@@ -16,7 +16,7 @@ try {
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Experimental binary hash mismatch' }
     $files = @((Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -File -Recurse).FullName) + @((Get-ChildItem -LiteralPath (Join-Path $projectRoot 'assets/branding') -File -Recurse).FullName) + @('Cargo.toml','Cargo.lock','build.rs','scripts/build-events-test.ps1' | ForEach-Object { Join-Path $projectRoot $_ })
     $sources = @($files | ForEach-Object { [ordered]@{ path=$_.Substring($projectRoot.Length + 1); sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
-    [ordered]@{ channel='clipboard-events-experiment'; features='ui,clipboard-events-test'; version='1.0.6-events-test'; executable_sha256=$hash; sources=$sources } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $directory 'build-manifest.json') -Encoding utf8
+    [ordered]@{ channel='clipboard-events-experiment'; features='ui,clipboard-events-test'; version='1.0.7-events-test'; executable_sha256=$hash; sources=$sources } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $directory 'build-manifest.json') -Encoding utf8
     Set-Content -LiteralPath (Join-Path $experiment 'current-version.txt') -Value $id -Encoding ascii
     Write-Output "Prepared EVENTS TEST: $id"
     Write-Output 'Stable Katran launcher and Start Menu entry were not changed.'

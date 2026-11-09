@@ -6,8 +6,8 @@ enum PreviewDrag {
     Export,
 }
 
-fn preview_drag(factor: f64, ctrl: bool) -> PreviewDrag {
-    if factor > 1.0 && !ctrl {
+fn preview_drag(factor: f64) -> PreviewDrag {
+    if factor > 1.0 {
         PreviewDrag::Pan
     } else {
         PreviewDrag::Export
@@ -18,10 +18,9 @@ fn latched_preview_drag(
     previous: Option<PreviewDrag>,
     started: bool,
     factor: f64,
-    ctrl: bool,
 ) -> Option<PreviewDrag> {
     if started {
-        Some(preview_drag(factor, ctrl))
+        Some(preview_drag(factor))
     } else {
         previous
     }
@@ -75,7 +74,16 @@ impl Shelf {
                             Vec2::new(width, (height - 76.0).max(32.0)), egui::Sense::click_and_drag());
                         let mut image_rect = None;
                         let drag_id = response.id.with(("preview-drag", id));
-                        let mut export_started = response.drag_started_by(egui::PointerButton::Primary);
+                        // Resolve the gesture even while a background job owns the API
+                        // or the preview texture is loading. Neither may enable export.
+                        let factor = self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
+                        let started = response.drag_started_by(egui::PointerButton::Primary);
+                        let intent = ctx.data_mut(|data| {
+                            let intent = latched_preview_drag(data.get_temp::<PreviewDrag>(drag_id), started, factor);
+                            if let Some(intent) = intent { data.insert_temp(drag_id, intent); }
+                            intent
+                        });
+                        let mut export_started = started && intent == Some(PreviewDrag::Export) && factor <= 1.0;
                         if self.api.is_some() && let Some(size) = self.images.fitted_preview_size(event, canvas) {
                             use katran::preview_view::{Point, Size};
                             let viewport = Size { width: canvas.width(), height: canvas.height() };
@@ -95,17 +103,8 @@ impl Shelf {
                                     });
                                 }
                             }
-                            let ctrl = ctx.input(|i| i.modifiers.ctrl);
                             let factor = self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
-                            // Latch at drag start: changing Ctrl or zoom during a pan
-                            // must never turn it into a native OLE export.
-                            let started = response.drag_started_by(egui::PointerButton::Primary);
-                            let intent = ctx.data_mut(|data| {
-                                let intent = latched_preview_drag(data.get_temp::<PreviewDrag>(drag_id), started, factor, ctrl);
-                                if let Some(intent) = intent { data.insert_temp(drag_id, intent); }
-                                intent
-                            });
-                            export_started = started && intent == Some(PreviewDrag::Export);
+                            export_started &= factor <= 1.0;
                             let primary_pan = response.dragged_by(egui::PointerButton::Primary)
                                 && intent == Some(PreviewDrag::Pan);
                             let middle_pan = response.dragged_by(egui::PointerButton::Middle);
@@ -114,7 +113,7 @@ impl Shelf {
                             }
                             if primary_pan || middle_pan {
                                 ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                            } else if response.hovered() && preview_drag(factor, ctrl) == PreviewDrag::Pan {
+                            } else if response.hovered() && preview_drag(factor) == PreviewDrag::Pan {
                                 ctx.set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             let geometry = self.call(Command::PreviewGeometry { viewport, fitted });
@@ -133,7 +132,7 @@ impl Shelf {
                         ui.vertical_centered(|ui| {
                             let zoomed = self.state["preview_view"]["factor"].as_f64().is_some_and(|factor| factor > 1.0);
                             let hint = if zoomed {
-                                "ЛКМ — сдвиг · Ctrl+тащить — экспорт · Space — назад · ← → — листать"
+                                "ЛКМ — сдвиг · Space — назад · ← → — листать"
                             } else {
                                 "Тащить — экспорт · колесо — увеличить · Space — назад · ← → — листать"
                             };
@@ -336,23 +335,93 @@ mod tests {
     use katran::preview_view::{Point, Size};
 
     #[test]
-    fn preview_primary_drag_reserves_ctrl_for_export() {
-        assert_eq!(preview_drag(1.0, false), PreviewDrag::Export);
-        assert_eq!(preview_drag(1.0, true), PreviewDrag::Export);
-        assert_eq!(preview_drag(1.01, false), PreviewDrag::Pan);
-        assert_eq!(preview_drag(16.0, false), PreviewDrag::Pan);
-        assert_eq!(preview_drag(16.0, true), PreviewDrag::Export);
+    fn preview_primary_drag_only_exports_at_fitted_scale() {
+        assert_eq!(preview_drag(1.0), PreviewDrag::Export);
+        assert_eq!(preview_drag(1.000001), PreviewDrag::Pan);
+        assert_eq!(preview_drag(1.01), PreviewDrag::Pan);
+        assert_eq!(preview_drag(16.0), PreviewDrag::Pan);
     }
 
     #[test]
-    fn drag_intent_stays_latched_when_modifiers_or_zoom_change() {
-        let pan = latched_preview_drag(None, true, 2.0, false);
+    fn drag_intent_stays_latched_when_zoom_changes() {
+        let pan = latched_preview_drag(None, true, 2.0);
         assert_eq!(pan, Some(PreviewDrag::Pan));
-        assert_eq!(latched_preview_drag(pan, false, 1.0, true), pan);
-        let export = latched_preview_drag(None, true, 2.0, true);
+        assert_eq!(latched_preview_drag(pan, false, 1.0), pan);
+        let export = latched_preview_drag(None, true, 1.0);
         assert_eq!(export, Some(PreviewDrag::Export));
-        assert_eq!(latched_preview_drag(export, false, 2.0, false), export);
-        assert_eq!(latched_preview_drag(export, true, 2.0, false), pan);
+        assert_eq!(latched_preview_drag(export, true, 2.0), pan);
+    }
+
+    #[test]
+    fn zoomed_preview_without_texture_never_starts_export() {
+        // Reproduce dragging before the texture is available, with and without
+        // Ctrl and while the dispatcher is temporarily owned by a worker.
+        for ctrl in [false, true] {
+            for busy in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let mut app = super::super::tests::test_shelf(root.path());
+                app.call(Command::IngestBytes {
+                    name: "synthetic.bin".into(),
+                    bytes: vec![1],
+                    source: "test".into(),
+                });
+                app.refresh();
+                app.state = app.call(Command::SetVisible {
+                    ids: app
+                        .events
+                        .iter()
+                        .map(|event| event["id"].as_i64().unwrap())
+                        .collect(),
+                });
+                app.state = app.call(Command::TogglePreview);
+                let size = Size {
+                    width: 200.0,
+                    height: 200.0,
+                };
+                app.state = app.call(Command::ZoomPreview {
+                    multiplier: 1.01,
+                    anchor: Point { x: 100.0, y: 100.0 },
+                    viewport: size,
+                    fitted: size,
+                });
+                assert!(app.state["preview_view"]["factor"].as_f64().unwrap() > 1.0);
+                let held_api = if busy { app.api.take() } else { None };
+                let ctx = egui::Context::default();
+                let modifiers = egui::Modifiers {
+                    ctrl,
+                    ..Default::default()
+                };
+                for events in [
+                    vec![egui::Event::PointerMoved(egui::pos2(200.0, 200.0))],
+                    vec![egui::Event::PointerButton {
+                        pos: egui::pos2(200.0, 200.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                    }],
+                    vec![egui::Event::PointerMoved(egui::pos2(260.0, 240.0))],
+                ] {
+                    let visible = app.events.clone();
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(900.0, 680.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    let mut output =
+                        ctx.run_ui(input, |ui| app.shelf_view(ui, &ctx, &visible, true, 4));
+                    output.textures_delta.clear();
+                    assert!(
+                        app.job.is_none(),
+                        "zoomed drag must not prepare a native export"
+                    );
+                    assert!(app.native_drag.is_none());
+                }
+                drop(held_api);
+            }
+        }
     }
 
     #[test]

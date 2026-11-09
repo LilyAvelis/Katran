@@ -7,11 +7,11 @@ into `main`. [Capture contract and verification](docs/clipboard-events-experimen
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.6 Release
+## Current build · 1.0.7 Release
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.6 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.7 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -55,7 +55,7 @@ hotkey under Settings → Applications and select Hotkey Action → Always Show.
 | Wheel in large preview / Ctrl + wheel | Zoom toward pointer / canvas center |
 | Middle-button drag in large preview | Pan the enlarged image |
 | Primary drag in enlarged preview | Grab and pan the image |
-| Drag a card / fitted preview; Ctrl + drag in preview | Native copy-only drag-out; selected group / current image |
+| Drag a card / fitted preview | Native copy-only drag-out; selected group / current image |
 | Escape | Close preview/dialog/palette |
 | Ctrl C | Copy selected files/images to the Windows clipboard |
 | Delete | Remove from shelf; groups require Enter confirmation |

@@ -5,10 +5,11 @@
 Large preview uses the same anchor math as Afio. Plain wheel zooms toward the
 pointer; Ctrl+wheel zooms around the canvas center. Starting with 1.0.6, ordinary
 primary-button drag grabs/pans an enlarged image, with grab/grabbing cursors.
-Ctrl+primary drag exports the image at any zoom; at fitted scale plain primary
-drag still exports. Middle-button panning remains available. The choice is latched
-at the start of a drag, so changing Ctrl or zoom mid-gesture cannot turn a pan into
-native export. Gallery card drag-out is unchanged. Space/Escape return to the shelf;
+Export is disabled above fitted scale (1×), including Ctrl+primary drag.
+At fitted scale primary drag still exports. Middle-button panning remains available.
+Gesture intent is decided independently of API/texture availability, and a pan
+cannot become native export while a background capture job owns the API.
+Gallery card drag-out is unchanged. Space/Escape return to the shelf;
 arrows change images. Image changes and
 preview close/reopen reset zoom and offset. Window sizing is unchanged.
 

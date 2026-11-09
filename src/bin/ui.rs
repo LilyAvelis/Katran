@@ -34,11 +34,11 @@ fn poll_delay(elapsed: Duration) -> Duration {
     CLIPBOARD_POLL_INTERVAL.saturating_sub(elapsed)
 }
 const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events-test") {
-    "Katran · EVENTS TEST · 1.0.6"
+    "Katran · EVENTS TEST · 1.0.7"
 } else if cfg!(feature = "clipboard-events") {
-    "Katran · 1.0.6 · Release"
+    "Katran · 1.0.7 · Release"
 } else {
-    "Katran · 1.0.6 · Legacy Polling"
+    "Katran · 1.0.7 · Legacy Polling"
 };
 fn clipboard_changed(result: &Value) -> bool {
     result["captured"].as_u64().is_some_and(|count| count > 0)
