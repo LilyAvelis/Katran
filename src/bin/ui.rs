@@ -3,6 +3,8 @@ mod action_icons;
 mod api_client;
 mod app_identity;
 mod capture_lamp;
+#[cfg(feature = "clipboard-events")]
+mod clipboard_events_ui;
 mod gallery_card;
 mod images;
 mod input_log;
@@ -25,10 +27,17 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+#[cfg(any(not(feature = "clipboard-events"), test))]
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(any(not(feature = "clipboard-events"), test))]
 fn poll_delay(elapsed: Duration) -> Duration {
     CLIPBOARD_POLL_INTERVAL.saturating_sub(elapsed)
 }
+const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events") {
+    "Katran · EVENTS TEST · 1.0.5"
+} else {
+    "Katran · 1.0.5 · Release"
+};
 fn clipboard_changed(result: &Value) -> bool {
     result["captured"].as_u64().is_some_and(|count| count > 0)
 }
@@ -81,6 +90,8 @@ fn ensure_visible_offset(offset: f32, viewport: f32, top: f32, height: f32) -> f
 }
 use images::Images;
 struct Shelf {
+    #[cfg(feature = "clipboard-events")]
+    clipboard_events: clipboard_events_ui::State,
     instance: Option<single_instance::Primary>,
     activation_rx: Option<mpsc::Receiver<()>>,
     activation_pending: bool,
@@ -112,6 +123,7 @@ struct Shelf {
     destination: String,
     message: String,
     capture: bool,
+    #[cfg(any(not(feature = "clipboard-events"), test))]
     last_poll: Instant,
     scroll: bool,
 }
@@ -241,7 +253,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0.5 · Release",
+                        BUILD_LABEL,
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -387,6 +399,7 @@ impl Shelf {
                 self.pending_delete.clear();
             }
         }
+        #[cfg(not(feature = "clipboard-events"))]
         if self.capture {
             ctx.request_repaint_after(CLIPBOARD_POLL_INTERVAL);
         }
@@ -428,6 +441,7 @@ impl Shelf {
                 self.save = false;
             }
         }
+        #[cfg(not(feature = "clipboard-events"))]
         if self.capture
             && self.api.is_some()
             && self.native_drag.is_none()
@@ -468,6 +482,8 @@ impl eframe::App for Shelf {
                 ctx.request_repaint_after(Duration::from_millis(40));
             }
         }
+        #[cfg(feature = "clipboard-events")]
+        self.event_capture_tick(ctx);
     }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         // Eframe invokes this before Context::run_ui, outside egui locks.
@@ -498,6 +514,8 @@ fn main() -> eframe::Result {
         api.attach_logger(logger.clone());
     }
     let mut app = Shelf {
+        #[cfg(feature = "clipboard-events")]
+        clipboard_events: Default::default(),
         instance: Some(instance),
         activation_rx: None,
         activation_pending: false,
@@ -529,6 +547,7 @@ fn main() -> eframe::Result {
         destination: String::new(),
         message: String::new(),
         capture: false,
+        #[cfg(any(not(feature = "clipboard-events"), test))]
         last_poll: Instant::now(),
         scroll: false,
     };
@@ -544,6 +563,11 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(move |cc| {
+            #[cfg(feature = "clipboard-events")]
+            {
+                app.clipboard_events =
+                    clipboard_events_ui::State::start(&cc.egui_ctx, app.logger.clone());
+            }
             #[cfg(windows)]
             {
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -573,6 +597,47 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    pub(super) fn test_shelf(root: &std::path::Path) -> Shelf {
+        let api = Service::open(root, 10000).unwrap();
+        Shelf {
+            #[cfg(feature = "clipboard-events")]
+            clipboard_events: Default::default(),
+            instance: None,
+            activation_rx: None,
+            activation_pending: false,
+            native_drag: None,
+            native_window: 77,
+            logger: None,
+            pending_delete: Vec::new(),
+            settings_ui: settings_ui::State::default(),
+            shortcut_editor: None,
+            api: Some(api),
+            job: None,
+            pending_drops: Vec::new(),
+            pending_copy: None,
+            busy_text_editing: false,
+            shortcuts: Vec::new(),
+            card_width: 210.0,
+            images: Images::new(root.into()),
+            events: vec![],
+            next_cursor: None,
+            state: Value::Null,
+            query: String::new(),
+            loaded_query: String::new(),
+            actions: false,
+            action_query: String::new(),
+            action_selected: 0,
+            focus_actions: false,
+            scroll_actions: false,
+            save: false,
+            destination: String::new(),
+            message: String::new(),
+            capture: false,
+            last_poll: Instant::now(),
+            scroll: false,
+        }
+    }
+
     fn frame(app: &mut Shelf, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -660,42 +725,7 @@ mod tests {
     #[test]
     fn keyboard_gallery_range_preview_and_actions() {
         let root = tempfile::tempdir().unwrap();
-        let api = Service::open(root.path(), 10000).unwrap();
-        let mut app = Shelf {
-            instance: None,
-            activation_rx: None,
-            activation_pending: false,
-            native_drag: None,
-            native_window: 77,
-            logger: None,
-            pending_delete: Vec::new(),
-            settings_ui: settings_ui::State::default(),
-            shortcut_editor: None,
-            api: Some(api),
-            job: None,
-            pending_drops: Vec::new(),
-            pending_copy: None,
-            busy_text_editing: false,
-            shortcuts: Vec::new(),
-            card_width: 210.0,
-            images: Images::new(root.path().into()),
-            events: vec![],
-            next_cursor: None,
-            state: Value::Null,
-            query: String::new(),
-            loaded_query: String::new(),
-            actions: false,
-            action_query: String::new(),
-            action_selected: 0,
-            focus_actions: false,
-            scroll_actions: false,
-            save: false,
-            destination: String::new(),
-            message: String::new(),
-            capture: false,
-            last_poll: Instant::now(),
-            scroll: false,
-        };
+        let mut app = test_shelf(root.path());
         // A stale visual selection must never start a native clipboard write.
         app.state = serde_json::json!({"selected": [999], "cursor": 999});
         app.run("copy".into(), &egui::Context::default());
