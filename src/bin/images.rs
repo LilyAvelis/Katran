@@ -125,6 +125,16 @@ impl Images {
         self.requested.retain(|key| self.active.contains(key));
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui, event: &Value, size: Vec2, edge: u32) {
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        self.paint_at(ui, event, rect, edge);
+    }
+    pub(super) fn paint_at(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        rect: egui::Rect,
+        edge: u32,
+    ) {
         let Some(id) = event["id"].as_i64() else {
             return;
         };
@@ -173,15 +183,17 @@ impl Images {
             self.textures.remove(&oldest);
         }
         if let Some(Some(texture)) = self.textures.get(&key).map(|e| &e.texture) {
-            ui.add(
-                egui::Image::new(texture)
-                    .fit_to_exact_size(size)
-                    .maintain_aspect_ratio(true),
+            let image = super::gallery_card::fit_rect(rect, texture.size_vec2());
+            ui.painter_at(rect).image(
+                texture.id(),
+                image,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
             );
         } else {
-            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-            ui.painter().rect_filled(rect, 6.0, Color32::from_gray(34));
-            ui.painter().text(
+            ui.painter_at(rect)
+                .rect_filled(rect, 6.0, Color32::from_gray(34));
+            ui.painter_at(rect).text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 if self.textures.contains_key(&key) {

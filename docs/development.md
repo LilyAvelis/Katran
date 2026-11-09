@@ -17,6 +17,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Provenance snapshot/parsing | `src/origin.rs` |
 | CLI JSON-line transport | `src/main.rs` |
 | UI shell / jobs / preview worker / palette / list-grid | `src/bin/ui.rs`, `api_client.rs`, `images.rs`, `palette.rs`, `shelf_view.rs` |
+| Gallery geometry / image fit / clipped labels | `src/bin/gallery_card.rs` |
 | Local logging / viewport input | `src/diagnostics.rs`, `src/bin/input_log.rs` |
 | Settings / key recorder / shared visuals | `src/bin/settings_ui.rs`, `shortcuts_ui.rs`, `ui_foundation.rs`, `ui_style.rs` |
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |

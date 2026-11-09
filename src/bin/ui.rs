@@ -2,6 +2,7 @@
 mod action_icons;
 mod api_client;
 mod capture_lamp;
+mod gallery_card;
 mod images;
 mod input_log;
 mod palette;
@@ -225,7 +226,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 0.5 · Release",
+                        "Katran · 1.0 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -288,9 +289,7 @@ impl Shelf {
                     .as_f64()
                     .unwrap_or(210.0) as f32;
             }
-            ((root.available_width() - 24.0) / self.card_width)
-                .floor()
-                .max(1.0) as usize
+            gallery_card::columns(root.available_width() - 24.0, self.card_width)
         } else {
             1
         };

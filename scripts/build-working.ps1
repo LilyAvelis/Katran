@@ -14,9 +14,9 @@ try {
     }
     $sourceFiles = @((Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Recurse -File).FullName) + @('Cargo.toml','Cargo.lock','scripts/build-working.ps1' | ForEach-Object { Join-Path $projectRoot $_ })
     $sourceHashes = @($sourceFiles | ForEach-Object { [ordered]@{ path = $_.Substring($projectRoot.Length + 1); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
-    [ordered]@{ profile = 'release'; version = '0.5.0'; executable_sha256 = (Get-FileHash -LiteralPath $installedExecutable -Algorithm SHA256).Hash.ToLowerInvariant(); sources = $sourceHashes } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $versionDirectory 'build-manifest.json') -Encoding utf8
+    [ordered]@{ profile = 'release'; version = '1.0.0'; executable_sha256 = (Get-FileHash -LiteralPath $installedExecutable -Algorithm SHA256).Hash.ToLowerInvariant(); sources = $sourceHashes } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $versionDirectory 'build-manifest.json') -Encoding utf8
     Set-Content -LiteralPath (Join-Path $projectRoot 'runtime/current-version.txt') -Value $buildVersion -Encoding ascii
-    Write-Output "Prepared Katran 0.5 Release: $buildVersion"
+    Write-Output "Prepared Katran 1.0 Release: $buildVersion"
 } finally {
     Pop-Location
 }

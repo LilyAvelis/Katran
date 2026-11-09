@@ -15,24 +15,30 @@ impl Shelf {
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
                     ui.label("Просмотр · Esc — назад");
-                    if let Some(event) = visible.iter().find(|event| event["id"] == id) { self.images.draw(
-                        ui,
-                        event,
-                        (ui.available_size() - egui::vec2(0.0, 24.0)).max(Vec2::splat(32.0)),
-                        1400,
-                    ); }
+                    if let Some(event) = visible.iter().find(|event| event["id"] == id) {
+                        self.images.draw(
+                            ui,
+                            event,
+                            (ui.available_size() - egui::vec2(0.0, 24.0)).max(Vec2::splat(32.0)),
+                            1400,
+                        );
+                    }
                 } else {
                     if visible.is_empty() {
                         ui.label(
                             "Полка пуста. Ctrl K → Включить захват, затем скопируйте изображение.",
                         );
                     }
-                    let height = if gallery { 220.0 } else { 150.0 };
+                    let gap = gallery_card::GAP;
+                    ui.spacing_mut().item_spacing = Vec2::splat(gap);
                     let cell_width = if gallery {
-                        (ui.available_width() - 8.0 * (columns - 1) as f32) / columns as f32
+                        ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
+                            / columns as f32)
+                            .max(80.0)
                     } else {
-                        ui.available_width()
+                        (ui.available_width() - 16.0).max(80.0)
                     };
+                    let height = if gallery { cell_width + 54.0 } else { 150.0 };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
                     let mut area = egui::ScrollArea::vertical().id_salt("shelf-scroll");
                     if self.scroll
@@ -46,7 +52,7 @@ impl Shelf {
                             offset,
                             ui.available_height(),
                             (index / columns) as f32 * pitch,
-                            height - 8.0,
+                            height,
                         ));
                     }
                     self.scroll = false;
@@ -64,7 +70,7 @@ impl Shelf {
                                         .is_some_and(|s| s.contains(&Value::from(id)));
                                     let cursor = self.state["cursor"] == id;
                                     let (rect, response) = ui.allocate_exact_size(
-                                        egui::vec2(cell_width, height - 8.0),
+                                        egui::vec2(cell_width, height),
                                         egui::Sense::click(),
                                     );
                                     ui.painter().rect_filled(
@@ -80,55 +86,91 @@ impl Shelf {
                                             egui::StrokeKind::Inside,
                                         );
                                     }
-                                    ui.scope_builder(
-                                        egui::UiBuilder::new()
-                                            .max_rect(rect.shrink(8.0))
-                                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                                        |ui| {
-                                            if gallery {
-                                                self.images.draw(
-                                                    ui,
-                                                    event,
-                                                    egui::vec2(cell_width - 16.0, 164.0),
-                                                    320,
-                                                );
-                                                ui.add(
-                                                    egui::Label::new(
-                                                        event["name"].as_str().unwrap_or("Файл"),
-                                                    )
-                                                    .truncate(),
-                                                );
+                                    if gallery {
+                                        let zones = gallery_card::geometry(rect);
+                                        self.images.paint_at(ui, event, zones.image, 512);
+                                        gallery_card::text(
+                                            ui,
+                                            zones.name,
+                                            event["name"].as_str().unwrap_or("Файл"),
+                                            14.0,
+                                            Color32::from_gray(235),
+                                        );
+                                        let origin: katran::origin::Origin =
+                                            serde_json::from_value(event["origin"].clone())
+                                                .unwrap_or_default();
+                                        let label = origin
+                                            .label()
+                                            .unwrap_or_else(|| "Источник не определён".into());
+                                        ui.painter_at(zones.origin).rect_filled(
+                                            zones.origin,
+                                            4.0,
+                                            Color32::from_gray(55),
+                                        );
+                                        gallery_card::text(
+                                            ui,
+                                            zones.origin.shrink2(Vec2::new(5.0, 0.0)),
+                                            &label,
+                                            12.0,
+                                            Color32::from_rgb(183, 200, 203),
+                                        );
+                                    } else {
+                                        let image = egui::Rect::from_min_size(
+                                            rect.min + Vec2::splat(10.0),
+                                            Vec2::new(176.0, 120.0),
+                                        );
+                                        self.images.paint_at(ui, event, image, 320);
+                                        let left = image.right() + 16.0;
+                                        let width = (rect.right() - left - 10.0).max(1.0);
+                                        let origin: katran::origin::Origin =
+                                            serde_json::from_value(event["origin"].clone())
+                                                .unwrap_or_default();
+                                        let lines = [
+                                            event["name"].as_str().unwrap_or("Файл").to_owned(),
+                                            event["source"].as_str().unwrap_or("").to_owned(),
+                                            origin
+                                                .label()
+                                                .unwrap_or_else(|| "Источник не определён".into()),
+                                            if event["available"] == false {
+                                                "Исходник недоступен"
+                                            } else if event["storage"] == "cached" {
+                                                "Временная копия"
                                             } else {
-                                                ui.horizontal(|ui| {
-                                                    self.images.draw(
-                                                        ui,
-                                                        event,
-                                                        egui::vec2(176.0, 120.0),
-                                                        320,
-                                                    );
-                                                    ui.vertical(|ui| {
-                                                        ui.label(
-                                                            event["name"]
-                                                                .as_str()
-                                                                .unwrap_or("Файл"),
-                                                        );
-                                                        ui.weak(
-                                                            event["source"].as_str().unwrap_or(""),
-                                                        );
-                                                        let origin:katran::origin::Origin=serde_json::from_value(event["origin"].clone()).unwrap_or_default();
-                                                        ui.label(RichText::new(origin.label().map(|s|format!("Из: {s}")).unwrap_or_else(||"Источник не определён".into())).small().color(Color32::from_rgb(183,200,203)));
-                                                        ui.weak(if event["available"] == false {
-                                                            "Исходник недоступен"
-                                                        } else if event["storage"] == "cached" {
-                                                            "Временная копия"
-                                                        } else {
-                                                            "Исходный файл"
-                                                        });
-                                                    });
-                                                });
+                                                "Исходный файл"
                                             }
-                                        },
-                                    );
+                                            .to_owned(),
+                                        ];
+                                        for (index, line) in lines.iter().enumerate() {
+                                            let r = egui::Rect::from_min_size(
+                                                egui::pos2(
+                                                    left,
+                                                    rect.top() + 12.0 + index as f32 * 28.0,
+                                                ),
+                                                Vec2::new(width, 24.0),
+                                            );
+                                            gallery_card::text(
+                                                ui,
+                                                r,
+                                                line,
+                                                if index == 0 { 14.0 } else { 12.0 },
+                                                Color32::from_gray(if index == 0 {
+                                                    235
+                                                } else {
+                                                    180
+                                                }),
+                                            );
+                                        }
+                                    }
+                                    let origin: katran::origin::Origin =
+                                        serde_json::from_value(event["origin"].clone())
+                                            .unwrap_or_default();
+                                    let response = response.on_hover_text(format!(
+                                        "{}\n{}",
+                                        event["name"].as_str().unwrap_or("Файл"),
+                                        origin
+                                            .label()
+                                            .unwrap_or_else(|| "Источник не определён".into())
+                                    ));
                                     if response.clicked() || response.double_clicked() {
                                         self.state = self.call(Command::Select {
                                             id,
@@ -143,7 +185,9 @@ impl Shelf {
                         }
                     });
                 }
-                if self.job.is_some() { ui.label("Выполняется операция…"); }
+                if self.job.is_some() {
+                    ui.label("Выполняется операция…");
+                }
                 if !self.message.is_empty() {
                     ui.label(&self.message);
                 }

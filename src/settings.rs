@@ -18,7 +18,7 @@ impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
             quota_bytes: quota,
-            card_width: 210.0,
+            card_width: 280.0,
             default_view: View::Gallery,
             capture_on_start: false,
         }

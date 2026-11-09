@@ -3,10 +3,10 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 0.5 Release
+## Current build · 1.0 Release
 
 Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 0.5 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -52,8 +52,8 @@ background listener are not implemented yet.
 
 Stream origin tags identify the clipboard owner's app and, if supplied in
 CF_HTML, the browser domain. Unknown/old origins remain unknown. Full URLs and
-browser history are not collected. Metadata tags in gallery and source sorting
-are future work.
+browser history are not collected. Origin tags appear in gallery and stream.
+Dedicated source sorting is future work.
 
 Delete never removes external original files. Owned blob files are reclaimed
 after their last event reference disappears. Clipboard exports are separate
@@ -84,7 +84,8 @@ does not remove sources. Delete confirmation must resubmit the exact returned
 IDs with `confirmed:true`. General settings persist in SQLite; shortcut overrides
 in JSON. UI interaction state is process-local until the planned IPC layer.
 
-See [0.5 changes and diagnostics](docs/version-0.5.md) and the
+See [1.0 gallery layout](docs/version-1.0.md),
+[0.5 changes and diagnostics](docs/version-0.5.md) and the
 [development map](docs/development.md). Shelf 03 documents are historical.
 
 ## Verification and boundaries
