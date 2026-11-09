@@ -89,6 +89,17 @@ impl Shelf {
             return;
         }
         let result = &reply["result"];
+        #[cfg(feature = "clipboard-events")]
+        if capture {
+            self.clipboard_events.completed(result, Instant::now());
+            if result["capture_schedule"]["retry_after_ms"].is_null() {
+                if let Some(error) = result["capture_error"]["message"].as_str() {
+                    self.message = format!("Не удалось захватить Clipboard: {error}");
+                } else if result["capture_schedule"]["exhausted"] == true {
+                    self.message = "Clipboard оставался занят или менялся; повторы исчерпаны. Скопируйте объект ещё раз.".into();
+                }
+            }
+        }
         if let Some(token) = result["drag_token"].as_str() {
             self.native_drag = Some(token.to_owned());
             self.message = "Файлы готовы к перетаскиванию…".into();

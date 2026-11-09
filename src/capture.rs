@@ -14,7 +14,7 @@ impl Service {
             if sequence == 0 || sequence == self.clipboard_sequence {
                 return Ok(serde_json::json!({"captured":0}));
             }
-            // Leave sequence unacknowledged on contention so the next poll retries.
+            // Leave sequence unacknowledged so a later capture attempt can retry.
             let lock = clipboard_win::Clipboard::new_attempts(3)
                 .map_err(|e| ApiError::new("clipboard_busy", e))?;
             let files: std::result::Result<Vec<PathBuf>, _> =

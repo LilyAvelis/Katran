@@ -1,5 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 pub mod capture;
+pub mod capture_events;
+pub mod clipboard_listener;
 pub mod copy_out;
 pub mod delete_shelf;
 pub mod diagnostics;
@@ -25,6 +27,9 @@ pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    capture_events: capture_events::Schedule,
+    capture_clock: Box<dyn capture_events::Clock>,
+    capture_source: Option<Box<dyn capture_events::Source>>,
     pending_drag: Option<drag_session::Prepared>,
     drag_runner: Box<dyn drag_out::Runner>,
     diagnostics: Option<diagnostics::Logger>,
@@ -89,6 +94,9 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            capture_events: Default::default(),
+            capture_clock: Box::new(capture_events::SystemClock::default()),
+            capture_source: None,
             pending_drag: None,
             drag_runner: Box::new(drag_out::NativeRunner),
             diagnostics: None,
@@ -112,6 +120,9 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            capture_events: Default::default(),
+            capture_clock: Box::new(capture_events::SystemClock::default()),
+            capture_source: None,
             pending_drag: None,
             drag_runner: Box::new(drag_out::NativeRunner),
             diagnostics: None,
@@ -167,6 +178,7 @@ impl Service {
             ));
         }
         match command {
+            Command::CaptureClipboard { trigger } => self.capture_from_event(trigger),
             Command::ActivateWindow => {
                 self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
                 Ok(serde_json::json!({"activation_requested": true, "serial": self.interaction.activation_serial}))
@@ -328,6 +340,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
             Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
             Command::SetCaptureEnabled { enabled } => {
+                self.capture_events.cancel();
                 self.capture_enabled = enabled;
                 #[cfg(windows)]
                 {

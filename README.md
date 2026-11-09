@@ -1,5 +1,11 @@
 # Katran
 
+**Current branch experiment:** `experiment/clipboard-events` provides an opt-in
+Windows clipboard listener build. The ordinary installed Katran still uses
+polling. Build the alternative with `scripts/build-events-test.ps1`, close the
+ordinary window, then use **Start Katran Events Test.cmd**. Look for **EVENTS TEST**
+in the title. [Comparison and rollback instructions](docs/clipboard-events-experiment.md).
+
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 

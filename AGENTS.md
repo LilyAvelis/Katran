@@ -2,6 +2,11 @@
 
 API First is mandatory, as explicitly required by the project owner.
 
+Clipboard event capture is an opt-in experiment on `experiment/clipboard-events`.
+Use `scripts/build-events-test.ps1` for that feature. Do not promote it to the
+normal runtime/current-version.txt or Start Menu entry before owner acceptance.
+The normal feature set and Start Katran.cmd retain polling for comparison/rollback.
+
 Start with the current README and [development map](docs/development.md).
 Documents shelf-02/shelf-03 are historical snapshots, not current launch instructions.
 For parallel agents, assign disjoint module files; one integrator owns shared

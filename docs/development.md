@@ -9,6 +9,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
+| Experimental clipboard signals / bounded retry API / hidden-window client | `src/clipboard_listener.rs`, `src/capture_events.rs`, `src/bin/clipboard_events_ui.rs` |
 | Selection, cursor, view, preview/settings state | `src/interaction.rs` |
 | Image zoom/anchor/pan bounds and canvas geometry | `src/preview_view.rs` |
 | General preferences and validation | `src/settings.rs` |
