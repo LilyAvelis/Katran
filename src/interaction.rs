@@ -23,15 +23,25 @@ pub struct Interaction {
     pub cursor: Option<i64>,
     pub selected: Vec<i64>,
     pub preview: Option<i64>,
+    pub preview_view: crate::preview_view::State,
     anchor: Option<i64>,
 }
 impl Interaction {
+    pub fn set_preview(&mut self, id: Option<i64>) {
+        if self.preview != id {
+            self.preview_view = Default::default();
+        }
+        self.preview = id;
+    }
     pub fn visible(&mut self, ids: Vec<i64>) {
         let previous = self
             .cursor
             .and_then(|id| self.visible.iter().position(|i| *i == id))
             .unwrap_or(0);
         self.visible = ids;
+        if self.preview.is_some_and(|id| !self.visible.contains(&id)) {
+            self.set_preview(None);
+        }
         self.selected.retain(|id| self.visible.contains(id));
         if !self.cursor.is_some_and(|id| self.visible.contains(&id)) {
             self.cursor = self

@@ -16,6 +16,30 @@ struct Entry {
     touched: u64,
     retry_after: Instant,
 }
+// Only the latest successful domain rectangle is retained during dispatcher jobs.
+#[derive(Default)]
+struct PreviewGeometryCache(Option<(ImageKey, egui::Rect, egui::Rect)>);
+impl PreviewGeometryCache {
+    fn resolve(
+        &mut self,
+        key: ImageKey,
+        canvas: egui::Rect,
+        image: Option<egui::Rect>,
+    ) -> Option<egui::Rect> {
+        if let Some(image) = image {
+            self.0 = Some((key, canvas, image));
+            return Some(image);
+        }
+        if self
+            .0
+            .as_ref()
+            .is_some_and(|(old, old_canvas, _)| old != &key || *old_canvas != canvas)
+        {
+            self.0 = None;
+        }
+        self.0.as_ref().map(|(_, _, image)| *image)
+    }
+}
 pub(super) struct Images {
     queue: Arc<(Mutex<Queue>, Condvar)>,
     rx: mpsc::Receiver<(ImageKey, Value)>,
@@ -23,6 +47,7 @@ pub(super) struct Images {
     requested: HashSet<ImageKey>,
     textures: HashMap<ImageKey, Entry>,
     clock: u64,
+    preview_geometry: PreviewGeometryCache,
 }
 impl Images {
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
@@ -101,6 +126,7 @@ impl Images {
             requested: HashSet::new(),
             textures: HashMap::new(),
             clock: 0,
+            preview_geometry: PreviewGeometryCache::default(),
         }
     }
     pub(super) fn begin_frame(&mut self) {
@@ -153,12 +179,50 @@ impl Images {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         self.paint_at(ui, event, rect, edge);
     }
+    pub(super) fn clear_preview_geometry(&mut self) {
+        self.preview_geometry = PreviewGeometryCache::default();
+    }
+    pub(super) fn fitted_preview_size(&self, event: &Value, canvas: egui::Rect) -> Option<Vec2> {
+        let key = (
+            event["id"].as_i64()?,
+            1400,
+            event["revision"].as_str()?.to_owned(),
+        );
+        let texture = self.textures.get(&key)?.texture.as_ref()?;
+        Some(super::gallery_card::fit_rect(canvas, texture.size_vec2()).size())
+    }
+    pub(super) fn paint_preview(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        canvas: egui::Rect,
+        image: Option<egui::Rect>,
+    ) {
+        let image = event["id"]
+            .as_i64()
+            .zip(event["revision"].as_str())
+            .and_then(|(id, revision)| {
+                self.preview_geometry
+                    .resolve((id, 1400, revision.to_owned()), canvas, image)
+            });
+        self.paint_image(ui, event, canvas, 1400, image);
+    }
     pub(super) fn paint_at(
         &mut self,
         ui: &mut egui::Ui,
         event: &Value,
         rect: egui::Rect,
         edge: u32,
+    ) {
+        self.paint_image(ui, event, rect, edge, None);
+    }
+    fn paint_image(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        rect: egui::Rect,
+        edge: u32,
+        image: Option<egui::Rect>,
     ) {
         let Some(id) = event["id"].as_i64() else {
             return;
@@ -208,7 +272,8 @@ impl Images {
             self.textures.remove(&oldest);
         }
         if let Some(Some(texture)) = self.textures.get(&key).map(|e| &e.texture) {
-            let image = super::gallery_card::fit_rect(rect, texture.size_vec2());
+            let image =
+                image.unwrap_or_else(|| super::gallery_card::fit_rect(rect, texture.size_vec2()));
             ui.painter_at(rect).image(
                 texture.id(),
                 image,
@@ -248,6 +313,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn busy_preview_reuses_last_domain_geometry_without_resetting_zoom() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 100).unwrap();
+        let mut call = |command| {
+            api.execute(Request {
+                api_version: 1,
+                request_id: "render-cache".into(),
+                command,
+            })
+        };
+        call(Command::SetVisible { ids: vec![1] });
+        call(Command::OpenCurrent);
+        use katran::preview_view::{Point, Size};
+        let size = Size {
+            width: 400.0,
+            height: 400.0,
+        };
+        call(Command::ZoomPreview {
+            multiplier: 2.0,
+            anchor: Point { x: 300.0, y: 250.0 },
+            viewport: size,
+            fitted: size,
+        });
+        let g = call(Command::PreviewGeometry {
+            viewport: size,
+            fitted: size,
+        });
+        let g = &g["result"];
+        let canvas = egui::Rect::from_min_size(egui::pos2(10.0, 40.0), Vec2::splat(400.0));
+        let image = egui::Rect::from_min_size(
+            canvas.min
+                + Vec2::new(
+                    g["left"].as_f64().unwrap() as f32,
+                    g["top"].as_f64().unwrap() as f32,
+                ),
+            Vec2::new(
+                g["width"].as_f64().unwrap() as f32,
+                g["height"].as_f64().unwrap() as f32,
+            ),
+        );
+        let key = (1, 1400, "synthetic".to_owned());
+        let mut cache = PreviewGeometryCache::default();
+        assert_eq!(cache.resolve(key.clone(), canvas, Some(image)), Some(image));
+        // A background job temporarily owns the dispatcher: no new rectangle.
+        for _ in 0..3 {
+            assert_eq!(cache.resolve(key.clone(), canvas, None), Some(image));
+        }
+        assert_ne!(image, canvas);
+        assert_eq!(cache.resolve((2, 1400, "other".into()), canvas, None), None);
+        assert_eq!(cache.resolve(key.clone(), canvas, None), None);
+        cache.resolve(key.clone(), canvas, Some(image));
+        assert_eq!(
+            cache.resolve(key, canvas.translate(Vec2::splat(1.0)), None),
+            None
+        );
+    }
+
+    #[test]
     fn queue_discards_invisible_requests_and_bounds_backlog() {
         let queue = Arc::new((
             Mutex::new(Queue {
@@ -264,6 +387,7 @@ mod tests {
             requested: HashSet::new(),
             textures: HashMap::new(),
             clock: 0,
+            preview_geometry: PreviewGeometryCache::default(),
         };
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

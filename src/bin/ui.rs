@@ -10,6 +10,7 @@ mod palette;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;
+mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
 use base64::Engine;
@@ -235,7 +236,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0.2 · Release",
+                        "Katran · 1.0.3 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );

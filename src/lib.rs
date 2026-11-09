@@ -19,6 +19,7 @@ use std::{
 pub mod actions;
 pub mod api;
 pub mod preview;
+pub mod preview_view;
 pub mod storage;
 pub use api::*;
 
@@ -166,18 +167,32 @@ impl Service {
             ));
         }
         match command {
+            Command::PreviewGeometry { viewport, fitted } => {
+                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
+                self.interaction.preview_view.geometry(viewport, fitted)
+            }
+            Command::ZoomPreview { multiplier, anchor, viewport, fitted } => {
+                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
+                self.interaction.preview_view.zoom(multiplier, anchor, viewport, fitted)?;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::PanPreview { delta, viewport, fitted } => {
+                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
+                self.interaction.preview_view.pan(delta, viewport, fitted)?;
+                Ok(serde_json::json!(self.interaction))
+            }
             Command::TogglePreview => {
-                self.interaction.preview = if self.interaction.preview.is_some() {
+                self.interaction.set_preview(if self.interaction.preview.is_some() {
                     None
                 } else {
                     self.interaction.cursor
-                };
+                });
                 Ok(serde_json::json!(self.interaction))
             }
             Command::NavigatePreview { delta } => {
                 if self.interaction.preview.is_some() {
                     self.interaction.navigate(delta, interaction::SelectionMode::Replace);
-                    self.interaction.preview = self.interaction.cursor;
+                    self.interaction.set_preview(self.interaction.cursor);
                 }
                 Ok(serde_json::json!(self.interaction))
             }
@@ -242,7 +257,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                         .preview
                         .is_some_and(|id| result.ids.contains(&id))
                     {
-                        self.interaction.preview = None;
+                        self.interaction.set_preview(None);
                     }
                 }
                 Ok(serde_json::json!(result))
@@ -298,11 +313,11 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 Ok(serde_json::json!(self.interaction))
             }
             Command::OpenCurrent => {
-                self.interaction.preview = self.interaction.cursor;
+                self.interaction.set_preview(self.interaction.cursor);
                 Ok(serde_json::json!(self.interaction))
             }
             Command::ClosePreview => {
-                self.interaction.preview = None;
+                self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
             }
             Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.5).map(|d|serde_json::json!({"id":d.0,"label":if d.0=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.1},"group":d.4,"shortcut":self.shortcuts.binding(d.0)})).collect())),

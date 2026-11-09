@@ -2,6 +2,7 @@ use crate::ui_foundation::tokens;
 use eframe::egui::{self, Color32};
 
 pub(super) fn install(ctx: &egui::Context) {
+    crate::ui_fonts::install(ctx);
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = Color32::from_rgb(39, 39, 42);

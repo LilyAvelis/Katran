@@ -3,10 +3,10 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.2 Release
+## Current build · 1.0.3 Release
 
 Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.2 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.3 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -36,10 +36,16 @@ executable SHA-256 and hashes of its source files. Developer/agent entry point:
 | Shift + arrows | Range selection |
 | Enter / double-click | Open large fitted image preview |
 | Space | Toggle large preview / shelf; arrows browse adjacent objects |
+| Wheel in large preview / Ctrl + wheel | Zoom toward pointer / canvas center |
+| Middle-button drag in large preview | Pan the enlarged image |
 | Drag a card / large preview | Native copy-only drag-out; selected group / current image |
 | Escape | Close preview/dialog/palette |
 | Ctrl C | Copy selected files/images to the Windows clipboard |
 | Delete | Remove from shelf; groups require Enter confirmation |
+
+Preview zoom follows the Afio pattern: 1–16×, clipped to the image canvas; changing
+the image or closing/reopening preview resets the fit. Window dimensions stay
+unchanged. See [zoom and font contracts](docs/preview-zoom-and-fonts.md).
 
 Use Actions to enable/pause capture, select gallery/stream, refresh or save copies
 to a folder. A green/red lamp next to Actions shows the current capture state.

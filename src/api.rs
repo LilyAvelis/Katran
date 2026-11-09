@@ -29,6 +29,21 @@ pub enum Command {
     CancelPreparedDrag {
         token: String,
     },
+    PreviewGeometry {
+        viewport: crate::preview_view::Size,
+        fitted: crate::preview_view::Size,
+    },
+    ZoomPreview {
+        multiplier: f32,
+        anchor: crate::preview_view::Point,
+        viewport: crate::preview_view::Size,
+        fitted: crate::preview_view::Size,
+    },
+    PanPreview {
+        delta: crate::preview_view::Point,
+        viewport: crate::preview_view::Size,
+        fitted: crate::preview_view::Size,
+    },
     TogglePreview,
     NavigatePreview {
         delta: i32,

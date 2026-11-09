@@ -10,6 +10,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
 | Selection, cursor, view, preview/settings state | `src/interaction.rs` |
+| Image zoom/anchor/pan bounds and canvas geometry | `src/preview_view.rs` |
 | General preferences and validation | `src/settings.rs` |
 | Shortcut catalogue, normalization, persistence/conflicts | `src/shortcuts.rs` |
 | Native copy payload preparation/publication | `src/copy_out.rs` |
@@ -22,6 +23,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Gallery geometry / image fit / clipped labels | `src/bin/gallery_card.rs` |
 | Local logging / viewport input | `src/diagnostics.rs`, `src/bin/input_log.rs` |
 | Settings / key recorder / shared visuals | `src/bin/settings_ui.rs`, `shortcuts_ui.rs`, `ui_foundation.rs`, `ui_style.rs` |
+| Shared text fallback (Windows fonts, loaded once) | `src/bin/ui_fonts.rs` |
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 

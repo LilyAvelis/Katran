@@ -1,10 +1,11 @@
-# Drag-out and Space preview · 1.0.2
+# Drag-out and Space preview · 1.0.3
 
 Space toggles the large centered in-window preview; Enter and double-click still
 open it, Escape closes it. Arrow keys in preview move one item at a time rather
 than by grid rows. The current visible ordering/search is respected. The adjacent
 previous/next previews are requested at lower priority than the current image.
-This is an in-window fit view, not a pixel zoom editor or OS fullscreen toggle.
+This is an in-window view with [wheel zoom and panning](preview-zoom-and-fonts.md),
+not an OS fullscreen toggle.
 
 Drag a selected gallery card to export the selected group; dragging an unselected
 card selects and exports that item. In large preview, drag the displayed image to

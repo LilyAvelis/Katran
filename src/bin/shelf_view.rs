@@ -29,12 +29,42 @@ impl Shelf {
                         ui.painter_at(title).galley(position, galley, Color32::from_gray(235));
                         let (canvas, response) = ui.allocate_exact_size(
                             Vec2::new(width, (height - 76.0).max(32.0)), egui::Sense::click_and_drag());
-                        self.images.paint_at(ui, event, canvas, 1400);
-                        if response.drag_started() {
+                        let mut image_rect = None;
+                        if self.api.is_some() && let Some(size) = self.images.fitted_preview_size(event, canvas) {
+                            use katran::preview_view::{Point, Size};
+                            let viewport = Size { width: canvas.width(), height: canvas.height() };
+                            let fitted = Size { width: size.x, height: size.y };
+                            if response.hovered() {
+                                let (wheel, center_zoom, cursor) = ui.input(|i| (i.smooth_scroll_delta().y, i.zoom_delta(), i.pointer.hover_pos()));
+                                if wheel.abs() > 0.01 && let Some(cursor) = cursor {
+                                    self.state = self.call(Command::ZoomPreview {
+                                        multiplier: (wheel * 0.003).exp(),
+                                        anchor: Point { x: cursor.x - canvas.min.x, y: cursor.y - canvas.min.y }, viewport, fitted,
+                                    });
+                                }
+                                if (center_zoom - 1.0).abs() > 0.001 {
+                                    self.state = self.call(Command::ZoomPreview {
+                                        multiplier: center_zoom,
+                                        anchor: Point { x: viewport.width / 2.0, y: viewport.height / 2.0 }, viewport, fitted,
+                                    });
+                                }
+                            }
+                            if response.dragged_by(egui::PointerButton::Middle) {
+                                let delta = ctx.input(|i| i.pointer.delta());
+                                self.state = self.call(Command::PanPreview { delta: Point { x: delta.x, y: delta.y }, viewport, fitted });
+                            }
+                            let geometry = self.call(Command::PreviewGeometry { viewport, fitted });
+                            if let (Some(left), Some(top), Some(width), Some(height)) = (
+                                geometry["left"].as_f64(), geometry["top"].as_f64(), geometry["width"].as_f64(), geometry["height"].as_f64()) {
+                                image_rect = Some(egui::Rect::from_min_size(canvas.min + Vec2::new(left as f32, top as f32), Vec2::new(width as f32, height as f32)));
+                            }
+                        }
+                        self.images.paint_preview(ui, event, canvas, image_rect);
+                        if response.drag_started_by(egui::PointerButton::Primary) {
                             self.start_drag(vec![id], ctx);
                         }
                         ui.vertical_centered(|ui| {
-                            ui.weak("Space / Esc — полка · ← → — изображения · перетащите изображение наружу");
+                            ui.weak("Space / Esc — полка · ← → — листать · колесо — зум · Ctrl — центр · средняя — сдвиг");
                         });
                         if let Some(index) = visible.iter().position(|e| e["id"] == id) {
                             let neighbors = [index.checked_sub(1), index.checked_add(1).filter(|n| *n < visible.len())];
@@ -44,6 +74,7 @@ impl Shelf {
                         }
                     }
                 } else {
+                    self.images.clear_preview_geometry();
                     if visible.is_empty() {
                         ui.label(
                             "Полка пуста. Ctrl K → Включить захват, затем скопируйте изображение.",

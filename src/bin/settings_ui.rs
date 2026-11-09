@@ -44,7 +44,7 @@ impl State {
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
      for(index,label)in ["Основные","Горячие клавиши"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;}}
-     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak("Katran · 1.0.2 · Release");});
+     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak("Katran · 1.0.3 · Release");});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_gray(69)).inner_margin(24)).show(ui,|ui|{
      egui::ScrollArea::vertical().show(ui,|ui|{
