@@ -1,0 +1,7 @@
+/target/
+/katran-data/
+/runtime/
+*.jsonl
+.env
+.env.*
+/logs/

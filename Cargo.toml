@@ -1,0 +1,42 @@
+[package]
+name = "katran"
+version = "0.5.0"
+edition = "2024"
+autobins = false
+
+[[bin]]
+name = "katran"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "functions"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+sha2 = "=0.10.9"
+base64 = "=0.22.1"
+url = "=2.5.8"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+egui-lucide = {version="=0.1.0",optional=true}
+egui_extras = {version="=0.36.2",optional=true,default-features=false,features=["svg"]}
+
+[target.'cfg(windows)'.dependencies]
+arboard = "=3.7.0"
+clipboard-win = "=5.4.3"
+windows-sys = { version = "=0.61.2", features = ["Win32_System_DataExchange","Win32_Foundation","Win32_System_Threading","Win32_UI_WindowsAndMessaging"] }
+
+[dependencies.eframe]
+version = "=0.36.2"
+optional = true
+default-features = false
+features = ["glow", "default_fonts"]
+
+[features]
+ui = ["dep:eframe","dep:egui-lucide","dep:egui_extras"]
+
+[[bin]]
+name = "katran-ui"
+path = "src/bin/ui.rs"
+required-features = ["ui"]
+
+[dev-dependencies]
+tempfile = "=3.27.0"

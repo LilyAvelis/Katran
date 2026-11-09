@@ -1,0 +1,88 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum View {
+    #[default]
+    Gallery,
+    List,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionMode {
+    #[default]
+    Replace,
+    Toggle,
+    Range,
+}
+#[derive(Default, Serialize)]
+pub struct Interaction {
+    pub settings_open: bool,
+    pub view: View,
+    pub visible: Vec<i64>,
+    pub cursor: Option<i64>,
+    pub selected: Vec<i64>,
+    pub preview: Option<i64>,
+    anchor: Option<i64>,
+}
+impl Interaction {
+    pub fn visible(&mut self, ids: Vec<i64>) {
+        let previous = self
+            .cursor
+            .and_then(|id| self.visible.iter().position(|i| *i == id))
+            .unwrap_or(0);
+        self.visible = ids;
+        self.selected.retain(|id| self.visible.contains(id));
+        if !self.cursor.is_some_and(|id| self.visible.contains(&id)) {
+            self.cursor = self
+                .visible
+                .get(previous.min(self.visible.len().saturating_sub(1)))
+                .copied();
+        }
+        if self.anchor.is_some_and(|id| !self.visible.contains(&id)) {
+            self.anchor = self.cursor;
+        }
+    }
+    pub fn select(&mut self, id: i64, mode: SelectionMode) {
+        let Some(end) = self.visible.iter().position(|i| *i == id) else {
+            return;
+        };
+        match mode {
+            SelectionMode::Replace => {
+                self.selected = vec![id];
+                self.anchor = Some(id);
+            }
+            SelectionMode::Toggle => {
+                if self.selected.contains(&id) {
+                    self.selected.retain(|i| *i != id);
+                } else {
+                    self.selected.push(id);
+                }
+                self.anchor = Some(id);
+            }
+            SelectionMode::Range => {
+                let anchor = self.anchor.or(self.cursor).unwrap_or(id);
+                self.anchor = Some(anchor);
+                let start = self
+                    .visible
+                    .iter()
+                    .position(|i| *i == anchor)
+                    .unwrap_or(end);
+                self.selected = self.visible[start.min(end)..=start.max(end)].to_vec();
+            }
+        }
+        self.cursor = Some(id);
+    }
+    pub fn navigate(&mut self, delta: i32, mode: SelectionMode) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let current = self
+            .cursor
+            .and_then(|id| self.visible.iter().position(|i| *i == id))
+            .unwrap_or(0);
+        let index =
+            (current as i64 + delta as i64).clamp(0, self.visible.len() as i64 - 1) as usize;
+        self.select(self.visible[index], mode);
+    }
+}

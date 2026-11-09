@@ -1,0 +1,453 @@
+use rusqlite::{Connection, OptionalExtension, params};
+pub mod capture;
+pub mod copy_out;
+pub mod delete_shelf;
+pub mod diagnostics;
+pub mod interaction;
+pub mod origin;
+pub mod settings;
+pub mod shortcuts;
+use interaction::Interaction;
+use std::{
+    fs::{self, OpenOptions},
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+pub mod actions;
+pub mod api;
+pub mod preview;
+pub mod storage;
+pub use api::*;
+
+/// The only action dispatcher. Transports and future UI call this contract.
+pub struct Service {
+    diagnostics: Option<diagnostics::Logger>,
+    db: Connection,
+    root: PathBuf,
+    quota: u64,
+    capture_enabled: bool,
+    clipboard_sequence: u32,
+    interaction: Interaction,
+    settings: settings::Settings,
+    shortcuts: shortcuts::Shortcuts,
+    ingest_origin: origin::Origin,
+    read_only: bool,
+}
+impl Service {
+    pub fn attach_logger(&mut self, logger: diagnostics::Logger) {
+        self.diagnostics = Some(logger);
+    }
+    pub fn logger(&self) -> Option<diagnostics::Logger> {
+        self.diagnostics.clone()
+    }
+    pub fn open(root: &Path, quota: u64) -> Result<Self> {
+        fs::create_dir_all(root.join("blobs"))?;
+        let root = fs::canonicalize(root)?;
+        let db = Connection::open(root.join("index.sqlite3"))?;
+        db.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+            CREATE TABLE IF NOT EXISTS blobs(hash TEXT PRIMARY KEY, size INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS events(
+              id INTEGER PRIMARY KEY, detected_at_ms INTEGER NOT NULL, source TEXT NOT NULL,
+              name TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL,
+              blob_hash TEXT REFERENCES blobs(hash)); PRAGMA user_version=1;",
+        )?;
+        let has_origin: bool = db.query_row(
+            "SELECT COUNT(*)>0 FROM pragma_table_info('events') WHERE name='origin_json'",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_origin {
+            db.execute_batch(
+                "ALTER TABLE events ADD COLUMN origin_json TEXT NOT NULL DEFAULT '{}';",
+            )?;
+        }
+        storage::initialize(&db, &root)?;
+        db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
+        let stored: Option<String> = db
+            .query_row(
+                "SELECT document FROM preferences WHERE key='general'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let settings: settings::Settings = match stored {
+            Some(s) => serde_json::from_str(&s).map_err(|e| ApiError::new("settings_error", e))?,
+            None => settings::Settings::defaults(quota),
+        };
+        settings
+            .validate(0)
+            .map_err(|e| ApiError::new("settings_error", e))?;
+        let mut interaction = Interaction::default();
+        interaction.view = settings.default_view;
+        let shortcuts =
+            shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
+        Ok(Self {
+            diagnostics: None,
+            db,
+            root,
+            quota: settings.quota_bytes,
+            capture_enabled: settings.capture_on_start,
+            clipboard_sequence: 0,
+            interaction,
+            settings,
+            shortcuts,
+            ingest_origin: origin::Origin::default(),
+            read_only: false,
+        })
+    }
+
+    pub fn open_read_only(root: &Path) -> Result<Self> {
+        let root = fs::canonicalize(root)?;
+        let db = Connection::open_with_flags(
+            root.join("index.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        Ok(Self {
+            diagnostics: None,
+            db,
+            root,
+            quota: DEFAULT_QUOTA,
+            capture_enabled: false,
+            clipboard_sequence: 0,
+            interaction: Interaction::default(),
+            settings: settings::Settings::default(),
+            shortcuts: shortcuts::Shortcuts::default(),
+            ingest_origin: origin::Origin::default(),
+            read_only: true,
+        })
+    }
+    pub fn execute(&mut self, request: Request) -> serde_json::Value {
+        let started = std::time::Instant::now();
+        if let Some(log) = &self.diagnostics {
+            log.record("command",serde_json::json!({"request_id":request.request_id,"command":diagnostics::summarize_command(&request.command),"cursor":self.interaction.cursor,"selected":self.interaction.selected}));
+        }
+        let result = if request.api_version != API_VERSION {
+            Err(ApiError::new(
+                "unsupported_version",
+                "Expected api_version 1",
+            ))
+        } else {
+            self.dispatch(request.command)
+        };
+        if let Some(log) = &self.diagnostics {
+            log.record("result",match &result{Ok(value)=>serde_json::json!({"request_id":request.request_id,"ok":true,"elapsed_us":started.elapsed().as_micros(),"id":value.get("id"),"copied":value.get("copied"),"deleted":value.get("deleted"),"captured":value.get("captured")}),Err(error)=>serde_json::json!({"request_id":request.request_id,"ok":false,"elapsed_us":started.elapsed().as_micros(),"error":error})});
+        }
+        match result {
+            Ok(value) => {
+                serde_json::json!({"api_version":API_VERSION,"request_id":request.request_id,"ok":true,"result":value})
+            }
+            Err(error) => {
+                serde_json::json!({"api_version":API_VERSION,"request_id":request.request_id,"ok":false,"error":error})
+            }
+        }
+    }
+
+    fn usage(&self) -> Result<u64> {
+        Ok(self
+            .db
+            .query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |r| r.get(0))?)
+    }
+    fn dispatch(&mut self, command: Command) -> Result<serde_json::Value> {
+        if self.read_only && !matches!(command, Command::Get { .. } | Command::PreviewImage { .. })
+        {
+            return Err(ApiError::new(
+                "read_only",
+                "Preview client cannot mutate state",
+            ));
+        }
+        match command {
+            Command::MaintainCache=>{let before=self.usage()?;storage::initialize(&self.db,&self.root)?;Ok(serde_json::json!({"reclaimed_blob_bytes":before.saturating_sub(self.usage()?)}))},
+            Command::CopyEventsChecked{items}=>{
+                if items.is_empty(){return Err(ApiError::new("invalid_argument","No selected objects"));}
+                for item in &items {let event=self.get(item.id).map_err(|_|ApiError::new("stale_selection","Selection no longer exists; refresh the shelf"))?;if event.revision!=item.revision{return Err(ApiError::new("stale_selection","Selected content changed; refresh before copying"));}
+if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_hash(&event.path)?!=expected{return Err(ApiError::new("stale_selection","Source contents changed; copy the current source again"));}}
+                self.dispatch(Command::CopyEvents{ids:items.into_iter().map(|i|i.id).collect()})
+            }
+            Command::CopyEvents { ids } => {
+                if ids.is_empty() || ids.len() > 1000 {
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Expected 1..1000 selected events",
+                    ));
+                }
+                let mut unique = std::collections::HashSet::new();
+                let events = ids
+                    .into_iter()
+                    .filter(|id| unique.insert(*id))
+                    .map(|id| self.get(id))
+                    .collect::<Result<Vec<_>>>()?;
+                let mut plan = copy_out::prepare_with_budget(&self.root, &events,self.quota)
+                    .map_err(|e| ApiError::new("copy_error", e))?;
+                let references={let mut statement=self.db.prepare("SELECT path FROM events WHERE blob_hash IS NULL")?;statement.query_map([],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?};
+                plan.protect_references(&references.into_iter().map(PathBuf::from).collect::<Vec<_>>()).map_err(|e|ApiError::new("copy_error",e))?;
+                let receipt = copy_out::commit(&plan, &mut copy_out::NativeClipboard)
+                    .map_err(|e| ApiError::new("clipboard_error", e))?;
+                self.clipboard_sequence = receipt.sequence;
+                Ok(
+                    serde_json::json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}),
+                )
+            }
+            Command::IngestWithOrigin { origin, command } => {
+                if !matches!(
+                    *command,
+                    Command::IngestPath { .. } | Command::IngestBytes { .. }
+                ) {
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Expected ingest_path or ingest_bytes",
+                    ));
+                }
+                self.ingest_origin = origin;
+                let result = self.dispatch(*command);
+                self.ingest_origin = origin::Origin::default();
+                result
+            }
+            Command::DeleteEvents { ids, confirmed } => {
+                let result =
+                    delete_shelf::delete_events(&mut self.db, &self.root, &ids, confirmed)?;
+                if result.deleted > 0 {
+                    self.interaction
+                        .selected
+                        .retain(|id| !result.ids.contains(id));
+                    if self
+                        .interaction
+                        .preview
+                        .is_some_and(|id| result.ids.contains(&id))
+                    {
+                        self.interaction.preview = None;
+                    }
+                }
+                Ok(serde_json::json!(result))
+            }
+            Command::Shortcuts => Ok(serde_json::json!(self.shortcuts.catalogue())),
+            Command::SetShortcut {
+                id,
+                binding,
+                replace,
+                reset,
+            } => self
+                .shortcuts
+                .set(&self.root, &id, binding, replace, reset)
+                .map(|items| serde_json::json!(items))
+                .map_err(|e| ApiError::new(&e.code, e.message)),
+            Command::GetSettings => Ok(serde_json::json!(self.settings)),
+            Command::SetSettings { settings } => {
+                settings
+                    .validate(self.usage()?)
+                    .map_err(|e| ApiError::new("invalid_settings", e))?;
+                let document = serde_json::to_string(&settings)
+                    .map_err(|e| ApiError::new("settings_error", e))?;
+                self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
+                self.quota = settings.quota_bytes;
+                self.settings = settings;
+                Ok(serde_json::json!(self.settings))
+            }
+            Command::ShowSettings => {
+                self.interaction.settings_open = true;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::CloseSettings => {
+                self.interaction.settings_open = false;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::Search{query,limit}=>{let events=storage::query_events(&self.db,&query,limit,None)?;let cursor=if events.len()==limit as usize{events.last().map(|e|e.id)}else{None};Ok(serde_json::json!({"events":events,"next_cursor":cursor}))},
+            Command::SearchPage{query,limit,after_id}=>{let events=storage::query_events(&self.db,&query,limit,after_id)?;let cursor=if events.len()==limit as usize{events.last().map(|e|e.id)}else{None};Ok(serde_json::json!({"events":events,"next_cursor":cursor}))},
+            Command::Interaction => Ok(serde_json::json!(self.interaction)),
+            Command::SetVisible { ids } => {
+                self.interaction.visible(ids);
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::Select { id, mode } => {
+                self.interaction.select(id, mode);
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::Navigate { delta, mode } => {
+                self.interaction.navigate(delta, mode);
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::SetView { view } => {
+                self.interaction.view = view;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::OpenCurrent => {
+                self.interaction.preview = self.interaction.cursor;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::ClosePreview => {
+                self.interaction.preview = None;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.5).map(|d|serde_json::json!({"id":d.0,"label":if d.0=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.1},"group":d.4,"shortcut":self.shortcuts.binding(d.0)})).collect())),
+            Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
+            Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
+            Command::SetCaptureEnabled { enabled } => {
+                self.capture_enabled = enabled;
+                #[cfg(windows)]
+                {
+                    self.clipboard_sequence = unsafe {
+                        windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber()
+                    };
+                }
+                Ok(serde_json::json!({"capture_enabled":enabled}))
+            }
+            Command::PollClipboard => self.poll_clipboard(),
+            Command::Status => Ok(
+                serde_json::json!({"cached_bytes":self.usage()?,"quota_bytes":self.quota,"capture_enabled":self.capture_enabled,"quota_policy":"reject_new","session_cleanup":"not_implemented","diagnostics":self.diagnostics.as_ref().map(|l|l.status())}),
+            ),
+            Command::List{limit}=>Ok(serde_json::json!({"events":storage::query_events(&self.db,"",limit,None)?})),
+            Command::Get { id } => Ok(serde_json::json!(self.get(id)?)),
+            Command::IngestPath { path, source } => {
+                validate_source(&source)?;
+                let path = fs::canonicalize(path)?;
+                if path.starts_with(&self.root){return Err(ApiError::new("managed_source","Katran's managed files cannot be ingested as external references"));}
+                let meta = fs::metadata(&path)?;
+                if !meta.is_file() {
+                    return Err(ApiError::new("invalid_argument", "Expected regular file"));
+                }
+                let name = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode filename"))?
+                    .to_owned();
+                let id = self.insert(&name, &source, &path, meta.len(), None)?;
+                Ok(serde_json::json!(self.get(id)?))
+            }
+            Command::IngestBytes{name,bytes,source}=>{validate_name(&name)?;validate_source(&source)?;let id=storage::ingest_bytes(&mut self.db,&self.root,self.quota,storage::ByteIngest{name:&name,source:&source,bytes:&bytes,origin:&self.ingest_origin})?;Ok(serde_json::json!(self.get(id)?))},
+            Command::Import { ids, destination } => {
+                if ids.is_empty() || ids.len() > 1000 {
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Expected 1..1000 event IDs",
+                    ));
+                }
+                let destination = fs::canonicalize(destination)?;
+                if !destination.is_dir() {
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Destination must be an existing directory",
+                    ));
+                }
+                // Validate all IDs before starting. Individual copy failures are
+                // returned explicitly; a batch is not an atomic filesystem transaction.
+                let events = ids
+                    .into_iter()
+                    .map(|id| self.get(id))
+                    .collect::<Result<Vec<_>>>()?;
+                let results: Vec<_> = events
+                    .into_iter()
+                    .map(|event| {
+                        let result = export(&event, &destination);
+                        match result {
+                            Ok(path) => serde_json::json!({"id":event.id,"ok":true,"path":path}),
+                            Err(error) => {
+                                serde_json::json!({"id":event.id,"ok":false,"error":error})
+                            }
+                        }
+                    })
+                    .collect();
+                Ok(serde_json::json!({"items":results,"atomic":false}))
+            }
+        }
+    }
+    fn insert(
+        &self,
+        name: &str,
+        source: &str,
+        path: &Path,
+        size: u64,
+        hash: Option<&str>,
+    ) -> Result<i64> {
+        let path = path
+            .to_str()
+            .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+        let reference_hash = if hash.is_none() {
+            Some(preview::content_hash(Path::new(path))?)
+        } else {
+            None
+        };
+        self.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![now_ms(),source,name,path,size,hash,serde_json::to_string(&self.ingest_origin).unwrap(),reference_hash])?;
+        Ok(self.db.last_insert_rowid())
+    }
+    fn get(&self, id: i64) -> Result<Event> {
+        storage::get_event(&self.db, id)
+    }
+}
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+fn validate_source(source: &str) -> Result<()> {
+    if source.trim().is_empty() || source.len() > 256 {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "source must contain 1..256 bytes",
+        ));
+    }
+    Ok(())
+}
+fn validate_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 200
+        || name
+            .chars()
+            .any(|c| c.is_control() || "\\/:*?\"<>|".contains(c))
+        || name.ends_with([' ', '.'])
+        || name == "."
+        || name == ".."
+    {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Expected a safe plain filename",
+        ));
+    }
+    let base = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ]
+    .contains(&base.as_str())
+    {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Reserved Windows filename",
+        ));
+    }
+    Ok(())
+}
+fn export(event: &Event, destination: &Path) -> Result<PathBuf> {
+    validate_name(&event.name)?;
+    let mut source = fs::File::open(&event.path)?;
+    let stem = Path::new(&event.name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("object");
+    let ext = Path::new(&event.name).extension().and_then(|s| s.to_str());
+    for n in 0..10000 {
+        let name = if n == 0 {
+            event.name.clone()
+        } else {
+            format!(
+                "{stem} ({n}){}",
+                ext.map(|s| format!(".{s}")).unwrap_or_default()
+            )
+        };
+        let path = destination.join(name);
+        let mut output = match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let result = std::io::copy(&mut source, &mut output).and_then(|_| output.sync_all());
+        drop(output);
+        if let Err(e) = result {
+            let _ = fs::remove_file(&path);
+            return Err(e.into());
+        }
+        return Ok(path);
+    }
+    Err(ApiError::new("name_conflict", "No free destination name"))
+}
