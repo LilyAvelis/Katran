@@ -25,6 +25,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Settings / key recorder / shared visuals | `src/bin/settings_ui.rs`, `shortcuts_ui.rs`, `ui_foundation.rs`, `ui_style.rs` |
 | Shared text fallback (Windows fonts, loaded once) | `src/bin/ui_fonts.rs` |
 | Window/taskbar identity / embedded executable resources | `src/bin/app_identity.rs`, `build.rs`, `assets/branding/` |
+| Stable launch / per-user Start Menu registration / single-instance activation | `src/bin/launcher.rs`, `app_registration.rs`, `single_instance.rs` |
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 

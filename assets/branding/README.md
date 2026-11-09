@@ -13,9 +13,10 @@ shipping a generic executable icon. Non-Windows and CLI-only builds skip RC.
 
 Before creating the window, Katran sets its stable AppUserModelID to
 `LiliaAvelis.Katran`. The window gets the same image through the viewport builder.
-No installer, registry edits, file associations, Start Menu entries or desktop
+As of 1.0.5, the build also registers a current-user Start Menu link with that same
+ID and a stable native launcher. No registry/file-association changes or desktop
 shortcuts are created. This remains a portable desktop executable; an installer
-can be added separately. The owner verifies the actual taskbar/Alt+Tab appearance.
+can be added separately. The owner verifies actual taskbar/Alt+Tab appearance.
 
 References: [Microsoft application IDs](https://learn.microsoft.com/en-us/windows/win32/shell/appids),
 [resource compilation](https://docs.rs/embed-resource/3.0.12/embed_resource/fn.compile_for.html).

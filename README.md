@@ -3,10 +3,11 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.4 Release
+## Current build · 1.0.5 Release
 
-Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.4 · Release**. Existing data stays in `katran-data`.
+Close the previous window yourself once after this update, then use **Katran** in
+the Start Menu/Raycast or **Start Katran.cmd**. The title strip
+must say **Katran · 1.0.5 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -27,6 +28,13 @@ executable SHA-256 and hashes of its source files. Developer/agent entry point:
 Katran's shark icon is embedded into the window and Windows executable. A stable
 application ID identifies its taskbar group. It remains a portable application;
 an installer is unnecessary for its icon. [Artwork and build details](assets/branding/README.md).
+
+The build also installs a per-user `Katran.lnk` Start Menu entry pointing to
+`runtime/Katran.exe`. This stable launcher follows the current-version pointer.
+Repeated launches request activation of the existing window for the same shelf
+root, including restoration from minimized state. In Raycast, assign its app
+hotkey under Settings → Applications and select Hotkey Action → Always Show.
+[Activation, registration and manual checks](docs/application-launch.md).
 
 ## Controls
 

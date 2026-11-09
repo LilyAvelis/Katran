@@ -17,6 +17,7 @@ pub enum SelectionMode {
 }
 #[derive(Default, Serialize)]
 pub struct Interaction {
+    pub activation_serial: u64,
     pub settings_open: bool,
     pub view: View,
     pub visible: Vec<i64>,

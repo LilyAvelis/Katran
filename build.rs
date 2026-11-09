@@ -17,11 +17,16 @@ fn main() {
         .replace("@ICON@", &icon.to_string_lossy().replace('\\', "/"))
         .replace("@VERSION@", &version)
         .replace("@NUMERIC_VERSION@", &numeric);
-    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("katran.rc");
-    fs::write(&output, script).unwrap();
     // A Windows UI build must include its identity, rather than silently shipping
     // the stock icon when the resource compiler is absent.
-    embed_resource::compile_for(output, ["katran-ui"], embed_resource::NONE)
-        .manifest_required()
-        .expect("Failed to embed Katran Windows icon/version resources");
+    for (binary, filename) in [
+        ("katran-ui", "katran-ui.exe"),
+        ("katran-launcher", "Katran.exe"),
+    ] {
+        let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join(format!("{binary}.rc"));
+        fs::write(&output, script.replace("@EXENAME@", filename)).unwrap();
+        embed_resource::compile_for(output, [binary], embed_resource::NONE)
+            .manifest_required()
+            .expect("Failed to embed Katran Windows icon/version resources");
+    }
 }

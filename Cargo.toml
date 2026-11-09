@@ -1,12 +1,17 @@
 [package]
 name = "katran"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 autobins = false
 
 [[bin]]
 name = "katran"
 path = "src/main.rs"
+
+[[bin]]
+name = "katran-launcher"
+path = "src/bin/launcher.rs"
+required-features = ["ui"]
 
 [dependencies]
 rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "functions"] }
@@ -21,7 +26,7 @@ egui_extras = {version="=0.36.2",optional=true,default-features=false,features=[
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "=0.6.2"
-windows = {version="=0.62.2",features=["Win32_Foundation","Win32_System_Com","Win32_System_Ole","Win32_System_SystemServices","Win32_System_Threading","Win32_UI_WindowsAndMessaging","Win32_UI_Shell","Win32_UI_Shell_Common","Win32_Graphics_Gdi","Win32_System_Com_StructuredStorage","Win32_UI_Input_KeyboardAndMouse"]}
+windows = {version="=0.62.2",features=["Win32_Foundation","Win32_Security","Win32_System_Com","Win32_System_Ole","Win32_System_SystemServices","Win32_System_Threading","Win32_UI_WindowsAndMessaging","Win32_UI_Shell","Win32_UI_Shell_Common","Win32_Graphics_Gdi","Win32_System_Com_StructuredStorage","Win32_System_Variant","Win32_UI_Shell_PropertiesSystem","Win32_UI_Input_KeyboardAndMouse"]}
 windows-core = "=0.62.2"
 arboard = "=3.7.0"
 clipboard-win = "=5.4.3"

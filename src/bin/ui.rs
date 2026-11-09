@@ -11,6 +11,7 @@ mod palette;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;
+mod single_instance;
 mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
@@ -80,6 +81,9 @@ fn ensure_visible_offset(offset: f32, viewport: f32, top: f32, height: f32) -> f
 }
 use images::Images;
 struct Shelf {
+    instance: Option<single_instance::Primary>,
+    activation_rx: Option<mpsc::Receiver<()>>,
+    activation_pending: bool,
     native_drag: Option<String>,
     native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
@@ -237,7 +241,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0.4 · Release",
+                        "Katran · 1.0.5 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -442,6 +446,29 @@ impl Shelf {
     }
 }
 impl eframe::App for Shelf {
+    fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.finish_job();
+        if let Some(rx) = &self.activation_rx {
+            self.activation_pending |= rx.try_iter().next().is_some();
+        }
+        if self.activation_pending {
+            if self.api.is_some() {
+                let reply = self.call(Command::ActivateWindow);
+                if reply["activation_requested"] == true {
+                    let foreground = single_instance::show(self.native_window);
+                    if let Some(log) = &self.logger {
+                        log.record(
+                            "window_activation",
+                            serde_json::json!({"serial":reply["serial"],"foreground":foreground}),
+                        );
+                    }
+                }
+                self.activation_pending = false;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(40));
+            }
+        }
+    }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
@@ -457,6 +484,11 @@ fn main() -> eframe::Result {
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("katran-data"));
+    let Some(instance) = single_instance::acquire(&root)
+        .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?
+    else {
+        return Ok(());
+    };
     let mut api = Service::open(&root, DEFAULT_QUOTA).unwrap_or_else(|e| {
         eprintln!("{}", e.message);
         std::process::exit(1)
@@ -466,6 +498,9 @@ fn main() -> eframe::Result {
         api.attach_logger(logger.clone());
     }
     let mut app = Shelf {
+        instance: Some(instance),
+        activation_rx: None,
+        activation_pending: false,
         native_drag: None,
         native_window: 0,
         logger,
@@ -516,6 +551,16 @@ fn main() -> eframe::Result {
                     && let RawWindowHandle::Win32(window) = handle.as_raw()
                 {
                     app.native_window = window.hwnd.get() as u64;
+                    if let Some(instance) = app.instance.as_mut() {
+                        instance.bind(app.native_window)?;
+                        let (tx, rx) = mpsc::channel();
+                        app.activation_rx = Some(rx);
+                        let ctx = cc.egui_ctx.clone();
+                        instance.listen(move || {
+                            let _ = tx.send(());
+                            ctx.request_repaint();
+                        });
+                    }
                 }
             }
             ui_style::install(&cc.egui_ctx);
@@ -617,6 +662,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let api = Service::open(root.path(), 10000).unwrap();
         let mut app = Shelf {
+            instance: None,
+            activation_rx: None,
+            activation_pending: false,
             native_drag: None,
             native_window: 77,
             logger: None,

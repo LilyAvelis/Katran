@@ -167,6 +167,10 @@ impl Service {
             ));
         }
         match command {
+            Command::ActivateWindow => {
+                self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
+                Ok(serde_json::json!({"activation_requested": true, "serial": self.interaction.activation_serial}))
+            }
             Command::PreviewGeometry { viewport, fitted } => {
                 if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
                 self.interaction.preview_view.geometry(viewport, fitted)
