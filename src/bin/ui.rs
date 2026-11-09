@@ -5,6 +5,7 @@ mod capture_lamp;
 mod gallery_card;
 mod images;
 mod input_log;
+mod native_drag_ui;
 mod palette;
 mod settings_ui;
 mod shelf_view;
@@ -77,6 +78,8 @@ fn ensure_visible_offset(offset: f32, viewport: f32, top: f32, height: f32) -> f
 }
 use images::Images;
 struct Shelf {
+    native_drag: Option<String>,
+    native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
     pending_delete: Vec<i64>,
     settings_ui: settings_ui::State,
@@ -138,6 +141,9 @@ impl Shelf {
             }
         }
         self.finish_job();
+        if self.native_drag.is_some() {
+            ctx.request_repaint();
+        }
         if self.api.is_some()
             && let Some(command) = self.take_queued_copy()
         {
@@ -213,6 +219,9 @@ impl Shelf {
         }
         if self.api.is_none() {
             root.disable();
+            // Busy commands keep their layout and paint; the status message
+            // communicates progress without dimming the source of a drag.
+            root.set_opacity(1.0);
         }
         self.state = self.call(Command::Interaction);
         egui::Panel::top("header")
@@ -226,7 +235,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0.1 · Release",
+                        "Katran · 1.0.2 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -415,6 +424,7 @@ impl Shelf {
         }
         if self.capture
             && self.api.is_some()
+            && self.native_drag.is_none()
             && !self.actions
             && !self.save
             && self.shortcut_editor.is_none()
@@ -430,6 +440,11 @@ impl Shelf {
     }
 }
 impl eframe::App for Shelf {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        // Eframe invokes this before Context::run_ui, outside egui locks.
+        self.finish_job();
+        self.perform_native_drag(ctx, input);
+    }
     fn ui(&mut self, root: &mut egui::Ui, _: &mut eframe::Frame) {
         self.render(root);
     }
@@ -448,6 +463,8 @@ fn main() -> eframe::Result {
         api.attach_logger(logger.clone());
     }
     let mut app = Shelf {
+        native_drag: None,
+        native_window: 0,
         logger,
         pending_delete: Vec::new(),
         settings_ui: settings_ui::State::default(),
@@ -488,6 +505,15 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(move |cc| {
+            #[cfg(windows)]
+            {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                if let Ok(handle) = cc.window_handle()
+                    && let RawWindowHandle::Win32(window) = handle.as_raw()
+                {
+                    app.native_window = window.hwnd.get() as u64;
+                }
+            }
             ui_style::install(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(app))
@@ -587,6 +613,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let api = Service::open(root.path(), 10000).unwrap();
         let mut app = Shelf {
+            native_drag: None,
+            native_window: 77,
             logger: None,
             pending_delete: Vec::new(),
             settings_ui: settings_ui::State::default(),
@@ -786,5 +814,56 @@ mod tests {
         app.shortcut_editor = None;
         frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::CTRL);
         assert_eq!(app.call(Command::Interaction)["settings_open"], true);
+
+        // Production handoff: a worker prepares files, then the window-thread
+        // hook calls the same dispatcher using a synthetic native boundary.
+        struct FakeDrag(
+            std::thread::ThreadId,
+            std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        );
+        impl katran::drag_out::Runner for FakeDrag {
+            fn run(
+                &mut self,
+                paths: &[PathBuf],
+                _: Option<&katran::drag_out::Preview>,
+                owner: u64,
+            ) -> Result<katran::drag_out::Outcome, String> {
+                assert_eq!(std::thread::current().id(), self.0);
+                assert_eq!(owner, 77);
+                assert_eq!(paths.len(), 1);
+                assert!(paths[0].is_file());
+                self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(katran::drag_out::Outcome {
+                    dropped: true,
+                    warnings: vec![],
+                })
+            }
+        }
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        app.api.as_mut().unwrap().set_drag_runner(Box::new(FakeDrag(
+            std::thread::current().id(),
+            calls.clone(),
+        )));
+        app.start_drag(vec![1], &ctx);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.job.is_some() && Instant::now() < deadline {
+            app.finish_job();
+            std::thread::yield_now();
+        }
+        assert!(app.api.is_some());
+        assert!(app.native_drag.is_some());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let mut input = egui::RawInput::default();
+        app.perform_native_drag(&ctx, &mut input);
+        assert!(app.native_drag.is_none());
+        assert!(app.api.is_some());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(app.message.contains("завершено"));
+        assert!(
+            input
+                .events
+                .iter()
+                .any(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. }))
+        );
     }
 }

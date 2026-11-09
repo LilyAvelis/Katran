@@ -3,10 +3,10 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.1 Release
+## Current build · 1.0.2 Release
 
 Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.1 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.2 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 

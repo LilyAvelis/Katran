@@ -2,6 +2,9 @@
 use super::*;
 impl Shelf {
     pub(super) fn start_drag(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
+        if self.native_drag.is_some() || self.job.is_some() {
+            return;
+        }
         let items: Option<Vec<katran::SelectionRef>> = ids
             .into_iter()
             .map(|id| {
@@ -86,6 +89,11 @@ impl Shelf {
             return;
         }
         let result = &reply["result"];
+        if let Some(token) = result["drag_token"].as_str() {
+            self.native_drag = Some(token.to_owned());
+            self.message = "Файлы готовы к перетаскиванию…".into();
+            return;
+        }
         if capture {
             let errors = item_failures(&result["items"]);
             if !errors.is_empty() {

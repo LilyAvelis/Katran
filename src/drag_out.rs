@@ -1,4 +1,67 @@
 //! Native OLE copy-only drag. No clipboard replacement, no source file moves.
+use std::path::PathBuf;
+
+pub struct Preview {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+pub struct Outcome {
+    pub dropped: bool,
+    pub warnings: Vec<String>,
+}
+/// The caller must run the native implementation on the owner window thread,
+/// outside egui painting/context locks. Test runners have no OS side effects.
+pub trait Runner: Send {
+    fn run(
+        &mut self,
+        paths: &[PathBuf],
+        preview: Option<&Preview>,
+        owner_window: u64,
+    ) -> Result<Outcome, String>;
+}
+pub struct NativeRunner;
+impl Runner for NativeRunner {
+    fn run(
+        &mut self,
+        paths: &[PathBuf],
+        preview: Option<&Preview>,
+        owner_window: u64,
+    ) -> Result<Outcome, String> {
+        if paths.is_empty() {
+            return Err("No files to drag".into());
+        }
+        #[cfg(windows)]
+        {
+            native::run(paths, preview, owner_window)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (preview, owner_window);
+            Err("Native drag requires Windows".into())
+        }
+    }
+}
+
+pub(crate) struct RunnerSink<'a> {
+    pub runner: &'a mut dyn Runner,
+    pub preview: Option<&'a Preview>,
+    pub owner_window: u64,
+}
+impl crate::copy_out::ClipboardSink for RunnerSink<'_> {
+    fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+        let result = self.runner.run(paths, self.preview, self.owner_window)?;
+        if result.dropped {
+            Ok((0, result.warnings))
+        } else {
+            Err("drag_cancelled".into())
+        }
+    }
+}
+
+#[cfg(windows)]
+#[path = "drag_image.rs"]
+mod drag_image;
 #[cfg(windows)]
 mod native {
     use std::path::PathBuf;
@@ -77,32 +140,75 @@ mod native {
             Ok(data)
         }
     }
-    pub fn run(paths: &[PathBuf]) -> Result<bool, String> {
+    pub fn run(
+        paths: &[PathBuf],
+        preview: Option<&super::Preview>,
+        owner_window: u64,
+    ) -> Result<super::Outcome, String> {
         unsafe {
             use windows::Win32::UI::Input::KeyboardAndMouse::{
-                GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON,
+                GetAsyncKeyState, ReleaseCapture, VK_ESCAPE, VK_LBUTTON,
+            };
+            use windows::Win32::{
+                Foundation::HWND,
+                System::Threading::{GetCurrentProcessId, GetCurrentThreadId},
+                UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow},
+            };
+            let owner = HWND(owner_window as usize as *mut _);
+            let mut process = 0;
+            if !IsWindow(Some(owner)).as_bool()
+                || GetWindowThreadProcessId(owner, Some(&mut process)) != GetCurrentThreadId()
+                || process != GetCurrentProcessId()
+            {
+                return Err("Native drag must run on its owner window thread".into());
+            }
+            let cancelled = || super::Outcome {
+                dropped: false,
+                warnings: vec![],
             };
             if GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000 == 0
                 || GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000 != 0
             {
-                return Ok(false);
+                return Ok(cancelled());
             }
             OleInitialize(None).map_err(|e| e.to_string())?;
             let _apartment = Apartment;
             let data = build_data(paths)?;
+            let mut warnings = Vec::new();
+            if let Some(preview) = preview
+                && let Err(error) = super::drag_image::attach(&data, preview)
+            {
+                warnings.push(format!("Drag preview unavailable: {error}"));
+            }
             let source: IDropSource = Source.into();
             let mut effect = DROPEFFECT(0);
+            if GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000 == 0
+                || GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000 != 0
+            {
+                return Ok(cancelled());
+            }
+            // Winit captures the mouse on button-down. OLE must take over on
+            // this SAME thread; a background modal loop misses release events.
+            let _ = ReleaseCapture();
             let result = DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect);
             if result == DRAGDROP_S_CANCEL {
-                return Ok(false);
+                return Ok(cancelled());
             }
             result.ok().map_err(|e| e.to_string())?;
-            Ok(result == DRAGDROP_S_DROP && effect.0 & DROPEFFECT_COPY.0 != 0)
+            Ok(super::Outcome {
+                dropped: result == DRAGDROP_S_DROP && effect.0 & DROPEFFECT_COPY.0 != 0,
+                warnings,
+            })
         }
     }
     #[cfg(test)]
     mod tests {
         use super::*;
+        #[test]
+        fn ownerless_native_call_is_rejected_before_any_drag_loop() {
+            let error = run(&[], None, 0).err().unwrap();
+            assert!(error.contains("owner window thread"));
+        }
         #[test]
         fn shell_payload_contains_group_without_touching_clipboard() {
             use windows::Win32::{
@@ -147,29 +253,6 @@ mod native {
             for path in paths {
                 assert!(path.is_file());
             }
-        }
-    }
-}
-pub fn run(paths: &[std::path::PathBuf]) -> Result<bool, String> {
-    if paths.is_empty() {
-        return Err("No files to drag".into());
-    }
-    #[cfg(windows)]
-    {
-        native::run(paths)
-    }
-    #[cfg(not(windows))]
-    {
-        Err("Native drag requires Windows".into())
-    }
-}
-pub struct NativeDrag;
-impl crate::copy_out::ClipboardSink for NativeDrag {
-    fn write(&mut self, paths: &[std::path::PathBuf]) -> Result<(u32, Vec<String>), String> {
-        if run(paths)? {
-            Ok((0, vec![]))
-        } else {
-            Err("drag_cancelled".into())
         }
     }
 }

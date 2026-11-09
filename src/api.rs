@@ -22,6 +22,13 @@ pub enum Command {
     DragEventsChecked {
         items: Vec<SelectionRef>,
     },
+    RunPreparedDrag {
+        token: String,
+        owner_window: u64,
+    },
+    CancelPreparedDrag {
+        token: String,
+    },
     TogglePreview,
     NavigatePreview {
         delta: i32,

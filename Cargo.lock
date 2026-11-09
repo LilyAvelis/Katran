@@ -1242,7 +1242,7 @@ dependencies = [
 
 [[package]]
 name = "katran"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arboard",
  "base64",
@@ -1251,6 +1251,7 @@ dependencies = [
  "egui-lucide",
  "egui_extras",
  "image",
+ "raw-window-handle",
  "rusqlite",
  "serde",
  "serde_json",
