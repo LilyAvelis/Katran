@@ -3,10 +3,10 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.3 Release
+## Current build · 1.0.4 Release
 
 Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.3 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.4 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -23,6 +23,10 @@ launch old `target/debug`, `target/capture` or `target/shelf` previews.
 Each installed version includes `build-manifest.json` with profile, version,
 executable SHA-256 and hashes of its source files. Developer/agent entry point:
 [module map and extension recipes](docs/development.md).
+
+Katran's shark icon is embedded into the window and Windows executable. A stable
+application ID identifies its taskbar group. It remains a portable application;
+an installer is unnecessary for its icon. [Artwork and build details](assets/branding/README.md).
 
 ## Controls
 

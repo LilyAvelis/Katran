@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod action_icons;
 mod api_client;
+mod app_identity;
 mod capture_lamp;
 mod gallery_card;
 mod images;
@@ -236,7 +237,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0.3 · Release",
+                        "Katran · 1.0.4 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -451,6 +452,7 @@ impl eframe::App for Shelf {
     }
 }
 fn main() -> eframe::Result {
+    app_identity::initialize();
     let root = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -500,6 +502,7 @@ fn main() -> eframe::Result {
         "Katran",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
+                .with_icon(app_identity::window_icon())
                 .with_inner_size([940.0, 680.0])
                 .with_min_inner_size([640.0, 440.0])
                 .with_decorations(false),

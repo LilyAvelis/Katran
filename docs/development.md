@@ -24,6 +24,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Local logging / viewport input | `src/diagnostics.rs`, `src/bin/input_log.rs` |
 | Settings / key recorder / shared visuals | `src/bin/settings_ui.rs`, `shortcuts_ui.rs`, `ui_foundation.rs`, `ui_style.rs` |
 | Shared text fallback (Windows fonts, loaded once) | `src/bin/ui_fonts.rs` |
+| Window/taskbar identity / embedded executable resources | `src/bin/app_identity.rs`, `build.rs`, `assets/branding/` |
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 
