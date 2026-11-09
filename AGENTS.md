@@ -7,6 +7,10 @@ Documents shelf-02/shelf-03 are historical snapshots, not current launch instruc
 For parallel agents, assign disjoint module files; one integrator owns shared
 Command/dispatcher/schema/catalogue edits. See the map for extension recipes.
 
+GitHub pushes use `python scripts/push-private.py`, which reads GITHUB_TOKEN
+from the environment or ignored .env.local. Do not repeatedly request 1Password
+approval when that credential is present. Never print or commit the token/file.
+
 The owner performs Windows UI checks herself. Do not use computer-use automation
 or manipulate her desktop unless she explicitly asks. Verify API/code with tools
 and provide a runnable build for manual visual feedback.

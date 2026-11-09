@@ -53,6 +53,11 @@ neither a plugin framework nor a separate crate per command is required.
 
 ## Checks and installation
 
+For authorized GitHub pushes, run `python scripts/push-private.py`. It reads
+`GITHUB_TOKEN` from the process environment or Git-ignored `.env.local`; it never
+retrieves 1Password itself or puts the token in the remote URL. Do not print,
+commit or upload that local file. Rotate the local value when the PAT expires.
+
 ```powershell
 cargo fmt --check
 cargo test --offline --features ui --target-dir target/build
