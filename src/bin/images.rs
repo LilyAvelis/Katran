@@ -25,6 +25,30 @@ pub(super) struct Images {
     clock: u64,
 }
 impl Images {
+    pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
+        let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
+            return;
+        };
+        let key = (id, edge, revision.to_owned());
+        self.active.insert(key.clone());
+        if self
+            .textures
+            .get(&key)
+            .is_some_and(|e| e.texture.is_some() || Instant::now() < e.retry_after)
+        {
+            return;
+        }
+        if self.requested.insert(key.clone()) {
+            let (lock, wake) = &*self.queue;
+            let mut state = lock.lock().unwrap();
+            if state.pending.len() < 64 {
+                state.pending.push_back((key, ctx.clone()));
+                wake.notify_one();
+            } else {
+                self.requested.remove(&key);
+            }
+        }
+    }
     pub(super) fn new(root: PathBuf) -> Self {
         let queue = Arc::new((
             Mutex::new(Queue {
@@ -124,6 +148,7 @@ impl Images {
         // Requests removed before execution must be eligible if the user returns.
         self.requested.retain(|key| self.active.contains(key));
     }
+    #[cfg(test)]
     pub(super) fn draw(&mut self, ui: &mut egui::Ui, event: &Value, size: Vec2, edge: u32) {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         self.paint_at(ui, event, rect, edge);

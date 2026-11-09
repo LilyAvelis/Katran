@@ -14,14 +14,34 @@ impl Shelf {
             .frame(egui::Frame::new().inner_margin(12))
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
-                    ui.label("Просмотр · Esc — назад");
-                    if let Some(event) = visible.iter().find(|event| event["id"] == id) {
-                        self.images.draw(
-                            ui,
-                            event,
-                            (ui.available_size() - egui::vec2(0.0, 24.0)).max(Vec2::splat(32.0)),
-                            1400,
-                        );
+                    if let Some(event) = visible.iter().find(|e| e["id"] == id) {
+                        let width = ui.available_width();
+                        let height = ui.available_height();
+                        let (title, _) = ui.allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
+                        let name = event["name"].as_str().unwrap_or("Изображение");
+                        let mut job = egui::text::LayoutJob::simple_singleline(
+                            name.into(), egui::FontId::proportional(16.0), Color32::from_gray(235));
+                        job.wrap.max_width = title.width();
+                        job.wrap.max_rows = 1;
+                        job.wrap.overflow_character = Some('…');
+                        let galley = ui.fonts_mut(|f| f.layout_job(job));
+                        let position = title.center() - galley.size() / 2.0;
+                        ui.painter_at(title).galley(position, galley, Color32::from_gray(235));
+                        let (canvas, response) = ui.allocate_exact_size(
+                            Vec2::new(width, (height - 76.0).max(32.0)), egui::Sense::click_and_drag());
+                        self.images.paint_at(ui, event, canvas, 1400);
+                        if response.drag_started() {
+                            self.start_drag(vec![id], ctx);
+                        }
+                        ui.vertical_centered(|ui| {
+                            ui.weak("Space / Esc — полка · ← → — изображения · перетащите изображение наружу");
+                        });
+                        if let Some(index) = visible.iter().position(|e| e["id"] == id) {
+                            let neighbors = [index.checked_sub(1), index.checked_add(1).filter(|n| *n < visible.len())];
+                            for neighbor in neighbors.into_iter().flatten() {
+                                self.images.prefetch(ctx, &visible[neighbor], 1400);
+                            }
+                        }
                     }
                 } else {
                     if visible.is_empty() {
@@ -71,7 +91,7 @@ impl Shelf {
                                     let cursor = self.state["cursor"] == id;
                                     let (rect, response) = ui.allocate_exact_size(
                                         egui::vec2(cell_width, height),
-                                        egui::Sense::click(),
+                                        egui::Sense::click_and_drag(),
                                     );
                                     ui.painter().rect_filled(
                                         rect,
@@ -171,6 +191,16 @@ impl Shelf {
                                             .label()
                                             .unwrap_or_else(|| "Источник не определён".into())
                                     ));
+                                    if response.drag_started() {
+                                        if !selected {
+                                            self.state = self.call(Command::Select {
+                                                id, mode: katran::interaction::SelectionMode::Replace,
+                                            });
+                                        }
+                                        let ids = self.state["selected"].as_array().into_iter()
+                                            .flatten().filter_map(Value::as_i64).collect();
+                                        self.start_drag(ids, ctx);
+                                    }
                                     if response.clicked() || response.double_clicked() {
                                         self.state = self.call(Command::Select {
                                             id,

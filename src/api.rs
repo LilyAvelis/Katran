@@ -19,6 +19,13 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    DragEventsChecked {
+        items: Vec<SelectionRef>,
+    },
+    TogglePreview,
+    NavigatePreview {
+        delta: i32,
+    },
     MaintainCache,
     SearchPage {
         query: String,

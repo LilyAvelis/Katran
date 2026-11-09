@@ -1,6 +1,25 @@
 //! Single-writer dispatcher jobs and UI result handling.
 use super::*;
 impl Shelf {
+    pub(super) fn start_drag(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
+        let items: Option<Vec<katran::SelectionRef>> = ids
+            .into_iter()
+            .map(|id| {
+                let event = self.events.iter().find(|e| e["id"].as_i64() == Some(id))?;
+                Some(katran::SelectionRef {
+                    id,
+                    revision: event["revision"].as_str()?.to_owned(),
+                })
+            })
+            .collect();
+        let Some(items) = items else {
+            self.message = "Выбор устарел; обновите полку".into();
+            return;
+        };
+        if self.start_job(Command::DragEventsChecked { items }, false, ctx.clone()) {
+            self.message = "Перетаскивание файлов…".into();
+        }
+    }
     pub(super) fn call(&mut self, command: Command) -> Value {
         let Some(api) = self.api.as_mut() else {
             return match command {
@@ -183,11 +202,31 @@ impl Shelf {
             }
             return;
         }
+        if matches!(id.as_str(), "open" | "preview")
+            && let Some(focus) = ctx.memory(|m| m.focused())
+        {
+            ctx.memory_mut(|m| m.surrender_focus(focus));
+        }
         let r = self.call(Command::RunAction { id });
         self.action_result(r);
         self.refresh();
     }
     pub(super) fn action_result(&mut self, r: Value) {
+        if r["cancelled"] == true {
+            self.message = "Перетаскивание отменено".into();
+        }
+        if let Some(count) = r["dragged"].as_u64() {
+            self.message = format!("Перетаскивание завершено: {count}");
+            let errors = item_failures(&r["failures"]);
+            if !errors.is_empty() {
+                self.message.push_str(&format!(" · не передано: {errors}"));
+            }
+            if let Some(warnings) = r["warnings"].as_array() {
+                for warning in warnings.iter().filter_map(Value::as_str) {
+                    self.message.push_str(&format!(" · {warning}"));
+                }
+            }
+        }
         if let Some(bytes) = r["reclaimed_blob_bytes"].as_u64() {
             self.message = format!("Очищено временных данных: {bytes} байт");
         }

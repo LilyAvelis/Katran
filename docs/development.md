@@ -13,6 +13,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | General preferences and validation | `src/settings.rs` |
 | Shortcut catalogue, normalization, persistence/conflicts | `src/shortcuts.rs` |
 | Native copy payload preparation/publication | `src/copy_out.rs` |
+| Native OLE drag-out adapter | `src/drag_out.rs` |
 | Exact-ID deletion, shared blob cleanup | `src/delete_shelf.rs` |
 | Provenance snapshot/parsing | `src/origin.rs` |
 | CLI JSON-line transport | `src/main.rs` |

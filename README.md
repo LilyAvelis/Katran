@@ -3,10 +3,10 @@
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0 Release
+## Current build · 1.0.1 Release
 
 Close the previous window yourself, then use **Start Katran.cmd**. The title strip
-must say **Katran · 1.0 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.1 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -35,6 +35,8 @@ executable SHA-256 and hashes of its source files. Developer/agent entry point:
 | Click / Ctrl-click / Shift-click | Single / individual toggle / range |
 | Shift + arrows | Range selection |
 | Enter / double-click | Open large fitted image preview |
+| Space | Toggle large preview / shelf; arrows browse adjacent objects |
+| Drag a card / large preview | Native copy-only drag-out; selected group / current image |
 | Escape | Close preview/dialog/palette |
 | Ctrl C | Copy selected files/images to the Windows clipboard |
 | Delete | Remove from shelf; groups require Enter confirmation |
@@ -84,7 +86,7 @@ does not remove sources. Delete confirmation must resubmit the exact returned
 IDs with `confirmed:true`. General settings persist in SQLite; shortcut overrides
 in JSON. UI interaction state is process-local until the planned IPC layer.
 
-See [1.0 gallery layout](docs/version-1.0.md),
+See [drag-out and Space preview](docs/drag-and-preview.md), [1.0 gallery layout](docs/version-1.0.md),
 [0.5 changes and diagnostics](docs/version-0.5.md) and the
 [development map](docs/development.md). Shelf 03 documents are historical.
 

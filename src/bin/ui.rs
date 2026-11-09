@@ -226,7 +226,7 @@ impl Shelf {
                     ui.painter().text(
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Katran · 1.0 · Release",
+                        "Katran · 1.0.1 · Release",
                         egui::FontId::proportional(13.0),
                         Color32::from_gray(180),
                     );
@@ -318,7 +318,10 @@ impl Shelf {
                 {
                     continue;
                 }
+                let preview = self.state["preview"].is_i64();
                 let delta = match key {
+                    egui::Key::ArrowDown | egui::Key::ArrowRight if preview => Some(1),
+                    egui::Key::ArrowUp | egui::Key::ArrowLeft if preview => Some(-1),
                     egui::Key::ArrowDown => Some(columns as i32),
                     egui::Key::ArrowUp => Some(-(columns as i32)),
                     egui::Key::ArrowLeft if gallery => Some(-1),
@@ -330,9 +333,13 @@ impl Shelf {
                         ctx.memory_mut(|m| m.surrender_focus(id));
                     }
                     ctx.input_mut(|i| i.consume_key(modifiers, key));
-                    self.state = self.call(Command::Navigate {
-                        delta,
-                        mode: mode(modifiers),
+                    self.state = self.call(if preview {
+                        Command::NavigatePreview { delta }
+                    } else {
+                        Command::Navigate {
+                            delta,
+                            mode: mode(modifiers),
+                        }
                     });
                     self.scroll = true;
                 }
@@ -690,6 +697,29 @@ mod tests {
         assert_eq!(app.state["selected"], serde_json::json!([3, 2]));
         frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert_eq!(app.state["preview"], 2);
+        frame(&mut app, &ctx, egui::Key::Space, egui::Modifiers::NONE);
+        assert!(app.state["preview"].is_null());
+        // A second tap requires release; holding Space must not flicker modes.
+        let mut released = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Space,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        released.textures_delta.clear();
+        frame(&mut app, &ctx, egui::Key::Space, egui::Modifiers::NONE);
+        assert_eq!(app.state["preview"], 2);
+        frame(&mut app, &ctx, egui::Key::ArrowRight, egui::Modifiers::NONE);
+        assert_eq!(app.state["preview"], 1);
+        frame(&mut app, &ctx, egui::Key::ArrowLeft, egui::Modifiers::NONE);
+        assert_eq!(app.state["preview"], 2);
         frame(&mut app, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
         assert!(app.state["preview"].is_null());
         frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL);
@@ -717,6 +747,16 @@ mod tests {
         assert_eq!(app.action_selected, 1);
         assert!(!app.scroll_actions);
         frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL);
+        // Preview navigation selects its current item; restore a group for the
+        // independent batch-delete scenario below.
+        app.state = app.call(Command::Select {
+            id: 3,
+            mode: SelectionMode::Replace,
+        });
+        app.state = app.call(Command::Select {
+            id: 2,
+            mode: SelectionMode::Range,
+        });
         frame(&mut app, &ctx, egui::Key::Delete, egui::Modifiers::NONE);
         assert_eq!(app.pending_delete, vec![3, 2]);
         assert_eq!(app.events.len(), 5);

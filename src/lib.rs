@@ -3,6 +3,7 @@ pub mod capture;
 pub mod copy_out;
 pub mod delete_shelf;
 pub mod diagnostics;
+pub mod drag_out;
 pub mod interaction;
 pub mod origin;
 pub mod settings;
@@ -158,6 +159,57 @@ impl Service {
             ));
         }
         match command {
+            Command::TogglePreview => {
+                self.interaction.preview = if self.interaction.preview.is_some() {
+                    None
+                } else {
+                    self.interaction.cursor
+                };
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::NavigatePreview { delta } => {
+                if self.interaction.preview.is_some() {
+                    self.interaction.navigate(delta, interaction::SelectionMode::Replace);
+                    self.interaction.preview = self.interaction.cursor;
+                }
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::DragEventsChecked { items } => {
+                if items.is_empty() || items.len() > 1000 {
+                    return Err(ApiError::new("invalid_argument", "Expected 1..1000 objects"));
+                }
+                let mut events = Vec::new();
+                let mut unique = std::collections::HashSet::new();
+                for item in items {
+                    let event = self.get(item.id)?;
+                    if event.revision != item.revision {
+                        return Err(ApiError::new("stale_selection", "Drag selection changed"));
+                    }
+                    if unique.insert(item.id) {
+                        events.push(event);
+                    }
+                }
+                let directory = self.root.join("drag-cache");
+                let mut plan = copy_out::prepare_with_budget(&directory, &events, self.quota)
+                    .map_err(|e| ApiError::new("drag_error", e))?;
+                // A file exported earlier may subsequently have been captured as
+                // a reference. Preserve its batch while the shelf still owns it.
+                let references = {
+                    let mut statement = self.db.prepare("SELECT path FROM events WHERE blob_hash IS NULL")?;
+                    statement.query_map([], |r| r.get::<_, String>(0))?
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                };
+                plan.protect_references(&references.into_iter().map(PathBuf::from).collect::<Vec<_>>())
+                    .map_err(|e| ApiError::new("drag_error", e))?;
+                match copy_out::commit(&plan, &mut drag_out::NativeDrag) {
+                    Ok(receipt) => Ok(serde_json::json!({
+                        "dropped": true, "dragged": receipt.count,
+                        "failures": receipt.failures, "warnings": receipt.warnings
+                    })),
+                    Err(e) if e == "drag_cancelled" => Ok(serde_json::json!({"dropped": false, "cancelled": true})),
+                    Err(e) => Err(ApiError::new("drag_error", e)),
+                }
+            }
             Command::MaintainCache=>{let before=self.usage()?;storage::initialize(&self.db,&self.root)?;Ok(serde_json::json!({"reclaimed_blob_bytes":before.saturating_sub(self.usage()?)}))},
             Command::CopyEventsChecked{items}=>{
                 if items.is_empty(){return Err(ApiError::new("invalid_argument","No selected objects"));}

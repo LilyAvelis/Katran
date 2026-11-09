@@ -12,6 +12,7 @@ pub type Definition = (
     bool,
 );
 pub const DEFS: &[Definition] = &[
+    ("preview", "Просмотр / полка", "Space", true, "Вид", true),
     ("cleanup", "Повторить очистку кэша", "", true, "Полка", true),
     ("open", "Открыть изображение", "Enter", true, "Файл", true),
     ("copy", "Копировать выбранное", "Ctrl C", true, "Файл", true),
@@ -58,6 +59,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }
     };
     Some(match id {
+        "preview" => Dispatch::Command(Command::TogglePreview),
         "cleanup" => Dispatch::Command(Command::MaintainCache),
         "open" => Dispatch::Command(Command::OpenCurrent),
         "copy" => Dispatch::Command(Command::CopyEvents { ids: selected() }),
