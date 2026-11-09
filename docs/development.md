@@ -30,6 +30,29 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 
+## Handoff · 2026-11-09 · 1.0.7
+
+The owner accepted the current build after manual testing. Main includes the
+accepted event-driven clipboard branch; no pending migration or feature work is
+required to finish this session. Continue from this version rather than the old
+experimental executable or historical shelf snapshots.
+
+- Default capture uses a hidden Win32 listener with bounded retries, independent
+  of whether the visible window is minimized. Legacy polling is available only
+  for explicit comparison; see `clipboard-events-experiment.md`.
+- Preview: wheel zooms toward the pointer, Ctrl+wheel toward the center. Above
+  fitted scale (1×), primary drag pans and native export is disabled, including
+  Ctrl+drag. At 1×, preview drag exports; gallery drag exports as before.
+- The last fix resolves gesture intent even when a worker owns the dispatcher or
+  a texture has not loaded. Do not restore an unconditional drag-export fallback
+  outside the preview geometry block.
+- Latest verification: 21 UI/headless tests and all-target/all-feature Clippy
+  passed. The preview regression covers missing textures, busy dispatcher and
+  Ctrl input using synthetic data. The owner then confirmed the fix works.
+- Normal installed executable: immutable build `6ae338dd4a69`, version 1.0.7.
+  Start Menu/Raycast and `Start Katran.cmd` use the stable launcher; rebuild with
+  the script below. Do not interrupt the owner's running application.
+
 ## Small extension recipe
 
 1. Define the command/result, error and side-effect contract. Put behavior in an
