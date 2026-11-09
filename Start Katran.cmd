@@ -8,4 +8,3 @@ if not exist "%~dp0runtime\current-version.txt" (
 )
 set /p KATRAN_BUILD_VERSION=<"%~dp0runtime\current-version.txt"
 start "" "%~dp0runtime\versions\%KATRAN_BUILD_VERSION%\katran-ui.exe" "%~dp0katran-data"
-2
