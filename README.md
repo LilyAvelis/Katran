@@ -1,19 +1,17 @@
 # Katran
 
-**Current branch experiment:** `experiment/clipboard-events` provides an opt-in
-Windows clipboard listener build. The ordinary installed Katran still uses
-polling. Build the alternative with `scripts/build-events-test.ps1`, close the
-ordinary window, then use **Start Katran Events Test.cmd**. Look for **EVENTS TEST**
-in the title. [Comparison and rollback instructions](docs/clipboard-events-experiment.md).
+Clipboard events are now the default after the owner's successful browser and
+filesystem checks. The accepted `experiment/clipboard-events` branch is merged
+into `main`. [Capture contract and verification](docs/clipboard-events-experiment.md).
 
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.5 Release
+## Current build · 1.0.6 Release
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.5 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.0.6 · Release**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -56,7 +54,8 @@ hotkey under Settings → Applications and select Hotkey Action → Always Show.
 | Space | Toggle large preview / shelf; arrows browse adjacent objects |
 | Wheel in large preview / Ctrl + wheel | Zoom toward pointer / canvas center |
 | Middle-button drag in large preview | Pan the enlarged image |
-| Drag a card / large preview | Native copy-only drag-out; selected group / current image |
+| Primary drag in enlarged preview | Grab and pan the image |
+| Drag a card / fitted preview; Ctrl + drag in preview | Native copy-only drag-out; selected group / current image |
 | Escape | Close preview/dialog/palette |
 | Ctrl C | Copy selected files/images to the Windows clipboard |
 | Delete | Remove from shelf; groups require Enter confirmation |
@@ -71,10 +70,11 @@ Capture is disabled at startup unless explicitly changed in Settings.
 
 Copied Explorer files are references; browser **Copy image** creates a cached PNG.
 Text/URL clipboard contents are not archived. File drops are supported. Capture
-currently runs only while the window process lives. Clipboard sequence polling
-is 250 ms when enabled, expensive reads only after a change; events faster than
-that interval may be missed. Downloads/watch-folder ingestion and an independent
-background listener are not implemented yet.
+uses Windows change notifications with short bounded retries. Its message-only
+listener and background logic continue while the window is minimized or hidden;
+the process must stay running. Very fast intermediate copies can still be
+coalesced because Clipboard holds a current snapshot, not a history. Downloads/
+watch-folder ingestion and capture after the app exits are not implemented yet.
 
 Stream origin tags identify the clipboard owner's app and, if supplied in
 CF_HTML, the browser domain. Unknown/old origins remain unknown. Full URLs and

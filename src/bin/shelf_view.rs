@@ -1,5 +1,49 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PreviewDrag {
+    Pan,
+    Export,
+}
+
+fn preview_drag(factor: f64, ctrl: bool) -> PreviewDrag {
+    if factor > 1.0 && !ctrl {
+        PreviewDrag::Pan
+    } else {
+        PreviewDrag::Export
+    }
+}
+
+fn latched_preview_drag(
+    previous: Option<PreviewDrag>,
+    started: bool,
+    factor: f64,
+    ctrl: bool,
+) -> Option<PreviewDrag> {
+    if started {
+        Some(preview_drag(factor, ctrl))
+    } else {
+        previous
+    }
+}
+
+fn preview_pan_command(
+    primary_pan: bool,
+    middle_pan: bool,
+    delta: Vec2,
+    viewport: katran::preview_view::Size,
+    fitted: katran::preview_view::Size,
+) -> Option<Command> {
+    (primary_pan || middle_pan).then_some(Command::PanPreview {
+        delta: katran::preview_view::Point {
+            x: delta.x,
+            y: delta.y,
+        },
+        viewport,
+        fitted,
+    })
+}
+
 impl Shelf {
     pub(super) fn shelf_view(
         &mut self,
@@ -30,6 +74,8 @@ impl Shelf {
                         let (canvas, response) = ui.allocate_exact_size(
                             Vec2::new(width, (height - 76.0).max(32.0)), egui::Sense::click_and_drag());
                         let mut image_rect = None;
+                        let drag_id = response.id.with(("preview-drag", id));
+                        let mut export_started = response.drag_started_by(egui::PointerButton::Primary);
                         if self.api.is_some() && let Some(size) = self.images.fitted_preview_size(event, canvas) {
                             use katran::preview_view::{Point, Size};
                             let viewport = Size { width: canvas.width(), height: canvas.height() };
@@ -49,9 +95,27 @@ impl Shelf {
                                     });
                                 }
                             }
-                            if response.dragged_by(egui::PointerButton::Middle) {
-                                let delta = ctx.input(|i| i.pointer.delta());
-                                self.state = self.call(Command::PanPreview { delta: Point { x: delta.x, y: delta.y }, viewport, fitted });
+                            let ctrl = ctx.input(|i| i.modifiers.ctrl);
+                            let factor = self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
+                            // Latch at drag start: changing Ctrl or zoom during a pan
+                            // must never turn it into a native OLE export.
+                            let started = response.drag_started_by(egui::PointerButton::Primary);
+                            let intent = ctx.data_mut(|data| {
+                                let intent = latched_preview_drag(data.get_temp::<PreviewDrag>(drag_id), started, factor, ctrl);
+                                if let Some(intent) = intent { data.insert_temp(drag_id, intent); }
+                                intent
+                            });
+                            export_started = started && intent == Some(PreviewDrag::Export);
+                            let primary_pan = response.dragged_by(egui::PointerButton::Primary)
+                                && intent == Some(PreviewDrag::Pan);
+                            let middle_pan = response.dragged_by(egui::PointerButton::Middle);
+                            if let Some(command) = preview_pan_command(primary_pan, middle_pan, ctx.input(|i| i.pointer.delta()), viewport, fitted) {
+                                self.state = self.call(command);
+                            }
+                            if primary_pan || middle_pan {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else if response.hovered() && preview_drag(factor, ctrl) == PreviewDrag::Pan {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             let geometry = self.call(Command::PreviewGeometry { viewport, fitted });
                             if let (Some(left), Some(top), Some(width), Some(height)) = (
@@ -59,12 +123,21 @@ impl Shelf {
                                 image_rect = Some(egui::Rect::from_min_size(canvas.min + Vec2::new(left as f32, top as f32), Vec2::new(width as f32, height as f32)));
                             }
                         }
+                        if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
+                            ctx.data_mut(|data| data.remove::<PreviewDrag>(drag_id));
+                        }
                         self.images.paint_preview(ui, event, canvas, image_rect);
-                        if response.drag_started_by(egui::PointerButton::Primary) {
+                        if export_started {
                             self.start_drag(vec![id], ctx);
                         }
                         ui.vertical_centered(|ui| {
-                            ui.weak("Space / Esc — полка · ← → — листать · колесо — зум · Ctrl — центр · средняя — сдвиг");
+                            let zoomed = self.state["preview_view"]["factor"].as_f64().is_some_and(|factor| factor > 1.0);
+                            let hint = if zoomed {
+                                "ЛКМ — сдвиг · Ctrl+тащить — экспорт · Space — назад · ← → — листать"
+                            } else {
+                                "Тащить — экспорт · колесо — увеличить · Space — назад · ← → — листать"
+                            };
+                            ui.weak(hint).on_hover_text("Колесо приближает к курсору, Ctrl+колесо — к центру. Увеличенное изображение можно двигать левой или средней кнопкой мыши.");
                         });
                         if let Some(index) = visible.iter().position(|e| e["id"] == id) {
                             let neighbors = [index.checked_sub(1), index.checked_add(1).filter(|n| *n < visible.len())];
@@ -254,5 +327,80 @@ impl Shelf {
                 }
             });
         self.images.end_frame(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use katran::preview_view::{Point, Size};
+
+    #[test]
+    fn preview_primary_drag_reserves_ctrl_for_export() {
+        assert_eq!(preview_drag(1.0, false), PreviewDrag::Export);
+        assert_eq!(preview_drag(1.0, true), PreviewDrag::Export);
+        assert_eq!(preview_drag(1.01, false), PreviewDrag::Pan);
+        assert_eq!(preview_drag(16.0, false), PreviewDrag::Pan);
+        assert_eq!(preview_drag(16.0, true), PreviewDrag::Export);
+    }
+
+    #[test]
+    fn drag_intent_stays_latched_when_modifiers_or_zoom_change() {
+        let pan = latched_preview_drag(None, true, 2.0, false);
+        assert_eq!(pan, Some(PreviewDrag::Pan));
+        assert_eq!(latched_preview_drag(pan, false, 1.0, true), pan);
+        let export = latched_preview_drag(None, true, 2.0, true);
+        assert_eq!(export, Some(PreviewDrag::Export));
+        assert_eq!(latched_preview_drag(export, false, 2.0, false), export);
+        assert_eq!(latched_preview_drag(export, true, 2.0, false), pan);
+    }
+
+    #[test]
+    fn grab_and_middle_drag_route_to_the_domain_pan_api() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 1024).unwrap();
+        let mut call = |command| {
+            let result = api.execute(Request {
+                api_version: 1,
+                request_id: "grab-test".into(),
+                command,
+            });
+            assert_eq!(result["ok"], true, "{result}");
+            result["result"].clone()
+        };
+        let event = call(Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        });
+        call(Command::SetVisible {
+            ids: vec![event["id"].as_i64().unwrap()],
+        });
+        call(Command::TogglePreview);
+        let viewport = Size {
+            width: 200.0,
+            height: 200.0,
+        };
+        let fitted = viewport;
+        call(Command::ZoomPreview {
+            multiplier: 2.0,
+            anchor: Point { x: 100.0, y: 100.0 },
+            viewport,
+            fitted,
+        });
+        for (primary, middle, expected) in [(true, false, 30.0), (false, true, 60.0)] {
+            let command =
+                preview_pan_command(primary, middle, Vec2::new(30.0, -20.0), viewport, fitted)
+                    .unwrap();
+            let state = call(command);
+            assert_eq!(state["preview_view"]["offset"]["x"], expected);
+        }
+        // Export and idle input produce no pan command (and no native drag is invoked).
+        assert!(preview_pan_command(false, false, Vec2::splat(50.0), viewport, fitted).is_none());
+        let state =
+            call(preview_pan_command(true, false, Vec2::splat(1000.0), viewport, fitted).unwrap());
+        assert_eq!(state["preview_view"]["offset"]["x"], 100.0);
+        assert_eq!(state["preview_view"]["offset"]["y"], 100.0);
+        assert!(!root.path().join("drag-cache").exists());
     }
 }

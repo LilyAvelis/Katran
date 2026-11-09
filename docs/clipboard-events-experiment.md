@@ -1,11 +1,13 @@
 # Clipboard events experiment
 
-Branch: `experiment/clipboard-events`. This is a comparison build, not a promotion
-to the default application. The ordinary `Start Katran.cmd`, Start Menu/Raycast
-entry, stable launcher and stable runtime pointer remain on polling. The Cargo
-default UI feature set also retains its original polling path.
+**Accepted and promoted, 2026-11-09:** the owner confirmed native browser and
+filesystem capture and authorized the merge. `experiment/clipboard-events` is
+merged into `main`; `clipboard-events` is a default Cargo feature. Starting with
+1.0.6, normal Start Katran.cmd and the Start Menu/Raycast entry use the listener.
+This confirmation covers those two native scenarios; the matrix below records
+other regression scenarios and does not claim all of them were manually tested.
 
-## Run and return to the accepted version
+## Optional comparison build
 
 Build without starting a window or changing installed shortcuts:
 
@@ -22,9 +24,13 @@ of the old window and parallel capture writers. `scripts/start-events-test.ps1
 Both builds use the same existing `katran-data` shelf and existing storage API;
 there is no schema migration. Images captured/deleted in the test remain changed
 on that shelf after returning to the normal version. Test sequentially, not in
-parallel. To return: close EVENTS TEST, then use ordinary **Start Katran.cmd** or
-the normal Raycast application. Git switching/rebuilding is unnecessary for this
-runtime rollback. Do not merge/promote before the owner accepts the comparison.
+parallel. Close the earlier EVENTS TEST window and use ordinary **Start Katran.cmd**
+or the normal Raycast application for the accepted 1.0.6 release. The optional
+test channel now enables `clipboard-events-test` solely for its distinct label.
+Legacy polling remains available for deliberate comparison via
+`cargo build --offline --no-default-features --features ui --bin katran-ui --target-dir target/build`.
+It is not an automatic fallback. Previously installed immutable polling binaries
+remain available if a deliberate rollback is needed; no shelf migration is required.
 
 The experimental executable and source-hash manifest live under
 `runtime/experiments/clipboard-events/<hash>/`; only that experiment's pointer
@@ -87,7 +93,7 @@ native snapshot adapter.
 
 ```powershell
 cargo test --offline --features ui,clipboard-events --target-dir target/build
-cargo test --offline --features ui --target-dir target/build
+cargo test --offline --no-default-features --features ui --target-dir target/build
 cargo clippy --offline --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
 ```
 

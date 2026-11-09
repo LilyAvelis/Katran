@@ -8,8 +8,9 @@ This is an in-window view with [wheel zoom and panning](preview-zoom-and-fonts.m
 not an OS fullscreen toggle.
 
 Drag a selected gallery card to export the selected group; dragging an unselected
-card selects and exports that item. In large preview, drag the displayed image to
-export that image. The Windows OLE adapter permits COPY only; originals are never
+card selects and exports that item. In fitted preview, drag the displayed image
+to export it. With 1.0.6 grab panning, primary drag on an enlarged preview moves
+the image; Ctrl+primary drag exports at every zoom level. The Windows OLE adapter permits COPY only; originals are never
 moved, and the system Clipboard is not replaced by the drag operation.
 
 API commands: `toggle_preview`, `navigate_preview {delta}`, and two-phase drag:

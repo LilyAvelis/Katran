@@ -2,10 +2,11 @@
 
 API First is mandatory, as explicitly required by the project owner.
 
-Clipboard event capture is an opt-in experiment on `experiment/clipboard-events`.
-Use `scripts/build-events-test.ps1` for that feature. Do not promote it to the
-normal runtime/current-version.txt or Start Menu entry before owner acceptance.
-The normal feature set and Start Katran.cmd retain polling for comparison/rollback.
+Clipboard events were accepted by the owner after browser/filesystem testing
+and merged from `experiment/clipboard-events`. `clipboard-events` is now a
+default feature and the normal installed build uses the Windows listener.
+Legacy polling is available only with `--no-default-features --features ui` for
+explicit comparison; do not silently fall back to it on listener failures.
 
 Start with the current README and [development map](docs/development.md).
 Documents shelf-02/shelf-03 are historical snapshots, not current launch instructions.

@@ -1,6 +1,6 @@
 [package]
 name = "katran"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2024"
 autobins = false
 
@@ -39,8 +39,10 @@ default-features = false
 features = ["glow", "default_fonts"]
 
 [features]
+default = ["clipboard-events"]
 ui = ["dep:eframe","dep:egui-lucide","dep:egui_extras"]
 clipboard-events = []
+clipboard-events-test = ["clipboard-events"]
 
 [[bin]]
 name = "katran-ui"
