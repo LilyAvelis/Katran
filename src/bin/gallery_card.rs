@@ -1,9 +1,6 @@
 //! Afio gallery_view/layout pattern: allocate once, fit/paint into fixed regions.
 use eframe::egui::{self, Color32, Rect, Vec2};
 pub const GAP: f32 = 12.0;
-pub fn columns(width: f32, target: f32) -> usize {
-    ((width - 16.0 + GAP) / (target + GAP)).floor().max(1.0) as usize
-}
 pub fn fit_rect(cell: Rect, natural: Vec2) -> Rect {
     let scale = (cell.width() / natural.x.max(1.0))
         .min(cell.height() / natural.y.max(1.0))
@@ -95,8 +92,10 @@ mod tests {
     #[test]
     fn cards_keep_image_name_origin_separate_at_all_scales() {
         for width in [280.0, 600.0, 940.0, 1600.0] {
-            for target in [160.0, 280.0, 360.0] {
-                let count = columns(width, target);
+            for count in [1usize, 2, 4, 8]
+                .into_iter()
+                .filter(|count| width / *count as f32 >= 96.0)
+            {
                 let w = (width - 16.0 - GAP * (count - 1) as f32) / count as f32;
                 let h = w + 54.0;
                 for column in 0..count {

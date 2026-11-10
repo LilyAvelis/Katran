@@ -3,14 +3,24 @@ pub mod capture;
 pub mod capture_events;
 pub mod clipboard_listener;
 pub mod copy_out;
+mod delete_selection;
 pub mod delete_shelf;
+pub mod density;
 pub mod diagnostics;
+pub mod downloads;
 pub mod drag_out;
 mod drag_session;
+pub mod file_visual;
+mod folder_commit;
+pub mod folder_watch;
 pub mod interaction;
 pub mod origin;
+pub mod screenshot_identity;
 pub mod settings;
+pub mod sharex;
+mod shelf_tabs;
 pub mod shortcuts;
+pub mod tab_layout;
 use interaction::Interaction;
 use std::{
     fs::{self, OpenOptions},
@@ -22,11 +32,15 @@ pub mod actions;
 pub mod api;
 pub mod preview;
 pub mod preview_view;
+pub mod quicklook;
 pub mod storage;
 pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    external_preview: Box<dyn quicklook::Launcher>,
+    sharex_scanner: sharex::SharexScanner,
+    downloads_scanner: downloads::DownloadsScanner,
     capture_events: capture_events::Schedule,
     capture_clock: Box<dyn capture_events::Clock>,
     capture_source: Option<Box<dyn capture_events::Source>>,
@@ -45,6 +59,11 @@ pub struct Service {
     read_only: bool,
 }
 impl Service {
+    /// Injectable external-preview boundary for synthetic tests and embedded clients.
+    pub fn set_preview_launcher(&mut self, launcher: Box<dyn quicklook::Launcher>) {
+        self.external_preview = launcher;
+    }
+
     pub fn attach_logger(&mut self, logger: diagnostics::Logger) {
         self.diagnostics = Some(logger);
     }
@@ -94,6 +113,9 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            external_preview: Box::new(quicklook::NativeLauncher),
+            sharex_scanner: Default::default(),
+            downloads_scanner: Default::default(),
             capture_events: Default::default(),
             capture_clock: Box::new(capture_events::SystemClock::default()),
             capture_source: None,
@@ -120,6 +142,9 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            external_preview: Box::new(quicklook::NativeLauncher),
+            sharex_scanner: Default::default(),
+            downloads_scanner: Default::default(),
             capture_events: Default::default(),
             capture_clock: Box::new(capture_events::SystemClock::default()),
             capture_source: None,
@@ -170,7 +195,11 @@ impl Service {
             .query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |r| r.get(0))?)
     }
     fn dispatch(&mut self, command: Command) -> Result<serde_json::Value> {
-        if self.read_only && !matches!(command, Command::Get { .. } | Command::PreviewImage { .. })
+        if self.read_only
+            && !matches!(
+                command,
+                Command::Get { .. } | Command::PreviewImage { .. } | Command::PreviewFile { .. }
+            )
         {
             return Err(ApiError::new(
                 "read_only",
@@ -178,6 +207,35 @@ impl Service {
             ));
         }
         match command {
+            Command::AdjustDensity { delta } => {
+                let mut settings = self.settings.clone();
+                match self.interaction.view {
+                    interaction::View::Gallery => settings.gallery_columns=density::adjust_density(settings.gallery_columns,delta),
+                    interaction::View::List => settings.stream_rows=density::adjust_density(settings.stream_rows,delta),
+                }
+                self.dispatch(Command::SetSettings{settings})
+            },
+            Command::CommitFolderCandidates { items } => self.commit_folder_candidates(items),
+            Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
+            Command::CommitScreenshotMatches { pairs } => {
+                let count = screenshot_identity::commit_matches(&self.db, &pairs)?;
+                Ok(serde_json::json!({"classification_changed":count > 0,"matched":count}))
+            }
+            Command::SelectTabPosition { position } => {
+                let tab = tab_layout::tab_at(&self.settings.tab_order,position)?;
+                self.interaction.set_tab(tab);
+                Ok(serde_json::json!(self.interaction))
+            },
+            Command::MoveTab { tab,index } => {
+                let mut settings=self.settings.clone();
+                tab_layout::reorder(&mut settings.tab_order,tab,index).map_err(|e|ApiError::new("invalid_tab_order",e))?;
+                self.dispatch(Command::SetSettings { settings })
+            },
+            Command::SetTab { tab } => { self.interaction.set_tab(tab); Ok(serde_json::json!(self.interaction)) },
+            Command::ToggleTab => { self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
+            Command::BrowseShelf { query, limit, after_id } => self.browse_shelf(&query, limit, after_id),
+            Command::ScanSharex => self.scan_sharex(),
+            Command::ScanDownloads => self.scan_downloads(),
             Command::CaptureClipboard { trigger } => self.capture_from_event(trigger),
             Command::ActivateWindow => {
                 self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
@@ -197,7 +255,12 @@ impl Service {
                 self.interaction.preview_view.pan(delta, viewport, fitted)?;
                 Ok(serde_json::json!(self.interaction))
             }
+            Command::PreviewExternal { id } => quicklook::preview(&self.get(id)?, self.external_preview.as_ref()),
             Command::TogglePreview => {
+                if self.interaction.preview.is_none() && let Some(id)=self.interaction.cursor {
+                    let event=self.get(id)?;
+                    if !quicklook::is_native_image(&event) { return quicklook::preview(&event,self.external_preview.as_ref()); }
+                }
                 self.interaction.set_preview(if self.interaction.preview.is_some() {
                     None
                 } else {
@@ -256,11 +319,19 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                         "Expected ingest_path or ingest_bytes",
                     ));
                 }
+                let clipboard_source = match command.as_ref() {
+                    Command::IngestPath { source, .. } | Command::IngestBytes { source, .. } => source.starts_with("clipboard_"),
+                    _ => false,
+                };
+                if clipboard_source && origin.source_app.as_deref().is_some_and(|app| app.eq_ignore_ascii_case("sharex")) {
+                    return Ok(serde_json::json!({"ignored":true,"reason":"sharex_uses_folder_source"}));
+                }
                 self.ingest_origin = origin;
                 let result = self.dispatch(*command);
                 self.ingest_origin = origin::Origin::default();
                 result
             }
+            Command::DeleteSelection { ids, confirmed } => self.delete_selection(ids, confirmed),
             Command::DeleteEvents { ids, confirmed } => {
                 let result =
                     delete_shelf::delete_events(&mut self.db, &self.root, &ids, confirmed)?;
@@ -297,6 +368,8 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 let document = serde_json::to_string(&settings)
                     .map_err(|e| ApiError::new("settings_error", e))?;
                 self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
+                if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
+                if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
                 Ok(serde_json::json!(self.settings))
@@ -329,6 +402,10 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 Ok(serde_json::json!(self.interaction))
             }
             Command::OpenCurrent => {
+                if let Some(id)=self.interaction.cursor {
+                    let event=self.get(id)?;
+                    if !quicklook::is_native_image(&event) { return quicklook::preview(&event,self.external_preview.as_ref()); }
+                }
                 self.interaction.set_preview(self.interaction.cursor);
                 Ok(serde_json::json!(self.interaction))
             }
@@ -339,6 +416,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.5).map(|d|serde_json::json!({"id":d.0,"label":if d.0=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.1},"group":d.4,"shortcut":self.shortcuts.binding(d.0)})).collect())),
             Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
             Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
+            Command::PreviewFile{id,max_edge}=>file_visual::render(&self.root,&self.get(id)?,max_edge),
             Command::SetCaptureEnabled { enabled } => {
                 self.capture_events.cancel();
                 self.capture_enabled = enabled;

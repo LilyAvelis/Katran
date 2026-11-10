@@ -13,8 +13,16 @@ struct Queue {
 }
 struct Entry {
     texture: Option<egui::TextureHandle>,
+    icon: bool,
     touched: u64,
     retry_after: Instant,
+}
+fn preview_command(id: i64, edge: u32) -> Command {
+    if edge <= 512 {
+        Command::PreviewFile { id, max_edge: edge }
+    } else {
+        Command::PreviewImage { id, max_edge: edge }
+    }
 }
 // Only the latest successful domain rectangle is retained during dispatcher jobs.
 #[derive(Default)]
@@ -107,10 +115,7 @@ impl Images {
                     let reply = api.execute(Request {
                         api_version: 1,
                         request_id: "preview".into(),
-                        command: Command::PreviewImage {
-                            id: key.0,
-                            max_edge: key.1,
-                        },
+                        command: preview_command(key.0, key.1),
                     });
                     if results.send((key, reply)).is_err() {
                         return;
@@ -163,6 +168,10 @@ impl Images {
                 result_key,
                 Entry {
                     texture,
+                    icon: matches!(
+                        reply["result"]["visual_kind"].as_str(),
+                        Some("shell_icon" | "generic_icon")
+                    ),
                     touched: self.clock,
                     retry_after: Instant::now() + Duration::from_secs(3),
                 },
@@ -272,8 +281,17 @@ impl Images {
             self.textures.remove(&oldest);
         }
         if let Some(Some(texture)) = self.textures.get(&key).map(|e| &e.texture) {
-            let image =
-                image.unwrap_or_else(|| super::gallery_card::fit_rect(rect, texture.size_vec2()));
+            let image = image.unwrap_or_else(|| {
+                let rect = if self.textures.get(&key).is_some_and(|entry| entry.icon) {
+                    egui::Rect::from_center_size(
+                        rect.center(),
+                        Vec2::splat(96.0_f32.min(rect.width()).min(rect.height())),
+                    )
+                } else {
+                    rect
+                };
+                super::gallery_card::fit_rect(rect, texture.size_vec2())
+            });
             ui.painter_at(rect).image(
                 texture.id(),
                 image,
@@ -313,6 +331,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cards_use_file_visuals_and_large_preview_keeps_image_decoder() {
+        assert!(matches!(
+            preview_command(1, 320),
+            Command::PreviewFile {
+                id: 1,
+                max_edge: 320
+            }
+        ));
+        assert!(matches!(
+            preview_command(1, 512),
+            Command::PreviewFile {
+                id: 1,
+                max_edge: 512
+            }
+        ));
+        assert!(matches!(
+            preview_command(1, 1400),
+            Command::PreviewImage {
+                id: 1,
+                max_edge: 1400
+            }
+        ));
+    }
+
+    #[test]
     fn busy_preview_reuses_last_domain_geometry_without_resetting_zoom() {
         let root = tempfile::tempdir().unwrap();
         let mut api = Service::open(root.path(), 100).unwrap();
@@ -323,6 +366,11 @@ mod tests {
                 command,
             })
         };
+        call(Command::IngestBytes {
+            name: "geometry.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        });
         call(Command::SetVisible { ids: vec![1] });
         call(Command::OpenCurrent);
         use katran::preview_view::{Point, Size};

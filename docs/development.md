@@ -8,6 +8,7 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | --- | --- |
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
+| Arbitrary-file gallery/stream visuals / Windows Shell thumbnail and icon boundary | `src/file_visual.rs`, `tests/file_visual.rs`, `docs/file-visuals.md` |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
 | Clipboard signals / bounded retry API / hidden-window client (default backend) | `src/clipboard_listener.rs`, `src/capture_events.rs`, `src/bin/clipboard_events_ui.rs` |
 | Selection, cursor, view, preview/settings state | `src/interaction.rs` |
@@ -31,6 +32,12 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 
 ## Handoff · 2026-11-09 · 1.0.7
+
+The next local preview is 1.1.0: `src/shelf_tabs.rs` owns tab browsing and ShareX
+ingest orchestration; `src/sharex.rs` owns bounded read-only folder discovery.
+`src/interaction.rs` owns tab memory independently of Gallery/Stream. See
+[tabs and ShareX](tabs-and-sharex.md) for API contracts and manual acceptance.
+The following 1.0.7 handoff remains the accepted baseline pending owner review.
 
 The owner accepted the current build after manual testing. Main includes the
 accepted event-driven clipboard branch; no pending migration or feature work is
@@ -100,3 +107,60 @@ binary. Existing capture tests query only the system clipboard sequence number;
 they never read or write clipboard contents. Release installation emits a source
 hash manifest and switches `Start Katran.cmd` only after a successful build.
 Do not launch apps or kill the owner's running process to complete a build.
+
+
+## Local 1.2.0 Test · current additions
+
+- `file_visual.rs`: PreviewFile fallback pipeline; image large preview unchanged.
+- `folder_watch.rs`: bounded native per-source discovery/hash workers.
+- `folder_commit.rs`: prepared source commits and classification input snapshots.
+- `downloads.rs`: Known Folder resolution, CLI scan, injectable recycler.
+- `screenshot_identity.rs`: background pixel digests and cheap association commits.
+- `bin/source_jobs.rs`: GUI clients, Clipboard priority and one prepared file/turn.
+- `delete_selection.rs`: ownership-sensitive delete; Downloads recycler,
+  Screenshots permanent, ordinary shelf entries shelf-only. Single immediate,
+  groups Enter confirmation. See docs/downloads.md and docs/latency.md.
+
+No GitHub publication until the owner's 2.0 release instruction. Source folder
+workers start when owner runs the new build; tests use synthetic temp roots.
+
+
+## Local 1.2.1 Test
+
+`tab_layout.rs` validates persisted non-All order and maps positions. Commands
+SelectTabPosition/MoveTab share settings persistence. `bin/tab_bar.rs` emits
+commands for click/drop; UI consumes unmodified Tab before button focus traversal,
+with actual search/dialog/recorder gating. `quicklook.rs` owns validated external
+preview requests with injectable launcher; TogglePreview/OpenCurrent route files
+through it, retaining native supported-image preview. See docs/quicklook.md.
+
+
+## Local 1.2.2 Test
+
+`density.rs` and AdjustDensity provide independently persisted gallery_columns
+and stream_rows, with backward-compatible defaults4/3 and validated1..12.
+CtrlMinus/Plus/Equals route through the catalogue; egui keyboard UI zoom disabled
+before input. UI clips content within fixed-font cards and clamps effective
+count to viewport minimums. QuickLook readiness now refuses duplicate spawning
+when its instance mutex exists without an accepting pipe; test transport uses
+isolated named pipes and injected launcher boundaries, never installed QuickLook.
+
+
+## Local 1.2.4 Test · Actions polish
+
+The shared catalogue groups actions contiguously into existing shelf/file/view/app
+sections. All exposed catalogue actions have specific Lucide icons. Palette rows
+reserve disjoint clipped label and shortcut regions; only the first alias is shown
+as keycaps, full aliases appear on hover. Command IDs, routing and bindings remain
+unchanged. Headless regression tests cover icon coverage and narrow-row geometry.
+QuickLook failure also reproduces in Explorer per owner; no QuickLook settings,
+plugins or installation changes performed in this iteration.
+
+
+## Local 1.2.5 · regression repair
+
+QuickLook direct pipe access removed; external preview delegates to desktop CLI.
+See docs/quicklook.md for source, local recovery and verification limits. Palette
+row clips intersect ancestor scroll clipping; regression renders real ScrollArea
+rows and verifies shapes at1x/1.5x, including fully offscreen rows. Restoring old
+set_clip_rect behavior causes the regression to fail.

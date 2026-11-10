@@ -5,16 +5,7 @@ impl Shelf {
         if self.native_drag.is_some() || self.job.is_some() {
             return;
         }
-        let items: Option<Vec<katran::SelectionRef>> = ids
-            .into_iter()
-            .map(|id| {
-                let event = self.events.iter().find(|e| e["id"].as_i64() == Some(id))?;
-                Some(katran::SelectionRef {
-                    id,
-                    revision: event["revision"].as_str()?.to_owned(),
-                })
-            })
-            .collect();
+        let items = self.snapshot_ids(ids);
         let Some(items) = items else {
             self.message = "Выбор устарел; обновите полку".into();
             return;
@@ -73,6 +64,7 @@ impl Shelf {
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.job = None;
                 self.pending_copy = None;
+                self.pending_copy_ids = None;
                 self.message =
                     "Фоновая операция прервалась; копирование не выполнено. Перезапустите Katran."
                         .into();
@@ -89,6 +81,12 @@ impl Shelf {
             return;
         }
         let result = &reply["result"];
+        if result.get("classification_changed").is_some() {
+            if result["classification_changed"] == true {
+                self.refresh();
+            }
+            return;
+        }
         #[cfg(feature = "clipboard-events")]
         if capture {
             self.clipboard_events.completed(result, Instant::now());
@@ -105,12 +103,29 @@ impl Shelf {
             self.message = "Файлы готовы к перетаскиванию…".into();
             return;
         }
+        if result["scanned"] == true {
+            let errors = item_failures(&result["items"]);
+            if !errors.is_empty() {
+                self.message = format!("Папки: {errors}");
+            }
+            if result["items"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["ok"] == true))
+            {
+                self.sources.match_dirty |= result["items"].as_array().is_some_and(|items| {
+                    items.iter().any(|item| item["event"]["source"] == "sharex")
+                });
+                self.refresh();
+            }
+            return;
+        }
         if capture {
             let errors = item_failures(&result["items"]);
             if !errors.is_empty() {
                 self.message = format!("Не удалось захватить: {errors}");
             }
             if clipboard_changed(result) {
+                self.sources.match_dirty = true;
                 self.refresh();
             }
         } else {
@@ -124,7 +139,7 @@ impl Shelf {
         } else {
             1000
         };
-        let r = self.call(Command::SearchPage {
+        let r = self.call(Command::BrowseShelf {
             query: self.query.clone(),
             limit: 1000,
             after_id: None,
@@ -147,7 +162,7 @@ impl Shelf {
         let Some(cursor) = self.next_cursor else {
             return;
         };
-        let r = self.call(Command::SearchPage {
+        let r = self.call(Command::BrowseShelf {
             query: self.query.clone(),
             limit: 1000,
             after_id: Some(cursor),
@@ -157,36 +172,54 @@ impl Shelf {
             self.next_cursor = r["next_cursor"].as_i64();
         }
     }
-    pub(super) fn selection_snapshot(&self) -> Option<Vec<katran::SelectionRef>> {
+    fn selected_ids(&self) -> Vec<i64> {
         let ids: Vec<i64> = self.state["selected"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(Value::as_i64)
             .collect();
-        let ids = if ids.is_empty() {
+        if ids.is_empty() {
             self.state["cursor"].as_i64().into_iter().collect()
         } else {
             ids
-        };
-        let items: Option<Vec<katran::SelectionRef>> = ids
-            .into_iter()
+        }
+    }
+    fn snapshot_ids(&mut self, ids: Vec<i64>) -> Option<Vec<katran::SelectionRef>> {
+        ids.into_iter()
             .map(|id| {
                 let event = self
                     .events
                     .iter()
-                    .find(|event| event["id"].as_i64() == Some(id))?;
+                    .find(|event| event["id"].as_i64() == Some(id))
+                    .cloned()
+                    .unwrap_or_else(|| self.call(Command::Get { id }));
                 Some(katran::SelectionRef {
                     id,
                     revision: event["revision"].as_str()?.to_owned(),
                 })
             })
-            .collect();
-        items
+            .collect()
+    }
+    pub(super) fn selection_snapshot(&mut self) -> Option<Vec<katran::SelectionRef>> {
+        self.snapshot_ids(self.selected_ids())
     }
     pub(super) fn copy_request(&mut self, ctx: &egui::Context) {
-        if self.pending_copy.is_some() {
+        if self.pending_copy.is_some() || self.pending_copy_ids.is_some() {
             self.message = "Копирование уже в очереди".into();
+            return;
+        }
+        if self.api.is_none()
+            && self.job.is_some()
+            && self.selected_ids().iter().any(|id| {
+                !self
+                    .events
+                    .iter()
+                    .any(|event| event["id"].as_i64() == Some(*id))
+            })
+        {
+            self.pending_copy_ids = Some(self.selected_ids());
+            self.message = "Копирование в очереди".into();
             return;
         }
         let Some(items) = self.selection_snapshot() else {
@@ -206,6 +239,15 @@ impl Shelf {
         }
     }
     pub(super) fn take_queued_copy(&mut self) -> Option<Command> {
+        if let Some(ids) = self.pending_copy_ids.take() {
+            match self.snapshot_ids(ids) {
+                Some(items) => return Some(Command::CopyEventsChecked { items }),
+                None => {
+                    self.message = "Выбор устарел; копирование не выполнено".into();
+                    return None;
+                }
+            }
+        }
         self.pending_copy
             .take()
             .map(|items| Command::CopyEventsChecked { items })
@@ -221,16 +263,24 @@ impl Shelf {
             }
             return;
         }
-        if matches!(id.as_str(), "open" | "preview")
+        if matches!(id.as_str(), "open" | "preview" | "quicklook")
             && let Some(focus) = ctx.memory(|m| m.focused())
         {
             ctx.memory_mut(|m| m.surrender_focus(focus));
         }
+        let preview_action = matches!(id.as_str(), "open" | "preview" | "quicklook");
         let r = self.call(Command::RunAction { id });
         self.action_result(r);
-        self.refresh();
+        if preview_action {
+            self.state = self.call(Command::Interaction);
+        } else {
+            self.refresh();
+        }
     }
     pub(super) fn action_result(&mut self, r: Value) {
+        if r["backend"] == "quicklook" && r["requested"] == true {
+            self.message = "Запрос просмотра передан в QuickLook".into();
+        }
         if r["cancelled"] == true {
             self.message = "Перетаскивание отменено".into();
         }
@@ -250,6 +300,9 @@ impl Shelf {
             self.message = format!("Очищено временных данных: {bytes} байт");
         }
         if r["confirmation_required"] == true {
+            self.pending_delete_originals = r["original_files"] == true;
+            self.pending_delete_permanent = r["permanent_files"] == true;
+            self.pending_delete_recycle = r["recycle_bin"] == true;
             self.pending_delete = r["ids"]
                 .as_array()
                 .into_iter()
@@ -258,9 +311,17 @@ impl Shelf {
                 .collect();
         }
         if let Some(count) = r["deleted"].as_u64()
-            && count > 0
+            && r["confirmation_required"] != true
         {
-            self.message = format!("Убрано с полки: {count}{}", cleanup_message(&r));
+            self.message = if r["original_files"] == true {
+                format!("Удалено объектов: {count}{}", cleanup_message(&r))
+            } else {
+                format!("Убрано с полки: {count}{}", cleanup_message(&r))
+            };
+            let errors = item_failures(&r["items"]);
+            if !errors.is_empty() {
+                self.message.push_str(&format!(" · не удалено: {errors}"));
+            }
         }
         if let Some(count) = r["copied"].as_u64() {
             self.message = format!("Скопировано: {count}");

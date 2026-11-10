@@ -242,7 +242,13 @@ pub fn take_assignment_key(ctx: &egui::Context) -> bool {
     ctx.input_mut(|i|{let found=i.events.iter().any(|e|matches!(e,egui::Event::Key{key:Key::Comma,pressed:true,repeat:false,modifiers,..} if modifiers.ctrl&&modifiers.shift&&!modifiers.alt&&!modifiers.mac_cmd));if found{discard(i);}found})
 }
 pub fn take_action(ctx: &egui::Context, catalogue: &[ShortcutInfo]) -> Option<String> {
-    let editing = ctx.egui_wants_keyboard_input();
+    take_action_with_editing(ctx, catalogue, ctx.egui_wants_keyboard_input())
+}
+pub fn take_action_with_editing(
+    ctx: &egui::Context,
+    catalogue: &[ShortcutInfo],
+    editing: bool,
+) -> Option<String> {
     ctx.input_mut(|i| {
         let found = i.events.iter().find_map(|e| match e {
             egui::Event::Copy if !editing => catalogue
@@ -258,12 +264,32 @@ pub fn take_action(ctx: &egui::Context, catalogue: &[ShortcutInfo]) -> Option<St
                 pressed: true,
                 repeat: false,
                 modifiers,
+                physical_key,
                 ..
             } if !editing
                 || *key == Key::Enter
                 || (modifiers.ctrl && matches!(key, Key::K | Key::Comma)) =>
             {
-                let current = normalize(&chord(*key, *modifiers)).ok()?;
+                let physical = physical_key.unwrap_or(*key);
+                let key = if modifiers.is_none()
+                    && matches!(
+                        physical,
+                        Key::Backtick
+                            | Key::Num1
+                            | Key::Num2
+                            | Key::Num3
+                            | Key::Num4
+                            | Key::Num5
+                            | Key::Num6
+                            | Key::Num7
+                            | Key::Num8
+                            | Key::Num9
+                    ) {
+                    physical
+                } else {
+                    *key
+                };
+                let current = normalize(&chord(key, *modifiers)).ok()?;
                 catalogue
                     .iter()
                     .find(|a| {

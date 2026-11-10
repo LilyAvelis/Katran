@@ -43,6 +43,10 @@ fn preview_pan_command(
     })
 }
 
+fn stream_row_height(viewport: f32, rows: u8, gap: f32) -> f32 {
+    ((viewport - gap * f32::from(rows.saturating_sub(1))) / f32::from(rows.max(1))).max(72.0)
+}
+
 impl Shelf {
     pub(super) fn shelf_view(
         &mut self,
@@ -157,11 +161,13 @@ impl Shelf {
                     let cell_width = if gallery {
                         ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
                             / columns as f32)
-                            .max(80.0)
+                            .max(1.0)
                     } else {
                         (ui.available_width() - 16.0).max(80.0)
                     };
-                    let height = if gallery { cell_width + 54.0 } else { 150.0 };
+                    let height = if gallery { cell_width + 54.0 } else {
+                        stream_row_height(ui.available_height(), self.stream_rows, gap)
+                    };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
                     let mut area = egui::ScrollArea::vertical().id_salt("shelf-scroll");
                     if self.scroll
@@ -238,9 +244,10 @@ impl Shelf {
                                             Color32::from_rgb(183, 200, 203),
                                         );
                                     } else {
+                                        let image_height = (rect.height() - 20.0).max(1.0);
                                         let image = egui::Rect::from_min_size(
                                             rect.min + Vec2::splat(10.0),
-                                            Vec2::new(176.0, 120.0),
+                                            Vec2::new((image_height * 1.4667).min(176.0), image_height),
                                         );
                                         self.images.paint_at(ui, event, image, 320);
                                         let left = image.right() + 16.0;
@@ -264,6 +271,7 @@ impl Shelf {
                                             .to_owned(),
                                         ];
                                         for (index, line) in lines.iter().enumerate() {
+                                            if rect.top() + 12.0 + index as f32 * 28.0 + 24.0 > rect.bottom() { break; }
                                             let r = egui::Rect::from_min_size(
                                                 egui::pos2(
                                                     left,
@@ -361,7 +369,7 @@ mod tests {
                 let root = tempfile::tempdir().unwrap();
                 let mut app = super::super::tests::test_shelf(root.path());
                 app.call(Command::IngestBytes {
-                    name: "synthetic.bin".into(),
+                    name: "synthetic.png".into(),
                     bytes: vec![1],
                     source: "test".into(),
                 });
@@ -471,5 +479,18 @@ mod tests {
         assert_eq!(state["preview_view"]["offset"]["x"], 100.0);
         assert_eq!(state["preview_view"]["offset"]["y"], 100.0);
         assert!(!root.path().join("drag-cache").exists());
+    }
+}
+
+#[cfg(test)]
+mod density_geometry_tests {
+    use super::stream_row_height;
+    #[test]
+    fn stream_rows_fill_viewport_at_each_density() {
+        for rows in 1..=7 {
+            let height = stream_row_height(600.0, rows, 8.0);
+            assert!((height * f32::from(rows) + 8.0 * f32::from(rows - 1) - 600.0).abs() < 0.01);
+        }
+        assert_eq!(stream_row_height(300.0, 12, 8.0), 72.0);
     }
 }

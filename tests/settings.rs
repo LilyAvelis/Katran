@@ -12,9 +12,15 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
         quota_bytes: 200,
+        gallery_columns: 4,
+        stream_rows: 3,
+        tab_order: katran::tab_layout::default_order(),
         card_width: 280.0,
         default_view: View::List,
         capture_on_start: false,
+        sharex_folder: None,
+        downloads_folder: None,
+        downloads_enabled: true,
     };
     assert_eq!(
         call(&mut api, Command::SetSettings { settings })["ok"],

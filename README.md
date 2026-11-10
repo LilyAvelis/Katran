@@ -7,11 +7,11 @@ into `main`. [Capture contract and verification](docs/clipboard-events-experimen
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.0.7 Release
+## Current build · 1.2.6 Test · Downloads and file visuals
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.0.7 · Release**. Existing data stays in `katran-data`.
+must say **Katran · 1.2.6 · Test**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -39,6 +39,32 @@ Repeated launches request activation of the existing window for the same shelf
 root, including restoration from minimized state. In Raycast, assign its app
 hotkey under Settings → Applications and select Hotkey Action → Always Show.
 [Activation, registration and manual checks](docs/application-launch.md).
+
+[Tabs and ShareX setup, API and limits](docs/tabs-and-sharex.md). This is the first
+2.0 foundation, not the complete 2.0 release.
+
+Current source contract: Images is the clipboard/manual image shelf; Screenshots
+and Downloads are live views of originals. Downloads uses the Windows Known
+Folder by default; Settings can disable it or override the root. Ctrl D is
+rebindable. Delete in Downloads uses Windows recycling; ShareX originals use
+permanent deletion. Single deletion is immediate; groups confirm with Enter.
+[Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
+[measured latency and native folder workers](docs/latency.md) describe the current
+1.2.6 contracts and supersede older source-ingest limitations below.
+
+Tabs are positional: 1..9 select non-All tabs in their saved order. Drag tabs
+with the mouse to reorder; All stays pinned. Tab toggles All and the remembered
+tab, including when a button has focus. Text fields/dialogs retain local input.
+Tab positions are registered in the shared shortcut catalogue; direct source
+commands no longer have Ctrl J/H/D defaults. Existing user overrides are retained.
+
+Space/Enter uses Katran for supported images, and installed Windows QuickLook
+for other files in its own window. [QuickLook setup and limits](docs/quicklook.md).
+
+Ctrl− / Ctrl+ changes content density by one: gallery columns (default 4) or
+stream rows (default 3), saved independently. Fonts, controls and DPI remain
+unchanged. Preferences are bounded to 1..12; narrow/short windows show fewer
+cards to preserve 96 px column / 72 px row minimums. Settings expose both values.
 
 ## Controls
 
@@ -69,19 +95,23 @@ to a folder. A green/red lamp next to Actions shows the current capture state.
 Capture is disabled at startup unless explicitly changed in Settings.
 
 Copied Explorer files are references; browser **Copy image** creates a cached PNG.
+Arbitrary regular files remain transferable. Gallery and stream use Windows
+Shell thumbnails when available, then associated file icons or a generic icon.
+See [file visual API and limits](docs/file-visuals.md).
 Text/URL clipboard contents are not archived. File drops are supported. Capture
 uses Windows change notifications with short bounded retries. Its message-only
 listener and background logic continue while the window is minimized or hidden;
 the process must stay running. Very fast intermediate copies can still be
-coalesced because Clipboard holds a current snapshot, not a history. Downloads/
-watch-folder ingestion and capture after the app exits are not implemented yet.
+coalesced because Clipboard holds a current snapshot, not a history. Capture after the app exits is not implemented. ShareX is opt-in; Downloads
+is enabled by default. Both sources use native folder notification workers.
 
 Stream origin tags identify the clipboard owner's app and, if supplied in
 CF_HTML, the browser domain. Unknown/old origins remain unknown. Full URLs and
 browser history are not collected. Origin tags appear in gallery and stream.
 Dedicated source sorting is future work.
 
-Delete never removes external original files. Owned blob files are reclaimed
+Shelf-only DeleteEvents never removes external original files. User-facing
+DeleteSelection follows the ownership-specific rules above. Owned blob files are reclaimed
 after their last event reference disappears. Clipboard exports are separate
 snapshots retained for paste; they are not immediately removed by shelf deletion.
 
@@ -125,7 +155,7 @@ Automated checks use synthetic files and headless egui. The owner checks native
 Windows appearance and paste compatibility. Tests never replace her clipboard
 or manipulate the desktop.
 
-Current boundaries: no global hotkey, autostart, watch folders, video thumbnails,
+Current boundaries: no global hotkey, autostart, native folder event watchers, built-in video decoding,
 Afio adapter or protected IPC. Previews are fitted images, not original-pixel zoom.
 Blobs default to a 2 GiB quota with reject-new policy. Clipboard snapshots have a
 separate budget of the same size, including the previous and prepared batch; old

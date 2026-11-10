@@ -4,7 +4,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default = "crate::tab_layout::default_order")]
+    pub tab_order: Vec<crate::interaction::ShelfTab>,
+    pub gallery_columns: u8,
+    pub stream_rows: u8,
     pub quota_bytes: u64,
+    pub downloads_enabled: bool,
+    pub downloads_folder: Option<std::path::PathBuf>,
+    pub sharex_folder: Option<std::path::PathBuf>,
     pub card_width: f32,
     pub default_view: View,
     pub capture_on_start: bool,
@@ -18,12 +25,34 @@ impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
             quota_bytes: quota,
+            gallery_columns: 4,
+            stream_rows: 3,
+            tab_order: crate::tab_layout::default_order(),
+            sharex_folder: None,
+            downloads_enabled: true,
+            downloads_folder: None,
             card_width: 280.0,
             default_view: View::Gallery,
             capture_on_start: false,
         }
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        crate::tab_layout::validate_order(&self.tab_order)?;
+        if !(1..=12).contains(&self.gallery_columns) || !(1..=12).contains(&self.stream_rows) {
+            return Err("Density must be in 1..12".into());
+        }
+        if let Some(folder) = &self.sharex_folder
+            && !folder.is_absolute()
+        {
+            return Err("ShareX: укажите абсолютную папку".into());
+        }
+        if self
+            .downloads_folder
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute())
+        {
+            return Err("Downloads: absolute folder required".into());
+        }
         if self.quota_bytes == 0 || self.quota_bytes > 1024 * 1024 * 1024 * 1024 {
             return Err("Квота должна быть больше нуля и не больше 1 ТиБ".into());
         }

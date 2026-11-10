@@ -11,6 +11,8 @@ pub struct State {
     error: String,
     editor: Option<super::shortcuts_ui::Editor>,
     shortcut_filter: String,
+    sharex_folder: String,
+    downloads_folder: String,
 }
 fn call(api: &mut Service, command: Command) -> serde_json::Value {
     api.execute(Request {
@@ -24,12 +26,32 @@ impl State {
         let open = call(api, Command::Interaction)["result"]["settings_open"] == true;
         if !open {
             self.draft = None;
+            self.sharex_folder.clear();
+            self.downloads_folder.clear();
             self.editor = None;
             return;
         }
         if self.draft.is_none() {
             self.draft =
                 serde_json::from_value(call(api, Command::GetSettings)["result"].clone()).ok();
+        }
+        if let Some(draft) = self.draft.as_ref()
+            && self.sharex_folder.is_empty()
+        {
+            self.sharex_folder = draft
+                .sharex_folder
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+        if let Some(draft) = self.draft.as_ref()
+            && self.downloads_folder.is_empty()
+        {
+            self.downloads_folder = draft
+                .downloads_folder
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
         }
         let logger = api.logger();
         let mut close = false;
@@ -54,7 +76,15 @@ impl State {
         SettingsSection::show(ui,|ui|{
          SettingsRow::show(ui,"Захват при запуске","По умолчанию выключен. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
-         SettingsRow::show(ui,"Размер карточек","Ширина карточки галереи в логических пикселях.",|ui|{ui.add(egui::Slider::new(&mut draft.card_width,160.0..=360.0));});
+         SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
+         SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});
+         SettingsRow::show(ui,"Папка ShareX","Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.",|ui|{
+          if ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")).changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
+         });
+         SettingsRow::show(ui,"Downloads","Показывать файлы из папки загрузок Windows. Удаление отправляет оригиналы в корзину.",|ui|{ui.checkbox(&mut draft.downloads_enabled,"Включено");});
+         SettingsRow::show(ui,"Папка Downloads","Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.",|ui|{
+          if ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text("Системная папка Downloads")).changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
+         });
          let mut mib=draft.quota_bytes as f64/(1024.0*1024.0);
          SettingsRow::show(ui,"Квота кэша · МиБ","Снижение ниже текущего объёма отклоняется. Исходники не удаляются.",|ui|{if ui.add(egui::DragValue::new(&mut mib).range(1.0..=1048576.0)).changed(){draft.quota_bytes=(mib*1024.0*1024.0)as u64;}});
         });
@@ -92,6 +122,8 @@ impl State {
         if close {
             call(api, Command::CloseSettings);
             self.draft = None;
+            self.sharex_folder.clear();
+            self.downloads_folder.clear();
             self.editor = None;
         }
     }

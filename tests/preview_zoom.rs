@@ -17,6 +17,16 @@ const SIZE: Size = Size {
 fn zoom_anchor_bounds_pan_and_reset_through_dispatcher() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
+    for n in 0..2 {
+        call(
+            &mut api,
+            Command::IngestBytes {
+                name: format!("geometry{n}.png"),
+                bytes: vec![1],
+                source: "test".into(),
+            },
+        );
+    }
     assert_eq!(
         call(
             &mut api,
@@ -118,6 +128,16 @@ fn zoom_anchor_bounds_pan_and_reset_through_dispatcher() {
 fn center_zoom_keeps_center_and_geometry_reconstrains_after_resize() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
+    for n in 0..2 {
+        call(
+            &mut api,
+            Command::IngestBytes {
+                name: format!("geometry{n}.png"),
+                bytes: vec![1],
+                source: "test".into(),
+            },
+        );
+    }
     call(&mut api, Command::SetVisible { ids: vec![1] });
     call(&mut api, Command::OpenCurrent);
     let center = Point { x: 200.0, y: 200.0 };

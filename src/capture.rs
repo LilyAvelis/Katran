@@ -23,6 +23,16 @@ impl Service {
                 return Ok(serde_json::json!({"captured":0,"state":"retry"}));
             };
             drop(lock);
+            if origin
+                .source_app
+                .as_deref()
+                .is_some_and(|app| app.eq_ignore_ascii_case("sharex"))
+            {
+                self.clipboard_sequence = sequence;
+                return Ok(
+                    serde_json::json!({"captured":0,"state":"excluded_sharex_folder_source"}),
+                );
+            }
             if let Ok(files) = files {
                 let mut results = Vec::new();
                 for path in files {

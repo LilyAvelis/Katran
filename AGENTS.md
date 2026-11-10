@@ -30,3 +30,25 @@ and provide a runnable build for manual visual feedback.
 - Keep success/error semantics explicit, including per-item batch failures.
 - Use synthetic data for tests; never silently overwrite or delete source files.
 - Keep technical contracts, build instructions and limitations with the code.
+
+## Agent collaboration
+
+Development builds for the 2.0 work are tested locally. Do not push them to
+GitHub; publication waits for the owner's 2.0 release instruction. Local Git
+diffs and checkpoints remain useful for review and rollback.
+
+The owner sets product scope; the lead agent owns integration and architecture.
+Use Terra (`gpt-6.1-terra`, medium effort) by default for simple file creation,
+small edits, tidy-up and validation tasks. Delegate nontrivial bounded
+implementation modules to Sol (`gpt-6.1-sol`, low effort), or the effort explicitly
+requested by the owner. Luna may handle minor tasks when useful. Keep module ownership disjoint and shared API edits with the
+integrator. Verify the domain API before editing GUI clients.
+
+## Screenshots original-file exception · owner decision 2026-11-10
+
+Screenshots is a live view of originals in the configured ShareX folder.
+`DeleteSelection` may delete these originals after configured-folder containment and recorded content-revision checks.
+Single-file deletion is immediate; multiple distinct IDs require confirmation. Report each
+item failure. Existing `DeleteEvents` remains shelf-only. Images and other
+external references retain the original non-deletion contract. Never delete
+personal files as part of tests or reconciliation.

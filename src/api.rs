@@ -19,6 +19,42 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    AdjustDensity {
+        delta: i8,
+    },
+    PreviewExternal {
+        id: i64,
+    },
+    SelectTabPosition {
+        position: u8,
+    },
+    MoveTab {
+        tab: crate::interaction::ShelfTab,
+        index: usize,
+    },
+    CommitFolderCandidates {
+        items: Vec<crate::folder_watch::PreparedCandidate>,
+    },
+    ScreenshotMatchInputs,
+    CommitScreenshotMatches {
+        pairs: Vec<crate::screenshot_identity::MatchPair>,
+    },
+    DeleteSelection {
+        ids: Vec<i64>,
+        #[serde(default)]
+        confirmed: bool,
+    },
+    SetTab {
+        tab: crate::interaction::ShelfTab,
+    },
+    ToggleTab,
+    BrowseShelf {
+        query: String,
+        limit: u32,
+        after_id: Option<i64>,
+    },
+    ScanSharex,
+    ScanDownloads,
     CaptureClipboard {
         trigger: crate::capture_events::Trigger,
     },
@@ -118,6 +154,10 @@ pub enum Command {
         id: String,
     },
     PreviewImage {
+        id: i64,
+        max_edge: u32,
+    },
+    PreviewFile {
         id: i64,
         max_edge: u32,
     },

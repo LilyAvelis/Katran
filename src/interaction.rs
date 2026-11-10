@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShelfTab {
+    All,
+    #[default]
+    Images,
+    Screenshots,
+    Downloads,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum View {
@@ -20,6 +30,8 @@ pub struct Interaction {
     pub activation_serial: u64,
     pub settings_open: bool,
     pub view: View,
+    pub tab: ShelfTab,
+    pub last_tab: ShelfTab,
     pub visible: Vec<i64>,
     pub cursor: Option<i64>,
     pub selected: Vec<i64>,
@@ -28,6 +40,19 @@ pub struct Interaction {
     anchor: Option<i64>,
 }
 impl Interaction {
+    pub fn set_tab(&mut self, tab: ShelfTab) {
+        self.tab = tab;
+        if tab != ShelfTab::All {
+            self.last_tab = tab;
+        }
+    }
+    pub fn toggle_tab(&mut self) {
+        self.set_tab(if self.tab == ShelfTab::All {
+            self.last_tab
+        } else {
+            ShelfTab::All
+        });
+    }
     pub fn set_preview(&mut self, id: Option<i64>) {
         if self.preview != id {
             self.preview_view = Default::default();
@@ -43,7 +68,6 @@ impl Interaction {
         if self.preview.is_some_and(|id| !self.visible.contains(&id)) {
             self.set_preview(None);
         }
-        self.selected.retain(|id| self.visible.contains(id));
         if !self.cursor.is_some_and(|id| self.visible.contains(&id)) {
             self.cursor = self
                 .visible
