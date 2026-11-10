@@ -6,6 +6,8 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+env:
+  RUSTUP_TOOLCHAIN: 1.95.0
 jobs:
   checks:
     runs-on: windows-2022
@@ -15,10 +17,10 @@ jobs:
           persist-credentials: false
       - name: Rust toolchain
         shell: pwsh
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - run: cargo +stable fmt --check
-      - run: cargo +stable test --locked --features ui,clipboard-events --target-dir target/build
-      - run: cargo +stable clippy --locked --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - run: cargo +1.95.0 fmt --check
+      - run: cargo +1.95.0 test --locked --features ui,clipboard-events --target-dir target/build
+      - run: cargo +1.95.0 clippy --locked --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
       - name: Synthetic packaging contract
         shell: pwsh
         run: |
@@ -38,10 +40,10 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal
-          cargo +stable build --locked --release --features ui,clipboard-events --bin katran-ui --bin katran-launcher --bin katran --target-dir target/build
+          rustup toolchain install 1.95.0 --profile minimal
+          cargo +1.95.0 build --locked --release --features ui,clipboard-events --bin katran-ui --bin katran-launcher --bin katran --target-dir target/build
           if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
-          $version = (cargo +stable metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $version = (cargo +1.95.0 metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
           if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag does not match Cargo version' }
           python scripts/third-party-notices.py --output "$env:RUNNER_TEMP/katran-third-party-notices.txt"
           if ($LASTEXITCODE -ne 0) { throw 'Dependency notice generation failed' }

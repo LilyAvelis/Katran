@@ -52,7 +52,8 @@ detect corruption; GitHub repository ownership and TLS remain the trust anchor.
 No signing key/certificate is configured, so binaries/installers are unsigned.
 Windows may display an unknown-publisher warning. Never claim signed provenance.
 
-CI runs fmt, API/headless tests, Clippy and synthetic whitelist/determinism tests
+CI pins Rust 1.95.0 for reproducible checks and release builds. It runs fmt,
+API/headless tests, Clippy and synthetic whitelist/determinism tests
 on Windows. Tag builds additionally compile setup and publish assets only after
 checks pass. Default workflow permissions are read-only; only the tag release job
 can write releases. Checkout is pinned to an official action commit. Inno Setup is
