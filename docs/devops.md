@@ -8,6 +8,16 @@ The original workflow used a fresh Windows runner for checks and another for rel
 
 Agent orchestration added avoidable overhead: repeated clean runs, duplicate branch/tag checks, and minute-by-minute status turns. Those are distinct from compiler runtime and must be addressed separately. The owner reported a two-hour release session; that is not a measured duration of one compilation.
 
+## Recurring lesson and accepted release scope
+
+The owner reports the same pattern previously occurred in Afio. This is a recurring process defect: a newly noticed inaccuracy led to a complete release rebuild, even when it did not invalidate the binary. The repeated Afio case is owner testimony, not a new audit of that project.
+
+The owner explicitly accepts releasing a working version with known bounded shortcomings and fixing them in patches. Do not add optional pre-release work merely to obtain reassurance. A concrete defect must be connected to the affected behavior; unease alone is not a reason to invalidate successful checks.
+
+Before another expensive command, identify the changed input, the evidence it invalidates, the minimum affected stage, and the existing result that remains reusable. No changed input or concrete new defect means no full rebuild. This is a work-selection rule, not an additional approval gate.
+
+The global entry point also requires reading `~/.codex/guides/devops.md` before release/CI work. [Notion lesson and principle](https://app.notion.com/p/41449fda32968163a218d5a0184af262). Instructions improve discoverability but do not mechanically prevent a new full dispatch. The implemented artifact/job boundaries remove compilation from package/publish retries; they are not a universal guarantee against repeated agent work.
+
 ## Execution contract
 
 1. Identify the product SHA and build inputs: Windows x64, Rust 1.95.0, Cargo.lock, `ui,clipboard-events`, and profile. For workflow_dispatch, the workflow/main SHA is different from the product tag SHA; use the checked source output, never assume github.sha is the product revision.
