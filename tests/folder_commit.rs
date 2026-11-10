@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{
     Command, Request, Service,
     folder_watch::{FolderSource, PreparedCandidate},
@@ -18,6 +20,7 @@ fn prepared_commits_validate_configuration_and_metadata_and_keep_sources() {
     let mut service = Service::open(data.path(), 10000).unwrap();
     let mut settings = katran::settings::Settings::defaults(10000);
     settings.downloads_folder = Some(folder.path().to_owned());
+    settings.downloads_enabled = true;
     assert_eq!(
         call(&mut service, Command::SetSettings { settings })["ok"],
         true
@@ -37,17 +40,42 @@ fn prepared_commits_validate_configuration_and_metadata_and_keep_sources() {
             items: vec![candidate.clone()],
         },
     );
-    assert_eq!(result["result"]["items"][0]["ok"], true);
-    assert!(
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["error"]["code"], "untrusted_worker_result");
+    let forged = PreparedCandidate {
+        content_hash: "0".repeat(64),
+        ..candidate.clone()
+    };
+    assert_eq!(
         call(
             &mut service,
             Command::CommitFolderCandidates {
-                items: vec![candidate.clone()]
+                items: vec![forged]
             }
-        )["result"]["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        )["error"]["code"],
+        "untrusted_worker_result"
+    );
+    let history = source_api::call(
+        &mut service,
+        Command::Search {
+            query: String::new(),
+            limit: 100,
+        },
+    );
+    assert!(
+        history["events"].as_array().unwrap().is_empty(),
+        "untrusted receipts must not create events"
+    );
+    let event = source_api::wait_event(
+        &mut service,
+        katran::source_policy::SourceId::Downloads,
+        &path,
+    );
+    assert_eq!(event["revision"], format!("ref:{}", candidate.content_hash));
+    assert_eq!(event["delete_policy"]["source_id"], "downloads");
+    assert!(
+        source_api::settle(&mut service, katran::source_policy::SourceId::Downloads).is_empty(),
+        "unchanged trusted discovery must not duplicate an event"
     );
     std::fs::write(&path, b"changed original").unwrap();
     assert_eq!(
@@ -56,8 +84,18 @@ fn prepared_commits_validate_configuration_and_metadata_and_keep_sources() {
             Command::CommitFolderCandidates {
                 items: vec![candidate]
             }
-        )["result"]["items"][0]["error"]["code"],
-        "source_changed"
+        )["error"]["code"],
+        "untrusted_worker_result"
+    );
+    let updated = source_api::wait_event(
+        &mut service,
+        katran::source_policy::SourceId::Downloads,
+        &path,
+    );
+    assert_ne!(event["id"], updated["id"]);
+    assert_eq!(
+        updated["revision"],
+        format!("ref:{}", katran::preview::content_hash(&path).unwrap())
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"changed original");
 }

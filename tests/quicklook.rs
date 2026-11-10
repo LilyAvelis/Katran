@@ -16,6 +16,7 @@ impl Launcher for Fake {
 }
 fn event(path: PathBuf) -> Event {
     Event {
+        delete_policy: Default::default(),
         revision: format!("ref:{}", katran::preview::content_hash(&path).unwrap()),
         origin: Default::default(),
         id: 42,

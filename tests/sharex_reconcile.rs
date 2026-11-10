@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{Command, Request, Service, interaction::ShelfTab, origin::Origin};
 fn call(api: &mut Service, command: Command) -> serde_json::Value {
     let response = api.execute(Request {
@@ -26,6 +28,7 @@ fn live_projection_hides_clipboard_and_missing_references_without_deleting_histo
     std::fs::write(&path, b"synthetic original").unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let mut settings = katran::settings::Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(source.path().to_path_buf());
     call(&mut api, Command::SetSettings { settings });
 
@@ -51,21 +54,9 @@ fn live_projection_hides_clipboard_and_missing_references_without_deleting_histo
     )
     .unwrap();
     drop(db);
-    let first = call(
-        &mut api,
-        Command::IngestPath {
-            path: path.clone(),
-            source: "sharex".into(),
-        },
-    );
+    let first = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
     std::fs::write(&path, b"synthetic updated original").unwrap();
-    let latest = call(
-        &mut api,
-        Command::IngestPath {
-            path: path.clone(),
-            source: "sharex".into(),
-        },
-    );
+    let latest = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
     call(
         &mut api,
         Command::SetTab {
@@ -103,6 +94,12 @@ fn live_projection_hides_clipboard_and_missing_references_without_deleting_histo
     );
     assert!(path.is_file());
     std::fs::remove_file(&path).unwrap();
+    source_api::poll_until(&mut api, "removed live original projection", |api, _| {
+        browse(api, "", None)["events"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    });
     assert!(
         browse(&mut api, "", None)["events"]
             .as_array()
@@ -130,28 +127,48 @@ fn external_removal_and_restoration_request_one_refresh_each() {
     std::fs::write(&path, b"synthetic original").unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let mut settings = katran::settings::Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(folder.path().to_path_buf());
     call(&mut api, Command::SetSettings { settings });
-    call(&mut api, Command::ScanSharex);
-    call(&mut api, Command::ScanSharex);
-    call(&mut api, Command::ScanSharex);
+    source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Screenshots,
+        },
+    );
+    source_api::settle(&mut api, katran::source_policy::SourceId::Sharex);
     std::fs::remove_file(&path).unwrap();
-    let removed = call(&mut api, Command::ScanSharex);
-    assert_eq!(removed["items"][0]["availability_changed"], true);
+    let removed = source_api::poll_until(&mut api, "removal availability refresh", |api, batch| {
+        batch["refresh"] == true
+            && browse(api, "", None)["events"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+    });
+    assert_eq!(removed["refresh"], true);
+    let quiet = source_api::observe_for(&mut api, std::time::Duration::from_millis(200));
     assert!(
-        call(&mut api, Command::ScanSharex)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        quiet.iter().all(|batch| batch["refresh"] != true),
+        "unchanged missing file repeated a refresh: {quiet:?}"
     );
     std::fs::write(&path, b"synthetic original").unwrap();
-    let restored = call(&mut api, Command::ScanSharex);
-    assert_eq!(restored["items"][0]["availability_changed"], true);
+    let restored = source_api::poll_until(
+        &mut api,
+        "restoration availability refresh",
+        |api, batch| {
+            batch["refresh"] == true
+                && !browse(api, "", None)["events"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        },
+    );
+    assert_eq!(restored["refresh"], true);
+    let quiet = source_api::observe_for(&mut api, std::time::Duration::from_millis(200));
     assert!(
-        call(&mut api, Command::ScanSharex)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        quiet.iter().all(|batch| batch["refresh"] != true),
+        "unchanged restored file repeated a refresh: {quiet:?}"
     );
     assert!(path.is_file());
 }
@@ -164,6 +181,7 @@ fn current_folder_only_and_reverted_content_gets_fresh_live_revision() {
     std::fs::write(&path, b"first version").unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let mut settings = katran::settings::Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(first.path().to_path_buf());
     call(
         &mut api,
@@ -177,18 +195,12 @@ fn current_folder_only_and_reverted_content_gets_fresh_live_revision() {
             tab: ShelfTab::Screenshots,
         },
     );
-    call(&mut api, Command::ScanSharex);
-    call(&mut api, Command::ScanSharex);
-    let original = browse(&mut api, "", None)["events"][0].clone();
+    let original = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
     std::fs::write(&path, b"second version changed").unwrap();
-    call(&mut api, Command::ScanSharex);
-    call(&mut api, Command::ScanSharex);
-    let updated = browse(&mut api, "", None)["events"][0].clone();
+    let updated = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
     assert_ne!(original["revision"], updated["revision"]);
     std::fs::write(&path, b"first version").unwrap();
-    call(&mut api, Command::ScanSharex);
-    call(&mut api, Command::ScanSharex);
-    let reverted = browse(&mut api, "", None)["events"][0].clone();
+    let reverted = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path);
     assert_eq!(original["revision"], reverted["revision"]);
     assert!(reverted["id"].as_i64().unwrap() > updated["id"].as_i64().unwrap());
     settings.sharex_folder = Some(second.path().to_path_buf());

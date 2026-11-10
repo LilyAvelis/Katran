@@ -37,42 +37,113 @@ impl Shelf {
         capture: bool,
         ctx: egui::Context,
     ) -> bool {
-        let Some(mut api) = self.api.take() else {
+        if self.api.is_none()
+            || (capture && self.capture_job.is_some())
+            || (!capture && self.job.is_some())
+        {
+            return false;
+        }
+        self.busy_text_editing = ctx.egui_wants_keyboard_input();
+        let result = self.call(Command::BeginJob {
+            command: Box::new(command),
+        });
+        if result["state"] == "succeeded" {
+            self.apply_job_reply(
+                serde_json::json!({"ok":true,"result":result["result"]}),
+                capture,
+            );
+            return true;
+        }
+        let Some(id) = result["job_id"].as_u64() else {
             return false;
         };
-        self.busy_text_editing = ctx.egui_wants_keyboard_input();
-        let (tx, rx) = mpsc::channel();
-        self.job = Some(rx);
-        std::thread::spawn(move || {
-            let reply = api.execute(Request {
-                api_version: 1,
-                request_id: "ui-job".into(),
-                command,
+        if capture {
+            self.capture_job = Some(katran::domain_jobs::JobId(id));
+        } else {
+            self.job = Some(UiJob::Domain {
+                job_id: katran::domain_jobs::JobId(id),
+                capture: false,
             });
-            let _ = tx.send((api, reply, capture));
-            ctx.request_repaint();
-        });
+        }
+        ctx.request_repaint();
         true
     }
+    pub(super) fn preview_warmup_tick(&mut self) {
+        let Some(job_id) = self.preview_warmup else {
+            return;
+        };
+        let status = self.call(Command::PollJob { job_id });
+        if matches!(
+            status["state"].as_str(),
+            Some("succeeded" | "failed" | "cancelled")
+        ) {
+            self.preview_warmup = None;
+            if status["state"] == "failed" {
+                self.message = format!(
+                    "QuickLook: {}",
+                    status["error"]["message"]
+                        .as_str()
+                        .unwrap_or("Не удалось подготовить просмотр")
+                );
+            }
+        }
+    }
+    fn finish_capture_job(&mut self) {
+        let Some(job_id) = self.capture_job else {
+            return;
+        };
+        let status = self.call(Command::PollJob { job_id });
+        let reply = match status["state"].as_str() {
+            Some("queued" | "running" | "ready") => return,
+            Some("succeeded") => serde_json::json!({"ok":true,"result":status["result"]}),
+            _ => serde_json::json!({"ok":false,"error":status["error"]}),
+        };
+        self.capture_job = None;
+        self.apply_job_reply(reply, true);
+    }
     pub(super) fn finish_job(&mut self) {
+        self.finish_capture_job();
         let Some(job) = self.job.as_ref() else {
             return;
         };
-        let (api, reply, capture) = match job.try_recv() {
-            Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.job = None;
-                self.pending_copy = None;
-                self.pending_copy_ids = None;
-                self.message =
-                    "Фоновая операция прервалась; копирование не выполнено. Перезапустите Katran."
-                        .into();
-                return;
+        let (reply, capture) = match job {
+            UiJob::Domain { job_id, capture } => {
+                let job_id = *job_id;
+                let capture = *capture;
+                let status = self.call(Command::PollJob { job_id });
+                match status["state"].as_str() {
+                    Some("queued" | "running" | "ready") => return,
+                    Some("succeeded") => (
+                        serde_json::json!({"ok":true,"result":status["result"]}),
+                        capture,
+                    ),
+                    Some("failed" | "cancelled") => (
+                        serde_json::json!({"ok":false,"error":status["error"]}),
+                        capture,
+                    ),
+                    _ => (
+                        serde_json::json!({"ok":false,"error":{"message":"Потерян статус фоновой операции"}}),
+                        capture,
+                    ),
+                }
             }
+            #[cfg(test)]
+            UiJob::UnavailableTransport(rx) => match rx.try_recv() {
+                Ok((api, reply, capture)) => {
+                    self.api = Some(api);
+                    (reply, capture)
+                }
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => (
+                    serde_json::json!({"ok":false,"error":{"message":"Тестовый транспорт отключён"}}),
+                    false,
+                ),
+            },
         };
         self.job = None;
-        self.api = Some(api);
+        self.apply_job_reply(reply, capture);
+    }
+    fn apply_job_reply(&mut self, reply: Value, capture: bool) {
         if reply["ok"] == false {
             self.message = reply["error"]["message"]
                 .as_str()
@@ -81,6 +152,15 @@ impl Shelf {
             return;
         }
         let result = &reply["result"];
+        if result["backend"] == "quicklook" {
+            self.action_result(result.clone());
+            self.state = self.call(Command::Interaction);
+            return;
+        }
+        if result.get("preview").is_some() && result.get("view").is_some() {
+            self.state = result.clone();
+            return;
+        }
         if result.get("classification_changed").is_some() {
             if result["classification_changed"] == true {
                 self.refresh();
@@ -226,7 +306,10 @@ impl Shelf {
             self.message = "Выбор устарел. Обновите полку и выберите объекты заново.".into();
             return;
         };
-        if self.api.is_some() {
+        if self.job.is_some() {
+            self.pending_copy = Some(items);
+            self.message = "Копирование в очереди".into();
+        } else if self.api.is_some() {
             if self.start_job(Command::CopyEventsChecked { items }, false, ctx.clone()) {
                 self.message = "Копирование выполняется…".into();
                 self.actions = false;
@@ -257,7 +340,7 @@ impl Shelf {
             self.copy_request(ctx);
             return;
         }
-        if id == "cleanup" {
+        if matches!(id.as_str(), "cleanup" | "delete") {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
             }
@@ -269,6 +352,13 @@ impl Shelf {
             ctx.memory_mut(|m| m.surrender_focus(focus));
         }
         let preview_action = matches!(id.as_str(), "open" | "preview" | "quicklook");
+        if preview_action {
+            if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
+                self.actions = false;
+            }
+            self.state = self.call(Command::Interaction);
+            return;
+        }
         let r = self.call(Command::RunAction { id });
         self.action_result(r);
         if preview_action {
@@ -344,6 +434,20 @@ impl Shelf {
                         .collect::<Vec<_>>()
                         .join("; ")
                 ));
+            }
+        }
+        if let Some(items) = r["items"].as_array()
+            && items.iter().any(|i| i.get("path").is_some())
+            && r.get("atomic").is_some()
+        {
+            self.message = format!(
+                "Сохранено {}/{}",
+                items.iter().filter(|i| i["ok"] == true).count(),
+                items.len()
+            );
+            let errors = item_failures(&r["items"]);
+            if !errors.is_empty() {
+                self.message.push_str(&format!(" · Ошибки: {errors}"));
             }
         }
         if r["intent"] == "choose_destination" {

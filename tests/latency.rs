@@ -1,4 +1,6 @@
 //! Explicit synthetic measurements, not machine-dependent CI deadlines.
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{Command, Event, Request, Service, settings::Settings};
 use std::{path::Path, time::Instant};
 
@@ -153,16 +155,48 @@ fn synthetic_latency_report() {
     }
     let mut settings = Settings::defaults(QUOTA);
     settings.sharex_folder = Some(shots.clone());
-    call(&mut history, Command::SetSettings { settings });
-    measure("scan_sharex_first_observation_100_files", 1, |_| {
-        call(&mut history, Command::ScanSharex);
-    });
-    measure("scan_sharex_first_ingest_100_files", 1, |_| {
-        call(&mut history, Command::ScanSharex);
-    });
-    measure("scan_sharex_unchanged_100_files_1100_history", 30, |_| {
-        call(&mut history, Command::ScanSharex);
-    });
+    settings.downloads_enabled = false;
+    measure(
+        "supervisor_configure_discover_hash_commit_100_files",
+        1,
+        |_| {
+            call(
+                &mut history,
+                Command::SetSettings {
+                    settings: settings.clone(),
+                },
+            );
+            let mut committed = std::collections::HashSet::new();
+            source_api::poll_until(&mut history, "100 synthetic source commits", |_, batch| {
+                assert!(
+                    batch["source_errors"].as_array().unwrap().is_empty(),
+                    "{batch}"
+                );
+                for item in batch["items"].as_array().unwrap() {
+                    assert_eq!(item["ok"], true, "{batch}");
+                    committed.insert(item["event"]["id"].as_i64().unwrap());
+                }
+                committed.len() == 100
+            });
+        },
+    );
+    measure(
+        "schedule_sharex_rescan_unchanged_100_files_1100_history",
+        30,
+        |_| {
+            let scheduled = call(
+                &mut history,
+                Command::RescanSource {
+                    source_id: katran::source_policy::SourceId::Sharex,
+                },
+            );
+            assert_eq!(scheduled["scheduled"], true);
+        },
+    );
+    println!(
+        "LATENCY unchanged rescan above measures scheduling only; no scan-completion token is exposed"
+    );
+    assert!(source_api::settle(&mut history, katran::source_policy::SourceId::Sharex).is_empty());
     let mut scanner = katran::sharex::SharexScanner::default();
     scanner.scan(&shots).unwrap();
     scanner.scan(&shots).unwrap();
@@ -178,7 +212,7 @@ fn synthetic_latency_report() {
 
     #[cfg(windows)]
     {
-        use katran::folder_watch::{FolderConfig, FolderEvent, FolderSource, FolderWatcher};
+        use katran::{interaction::ShelfTab, source_policy::SourceId};
         for (label, bytes) in [
             ("32px", small_png.as_slice()),
             ("1920x1080", png.as_slice()),
@@ -186,42 +220,53 @@ fn synthetic_latency_report() {
             let folder = tempfile::tempdir().unwrap();
             let mut settings = Settings::defaults(QUOTA);
             settings.sharex_folder = Some(folder.path().into());
+            settings.downloads_enabled = false;
             call(&mut history, Command::SetSettings { settings });
-            let watcher = FolderWatcher::start(vec![FolderConfig {
-                source: FolderSource::Sharex,
-                root: folder.path().into(),
-            }])
-            .unwrap();
-            let mut ready = Vec::new();
+            call(
+                &mut history,
+                Command::SetTab {
+                    tab: ShelfTab::Screenshots,
+                },
+            );
+            source_api::poll_until(
+                &mut history,
+                "configured source native readiness",
+                |_, batch| {
+                    batch["sources"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|s| s["source_id"] == "sharex" && s["state"] == "watching")
+                },
+            );
+            let mut committed_samples = Vec::new();
             measure(
-                &format!("native_write_ready_commit_browse_{label}_history_1100"),
+                &format!("native_write_supervisor_commit_browse_{label}_history_1100"),
                 20,
                 |index| {
                     let start = Instant::now();
                     let path = folder.path().join(format!("native-{index}.png"));
                     std::fs::write(&path, bytes).unwrap();
-                    let deadline = start + std::time::Duration::from_secs(10);
-                    let candidate = loop {
-                        match watcher.try_recv() {
-                            Some(FolderEvent::Candidate(candidate)) => break candidate,
-                            Some(FolderEvent::Error { message, .. }) => panic!("{message}"),
-                            _ => {}
-                        }
+                    let expected = path.canonicalize().unwrap();
+                    let mut committed = None;
+                    source_api::poll_until(&mut history, "native synthetic commit", |_, batch| {
                         assert!(
-                            Instant::now() < deadline,
-                            "native synthetic watcher timeout"
+                            batch["source_errors"].as_array().unwrap().is_empty(),
+                            "{batch}"
                         );
-                        std::thread::sleep(std::time::Duration::from_millis(1));
-                    };
-                    ready.push(start.elapsed().as_secs_f64() * 1000.0);
-                    let result = call(
-                        &mut history,
-                        Command::CommitFolderCandidates {
-                            items: vec![candidate],
-                        },
-                    );
-                    assert_eq!(result["items"][0]["ok"], true, "{result}");
-                    call(
+                        for item in batch["items"].as_array().unwrap() {
+                            assert_eq!(item["ok"], true, "{batch}");
+                            if item["event"]["path"]
+                                .as_str()
+                                .is_some_and(|p| Path::new(p) == expected)
+                            {
+                                committed = item["event"]["id"].as_i64();
+                            }
+                        }
+                        committed.is_some()
+                    });
+                    committed_samples.push(start.elapsed().as_secs_f64() * 1000.0);
+                    let page = call(
                         &mut history,
                         Command::BrowseShelf {
                             query: String::new(),
@@ -229,9 +274,26 @@ fn synthetic_latency_report() {
                             after_id: None,
                         },
                     );
+                    assert!(
+                        page["events"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|e| e["id"].as_i64() == committed)
+                    );
                 },
             );
-            report(&format!("native_write_to_prepared_{label}"), ready);
+            report(
+                &format!("native_write_to_supervisor_committed_{label}"),
+                committed_samples,
+            );
+            // Requesting a rescan is still a source API operation, not receipt injection.
+            call(
+                &mut history,
+                Command::RescanSource {
+                    source_id: SourceId::Sharex,
+                },
+            );
         }
     }
 }

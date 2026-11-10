@@ -1,23 +1,11 @@
-//! UI clients of native discovery and dispatcher commits. No source I/O here.
+//! Thin source API client. The domain owns workers, generations and classification.
 use super::*;
-use katran::{
-    folder_watch::{FolderConfig, FolderEvent, FolderSource, FolderWatcher, PreparedCandidate},
-    screenshot_identity::MatchPair,
-};
-use std::collections::VecDeque;
 
-type Setup = (Vec<FolderWatcher>, Vec<String>);
 #[derive(Default)]
 pub(super) struct Sources {
-    configuration: String,
-    setup: Option<mpsc::Receiver<Setup>>,
-    watchers: Vec<FolderWatcher>,
-    pending: VecDeque<PreparedCandidate>,
-    refresh: bool,
+    started: bool,
+    // Compatibility with capture completion until its refresh bookkeeping is removed.
     pub match_dirty: bool,
-    match_snapshot: String,
-    matching: Option<mpsc::Receiver<Vec<MatchPair>>>,
-    pairs: Option<Vec<MatchPair>>,
 }
 impl Shelf {
     /// Clipboard and queued transfers receive the dispatcher before source work.
@@ -34,150 +22,38 @@ impl Shelf {
         if self.capture && self.last_poll.elapsed() >= CLIPBOARD_POLL_INTERVAL {
             return;
         }
-        let settings = self.call(Command::GetSettings);
-        let configuration = serde_json::json!([
-            settings["sharex_folder"],
-            settings["downloads_enabled"],
-            settings["downloads_folder"]
-        ])
-        .to_string();
-        if self.sources.configuration != configuration {
-            self.sources = Sources {
-                configuration,
-                match_dirty: true,
-                ..Default::default()
-            };
-            if let Ok(settings) = serde_json::from_value::<katran::settings::Settings>(settings) {
-                let (tx, rx) = mpsc::channel();
-                self.sources.setup = Some(rx);
-                let ctx = ctx.clone();
-                std::thread::spawn(move || {
-                    let mut configurations = Vec::new();
-                    let mut errors = Vec::new();
-                    if let Some(root) = settings.sharex_folder {
-                        configurations.push(FolderConfig {
-                            source: FolderSource::Sharex,
-                            root,
-                        });
-                    }
-                    if settings.downloads_enabled {
-                        match katran::downloads::configured_folder(
-                            settings.downloads_folder.as_deref(),
-                        ) {
-                            Ok(root) => configurations.push(FolderConfig {
-                                source: FolderSource::Downloads,
-                                root,
-                            }),
-                            Err(error) => errors.push(format!("Downloads: {}", error.message)),
-                        }
-                    }
-                    let mut watchers = Vec::new();
-                    for configuration in configurations {
-                        let source = configuration.source;
-                        match FolderWatcher::start(vec![configuration]) {
-                            Ok(watcher) => watchers.push(watcher),
-                            Err(error) => errors.push(format!("{source:?}: {}", error.message)),
-                        }
-                    }
-                    let _ = tx.send((watchers, errors));
-                    ctx.request_repaint();
-                });
+        if !self.sources.started {
+            let result = self.call(Command::EnsureSources);
+            if !result["sources"].is_array() {
+                return;
             }
+            self.sources.started = true;
         }
-        if let Some(receiver) = self.sources.setup.as_ref() {
-            match receiver.try_recv() {
-                Ok((watchers, errors)) => {
-                    self.sources.watchers = watchers;
-                    self.sources.setup = None;
-                    if !errors.is_empty() {
-                        self.message = errors.join("; ");
-                    }
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.sources.setup = None;
-                    self.message = "Не удалось запустить наблюдение папок".into();
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+        // Poll also synchronizes settings in the domain; the client does not
+        // fingerprint configuration, create watchers or accept worker receipts.
+        let result = self.call(Command::PollSources { limit: 1 });
+        let mut errors = Vec::new();
+        let item_errors = item_failures(&result["items"]);
+        if !item_errors.is_empty() {
+            errors.push(item_errors);
         }
-        if !self.sources.watchers.is_empty() {
-            self.sources.watchers.rotate_left(1);
+        if let Some(source_errors) = result["source_errors"].as_array() {
+            errors.extend(
+                source_errors
+                    .iter()
+                    .filter_map(|error| error["message"].as_str().map(str::to_owned)),
+            );
         }
-        for watcher in &self.sources.watchers {
-            while self.sources.pending.len() < 64 {
-                let Some(event) = watcher.try_recv() else {
-                    break;
-                };
-                match event {
-                    FolderEvent::Candidate(candidate) => self.sources.pending.push_back(candidate),
-                    FolderEvent::Refresh { source } => {
-                        self.sources.refresh = true;
-                        self.sources.match_dirty |= source == FolderSource::Sharex;
-                    }
-                    FolderEvent::Error { source, message } => {
-                        self.message = format!("{source:?}: {message}")
-                    }
-                }
-            }
-        }
-        if self.sources.refresh {
-            self.sources.refresh = false;
+        if result["refresh"] == true
+            || result["classification_changed"] == true
+            || result["items"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["ok"] == true))
+        {
             self.refresh();
         }
-        // One inexpensive SQL commit per turn; discovery and content hashing
-        // remain in FolderWatcher rather than taking the dispatcher from input.
-        if let Some(candidate) = self.sources.pending.pop_front() {
-            self.start_job(
-                Command::CommitFolderCandidates {
-                    items: vec![candidate],
-                },
-                false,
-                ctx.clone(),
-            );
-            return;
-        }
-        if let Some(receiver) = self.sources.matching.as_ref() {
-            match receiver.try_recv() {
-                Ok(pairs) => {
-                    self.sources.pairs = Some(pairs);
-                    self.sources.matching = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.sources.matching = None;
-                    self.message = "Не удалось сопоставить снимки Clipboard и ShareX".into();
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-        }
-        if let Some(pairs) = self.sources.pairs.take()
-            && !pairs.is_empty()
-        {
-            self.start_job(
-                Command::CommitScreenshotMatches { pairs },
-                false,
-                ctx.clone(),
-            );
-            return;
-        }
-        if self.sources.match_dirty && self.sources.matching.is_none() {
-            self.sources.match_dirty = false;
-            let inputs = self.call(Command::ScreenshotMatchInputs);
-            if let Ok(events) =
-                serde_json::from_value::<Vec<katran::Event>>(inputs["events"].clone())
-            {
-                let snapshot = serde_json::to_string(&events).unwrap_or_default();
-                if snapshot != self.sources.match_snapshot {
-                    self.sources.match_snapshot = snapshot;
-                    let (tx, rx) = mpsc::channel();
-                    self.sources.matching = Some(rx);
-                    let ctx = ctx.clone();
-                    std::thread::spawn(move || {
-                        let pairs = katran::screenshot_identity::prepare_matches(&events);
-                        let _ = tx.send(pairs);
-                        ctx.request_repaint();
-                    });
-                }
-            }
+        if !errors.is_empty() {
+            self.message = format!("Папки: {}", errors.join("; "));
         }
     }
 }
@@ -185,9 +61,8 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn native_downloads_and_sharex_identity_workers_commit_through_api() {
+    fn thin_source_client_ingests_native_sources_through_domain_api() {
         let root = tempfile::tempdir().unwrap();
         let shots = tempfile::tempdir().unwrap();
         let downloads = tempfile::tempdir().unwrap();
@@ -195,49 +70,36 @@ mod tests {
         image::RgbaImage::from_pixel(12, 8, image::Rgba([33, 66, 99, 255]))
             .save(&path)
             .unwrap();
-        std::fs::write(
-            downloads.path().join("synthetic.unknown"),
-            b"arbitrary bytes",
-        )
-        .unwrap();
+        let download = downloads.path().join("synthetic.unknown");
+        std::fs::write(&download, b"arbitrary bytes").unwrap();
         let mut app = crate::tests::test_shelf(root.path());
-        app.call(Command::IngestBytes {
-            name: "clipboard.png".into(),
-            bytes: std::fs::read(&path).unwrap(),
-            source: "clipboard_image".into(),
-        });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(shots.path().into());
         settings.downloads_enabled = true;
         settings.downloads_folder = Some(downloads.path().into());
         app.call(Command::SetSettings { settings });
-        app.call(Command::SetTab {
-            tab: katran::interaction::ShelfTab::Images,
-        });
-        app.refresh();
-        assert_eq!(app.events.len(), 1);
         let ctx = egui::Context::default();
-        let deadline = Instant::now() + Duration::from_secs(4);
-        while Instant::now() < deadline {
-            app.finish_job();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
             app.source_tick(&ctx);
-            if app.api.is_some() && app.events.is_empty() {
-                let arrivals = app.call(Command::List { limit: 100 });
-                if arrivals["events"]
-                    .as_array()
-                    .is_some_and(|events| events.iter().any(|e| e["source"] == "downloads"))
-                {
-                    break;
-                }
+            let arrivals = app.call(Command::List { limit: 100 });
+            if arrivals["events"].as_array().is_some_and(|events| {
+                events.iter().any(|event| event["source"] == "downloads")
+                    && events.iter().any(|event| event["source"] == "sharex")
+            }) {
+                break;
             }
+            assert!(
+                Instant::now() < deadline,
+                "source API client timed out: {}",
+                app.message
+            );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(app.api.is_some(), "worker did not complete");
         assert!(
-            app.events.is_empty(),
-            "Clipboard duplicate remained in Images: {}",
-            app.message
+            app.api.is_some(),
+            "source polling must retain the dispatcher client"
         );
         app.call(Command::SetTab {
             tab: katran::interaction::ShelfTab::Screenshots,
@@ -250,5 +112,7 @@ mod tests {
         app.refresh();
         assert_eq!(app.events.len(), 1);
         assert_eq!(app.events[0]["name"], "synthetic.unknown");
+        assert_eq!(std::fs::read(download).unwrap(), b"arbitrary bytes");
+        assert!(path.is_file());
     }
 }

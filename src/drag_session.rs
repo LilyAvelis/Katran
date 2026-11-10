@@ -14,6 +14,46 @@ pub(crate) struct Prepared {
     preview: Option<drag_out::Preview>,
 }
 
+pub(crate) struct DragPreparation {
+    pub(crate) plan: copy_out::Plan,
+    preview: Option<drag_out::Preview>,
+}
+pub(crate) fn prepare_owned(
+    root: &std::path::Path,
+    events: &[crate::Event],
+    quota: u64,
+    references: &[PathBuf],
+) -> Result<DragPreparation> {
+    let mut plan = copy_out::prepare_with_budget(&root.join("drag-cache"), events, quota)
+        .map_err(|e| ApiError::new("drag_error", e))?;
+    plan.protect_references(references)
+        .map_err(|e| ApiError::new("drag_error", e))?;
+    if plan.paths.is_empty() {
+        return Err(ApiError::new(
+            "drag_error",
+            format!(
+                "No available files: {}",
+                serde_json::to_string(&plan.failures).unwrap_or_default()
+            ),
+        ));
+    }
+    // Reuse the bounded persistent image cache. Preview failure is cosmetic.
+    let preview = events
+        .iter()
+        .find(|event| !plan.failures.iter().any(|failure| failure.id == event.id))
+        .and_then(|event| {
+            let rendered = crate::preview::render(root, event, 160).ok()?;
+            Some(drag_out::Preview {
+                width: rendered["width"].as_u64()? as u32,
+                height: rendered["height"].as_u64()? as u32,
+                rgba: base64::engine::general_purpose::STANDARD
+                    .decode(rendered["rgba_base64"].as_str()?)
+                    .ok()?,
+            })
+        });
+    Ok(DragPreparation { plan, preview })
+}
+
 impl Service {
     /// Native boundary injection for embedded clients and synthetic API tests.
     pub fn set_drag_runner(&mut self, runner: Box<dyn drag_out::Runner>) {
@@ -41,47 +81,13 @@ impl Service {
         // Retire an abandoned unpublished gesture before budgeting a new one.
         // A previously successful drop is independent and remains protected.
         self.pending_drag = None;
-        let mut plan =
-            copy_out::prepare_with_budget(&self.root.join("drag-cache"), &events, self.quota)
-                .map_err(|e| ApiError::new("drag_error", e))?;
-        let references = {
-            let mut statement = self
-                .db
-                .prepare("SELECT path FROM events WHERE blob_hash IS NULL")?;
-            statement
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-        plan.protect_references(
-            &references
-                .into_iter()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>(),
-        )
-        .map_err(|e| ApiError::new("drag_error", e))?;
-        if plan.paths.is_empty() {
-            return Err(ApiError::new(
-                "drag_error",
-                format!(
-                    "No available files: {}",
-                    serde_json::to_string(&plan.failures).unwrap_or_default()
-                ),
-            ));
-        }
-        // Reuse the bounded persistent image cache. Preview failure is cosmetic.
-        let preview = events
-            .iter()
-            .find(|event| !plan.failures.iter().any(|failure| failure.id == event.id))
-            .and_then(|event| {
-                let rendered = crate::preview::render(&self.root, event, 160).ok()?;
-                Some(drag_out::Preview {
-                    width: rendered["width"].as_u64()? as u32,
-                    height: rendered["height"].as_u64()? as u32,
-                    rgba: base64::engine::general_purpose::STANDARD
-                        .decode(rendered["rgba_base64"].as_str()?)
-                        .ok()?,
-                })
-            });
+        let references = self.reference_paths()?;
+        let prepared = prepare_owned(&self.root, &events, self.quota, &references)?;
+        self.commit_drag_preparation(prepared)
+    }
+
+    pub(crate) fn commit_drag_preparation(&mut self, prepared: DragPreparation) -> Result<Value> {
+        let DragPreparation { plan, preview } = prepared;
         let token = format!(
             "{}-{}",
             std::process::id(),

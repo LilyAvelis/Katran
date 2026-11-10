@@ -6,6 +6,7 @@ pub fn record(ctx: &eframe::egui::Context, logger: Option<&katran::diagnostics::
     ctx.input(|input|{
   for event in &input.events {
    use eframe::egui::Event;
+   if matches!(event,Event::PointerMoved(..)|Event::MouseMoved(..)) { continue; }
    let data=match event {
     Event::Screenshot{..}=>serde_json::json!({"event":"screenshot_result","payload":"omitted"}),
     Event::Text(text)=>serde_json::json!({"type":"text","text":text.chars().take(2048).collect::<String>(),"length":text.chars().count()}),

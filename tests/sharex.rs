@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::sharex::SharexScanner;
 use std::fs;
 
@@ -59,43 +61,51 @@ fn invalid_roots_are_explicit_errors_without_advancing_observations() {
 
 #[test]
 fn failed_receipt_rolls_back_event_and_retries_without_resurrection() {
-    use katran::{Command, Request, Service, settings::Settings};
-    fn call(api: &mut Service, command: Command) -> serde_json::Value {
-        let reply = api.execute(Request {
-            api_version: 1,
-            request_id: "sharex-atomic".into(),
-            command,
-        });
-        assert_eq!(reply["ok"], true, "{reply}");
-        reply["result"].clone()
-    }
+    use katran::{Command, Service, settings::Settings, source_policy::SourceId};
+    use source_api::call;
     let root = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();
-    fs::write(folder.path().join("synthetic.png"), b"synthetic").unwrap();
+    let path = folder.path().join("synthetic.png");
+    fs::write(&path, b"synthetic").unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let mut settings = Settings::defaults(100_000);
-    settings.sharex_folder = Some(folder.path().to_path_buf());
+    settings.sharex_folder = Some(folder.path().into());
+    settings.downloads_enabled = false;
     call(&mut api, Command::SetSettings { settings });
-    call(&mut api, Command::ScanSharex);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("CREATE TRIGGER reject_sharex_receipt BEFORE INSERT ON sharex_seen BEGIN SELECT RAISE(FAIL, 'synthetic receipt failure'); END;").unwrap();
-    let failed = call(&mut api, Command::ScanSharex);
+    db.execute_batch("CREATE TRIGGER reject_sharex_receipt BEFORE INSERT ON source_receipts BEGIN SELECT RAISE(FAIL,'synthetic receipt failure'); END;").unwrap();
+    let failed =
+        source_api::poll_until(&mut api, "injected durable receipt failure", |_, batch| {
+            batch["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["ok"] == false)
+        });
     assert_eq!(failed["items"][0]["ok"], false);
-    let count: i64 = db
-        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(count, 0, "receipt failure must roll back its event");
+    assert!(
+        failed["items"][0]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("synthetic receipt failure")
+    );
+    for table in [
+        "events",
+        "source_receipts",
+        "source_projection",
+        "classification_work",
+    ] {
+        let count: i64 = db
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "failed receipt must roll back {table}");
+    }
     db.execute_batch("DROP TRIGGER reject_sharex_receipt")
         .unwrap();
-    assert!(
-        call(&mut api, Command::ScanSharex)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    let succeeded = call(&mut api, Command::ScanSharex);
-    assert_eq!(succeeded["items"][0]["ok"], true);
-    let id = succeeded["items"][0]["event"]["id"].as_i64().unwrap();
+    let event = source_api::wait_event(&mut api, SourceId::Sharex, &path);
+    let id = event["id"].as_i64().unwrap();
     call(
         &mut api,
         Command::DeleteEvents {
@@ -105,14 +115,7 @@ fn failed_receipt_rolls_back_event_and_retries_without_resurrection() {
     );
     drop(api);
     let mut api = Service::open(root.path(), 100_000).unwrap();
-    for _ in 0..3 {
-        assert!(
-            call(&mut api, Command::ScanSharex)["items"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
-    }
+    assert!(source_api::settle(&mut api, SourceId::Sharex).is_empty());
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
         .unwrap();
@@ -120,4 +123,5 @@ fn failed_receipt_rolls_back_event_and_retries_without_resurrection() {
         count, 0,
         "deleted screenshots must not return after restart"
     );
+    assert_eq!(fs::read(&path).unwrap(), b"synthetic");
 }

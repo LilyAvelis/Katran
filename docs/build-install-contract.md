@@ -1,0 +1,7 @@
+# Build installation contract
+
+`scripts/build-working.ps1` snapshots source paths and SHA-256 hashes before Cargo runs and rejects changes after the build or before committing the launch pointer. The manifest records those hashes, the package version parsed from Cargo.toml, profile, capture backend and executable hash. A staged executable is hashed, and an existing hash-named version is accepted only when both executable and manifest match. The installed executable and manifest are checked again before pointer replacement.
+
+The launcher is copied and its per-user Start Menu registration must succeed before the pointer is atomically replaced. Failures before that commit preserve the old pointer; a failed registration can still have modified the launcher or shortcut. Staging and pointer temporary files use generated names directly inside runtime, and cleanup is restricted to those names. Immutable version directories may remain after an unsuccessful attempt.
+
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File tests/build-install-contract.ps1` for synthetic build failure, source mutation, registration failure, successful install, and repeat install checks. This test uses a temporary project and fake build and registration callbacks; it does not invoke Cargo, launch applications, or touch the real runtime or Start Menu. The snapshot detects persistent changes at the checks; it cannot detect a file modified and restored between them.

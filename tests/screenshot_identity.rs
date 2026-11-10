@@ -5,6 +5,7 @@ use screenshot_identity::matched_clipboard_ids;
 
 fn event(id: i64, source: &str, path: &std::path::Path) -> Event {
     Event {
+        delete_policy: Default::default(),
         id,
         source: source.into(),
         revision: format!("ref:{}", preview::content_hash(path).unwrap()),

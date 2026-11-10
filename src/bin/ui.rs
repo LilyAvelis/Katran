@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod action_icons;
+mod action_row;
 mod api_client;
 mod app_identity;
 mod capture_lamp;
@@ -36,11 +37,11 @@ fn poll_delay(elapsed: Duration) -> Duration {
     CLIPBOARD_POLL_INTERVAL.saturating_sub(elapsed)
 }
 const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events-test") {
-    "Katran · EVENTS TEST · 1.2.6"
+    concat!("Katran · EVENTS TEST · ", env!("CARGO_PKG_VERSION"))
 } else if cfg!(feature = "clipboard-events") {
-    "Katran · 1.2.6 · Test"
+    concat!("Katran · ", env!("CARGO_PKG_VERSION"), " · Test")
 } else {
-    "Katran · 1.2.6 · Legacy Polling"
+    concat!("Katran · ", env!("CARGO_PKG_VERSION"), " · Legacy Polling")
 };
 fn clipboard_changed(result: &Value) -> bool {
     result["captured"].as_u64().is_some_and(|count| count > 0)
@@ -67,12 +68,38 @@ fn item_failures(items: &Value) -> String {
         .join("; ")
 }
 fn cleanup_message(result: &Value) -> String {
-    let pending = result["cleanup_pending"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
+    fn collect(value: &Value, pending: &mut Vec<String>) {
+        if pending.len() >= 128 {
+            return;
+        }
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    if key == "cleanup_pending" {
+                        if let Some(paths) = child.as_array() {
+                            pending.extend(
+                                paths
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .take(128 - pending.len())
+                                    .map(str::to_owned),
+                            );
+                        }
+                    } else {
+                        collect(child, pending);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    collect(child, pending);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut pending = Vec::new();
+    collect(result, &mut pending);
     if pending.is_empty() {
         String::new()
     } else {
@@ -93,6 +120,15 @@ fn ensure_visible_offset(offset: f32, viewport: f32, top: f32, height: f32) -> f
     }
 }
 use images::Images;
+enum UiJob {
+    Domain {
+        job_id: katran::domain_jobs::JobId,
+        capture: bool,
+    },
+    // Synthetic transport-loss fixtures only; production never moves a Service.
+    #[cfg(test)]
+    UnavailableTransport(mpsc::Receiver<(Service, Value, bool)>),
+}
 struct Shelf {
     #[cfg(feature = "clipboard-events")]
     clipboard_events: clipboard_events_ui::State,
@@ -109,7 +145,9 @@ struct Shelf {
     settings_ui: settings_ui::State,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
-    job: Option<mpsc::Receiver<(Service, Value, bool)>>,
+    job: Option<UiJob>,
+    capture_job: Option<katran::domain_jobs::JobId>,
+    preview_warmup: Option<katran::domain_jobs::JobId>,
     pending_drops: Vec<PathBuf>,
     pending_copy: Option<Vec<katran::SelectionRef>>,
     pending_copy_ids: Option<Vec<i64>>,
@@ -242,6 +280,7 @@ impl Shelf {
             }
         }
         self.finish_job();
+        self.preview_warmup_tick();
         if self.api.is_some() {
             for action in std::mem::take(&mut self.pending_density) {
                 self.run(action, &ctx);
@@ -256,6 +295,7 @@ impl Shelf {
             ctx.request_repaint();
         }
         if self.api.is_some()
+            && self.job.is_none()
             && let Some(command) = self.take_queued_copy()
         {
             self.start_job(command, false, ctx.clone());
@@ -269,14 +309,16 @@ impl Shelf {
                 .collect::<Vec<_>>()
         });
         self.pending_drops.extend(dropped);
-        if self.api.is_some() {
-            for path in std::mem::take(&mut self.pending_drops) {
-                self.call(Command::IngestPath {
+        if self.api.is_some() && self.job.is_none() && !self.pending_drops.is_empty() {
+            let path = self.pending_drops.remove(0);
+            self.start_job(
+                Command::IngestPath {
                     path,
                     source: "drop".into(),
-                });
-                self.refresh();
-            }
+                },
+                false,
+                ctx.clone(),
+            );
         }
         if self.api.is_some() {
             if let Some(editor) = self.shortcut_editor.as_mut()
@@ -506,10 +548,8 @@ impl Shelf {
                 let enter=ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
                 let label = if self.pending_delete_recycle && !self.pending_delete_permanent {"В корзину · Enter"} else if self.pending_delete_originals {"Удалить оригиналы · Enter"} else {"Убрать · Enter"};
                 if ui.button(label).clicked()||enter {
-                    let ids=std::mem::take(&mut self.pending_delete);
-                    let r=self.call(Command::DeleteSelection{ids,confirmed:true});
-                    self.action_result(r);
-                    self.refresh();
+                    let ids=self.pending_delete.clone();
+                    if self.start_job(Command::DeleteSelection{ids,confirmed:true},false,ctx.clone()) {self.pending_delete.clear();}
                 }
                 if ui.button("Отмена · Esc").clicked(){self.pending_delete.clear();}
             });
@@ -537,21 +577,10 @@ impl Shelf {
                         .flatten()
                         .filter_map(Value::as_i64)
                         .collect();
-                    let result = self.call(Command::Import {
-                        ids,
-                        destination: PathBuf::from(&self.destination),
-                    });
-                    if let Some(items) = result["items"].as_array() {
-                        self.message = format!(
-                            "Сохранено {}/{}",
-                            items.iter().filter(|i| i["ok"] == true).count(),
-                            items.len()
-                        );
-                        let errors = item_failures(&result["items"]);
-                        if !errors.is_empty() {
-                            self.message.push_str(&format!(" · Ошибки: {errors}"));
-                        }
+                    let destination = PathBuf::from(&self.destination);
+                    if self.start_job(Command::Import { ids, destination }, false, ctx.clone()) {
                         self.save = false;
+                        self.message = "Сохранение копий…".into();
                     }
                 }
             });
@@ -580,6 +609,10 @@ impl Shelf {
 impl eframe::App for Shelf {
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.finish_job();
+        self.preview_warmup_tick();
+        if self.job.is_some() || self.capture_job.is_some() || self.preview_warmup.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
         if let Some(rx) = &self.activation_rx {
             self.activation_pending |= rx.try_iter().next().is_some();
         }
@@ -615,6 +648,9 @@ impl eframe::App for Shelf {
     }
 }
 fn main() -> eframe::Result {
+    if let Some(code) = katran::shell_visual_worker::run_if_requested() {
+        std::process::exit(code);
+    }
     app_identity::initialize();
     let root = std::env::args_os()
         .nth(1)
@@ -650,6 +686,8 @@ fn main() -> eframe::Result {
         shortcut_editor: None,
         api: Some(api),
         job: None,
+        capture_job: None,
+        preview_warmup: None,
         pending_drops: Vec::new(),
         pending_copy: None,
         pending_copy_ids: None,
@@ -681,6 +719,10 @@ fn main() -> eframe::Result {
         scroll: false,
     };
     app.refresh();
+    let warmup = app.call(Command::BeginJob {
+        command: Box::new(Command::EnsurePreviewBackend),
+    });
+    app.preview_warmup = warmup["job_id"].as_u64().map(katran::domain_jobs::JobId);
     eframe::run_native(
         "Katran",
         eframe::NativeOptions {
@@ -779,6 +821,8 @@ mod tests {
             shortcut_editor: None,
             api: Some(api),
             job: None,
+            capture_job: None,
+            preview_warmup: None,
             pending_drops: Vec::new(),
             pending_copy: None,
             pending_copy_ids: None,
@@ -834,6 +878,7 @@ mod tests {
         app.run("preview".into(), &ctx);
         assert!(app.state["preview"].is_null());
         app.run("quicklook".into(), &ctx);
+        drain_domain_job(&mut app);
         assert_eq!(app.message, "External preview disabled in tests");
         app.run("refresh".into(), &ctx);
         assert!(logger.flush(std::time::Duration::from_secs(2)));
@@ -851,18 +896,18 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            commands,
-            [
-                "run_action",
-                "interaction",
-                "run_action",
-                "interaction",
-                "run_action",
-                "interaction",
-                "run_action",
-                "browse_shelf",
-                "status"
-            ]
+            commands
+                .iter()
+                .filter(|c| c.as_str() == "browse_shelf")
+                .count(),
+            1,
+            "Preview must not reload catalogue; only explicit Refresh browses"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c.as_str(), "interaction" | "status")),
+            "hot successful reads should not flood diagnostics"
         );
     }
 
@@ -964,6 +1009,15 @@ mod tests {
             app.render(ui);
         });
         output.textures_delta.clear();
+        drain_domain_job(app);
+    }
+    fn drain_domain_job(app: &mut Shelf) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while matches!(app.job, Some(UiJob::Domain { .. })) {
+            app.finish_job();
+            assert!(Instant::now() < deadline, "domain UI job did not complete");
+            std::thread::yield_now();
+        }
     }
     #[test]
     fn tabs_shortcuts_and_hidden_selection_use_domain_api() {
@@ -994,7 +1048,7 @@ mod tests {
         // A worker may own the API when copy arrives with an invisible selection.
         let api = app.api.take().unwrap();
         let (tx, rx) = mpsc::channel();
-        app.job = Some(rx);
+        app.job = Some(UiJob::UnavailableTransport(rx));
         app.copy_request(&ctx);
         assert_eq!(app.pending_copy_ids, Some(vec![id]));
         tx.send((
@@ -1068,7 +1122,7 @@ mod tests {
         frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
         let api = app.api.take().unwrap();
         let (tx, rx) = mpsc::channel();
-        app.job = Some(rx);
+        app.job = Some(UiJob::UnavailableTransport(rx));
         frame(&mut app, &ctx, egui::Key::Num3, egui::Modifiers::NONE);
         assert_eq!(app.pending_tab_action.as_deref(), Some("tab_position_3"));
         tx.send((api, serde_json::json!({"ok":true,"result":{}}), false))
@@ -1135,20 +1189,22 @@ mod tests {
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(shots.path().to_path_buf());
         app.call(Command::SetSettings { settings });
-        let id = app.call(Command::IngestPath {
-            path: original.clone(),
-            source: "sharex".into(),
-        })["id"]
-            .as_i64()
-            .unwrap();
         let second = shots.path().join("second.png");
         image::RgbaImage::new(3, 2).save(&second).unwrap();
-        let second_id = app.call(Command::IngestPath {
-            path: second.clone(),
-            source: "sharex".into(),
-        })["id"]
-            .as_i64()
-            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut source_ids = Vec::new();
+        while source_ids.len() < 2 {
+            let result = app.call(Command::PollSources { limit: 8 });
+            for item in result["items"].as_array().unwrap() {
+                if let Some(id) = item["event"]["id"].as_i64() {
+                    source_ids.push(id);
+                }
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let id = source_ids[0];
+        let second_id = source_ids[1];
         app.refresh();
         app.call(Command::SetVisible {
             ids: vec![id, second_id],
@@ -1295,7 +1351,7 @@ mod tests {
         let normal = visible_landmarks(&mut app, &layout_ctx);
         let held_api = app.api.take().unwrap();
         let (pending_tx, pending_rx) = mpsc::channel();
-        app.job = Some(pending_rx);
+        app.job = Some(UiJob::UnavailableTransport(pending_rx));
         app.last_poll = Instant::now() - Duration::from_secs(1);
         let busy = visible_landmarks(&mut app, &layout_ctx);
         assert_eq!(normal, busy);
@@ -1334,11 +1390,11 @@ mod tests {
             _ => panic!("queued copy must use the checked command"),
         }
         app.state = app.call(Command::Interaction);
-        // Move the dispatcher through the actual worker using a harmless command.
+        // Domain jobs retain the interactive dispatcher while work is pending.
         assert!(app.start_job(Command::Status, false, egui::Context::default()));
-        assert!(app.api.is_none());
+        assert!(app.api.is_some());
         let deadline = Instant::now() + Duration::from_secs(2);
-        while app.api.is_none() && Instant::now() < deadline {
+        while app.job.is_some() && Instant::now() < deadline {
             app.finish_job();
             std::thread::yield_now();
         }

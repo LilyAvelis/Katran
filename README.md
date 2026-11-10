@@ -7,11 +7,11 @@ into `main`. [Capture contract and verification](docs/clipboard-events-experimen
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.2.6 Test · Downloads and file visuals
+## Current build · 1.3.0 Test · QuickLook and architecture hardening
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.2.6 · Test**. Existing data stays in `katran-data`.
+must say **Katran · 1.3.0 · Test**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -49,8 +49,7 @@ Folder by default; Settings can disable it or override the root. Ctrl D is
 rebindable. Delete in Downloads uses Windows recycling; ShareX originals use
 permanent deletion. Single deletion is immediate; groups confirm with Enter.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
-[measured latency and native folder workers](docs/latency.md) describe the current
-1.2.6 contracts and supersede older source-ingest limitations below.
+[hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the 1.3.0 boundaries. The older latency document records its measured snapshot.
 
 Tabs are positional: 1..9 select non-All tabs in their saved order. Drag tabs
 with the mouse to reorder; All stays pinned. Tab toggles All and the remembered
@@ -59,7 +58,7 @@ Tab positions are registered in the shared shortcut catalogue; direct source
 commands no longer have Ctrl J/H/D defaults. Existing user overrides are retained.
 
 Space/Enter uses Katran for supported images, and installed Windows QuickLook
-for other files in its own window. [QuickLook setup and limits](docs/quicklook.md).
+for other files in its own window. Ctrl Enter / “Открыть через QuickLook” explicitly opens either kind externally. Katran prepares QuickLook in the background at startup. The verified fast QuickLook is the main installation at its normal path. Katran starts it automatically when absent and reuses it when ready. Closing Katran leaves QuickLook running. [Fast backend, installation, rollback and limits](docs/quicklook-fast-backend.md).
 
 Ctrl− / Ctrl+ changes content density by one: gallery columns (default 4) or
 stream rows (default 3), saved independently. Fonts, controls and DPI remain

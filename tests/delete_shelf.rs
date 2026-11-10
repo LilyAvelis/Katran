@@ -101,6 +101,7 @@ fn shelf_deletion_keeps_successful_clipboard_snapshot() {
     let blob = blobs.join(&hash);
     std::fs::write(&blob, b"pending paste").unwrap();
     let event = katran::Event {
+        delete_policy: Default::default(),
         origin: Default::default(),
         revision: "synthetic".into(),
         id: 1,

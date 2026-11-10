@@ -4,18 +4,14 @@ use serde_json::{Value, json};
 use std::path::Path;
 pub trait Launcher: Send {
     fn launch(&self, path: &Path) -> Result<()>;
+    fn launch_receipt(&self, path: &Path) -> Result<Value> {
+        self.launch(path)?;
+        Ok(json!({"requested":true,"acknowledgement":"launcher_returned"}))
+    }
 }
 pub struct NativeLauncher;
 pub fn is_native_image(event: &Event) -> bool {
-    Path::new(&event.name)
-        .extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|s| {
-            matches!(
-                s.to_ascii_lowercase().as_str(),
-                "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
-            )
-        })
+    crate::file_types::is_native_image(Path::new(&event.name))
 }
 pub fn preview(event: &Event, launcher: &dyn Launcher) -> Result<Value> {
     if !event.path.is_file() {
@@ -42,23 +38,17 @@ pub fn preview(event: &Event, launcher: &dyn Launcher) -> Result<Value> {
             "Source contents changed since this arrival",
         ));
     }
-    launcher.launch(&event.path)?;
-    Ok(json!({"id":event.id,"revision":event.revision,"backend":"quicklook","requested":true}))
+    let receipt = launcher.launch_receipt(&event.path)?;
+    Ok(
+        json!({"id":event.id,"revision":event.revision,"backend":"quicklook","requested":true,"receipt":receipt}),
+    )
 }
 impl Launcher for NativeLauncher {
     fn launch(&self, path: &Path) -> Result<()> {
-        #[cfg(windows)]
-        {
-            native::launch(path)
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = path;
-            Err(ApiError::new(
-                "unsupported_platform",
-                "QuickLook preview requires Windows",
-            ))
-        }
+        crate::quicklook_backend::toggle(path).map(|_| ())
+    }
+    fn launch_receipt(&self, path: &Path) -> Result<Value> {
+        crate::quicklook_backend::toggle(path)
     }
 }
 /// Convert canonical Windows paths to the form consumed by QuickLook/.NET.
@@ -93,41 +83,4 @@ pub fn toggle_message(path: &Path) -> Result<String> {
         "QuickLook.App.PipeMessages.Toggle|{}|\n",
         protocol_path(path)?
     ))
-}
-#[cfg(windows)]
-mod native {
-    use super::*;
-    use std::{path::PathBuf, process::Command};
-
-    // Delegate IPC to QuickLook itself. Opening a probe connection to its pipe
-    // can terminate the uncaught reader task in QuickLook 4.5 on empty EOF.
-    pub(super) fn launch(path: &Path) -> Result<()> {
-        let path = protocol_path(&std::fs::canonicalize(path)?)?;
-        let mut candidates = Vec::new();
-        if let Some(root) = std::env::var_os("LOCALAPPDATA") {
-            candidates.push(PathBuf::from(root).join("Programs/QuickLook/QuickLook.exe"));
-        }
-        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
-            if let Some(root) = std::env::var_os(variable) {
-                candidates.push(PathBuf::from(root).join("QuickLook/QuickLook.exe"));
-            }
-        }
-        if let Some(root) = std::env::var_os("USERPROFILE") {
-            candidates.push(PathBuf::from(root).join("scoop/apps/quicklook/current/QuickLook.exe"));
-        }
-        let executable = candidates
-            .into_iter()
-            .find(|p| p.is_absolute() && p.is_file())
-            .ok_or_else(|| {
-                ApiError::new(
-                    "quicklook_not_found",
-                    "QuickLook desktop executable was not found in standard installation locations",
-                )
-            })?;
-        Command::new(executable)
-            .arg(path)
-            .spawn()
-            .map_err(|e| ApiError::new("quicklook_launch_failed", e))?;
-        Ok(())
-    }
 }

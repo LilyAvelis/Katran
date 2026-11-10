@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{
     Command, Request, Service,
     interaction::{SelectionMode, ShelfTab},
@@ -49,19 +51,16 @@ fn tabs_filter_before_pagination_and_preserve_hidden_selection() {
     ingest(&mut api, "needle.txt", "test");
     let shots = tempfile::tempdir().unwrap();
     let mut settings = Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(shots.path().to_path_buf());
+    settings.downloads_enabled = false;
     call(&mut api, Command::SetSettings { settings });
     let path = shots.path().join("needle-screen.png");
     std::fs::write(&path, [1, 2, 3]).unwrap();
-    let screenshot = call(
-        &mut api,
-        Command::IngestPath {
-            path,
-            source: "sharex".into(),
-        },
-    )["id"]
-        .as_i64()
-        .unwrap();
+    let screenshot =
+        source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &path)["id"]
+            .as_i64()
+            .unwrap();
     ingest(&mut api, "unrelated.png", "test");
     assert_eq!(call(&mut api, Command::Interaction)["tab"], "images");
     let page = browse(&mut api, "needle", 1, None);
@@ -135,28 +134,15 @@ fn sharex_scan_is_stable_durable_and_deletion_keeps_original() {
     let bytes = std::fs::read(&original).unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let mut settings = Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(folder.path().to_path_buf());
+    settings.downloads_enabled = false;
     call(&mut api, Command::SetSettings { settings });
-    assert!(
-        call(&mut api, Command::ScanSharex)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    let scan = call(&mut api, Command::ScanSharex);
-    assert_eq!(scan["items"].as_array().unwrap().len(), 1);
-    assert_eq!(scan["items"][0]["ok"], true);
-    let id = scan["items"][0]["event"]["id"].as_i64().unwrap();
+    let scan = source_api::wait_event(&mut api, katran::source_policy::SourceId::Sharex, &original);
+    let id = scan["id"].as_i64().unwrap();
     drop(api);
     let mut api = Service::open(root.path(), 100_000).unwrap();
-    for _ in 0..2 {
-        assert!(
-            call(&mut api, Command::ScanSharex)["items"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
-    }
+    assert!(source_api::settle(&mut api, katran::source_policy::SourceId::Sharex).is_empty());
     call(
         &mut api,
         Command::SetTab {
@@ -179,14 +165,7 @@ fn sharex_scan_is_stable_durable_and_deletion_keeps_original() {
     );
     drop(api);
     let mut api = Service::open(root.path(), 100_000).unwrap();
-    for _ in 0..2 {
-        assert!(
-            call(&mut api, Command::ScanSharex)["items"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
-    }
+    assert!(source_api::settle(&mut api, katran::source_policy::SourceId::Sharex).is_empty());
     call(&mut api, Command::SetTab { tab: ShelfTab::All });
     assert!(
         browse(&mut api, "", 10, None)["events"]
@@ -196,10 +175,23 @@ fn sharex_scan_is_stable_durable_and_deletion_keeps_original() {
     );
     assert_eq!(std::fs::read(&original).unwrap(), bytes);
     let mut settings = Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some(folder.path().join("missing"));
     call(&mut api, Command::SetSettings { settings });
-    assert_eq!(reply(&mut api, Command::ScanSharex)["ok"], false);
+    assert_eq!(
+        reply(&mut api, Command::ScanSharex)["ok"],
+        true,
+        "scheduling succeeds; worker failure is asynchronous"
+    );
+    source_api::poll_until(&mut api, "invalid source failure", |_, batch| {
+        batch["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["source_id"] == "sharex" && s["state"] == "failed" && s["error"].is_string())
+    });
     let mut settings = Settings::defaults(100_000);
+    settings.downloads_enabled = false;
     settings.sharex_folder = Some("relative-folder".into());
     assert_eq!(
         reply(&mut api, Command::SetSettings { settings })["error"]["code"],

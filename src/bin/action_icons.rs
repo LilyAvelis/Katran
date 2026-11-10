@@ -32,7 +32,8 @@ mod tests {
 
     #[test]
     fn every_catalogue_action_has_a_specific_icon() {
-        for &(id, _, _, _, _, _) in katran::actions::DEFS {
+        for definition in katran::actions::DEFS {
+            let id = definition.id;
             assert_ne!(
                 icon(id),
                 Lucide::CircleQuestionMark,

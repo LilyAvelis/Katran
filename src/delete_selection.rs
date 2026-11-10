@@ -1,141 +1,167 @@
 //! Explicit original-file deletion for ShareX references, through the dispatcher.
 use crate::*;
-use serde_json::{Value, json};
-use std::collections::HashSet;
+use serde_json::Value;
 
 impl Service {
     pub(crate) fn delete_selection(&mut self, ids: Vec<i64>, confirmed: bool) -> Result<Value> {
-        let mut seen = HashSet::new();
-        let ids: Vec<_> = ids.into_iter().filter(|id| seen.insert(*id)).collect();
-        if ids.is_empty() || ids.len() > 1000 || ids.iter().any(|id| *id <= 0) {
-            return Err(ApiError::new(
-                "invalid_argument",
-                "Expected 1..1000 positive record IDs",
-            ));
-        }
-        let originals = ids.iter().any(|id| {
-            self.get(*id)
-                .is_ok_and(|e| matches!(e.source.as_str(), "sharex" | "downloads"))
-        });
-        if !originals {
-            return self.dispatch(Command::DeleteEvents { ids, confirmed });
-        }
-        let permanent_files = ids
-            .iter()
-            .any(|id| self.get(*id).is_ok_and(|e| e.source == "sharex"));
-        let recycle_bin = ids
-            .iter()
-            .any(|id| self.get(*id).is_ok_and(|e| e.source == "downloads"));
-        if !confirmed && ids.len() > 1 {
-            return Ok(
-                json!({"confirmation_required":true,"ids":ids,"original_files":true,"permanent_files":permanent_files,"recycle_bin":recycle_bin,"deleted":0}),
-            );
-        }
-        let mut items = Vec::new();
-        let mut deleted = 0;
-        for &id in &ids {
-            let result = (|| -> Result<Value> {
-                let event = self.get(id)?;
-                let mut missing = false;
-                if event.source == "downloads" {
-                    let folder =
-                        downloads::configured_folder(self.settings.downloads_folder.as_deref())?;
-                    missing =
-                        downloads::recycle_original(&event, &folder, &downloads::NativeTrash)?;
-                }
-                if event.source == "sharex" {
-                    missing = self.remove_sharex_original(&event)?;
-                }
-                let shelf = self.dispatch(Command::DeleteEvents {
-                    ids: vec![id],
-                    confirmed: true,
-                })?;
-                Ok(json!({"ok":true,"id":id,"original_missing":missing,"shelf":shelf}))
-            })();
-            match result {
-                Ok(item) => {
-                    deleted += 1;
-                    items.push(item);
-                }
-                Err(error) => items.push(json!({"ok":false,"id":id,"error":error})),
+        match self.begin_delete_selection(ids, confirmed)? {
+            crate::delete_jobs::DeleteStart::Immediate(value) => Ok(value),
+            crate::delete_jobs::DeleteStart::Prepare(request) => {
+                let prepared = crate::delete_jobs::prepare(request);
+                let authorized = self.authorize_delete(prepared);
+                let deleted =
+                    crate::delete_jobs::apply(authorized, std::sync::Arc::clone(&self.trash));
+                self.finish_delete(deleted)
             }
         }
-        Ok(
-            json!({"ids":ids,"confirmation_required":false,"deleted":deleted,"items":items,"original_files":true,"permanent_files":permanent_files,"recycle_bin":recycle_bin}),
-        )
     }
+}
 
-    fn remove_sharex_original(&self, event: &Event) -> Result<bool> {
-        let folder = self
-            .settings
-            .sharex_folder
-            .as_ref()
-            .ok_or_else(|| ApiError::new("unsafe_source", "ShareX folder is not configured"))?
-            .canonicalize()?;
-        // Resolve the parent even for a missing file. A renamed or replaced folder
-        // cannot turn an old reference into permission to delete another source.
-        if event
-            .path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+/// Hash and delete the same opened Windows file. Replacement/writes are denied
+/// until FileDispositionInfo marks this handle, closing the pathname TOCTOU gap.
+pub(crate) struct LockedOriginal {
+    file: fs::File,
+    #[cfg(not(windows))]
+    path: PathBuf,
+}
+/// Retain the same deny-write/deny-replacement handle through authorization.
+pub(crate) fn prepare_locked_original(
+    path: &Path,
+    folder: &Path,
+    expected: &str,
+) -> Result<LockedOriginal> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    #[cfg(windows)]
+    let mut file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .access_mode(0x80000000 | 0x00010000)
+            .share_mode(1)
+            .custom_flags(0x00200000)
+            .open(path)?
+    };
+    #[cfg(not(windows))]
+    let mut file = fs::File::open(path)?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(ApiError::new(
+            "unsafe_source",
+            "Opened original is not a regular file",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+        let mut name = vec![0u16; 32768];
+        let count = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+                0,
+            )
+        } as usize;
+        if count == 0 || count >= name.len() {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let resolved = PathBuf::from(
+            String::from_utf16(&name[..count])
+                .map_err(|error| ApiError::new("unsafe_source", error))?,
+        );
+        if !resolved.starts_with(folder) || resolved == folder {
+            return Err(ApiError::new(
+                "unsafe_source",
+                "Opened original escaped configured folder",
+            ));
+        }
+    }
+    #[cfg(not(windows))]
+    if !path.canonicalize()?.starts_with(folder) {
+        return Err(ApiError::new(
+            "unsafe_source",
+            "Opened original escaped configured folder",
+        ));
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    if format!("{:x}", hash.finalize()) != expected {
+        return Err(ApiError::new(
+            "stale_selection",
+            "Source contents changed; refresh before deleting",
+        ));
+    }
+    Ok(LockedOriginal {
+        file,
+        #[cfg(not(windows))]
+        path: path.into(),
+    })
+}
+pub(crate) fn dispose_locked_original(original: LockedOriginal) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
+        };
+        let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+        if unsafe {
+            SetFileInformationByHandle(
+                original.file.as_raw_handle(),
+                FileDispositionInfo,
+                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        } == 0
         {
-            return Err(ApiError::new(
-                "unsafe_source",
-                "Source contains parent traversal",
-            ));
+            return Err(std::io::Error::last_os_error().into());
         }
-        let mut ancestor = event
-            .path
-            .parent()
-            .ok_or_else(|| ApiError::new("unsafe_source", "Source has no parent"))?;
-        // A removed nested directory is also a missing original. Resolve the
-        // closest surviving ancestor; never skip a dangling link or I/O error.
-        loop {
-            match fs::symlink_metadata(ancestor) {
-                Ok(_) => break,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    ancestor = ancestor.parent().ok_or_else(|| {
-                        ApiError::new("unsafe_source", "Source has no existing parent")
-                    })?;
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-        let parent = ancestor.canonicalize()?;
-        if !parent.starts_with(&folder) {
-            return Err(ApiError::new(
-                "unsafe_source",
-                "Source is outside the configured ShareX folder",
-            ));
-        }
-        match fs::symlink_metadata(&event.path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-            Err(e) => return Err(e.into()),
-            Ok(metadata) if !metadata.file_type().is_file() => {
-                return Err(ApiError::new(
-                    "unsafe_source",
-                    "Source is not a regular file",
-                ));
-            }
-            Ok(_) => {}
-        }
-        let canonical = event.path.canonicalize()?;
-        if canonical == folder || !canonical.starts_with(&folder) {
-            return Err(ApiError::new(
-                "unsafe_source",
-                "Source escapes the configured ShareX folder",
-            ));
-        }
-        let expected = event.revision.strip_prefix("ref:").ok_or_else(|| {
-            ApiError::new("stale_selection", "Source has no recorded content hash")
-        })?;
-        if preview::content_hash(&canonical)? != expected {
-            return Err(ApiError::new(
-                "stale_selection",
-                "Source contents changed; refresh before deleting",
-            ));
-        }
-        fs::remove_file(&canonical)?;
-        Ok(false)
+    }
+    #[cfg(not(windows))]
+    {
+        drop(original.file);
+        fs::remove_file(original.path)?;
+    }
+    Ok(())
+}
+#[cfg(all(test, windows))]
+fn remove_locked_original_with_hook(
+    path: &Path,
+    folder: &Path,
+    expected: &str,
+    before_disposition: impl FnOnce(),
+) -> Result<()> {
+    let original = prepare_locked_original(path, folder, expected)?;
+    before_disposition();
+    dispose_locked_original(original)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn opened_original_cannot_be_replaced_or_written_between_hash_and_disposition() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("original.png");
+        fs::write(&path, b"verified synthetic original").unwrap();
+        let replacement = temp.path().join("replacement.png");
+        fs::write(&replacement, b"preserve replacement").unwrap();
+        let hash = preview::content_hash(&path).unwrap();
+        let folder = temp.path().canonicalize().unwrap();
+        remove_locked_original_with_hook(&path, &folder, &hash, || {
+            assert!(fs::write(&path, b"changed").is_err());
+            assert!(fs::remove_file(&path).is_err());
+            assert!(fs::rename(&replacement, &path).is_err());
+        })
+        .unwrap();
+        assert!(!path.exists());
+        assert_eq!(fs::read(replacement).unwrap(), b"preserve replacement");
     }
 }

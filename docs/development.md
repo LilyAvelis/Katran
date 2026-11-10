@@ -1,8 +1,7 @@
 # Developer and agent entry point
 
 Read `AGENTS.md`, current `README.md`, then this map and the relevant API test.
-Current source structure is listed below. The audit extraction plan has been
-implemented in 0.5; historical reviews describe their examined snapshots.
+Current source structure and1.3 contracts are listed below. Historical reviews describe their examined snapshots; current behavior is in [domain-jobs.md](domain-jobs.md).
 
 | Responsibility | Current owner files |
 | --- | --- |
@@ -31,34 +30,23 @@ implemented in 0.5; historical reviews describe their examined snapshots.
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 
-## Handoff · 2026-11-09 · 1.0.7
+## Current1.3 ownership
 
-The next local preview is 1.1.0: `src/shelf_tabs.rs` owns tab browsing and ShareX
-ingest orchestration; `src/sharex.rs` owns bounded read-only folder discovery.
-`src/interaction.rs` owns tab memory independently of Gallery/Stream. See
-[tabs and ShareX](tabs-and-sharex.md) for API contracts and manual acceptance.
-The following 1.0.7 handoff remains the accepted baseline pending owner review.
+| Responsibility | Modules |
+| --- | --- |
+| Ordered schema / indexed shelf projection | catalogue_schema.rs, catalogue_query.rs, shelf_tabs.rs |
+| Source ownership, generations, status and private receipts | source_policy.rs, source_runtime.rs, source_service.rs, folder_commit.rs |
+| Continuing pixel classification / counters | classification_runtime.rs |
+| Bounded jobs / private preparation and commit recipes | domain_jobs.rs, jobs_service.rs |
+| Original preparation / authorization / effect / receipts | delete_jobs.rs, delete_selection.rs |
+| Native backend ACK / lifecycle / compatibility | quicklook_transport.rs, quicklook_backend.rs, quicklook.rs |
+| Killable Shell provider adapter | shell_visual_worker.rs, file_visual.rs |
+| Native image capability policy | file_types.rs |
+| Measured palette presentation | bin/action_row.rs, bin/ui_style.rs, bin/palette.rs |
 
-The owner accepted the current build after manual testing. Main includes the
-accepted event-driven clipboard branch; no pending migration or feature work is
-required to finish this session. Continue from this version rather than the old
-experimental executable or historical shelf snapshots.
-
-- Default capture uses a hidden Win32 listener with bounded retries, independent
-  of whether the visible window is minimized. Legacy polling is available only
-  for explicit comparison; see `clipboard-events-experiment.md`.
-- Preview: wheel zooms toward the pointer, Ctrl+wheel toward the center. Above
-  fitted scale (1×), primary drag pans and native export is disabled, including
-  Ctrl+drag. At 1×, preview drag exports; gallery drag exports as before.
-- The last fix resolves gesture intent even when a worker owns the dispatcher or
-  a texture has not loaded. Do not restore an unconditional drag-export fallback
-  outside the preview geometry block.
-- Latest verification: 21 UI/headless tests and all-target/all-feature Clippy
-  passed. The preview regression covers missing textures, busy dispatcher and
-  Ctrl input using synthetic data. The owner then confirmed the fix works.
-- Normal installed executable: immutable build `6ae338dd4a69`, version 1.0.7.
-  Start Menu/Raycast and `Start Katran.cmd` use the stable launcher; rebuild with
-  the script below. Do not interrupt the owner's running application.
+Source and catalogue generations are domain state. New adapters must not trust
+client-supplied digests, pairs, provenance strings or GUI membership as authority.
+See the original audit and [hardening follow-up](reviews/azuros-1.3-hardening-followup.md).
 
 ## Small extension recipe
 
@@ -109,58 +97,20 @@ hash manifest and switches `Start Katran.cmd` only after a successful build.
 Do not launch apps or kill the owner's running process to complete a build.
 
 
-## Local 1.2.0 Test · current additions
+## Validation and limits
 
-- `file_visual.rs`: PreviewFile fallback pipeline; image large preview unchanged.
-- `folder_watch.rs`: bounded native per-source discovery/hash workers.
-- `folder_commit.rs`: prepared source commits and classification input snapshots.
-- `downloads.rs`: Known Folder resolution, CLI scan, injectable recycler.
-- `screenshot_identity.rs`: background pixel digests and cheap association commits.
-- `bin/source_jobs.rs`: GUI clients, Clipboard priority and one prepared file/turn.
-- `delete_selection.rs`: ownership-sensitive delete; Downloads recycler,
-  Screenshots permanent, ordinary shelf entries shelf-only. Single immediate,
-  groups Enter confirmation. See docs/downloads.md and docs/latency.md.
+All-target/all-feature API/headless tests, Clippy and synthetic build-install
+failure tests accompany this line. [Independent latency report](reviews/latency-1.3-hardening.md)
+distinguishes debug/release, source API response and actual rendering. Source
+roots remain bounded to20,000 entries; large catalogue/idle work tests do not remove
+that limit. Explicit maintenance/native-finalization limitations remain documented.
 
-No GitHub publication until the owner's 2.0 release instruction. Source folder
-workers start when owner runs the new build; tests use synthetic temp roots.
+Use Sol low for ordinary bounded implementation tasks, Terra medium for small
+ordered edits/validation, and Luna for suitable tiny tasks. The owner explicitly
+requested Sol medium for the QuickLook experiment and Sol xhigh for Azuros review.
+The lead integrates shared contracts; assign disjoint files to parallel workers.
 
-
-## Local 1.2.1 Test
-
-`tab_layout.rs` validates persisted non-All order and maps positions. Commands
-SelectTabPosition/MoveTab share settings persistence. `bin/tab_bar.rs` emits
-commands for click/drop; UI consumes unmodified Tab before button focus traversal,
-with actual search/dialog/recorder gating. `quicklook.rs` owns validated external
-preview requests with injectable launcher; TogglePreview/OpenCurrent route files
-through it, retaining native supported-image preview. See docs/quicklook.md.
-
-
-## Local 1.2.2 Test
-
-`density.rs` and AdjustDensity provide independently persisted gallery_columns
-and stream_rows, with backward-compatible defaults4/3 and validated1..12.
-CtrlMinus/Plus/Equals route through the catalogue; egui keyboard UI zoom disabled
-before input. UI clips content within fixed-font cards and clamps effective
-count to viewport minimums. QuickLook readiness now refuses duplicate spawning
-when its instance mutex exists without an accepting pipe; test transport uses
-isolated named pipes and injected launcher boundaries, never installed QuickLook.
-
-
-## Local 1.2.4 Test · Actions polish
-
-The shared catalogue groups actions contiguously into existing shelf/file/view/app
-sections. All exposed catalogue actions have specific Lucide icons. Palette rows
-reserve disjoint clipped label and shortcut regions; only the first alias is shown
-as keycaps, full aliases appear on hover. Command IDs, routing and bindings remain
-unchanged. Headless regression tests cover icon coverage and narrow-row geometry.
-QuickLook failure also reproduces in Explorer per owner; no QuickLook settings,
-plugins or installation changes performed in this iteration.
-
-
-## Local 1.2.5 · regression repair
-
-QuickLook direct pipe access removed; external preview delegates to desktop CLI.
-See docs/quicklook.md for source, local recovery and verification limits. Palette
-row clips intersect ancestor scroll clipping; regression renders real ScrollArea
-rows and verifies shapes at1x/1.5x, including fully offscreen rows. Restoring old
-set_clip_rect behavior causes the regression to fail.
+No GitHub publication until the owner's2.0 release instruction. Tests must not
+scan personal roots: Settings synchronizes source authority but starts no workers
+until EnsureSources/PollSources; synthetic source tests configure temporary roots
+before invoking those commands. The owner performs actual Windows acceptance.

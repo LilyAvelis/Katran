@@ -95,13 +95,7 @@ impl SharexScanner {
 }
 
 fn supported(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
-                .iter()
-                .any(|supported| ext.eq_ignore_ascii_case(supported))
-        })
+    crate::file_types::is_native_image(path)
 }
 
 fn readable_revision(path: &Path) -> Option<Revision> {

@@ -142,7 +142,7 @@ impl Shortcuts {
         )
         .map_err(|e| ShortcutError::new("invalid_shortcuts", e))?;
         for (id, binding) in &mut value.overrides {
-            if !DEFAULTS.iter().any(|d| d.0 == id && d.3) {
+            if !DEFAULTS.iter().any(|d| d.id == id && d.rebindable) {
                 return Err(ShortcutError::new(
                     "invalid_shortcuts",
                     format!("Unknown or protected action: {id}"),
@@ -161,20 +161,21 @@ impl Shortcuts {
             .unwrap_or_else(|| {
                 DEFAULTS
                     .iter()
-                    .find(|d| d.0 == id)
-                    .map_or("", |d| d.2)
+                    .find(|d| d.id == id)
+                    .map_or("", |d| d.default_binding)
                     .into()
             })
     }
     pub fn catalogue(&self) -> Vec<ShortcutInfo> {
         DEFAULTS
             .iter()
-            .map(|(id, label, binding, rebindable, _, _)| ShortcutInfo {
-                id: (*id).into(),
-                label: (*label).into(),
-                default_binding: (!binding.is_empty()).then(|| (*binding).into()),
-                binding: Some(self.binding(id)).filter(|s| !s.is_empty()),
-                rebindable: *rebindable,
+            .map(|definition| ShortcutInfo {
+                id: definition.id.into(),
+                label: definition.label.into(),
+                default_binding: (!definition.default_binding.is_empty())
+                    .then(|| definition.default_binding.into()),
+                binding: Some(self.binding(definition.id)).filter(|s| !s.is_empty()),
+                rebindable: definition.rebindable,
             })
             .collect()
     }
@@ -188,16 +189,16 @@ impl Shortcuts {
     ) -> Result<Vec<ShortcutInfo>, ShortcutError> {
         let default = DEFAULTS
             .iter()
-            .find(|d| d.0 == id)
+            .find(|d| d.id == id)
             .ok_or_else(|| ShortcutError::new("unknown_action", id))?;
-        if !default.3 {
+        if !default.rebindable {
             return Err(ShortcutError::new(
                 "reserved_shortcut",
                 "Это сочетание нельзя изменить",
             ));
         }
         let binding = normalize(if reset {
-            default.2
+            default.default_binding
         } else {
             binding.as_deref().unwrap_or("")
         })?;

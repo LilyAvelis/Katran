@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{Command, Service, settings::Settings};
 use serde_json::Value;
 
@@ -29,11 +31,15 @@ fn group_requires_confirmation_and_changed_revision_is_preserved() {
         .test_dispatch(Command::SetSettings {
             settings: Settings {
                 sharex_folder: Some(folder),
+                downloads_enabled: false,
                 ..Default::default()
             },
         })
         .unwrap();
-    let id = ingest(&mut service, &path, "sharex");
+    let id =
+        source_api::wait_event(&mut service, katran::source_policy::SourceId::Sharex, &path)["id"]
+            .as_i64()
+            .unwrap();
     let other = temp.path().join("other.txt");
     std::fs::write(&other, b"other synthetic").unwrap();
     let second = ingest(&mut service, &other, "test");
@@ -58,11 +64,15 @@ fn single_original_deletes_immediately_and_duplicates_are_one_item() {
         .test_dispatch(Command::SetSettings {
             settings: Settings {
                 sharex_folder: Some(temp.path().into()),
+                downloads_enabled: false,
                 ..Default::default()
             },
         })
         .unwrap();
-    let id = ingest(&mut service, &path, "sharex");
+    let id =
+        source_api::wait_event(&mut service, katran::source_policy::SourceId::Sharex, &path)["id"]
+            .as_i64()
+            .unwrap();
     let result = delete(&mut service, vec![id, id], false);
     assert_eq!(result["confirmation_required"], false);
     assert_eq!(result["deleted"], 1);
@@ -86,15 +96,27 @@ fn mixed_batch_deletes_only_authorized_original_and_reports_each_item() {
         .test_dispatch(Command::SetSettings {
             settings: Settings {
                 sharex_folder: Some(folder),
+                downloads_enabled: false,
                 ..Default::default()
             },
         })
         .unwrap();
-    let first = ingest(&mut service, &original, "sharex");
+    let first = source_api::wait_event(
+        &mut service,
+        katran::source_policy::SourceId::Sharex,
+        &original,
+    )["id"]
+        .as_i64()
+        .unwrap();
     let unsafe_id = ingest(&mut service, &outside, "sharex");
     let ordinary = ingest(&mut service, &clipboard, "test");
     let result = delete(&mut service, vec![first, unsafe_id, ordinary, 99999], true);
-    assert_eq!(result["deleted"], 2);
+    assert_eq!(result["deleted"], 3);
+    assert_eq!(
+        result["items"][1]["ok"], true,
+        "a provenance label grants only shelf deletion"
+    );
+    assert_eq!(result["items"][3]["error"]["code"], "not_found");
     assert_eq!(result["items"].as_array().unwrap().len(), 4);
     assert!(!original.exists());
     assert!(outside.exists());
@@ -111,11 +133,15 @@ fn missing_original_can_remove_its_shelf_record() {
         .test_dispatch(Command::SetSettings {
             settings: Settings {
                 sharex_folder: Some(temp.path().into()),
+                downloads_enabled: false,
                 ..Default::default()
             },
         })
         .unwrap();
-    let id = ingest(&mut service, &path, "sharex");
+    let id =
+        source_api::wait_event(&mut service, katran::source_policy::SourceId::Sharex, &path)["id"]
+            .as_i64()
+            .unwrap();
     std::fs::remove_file(path).unwrap();
     let result = delete(&mut service, vec![id], true);
     assert_eq!(result["deleted"], 1);

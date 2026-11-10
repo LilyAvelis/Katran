@@ -109,122 +109,6 @@ fn readable_revision(path: &Path) -> Option<Revision> {
         .then_some(revision)
 }
 
-use crate::{Command, Service, preview};
-use rusqlite::params;
-impl Service {
-    pub(crate) fn scan_downloads(&mut self) -> Result<serde_json::Value> {
-        if !self.settings.downloads_enabled {
-            return Ok(serde_json::json!({"items":[],"scanned":false}));
-        }
-        let folder = configured_folder(self.settings.downloads_folder.as_deref())?;
-        self.db.execute_batch("CREATE TABLE IF NOT EXISTS downloads_seen(path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(path,hash));")?;
-        let paths = self.downloads_scanner.scan(&folder)?;
-        let mut items = Vec::new();
-        self.db.execute_batch("CREATE TABLE IF NOT EXISTS downloads_availability(event_id INTEGER PRIMARY KEY, available INTEGER NOT NULL);")?;
-        let statuses = {
-            let mut statement = self
-                .db
-                .prepare("SELECT id,path FROM events WHERE source='downloads'")?;
-            statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-        for (id, path) in statuses {
-            let available = std::path::Path::new(&path).is_file();
-            let previous = self
-                .db
-                .query_row(
-                    "SELECT available FROM downloads_availability WHERE event_id=?1",
-                    [id],
-                    |row| row.get::<_, bool>(0),
-                )
-                .ok();
-            self.db.execute(
-                "INSERT OR REPLACE INTO downloads_availability(event_id,available) VALUES(?1,?2)",
-                params![id, available],
-            )?;
-            if previous.is_some_and(|value| value != available)
-                || (previous.is_none() && !available)
-            {
-                items.push(serde_json::json!({"ok":true,"availability_changed":true,"id":id}));
-            }
-        }
-        for path in paths {
-            let result = (|| -> Result<Option<serde_json::Value>> {
-                let before = fs::metadata(&path)?;
-                let hash = preview::content_hash(&path)?;
-                let key = path.to_string_lossy().to_string();
-                let seen: bool = self.db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM downloads_seen WHERE path=?1 AND hash=?2)",
-                    params![key, hash],
-                    |r| r.get(0),
-                )?;
-                if seen {
-                    let latest: Option<String> = self.db.query_row(
-                        "SELECT reference_hash FROM events WHERE source='downloads' AND path=?1 ORDER BY id DESC LIMIT 1",
-                        [&key], |row| row.get(0),
-                    ).ok().flatten();
-                    // A deleted shelf event must not resurrect merely because
-                    // its receipt remains. A newer revision reverting to old
-                    // bytes, however, needs a fresh live event.
-                    if latest.is_none_or(|latest| latest == hash) {
-                        return Ok(None);
-                    }
-                }
-                // Keep the durable receipt and event together, including failure
-                // to read the event back. IngestPath uses the ordinary dispatcher.
-                self.db.execute_batch("SAVEPOINT downloads_ingest")?;
-                let ingest = (|| -> Result<serde_json::Value> {
-                    let event = self.dispatch(Command::IngestPath {
-                        path: path.clone(),
-                        source: "downloads".into(),
-                    })?;
-                    let reference_hash: String = self.db.query_row(
-                        "SELECT reference_hash FROM events WHERE id=?1",
-                        params![event["id"].as_i64()],
-                        |row| row.get(0),
-                    )?;
-                    let after = fs::metadata(&path)?;
-                    if reference_hash != hash
-                        || before.len() != after.len()
-                        || before.modified()? != after.modified()?
-                        || preview::content_hash(&path)? != hash
-                    {
-                        return Err(ApiError::new(
-                            "source_changed",
-                            "Downloads file changed during ingestion",
-                        ));
-                    }
-                    self.db.execute(
-                        "INSERT OR IGNORE INTO downloads_seen(path,hash) VALUES(?1,?2)",
-                        params![key, hash],
-                    )?;
-                    self.db
-                        .execute_batch("RELEASE SAVEPOINT downloads_ingest")?;
-                    Ok(event)
-                })();
-                if ingest.is_err() {
-                    self.db.execute_batch(
-                        "ROLLBACK TO SAVEPOINT downloads_ingest; RELEASE SAVEPOINT downloads_ingest",
-                    )?;
-                }
-                ingest.map(Some)
-            })();
-            match result {
-                Ok(Some(event)) => items.push(serde_json::json!({"ok":true,"event":event})),
-                Ok(None) => {}
-                Err(error) => {
-                    self.downloads_scanner = Default::default();
-                    items.push(serde_json::json!({"ok":false,"path":path,"error":error}));
-                }
-            }
-        }
-        Ok(serde_json::json!({"items":items,"scanned":true}))
-    }
-}
-/// Resolve the Windows Known Folder, including redirected Downloads locations.
 pub fn configured_folder(override_folder: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = override_folder {
         return Ok(path.to_path_buf());
@@ -256,7 +140,7 @@ fn system_downloads_folder() -> Result<PathBuf> {
 }
 
 /// Injectable recycle boundary. No permanent-deletion fallback is allowed.
-pub trait Trash {
+pub trait Trash: Send {
     fn recycle(&self, path: &Path) -> Result<()>;
 }
 pub struct NativeTrash;

@@ -79,6 +79,11 @@ pub struct ItemFailure {
     pub id: i64,
     pub error: String,
 }
+fn active_plans() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
+    static ACTIVE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    ACTIVE.get_or_init(Default::default)
+}
 #[derive(Debug)]
 pub struct Plan {
     pub paths: Vec<PathBuf>,
@@ -120,6 +125,10 @@ impl Plan {
 }
 impl Drop for Plan {
     fn drop(&mut self) {
+        active_plans()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&self.directory);
         if !self.published.get() {
             let _ = std::fs::remove_dir_all(&self.directory);
         }
@@ -138,7 +147,8 @@ pub const DEFAULT_EXPORT_QUOTA: u64 = 2 * 1024 * 1024 * 1024;
 /// Preparation never touches the clipboard. Startup deliberately preserves exports:
 /// clipboard history is unknown. Only a later successful Katran copy retires prior
 /// batches. All payload paths are independent owned snapshots, including references.
-/// One writer per root is required, as for the enclosing Service.
+/// One preparation writer per root is required; live plans are protected from
+/// cleanup while other serialized preparation results await dispatcher commit.
 pub fn prepare(root: &Path, events: &[crate::Event]) -> Result<Plan, String> {
     prepare_with_budget(root, events, DEFAULT_EXPORT_QUOTA)
 }
@@ -201,6 +211,10 @@ pub fn prepare_with_budget(
             Err(e) => return Err(e.to_string()),
         }
     };
+    active_plans()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(directory.clone());
     let mut plan = Plan {
         paths: vec![],
         failures: vec![],
@@ -335,6 +349,13 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
     // destructor must preserve these paths until the next successful copy.
     plan.published.set(true);
     for previous in &plan.previous {
+        if active_plans()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains(previous)
+        {
+            continue;
+        }
         if let Err(error) = std::fs::remove_dir_all(previous) {
             warnings.push(format!("Files copied; old export cleanup pending: {error}"));
         }
@@ -346,45 +367,75 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
         sequence,
     })
 }
-pub struct NativeClipboard;
-#[cfg(windows)]
-impl ClipboardSink for NativeClipboard {
-    fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
-        let mut warnings = vec![];
+/// Image decoding and HDROP encoding are preparation work, not publication work.
+pub(crate) struct PreparedNativeClipboard {
+    paths: Vec<PathBuf>,
+    #[cfg(windows)]
+    files: Vec<u8>,
+    pixels: Option<Vec<u8>>,
+    warnings: Vec<String>,
+}
+impl PreparedNativeClipboard {
+    pub(crate) fn prepare(paths: &[PathBuf]) -> Self {
+        let mut warnings = Vec::new();
         let pixels = if paths.len() == 1 {
             match image_dib(&paths[0]) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    warnings.push(format!("Files copied; pixels unavailable: {e}"));
+                Ok(pixels) => Some(pixels),
+                Err(error) => {
+                    warnings.push(format!("Files copied; pixels unavailable: {error}"));
                     None
                 }
             }
         } else {
             None
         };
-        let files = file_drop(paths);
-        let _clipboard = clipboard_win::Clipboard::new_attempts(20).map_err(|e| e.to_string())?;
-        clipboard_win::raw::set(15, &files).map_err(|e| e.to_string())?;
-        if let Some(pixels) = pixels
-            && let Err(e) = clipboard_win::raw::set_without_clear(17, &pixels)
-        {
-            warnings.push(format!("Files copied; image clipboard failed: {e}"));
-        }
-        if let Some(format) = clipboard_win::raw::register_format("Preferred DropEffect")
-            && let Err(e) = clipboard_win::raw::set_without_clear(format.get(), &1u32.to_le_bytes())
-        {
-            warnings.push(format!("Copy effect unavailable: {e}"));
-        }
-        Ok((
-            unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() },
+        Self {
+            paths: paths.to_vec(),
+            #[cfg(windows)]
+            files: file_drop(paths),
+            pixels,
             warnings,
-        ))
+        }
     }
 }
-#[cfg(not(windows))]
+impl ClipboardSink for PreparedNativeClipboard {
+    fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+        if paths != self.paths {
+            return Err("Prepared clipboard payload does not match export plan".into());
+        }
+        #[cfg(windows)]
+        {
+            let mut warnings = std::mem::take(&mut self.warnings);
+            let _clipboard =
+                clipboard_win::Clipboard::new_attempts(20).map_err(|error| error.to_string())?;
+            clipboard_win::raw::set(15, &self.files).map_err(|error| error.to_string())?;
+            if let Some(pixels) = &self.pixels
+                && let Err(error) = clipboard_win::raw::set_without_clear(17, pixels)
+            {
+                warnings.push(format!("Files copied; image clipboard failed: {error}"));
+            }
+            if let Some(format) = clipboard_win::raw::register_format("Preferred DropEffect")
+                && let Err(error) =
+                    clipboard_win::raw::set_without_clear(format.get(), &1u32.to_le_bytes())
+            {
+                warnings.push(format!("Copy effect unavailable: {error}"));
+            }
+            Ok((
+                unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() },
+                warnings,
+            ))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (&self.pixels, &self.warnings);
+            Err("Native clipboard requires Windows".into())
+        }
+    }
+}
+pub struct NativeClipboard;
 impl ClipboardSink for NativeClipboard {
-    fn write(&mut self, _: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
-        Err("Native clipboard requires Windows".into())
+    fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+        PreparedNativeClipboard::prepare(paths).write(paths)
     }
 }
 #[cfg(test)]
@@ -407,6 +458,7 @@ mod tests {
         let source = dir.path().join("blob");
         std::fs::write(&source, b"synthetic").unwrap();
         let event = |id, path| crate::Event {
+            delete_policy: Default::default(),
             origin: Default::default(),
             revision: "synthetic".into(),
             id,
@@ -451,6 +503,7 @@ mod tests {
     }
     fn cached_event(path: PathBuf) -> crate::Event {
         crate::Event {
+            delete_policy: Default::default(),
             origin: Default::default(),
             revision: "synthetic".into(),
             id: 1,
@@ -464,6 +517,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn publication_never_reclaims_another_live_preparation() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.bin");
+        std::fs::write(&source, b"fixture").unwrap();
+        let event = cached_event(source);
+        let first = prepare_with_budget(root.path(), std::slice::from_ref(&event), 100).unwrap();
+        let first_path = first.paths[0].clone();
+        let second = prepare_with_budget(root.path(), std::slice::from_ref(&event), 100).unwrap();
+        let second_path = second.paths[0].clone();
+        commit(&second, &mut Fake(true)).unwrap();
+        assert_eq!(std::fs::read(&first_path).unwrap(), b"fixture");
+        commit(&first, &mut Fake(true)).unwrap();
+        assert_eq!(std::fs::read(&second_path).unwrap(), b"fixture");
+        drop(first);
+        drop(second);
+        let third = prepare_with_budget(root.path(), &[event], 100).unwrap();
+        commit(&third, &mut Fake(true)).unwrap();
+        assert!(!first_path.exists());
+        assert!(!second_path.exists());
+    }
     #[test]
     fn budget_and_failed_publication_preserve_pending_paste() {
         let dir = tempfile::tempdir().unwrap();
@@ -585,6 +659,7 @@ mod tests {
         image::DynamicImage::new_rgb8(2, 1).save(&original).unwrap();
         let events: Vec<_> = (1..=3)
             .map(|id| crate::Event {
+                delete_policy: Default::default(),
                 origin: Default::default(),
                 revision: format!("ref:{}", content_digest(&original).unwrap()),
                 id,

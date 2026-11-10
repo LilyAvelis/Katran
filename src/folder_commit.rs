@@ -1,127 +1,103 @@
-use crate::*;
-
+//! Private prepared receipts issued by SourceRuntime; never deserialized from a client.
+use crate::{
+    source_policy::{DeletePolicy, OriginalDeleteMode, SourceId},
+    *,
+};
 impl Service {
-    pub(crate) fn commit_folder_candidates(
+    pub(crate) fn commit_source_file(
         &mut self,
-        items: Vec<folder_watch::PreparedCandidate>,
-    ) -> Result<serde_json::Value> {
-        if items.len() > 8 {
+        prepared: source_runtime::PreparedSourceFile,
+    ) -> Result<Option<Event>> {
+        let configuration = prepared.configuration;
+        let item = prepared.candidate;
+        if !self.current_source(&configuration)? {
             return Err(ApiError::new(
-                "invalid_argument",
-                "At most eight prepared files",
+                "stale_source_generation",
+                "Source configuration changed",
             ));
         }
-        self.db.execute_batch("CREATE TABLE IF NOT EXISTS folder_commits(source TEXT,path TEXT,hash TEXT,event_id INTEGER,PRIMARY KEY(source,path));")?;
-        let mut results = Vec::new();
-        for item in items {
-            let result = (|| -> Result<Option<Event>> {
-                let (source, root) = match item.source {
-                    folder_watch::FolderSource::Sharex => (
-                        "sharex",
-                        self.settings.sharex_folder.clone().ok_or_else(|| {
-                            ApiError::new("source_disabled", "ShareX not configured")
-                        })?,
-                    ),
-                    folder_watch::FolderSource::Downloads => {
-                        if !self.settings.downloads_enabled {
-                            return Err(ApiError::new("source_disabled", "Downloads disabled"));
-                        }
-                        (
-                            "downloads",
-                            downloads::configured_folder(
-                                self.settings.downloads_folder.as_deref(),
-                            )?,
-                        )
-                    }
-                };
-                let root = root.canonicalize()?;
-                let path = item.path.canonicalize()?;
-                if root != item.root
-                    || !path.starts_with(&root)
-                    || path.starts_with(&self.root)
-                    || item.content_hash.len() != 64
-                    || !item.content_hash.bytes().all(|b| b.is_ascii_hexdigit())
-                {
-                    return Err(ApiError::new(
-                        "unsafe_source",
-                        "Prepared source does not match configured folder",
-                    ));
-                }
-                let metadata = fs::metadata(&path)?;
-                if !metadata.is_file()
-                    || metadata.len() != item.size
-                    || metadata.modified()? != item.modified
-                {
-                    return Err(ApiError::new("source_changed", "Prepared source changed"));
-                }
-                let key = path.to_string_lossy();
-                let previous: Option<(String, i64)> = self
-                    .db
-                    .query_row(
-                        "SELECT hash,event_id FROM folder_commits WHERE source=?1 AND path=?2",
-                        params![source, key],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?;
-                if previous
-                    .as_ref()
-                    .is_some_and(|(hash, id)| hash == &item.content_hash && self.get(*id).is_ok())
-                {
-                    return Ok(None);
-                }
-                // Reuse only the latest matching arrival; content reverting to an older hash is a new revision.
-                let existing: Option<i64> = self.db.query_row("SELECT id FROM events WHERE id=(SELECT MAX(id) FROM events WHERE source=?1 AND path=?2) AND reference_hash=?3",params![source,key,item.content_hash],|r|r.get(0)).optional()?;
-                self.db.execute_batch("SAVEPOINT folder_commit")?;
-                let write = (|| -> Result<i64> {
-                    let id = if let Some(id) = existing {
-                        id
-                    } else {
-                        let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-                            ApiError::new("invalid_argument", "Non-Unicode filename")
-                        })?;
-                        let origin = origin::Origin {
-                            source_app: Some(
-                                if source == "sharex" {
-                                    "ShareX folder"
-                                } else {
-                                    "Downloads"
-                                }
-                                .into(),
-                            ),
-                            source_domain: None,
-                        };
-                        self.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,NULL,?6,?7)",params![now_ms(),source,name,key,item.size,serde_json::to_string(&origin).unwrap(),item.content_hash])?;
-                        self.db.last_insert_rowid()
-                    };
-                    self.db.execute(
-                        "INSERT OR REPLACE INTO folder_commits VALUES(?1,?2,?3,?4)",
-                        params![source, key, item.content_hash, id],
-                    )?;
-                    Ok(id)
-                })();
-                match write {
-                    Ok(id) => {
-                        self.db.execute_batch("RELEASE folder_commit")?;
-                        Ok(Some(self.get(id)?))
-                    }
-                    Err(error) => {
-                        self.db
-                            .execute_batch("ROLLBACK TO folder_commit; RELEASE folder_commit")?;
-                        Err(error)
-                    }
-                }
-            })();
-            match result {
-                Ok(Some(event)) => results.push(serde_json::json!({"ok":true,"event":event})),
-                Ok(None) => {}
-                Err(error) => {
-                    results.push(serde_json::json!({"ok":false,"path":item.path,"error":error}))
-                }
-            }
+        let root = configuration.root.canonicalize()?;
+        let path = item.path.canonicalize()?;
+        if root != item.root || !path.starts_with(&root) || path.starts_with(&self.root) {
+            return Err(ApiError::new(
+                "unsafe_source",
+                "Source escaped configured folder",
+            ));
         }
-        Ok(serde_json::json!({"scanned":true,"items":results}))
+        let metadata = fs::metadata(&path)?;
+        if !metadata.is_file()
+            || metadata.len() != item.size
+            || metadata.modified()? != item.modified
+        {
+            return Err(ApiError::new(
+                "source_changed",
+                "Source changed after preparation",
+            ));
+        }
+        let source = configuration.source_id.as_str();
+        let key = path.to_string_lossy().to_lowercase();
+        let root_key = root.to_string_lossy().to_lowercase();
+        let receipt:Option<(String,i64)>=self.db.query_row("SELECT hash,event_id FROM source_receipts WHERE source_id=?1 AND root_key=?2 AND path_key=?3",params![source,root_key,key],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((hash, id)) = receipt
+            && hash == item.content_hash
+            && self.get(id).is_err()
+        {
+            return Ok(None);
+        }
+        let previous:Option<(i64,String)>=self.db.query_row("SELECT p.event_id,e.reference_hash FROM source_projection p JOIN events e ON e.id=p.event_id WHERE p.source_id=?1 AND p.generation=?2 AND p.path_key=?3",params![source,configuration.generation,key],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((id, hash)) = previous
+            && hash == item.content_hash
+        {
+            self.db.execute(
+                "UPDATE source_projection SET available=1 WHERE event_id=?1",
+                [id],
+            )?;
+            return Ok(None);
+        }
+        let policy = DeletePolicy::LiveOriginal {
+            source_id: configuration.source_id,
+            generation: configuration.generation,
+            mode: match configuration.source_id {
+                SourceId::Sharex => OriginalDeleteMode::Permanent,
+                SourceId::Downloads => OriginalDeleteMode::Recycle,
+            },
+        };
+        let tx = self.db.unchecked_transaction()?;
+        // A pre-hardening reference is reused only after this worker verified the actual file.
+        let existing:Option<i64>=tx.query_row("SELECT id FROM events WHERE id=(SELECT MAX(id) FROM events WHERE source=?1 AND path=?2 AND blob_hash IS NULL AND (legacy_source_ref=1 OR json_extract(delete_policy_json,'$.kind')='live_original')) AND reference_hash=?3",params![source,path.to_string_lossy(),item.content_hash],|r|r.get(0)).optional()?;
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode filename"))?;
+            let origin = origin::Origin {
+                source_app: Some(
+                    if configuration.source_id == SourceId::Sharex {
+                        "ShareX folder"
+                    } else {
+                        "Downloads"
+                    }
+                    .into(),
+                ),
+                source_domain: None,
+            };
+            tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,NULL,?6,?7)",params![now_ms(),source,name,path.to_string_lossy(),item.size,serde_json::to_string(&origin).unwrap(),item.content_hash])?;
+            tx.last_insert_rowid()
+        };
+        tx.execute(
+            "UPDATE events SET delete_policy_json=?1,legacy_source_ref=0 WHERE id=?2",
+            params![serde_json::to_string(&policy).unwrap(), id],
+        )?;
+        tx.execute("INSERT INTO source_projection VALUES(?1,?2,?3,?4,1) ON CONFLICT(source_id,generation,path_key) DO UPDATE SET event_id=excluded.event_id,available=1",params![source,configuration.generation,key,id])?;
+        tx.execute("INSERT INTO source_receipts VALUES(?1,?2,?3,?4,?5) ON CONFLICT(source_id,root_key,path_key) DO UPDATE SET hash=excluded.hash,event_id=excluded.event_id",params![source,root_key,key,item.content_hash,id])?;
+        if configuration.source_id == SourceId::Sharex {
+            tx.execute("INSERT OR IGNORE INTO classification_work(event_id,revision,kind,source_generation) VALUES(?1,?2,'source',?3)",params![id,format!("ref:{}",item.content_hash),configuration.generation])?;
+        }
+        tx.commit()?;
+        Ok(Some(self.get(id)?))
     }
-
     pub(crate) fn screenshot_match_inputs(&self) -> Result<serde_json::Value> {
         let Some(root) = self
             .settings

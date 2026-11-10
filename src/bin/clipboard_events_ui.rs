@@ -99,11 +99,13 @@ impl Shelf {
             }
             return;
         }
-        if self.api.is_none() || self.native_drag.is_some() {
+        if self.api.is_none() || self.native_drag.is_some() || self.capture_job.is_some() {
             return;
         }
         // Preserve the already captured copy selection before background reads.
-        if let Some(command) = self.take_queued_copy() {
+        if self.job.is_none()
+            && let Some(command) = self.take_queued_copy()
+        {
             self.start_job(command, false, ctx.clone());
             return;
         }
@@ -220,6 +222,77 @@ mod tests {
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1, "idle ticks must not poll");
         assert!(app.job.is_none());
+    }
+    #[test]
+    fn foreground_preview_does_not_gate_background_capture_submission() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Preview {
+            started: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+        impl katran::quicklook::Launcher for Preview {
+            fn launch(&self, _: &std::path::Path) -> katran::Result<()> {
+                self.started.send(()).unwrap();
+                self.release.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok(())
+            }
+        }
+        struct Capture(Arc<AtomicUsize>);
+        impl katran::capture_events::Source for Capture {
+            fn capture(&mut self, _: &mut Service) -> katran::Result<Value> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(serde_json::json!({"captured":0}))
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let id = app.call(Command::IngestBytes {
+            name: "synthetic.pdf".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_preview_launcher(Box::new(Preview {
+                started: started_tx,
+                release: release_rx,
+            }));
+        let ctx = egui::Context::default();
+        assert!(app.start_job(Command::PreviewExternal { id }, false, ctx.clone()));
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_capture_source(Box::new(Capture(calls.clone())));
+        app.call(Command::SetCaptureEnabled { enabled: true });
+        app.capture = true;
+        app.event_capture_tick(&ctx);
+        let captured = calls.load(Ordering::SeqCst);
+        let still_pending = app.job.is_some();
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.job.is_some() {
+            app.finish_job();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            captured, 1,
+            "Foreground preview prevented capture submission"
+        );
+        assert!(
+            still_pending,
+            "Fake preview must still be blocked while capture runs"
+        );
     }
     #[test]
     fn listener_failure_disables_capture_instead_of_falling_back_to_polling() {

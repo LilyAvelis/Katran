@@ -1,25 +1,36 @@
 use rusqlite::{Connection, OptionalExtension, params};
 pub mod capture;
 pub mod capture_events;
+mod catalogue_query;
+mod catalogue_schema;
+mod classification_runtime;
 pub mod clipboard_listener;
 pub mod copy_out;
+mod delete_jobs;
 mod delete_selection;
 pub mod delete_shelf;
 pub mod density;
 pub mod diagnostics;
+pub mod domain_jobs;
 pub mod downloads;
 pub mod drag_out;
 mod drag_session;
+pub mod file_types;
 pub mod file_visual;
 mod folder_commit;
 pub mod folder_watch;
 pub mod interaction;
+mod jobs_service;
 pub mod origin;
 pub mod screenshot_identity;
 pub mod settings;
 pub mod sharex;
 mod shelf_tabs;
+pub mod shell_visual_worker;
 pub mod shortcuts;
+pub mod source_policy;
+pub mod source_runtime;
+mod source_service;
 pub mod tab_layout;
 use interaction::Interaction;
 use std::{
@@ -33,12 +44,21 @@ pub mod api;
 pub mod preview;
 pub mod preview_view;
 pub mod quicklook;
+pub mod quicklook_backend;
+pub mod quicklook_process;
+pub mod quicklook_transport;
 pub mod storage;
 pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
-    external_preview: Box<dyn quicklook::Launcher>,
+    trash: std::sync::Arc<std::sync::Mutex<Box<dyn downloads::Trash>>>,
+    jobs: domain_jobs::DomainJobs<jobs_service::PreparedWork>,
+    classification: classification_runtime::ClassificationRuntime,
+    source_runtime: source_runtime::SourceRuntime,
+    source_configured: bool,
+    source_runtime_started: bool,
+    external_preview: std::sync::Arc<std::sync::Mutex<Box<dyn quicklook::Launcher>>>,
     sharex_scanner: sharex::SharexScanner,
     downloads_scanner: downloads::DownloadsScanner,
     capture_events: capture_events::Schedule,
@@ -61,7 +81,10 @@ pub struct Service {
 impl Service {
     /// Injectable external-preview boundary for synthetic tests and embedded clients.
     pub fn set_preview_launcher(&mut self, launcher: Box<dyn quicklook::Launcher>) {
-        self.external_preview = launcher;
+        self.external_preview = std::sync::Arc::new(std::sync::Mutex::new(launcher));
+    }
+    pub fn set_trash(&mut self, trash: Box<dyn downloads::Trash>) {
+        self.trash = std::sync::Arc::new(std::sync::Mutex::new(trash));
     }
 
     pub fn attach_logger(&mut self, logger: diagnostics::Logger) {
@@ -74,13 +97,15 @@ impl Service {
         fs::create_dir_all(root.join("blobs"))?;
         let root = fs::canonicalize(root)?;
         let db = Connection::open(root.join("index.sqlite3"))?;
+        catalogue_schema::check_version(&db)?;
+        catalogue_schema::backup_before_migration(&db, &root)?;
         db.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS blobs(hash TEXT PRIMARY KEY, size INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS events(
               id INTEGER PRIMARY KEY, detected_at_ms INTEGER NOT NULL, source TEXT NOT NULL,
               name TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL,
-              blob_hash TEXT REFERENCES blobs(hash)); PRAGMA user_version=1;",
+              blob_hash TEXT REFERENCES blobs(hash));",
         )?;
         let has_origin: bool = db.query_row(
             "SELECT COUNT(*)>0 FROM pragma_table_info('events') WHERE name='origin_json'",
@@ -93,6 +118,8 @@ impl Service {
             )?;
         }
         storage::initialize(&db, &root)?;
+        catalogue_schema::migrate(&db)?;
+        classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
         let stored: Option<String> = db
             .query_row(
@@ -113,7 +140,15 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
-            external_preview: Box::new(quicklook::NativeLauncher),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
+            jobs: Default::default(),
+            classification: Default::default(),
+            source_runtime: Default::default(),
+            source_configured: false,
+            source_runtime_started: false,
+            external_preview: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                quicklook::NativeLauncher,
+            ))),
             sharex_scanner: Default::default(),
             downloads_scanner: Default::default(),
             capture_events: Default::default(),
@@ -142,7 +177,15 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
-            external_preview: Box::new(quicklook::NativeLauncher),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
+            jobs: Default::default(),
+            classification: Default::default(),
+            source_runtime: Default::default(),
+            source_configured: false,
+            source_runtime_started: false,
+            external_preview: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                quicklook::NativeLauncher,
+            ))),
             sharex_scanner: Default::default(),
             downloads_scanner: Default::default(),
             capture_events: Default::default(),
@@ -165,8 +208,11 @@ impl Service {
     }
     pub fn execute(&mut self, request: Request) -> serde_json::Value {
         let started = std::time::Instant::now();
-        if let Some(log) = &self.diagnostics {
-            log.record("command",serde_json::json!({"request_id":request.request_id,"command":diagnostics::summarize_command(&request.command),"cursor":self.interaction.cursor,"selected":self.interaction.selected}));
+        let hot = diagnostics::hot_command(&request.command);
+        if hot.is_none()
+            && let Some(log) = &self.diagnostics
+        {
+            log.record("command",serde_json::json!({"request_id":request.request_id,"command":diagnostics::summarize_command(&request.command),"cursor":self.interaction.cursor,"selected_count":self.interaction.selected.len(),"selected_sample":self.interaction.selected.iter().take(32).collect::<Vec<_>>()}));
         }
         let result = if request.api_version != API_VERSION {
             Err(ApiError::new(
@@ -176,7 +222,11 @@ impl Service {
         } else {
             self.dispatch(request.command)
         };
-        if let Some(log) = &self.diagnostics {
+        if (hot.is_none()
+            || result.is_err()
+            || started.elapsed() >= std::time::Duration::from_millis(10))
+            && let Some(log) = &self.diagnostics
+        {
             log.record("result",match &result{Ok(value)=>serde_json::json!({"request_id":request.request_id,"ok":true,"elapsed_us":started.elapsed().as_micros(),"id":value.get("id"),"copied":value.get("copied"),"deleted":value.get("deleted"),"captured":value.get("captured")}),Err(error)=>serde_json::json!({"request_id":request.request_id,"ok":false,"elapsed_us":started.elapsed().as_micros(),"error":error})});
         }
         match result {
@@ -207,6 +257,21 @@ impl Service {
             ));
         }
         match command {
+            Command::BeginJob{command} => self.begin_job(*command),
+            Command::PollJob{job_id} => self.poll_job(job_id),
+            Command::CancelJob{job_id} => {
+                Ok(serde_json::json!(self.jobs.cancel(job_id)?))
+            }
+            Command::EnsurePreviewBackend => quicklook_backend::warmup(),
+            Command::PreviewBackendStatus => quicklook_backend::status(),
+            Command::EnsureSources => self.ensure_sources(),
+            Command::PollSources { limit } => self.poll_sources(limit),
+            Command::SourceStatus => Ok(serde_json::json!({"sources":self.source_runtime.statuses()})),
+            Command::RescanSource { source_id } => {
+                self.ensure_sources()?;
+                self.source_runtime.rescan(source_id)?;
+                Ok(serde_json::json!({"scheduled":true,"sources":self.source_runtime.statuses()}))
+            }
             Command::AdjustDensity { delta } => {
                 let mut settings = self.settings.clone();
                 match self.interaction.view {
@@ -215,12 +280,9 @@ impl Service {
                 }
                 self.dispatch(Command::SetSettings{settings})
             },
-            Command::CommitFolderCandidates { items } => self.commit_folder_candidates(items),
+            Command::CommitFolderCandidates { .. } => Err(ApiError::new("untrusted_worker_result","Prepared source results are accepted only from the domain supervisor")),
             Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
-            Command::CommitScreenshotMatches { pairs } => {
-                let count = screenshot_identity::commit_matches(&self.db, &pairs)?;
-                Ok(serde_json::json!({"classification_changed":count > 0,"matched":count}))
-            }
+            Command::CommitScreenshotMatches { .. } => Err(ApiError::new("untrusted_worker_result","Pixel identity must be verified by the domain worker")),
             Command::SelectTabPosition { position } => {
                 let tab = tab_layout::tab_at(&self.settings.tab_order,position)?;
                 self.interaction.set_tab(tab);
@@ -234,8 +296,8 @@ impl Service {
             Command::SetTab { tab } => { self.interaction.set_tab(tab); Ok(serde_json::json!(self.interaction)) },
             Command::ToggleTab => { self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
             Command::BrowseShelf { query, limit, after_id } => self.browse_shelf(&query, limit, after_id),
-            Command::ScanSharex => self.scan_sharex(),
-            Command::ScanDownloads => self.scan_downloads(),
+            Command::ScanSharex => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Sharex}),
+            Command::ScanDownloads => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Downloads}),
             Command::CaptureClipboard { trigger } => self.capture_from_event(trigger),
             Command::ActivateWindow => {
                 self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
@@ -255,11 +317,11 @@ impl Service {
                 self.interaction.preview_view.pan(delta, viewport, fitted)?;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::PreviewExternal { id } => quicklook::preview(&self.get(id)?, self.external_preview.as_ref()),
+            Command::PreviewExternal { id } => self.preview_external(id),
             Command::TogglePreview => {
                 if self.interaction.preview.is_none() && let Some(id)=self.interaction.cursor {
                     let event=self.get(id)?;
-                    if !quicklook::is_native_image(&event) { return quicklook::preview(&event,self.external_preview.as_ref()); }
+                    if !quicklook::is_native_image(&event) { return self.preview_external(event.id); }
                 }
                 self.interaction.set_preview(if self.interaction.preview.is_some() {
                     None
@@ -370,8 +432,11 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
                 if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
                 if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
+                let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder;
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
+                if sources_changed {self.source_configured = false;}
+                self.configure_sources(self.source_runtime_started)?;
                 Ok(serde_json::json!(self.settings))
             }
             Command::ShowSettings => {
@@ -404,7 +469,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::OpenCurrent => {
                 if let Some(id)=self.interaction.cursor {
                     let event=self.get(id)?;
-                    if !quicklook::is_native_image(&event) { return quicklook::preview(&event,self.external_preview.as_ref()); }
+                    if !quicklook::is_native_image(&event) { return self.preview_external(event.id); }
                 }
                 self.interaction.set_preview(self.interaction.cursor);
                 Ok(serde_json::json!(self.interaction))
@@ -413,7 +478,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.5).map(|d|serde_json::json!({"id":d.0,"label":if d.0=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.1},"group":d.4,"shortcut":self.shortcuts.binding(d.0)})).collect())),
+            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.in_palette).map(|d|serde_json::json!({"id":d.id,"label":if d.id=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.label},"group":d.group,"shortcut":self.shortcuts.binding(d.id)})).collect())),
             Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
             Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
             Command::PreviewFile{id,max_edge}=>file_visual::render(&self.root,&self.get(id)?,max_edge),
@@ -504,7 +569,16 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             None
         };
         self.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![now_ms(),source,name,path,size,hash,serde_json::to_string(&self.ingest_origin).unwrap(),reference_hash])?;
-        Ok(self.db.last_insert_rowid())
+        let id = self.db.last_insert_rowid();
+        classification_runtime::enqueue(&self.db, id)?;
+        Ok(id)
+    }
+    fn preview_external(&self, id: i64) -> Result<serde_json::Value> {
+        let launcher = self
+            .external_preview
+            .lock()
+            .map_err(|_| ApiError::new("quicklook_busy", "Preview launcher lock poisoned"))?;
+        quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
         storage::get_event(&self.db, id)
@@ -554,8 +628,17 @@ fn validate_name(name: &str) -> Result<()> {
     }
     Ok(())
 }
-fn export(event: &Event, destination: &Path) -> Result<PathBuf> {
+pub(crate) fn export(event: &Event, destination: &Path) -> Result<PathBuf> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
     validate_name(&event.name)?;
+    let expected = event
+        .revision
+        .strip_prefix("ref:")
+        .or_else(|| event.revision.strip_prefix("blob:"))
+        .ok_or_else(|| {
+            ApiError::new("source_changed", "Object has no recorded content identity")
+        })?;
     let mut source = fs::File::open(&event.path)?;
     let stem = Path::new(&event.name)
         .file_stem()
@@ -577,11 +660,30 @@ fn export(event: &Event, destination: &Path) -> Result<PathBuf> {
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         };
-        let result = std::io::copy(&mut source, &mut output).and_then(|_| output.sync_all());
+        let result = (|| -> Result<()> {
+            let mut digest = Sha256::new();
+            let mut buffer = [0u8; 65536];
+            loop {
+                let n = source.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                output.write_all(&buffer[..n])?;
+                digest.update(&buffer[..n]);
+            }
+            if format!("{:x}", digest.finalize()) != expected {
+                return Err(ApiError::new(
+                    "source_changed",
+                    "Source contents changed since this arrival",
+                ));
+            }
+            output.sync_all()?;
+            Ok(())
+        })();
         drop(output);
         if let Err(e) = result {
             let _ = fs::remove_file(&path);
-            return Err(e.into());
+            return Err(e);
         }
         return Ok(path);
     }

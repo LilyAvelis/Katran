@@ -231,6 +231,15 @@ impl RotatingWriter {
 /// Summarizes commands without serializing image bytes, including nested ingestion.
 pub fn summarize_command(command: &crate::Command) -> Value {
     match command {
+        crate::Command::BeginJob { command } => {
+            json!({"type":"begin_job","command":summarize_command(command)})
+        }
+        crate::Command::CommitFolderCandidates { items } => {
+            json!({"type":"commit_folder_candidates","count":items.len()})
+        }
+        crate::Command::CommitScreenshotMatches { pairs } => {
+            json!({"type":"commit_screenshot_matches","count":pairs.len()})
+        }
         crate::Command::IngestBytes {
             name,
             bytes,
@@ -241,6 +250,23 @@ pub fn summarize_command(command: &crate::Command) -> Value {
         }
         _ => serde_json::to_value(command).unwrap_or(Value::Null),
     }
+}
+
+/// Hot read clients are silent on success; slow operations and failures still log.
+pub(crate) fn hot_command(command: &crate::Command) -> Option<&'static str> {
+    use crate::Command::*;
+    Some(match command {
+        Interaction => "interaction",
+        GetSettings => "get_settings",
+        Shortcuts => "shortcuts",
+        SetVisible { .. } => "set_visible",
+        Status => "status",
+        PollSources { .. } => "poll_sources",
+        SourceStatus => "source_status",
+        PollJob { .. } => "poll_job",
+        Actions => "actions",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

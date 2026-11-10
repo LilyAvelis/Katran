@@ -1,3 +1,5 @@
+#[path = "common/source_api.rs"]
+mod source_api;
 use katran::{
     Command, Request, Service,
     downloads::{DownloadsScanner, Trash, recycle_original},
@@ -50,23 +52,18 @@ fn scan_ingests_through_api_and_receipts_survive_restart() {
     settings.downloads_folder = Some(folder.path().to_owned());
     settings.downloads_enabled = true;
     call(&mut api, Command::SetSettings { settings });
-    assert!(
-        call(&mut api, Command::ScanDownloads)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+    let original = folder.path().join("synthetic.pdf");
+    let event = source_api::wait_event(
+        &mut api,
+        katran::source_policy::SourceId::Downloads,
+        &original,
     );
-    let result = call(&mut api, Command::ScanDownloads);
-    assert_eq!(result["items"][0]["event"]["source"], "downloads");
+    assert_eq!(event["source"], "downloads");
+    let id = event["id"].as_i64().unwrap();
     drop(api);
     let mut api = Service::open(shelf.path(), 100_000).unwrap();
-    call(&mut api, Command::ScanDownloads);
-    assert!(
-        call(&mut api, Command::ScanDownloads)["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(source_api::settle(&mut api, katran::source_policy::SourceId::Downloads).is_empty());
+    assert_eq!(call(&mut api, Command::Get { id })["id"], id);
     assert_eq!(
         fs::read(folder.path().join("synthetic.pdf")).unwrap(),
         b"synthetic PDF bytes"
@@ -87,13 +84,11 @@ fn recycling_checks_revision_and_containment_before_injected_boundary() {
     let path = folder.path().join("synthetic.bin");
     fs::write(&path, b"synthetic").unwrap();
     let mut api = Service::open(shelf.path(), 100_000).unwrap();
-    let value = call(
-        &mut api,
-        Command::IngestPath {
-            path: path.clone(),
-            source: "downloads".into(),
-        },
-    );
+    let mut settings = Settings::defaults(100_000);
+    settings.downloads_folder = Some(folder.path().into());
+    settings.downloads_enabled = true;
+    call(&mut api, Command::SetSettings { settings });
+    let value = source_api::wait_event(&mut api, katran::source_policy::SourceId::Downloads, &path);
     let mut event: katran::Event = serde_json::from_value(value).unwrap();
     let trash = FakeTrash(RefCell::new(vec![]));
     assert!(!recycle_original(&event, folder.path(), &trash).unwrap());

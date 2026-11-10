@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     time::{Duration, Instant, SystemTime},
@@ -35,7 +35,14 @@ pub struct PreparedCandidate {
 }
 #[derive(Debug)]
 pub enum FolderEvent {
+    Ready {
+        source: FolderSource,
+    },
     Candidate(PreparedCandidate),
+    Snapshot {
+        source: FolderSource,
+        paths: Vec<PathBuf>,
+    },
     Refresh {
         source: FolderSource,
     },
@@ -45,9 +52,32 @@ pub enum FolderEvent {
     },
 }
 
+#[derive(Clone)]
+struct EventSender {
+    sender: mpsc::SyncSender<FolderEvent>,
+    queued: Arc<AtomicUsize>,
+}
+impl EventSender {
+    fn try_send(
+        &self,
+        event: FolderEvent,
+    ) -> std::result::Result<(), mpsc::TrySendError<FolderEvent>> {
+        self.queued.fetch_add(1, Ordering::Relaxed);
+        let result = self.sender.try_send(event);
+        if result.is_err() {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
+    }
+}
+
 pub struct FolderWatcher {
     stop: Arc<AtomicBool>,
     receiver: mpsc::Receiver<FolderEvent>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    rescan: Arc<AtomicBool>,
+    backlog: Arc<AtomicUsize>,
+    queued: Arc<AtomicUsize>,
 }
 impl FolderWatcher {
     pub fn start(configs: Vec<FolderConfig>) -> Result<Self> {
@@ -57,42 +87,65 @@ impl FolderWatcher {
                 "At most two configured folder roots",
             ));
         }
-        let mut roots = Vec::new();
-        for config in configs {
-            if fs::symlink_metadata(&config.root)?.file_type().is_symlink() {
-                return Err(ApiError::new(
-                    "invalid_directory",
-                    "Folder root cannot be a symbolic link",
-                ));
-            }
-            let root = fs::canonicalize(&config.root)?;
-            if !root.is_dir() {
-                return Err(ApiError::new(
-                    "invalid_directory",
-                    "Folder root must be a directory",
-                ));
-            }
-            roots.push(Root {
-                source: config.source,
-                native: None,
-                root,
-                shots: SharexScanner::default(),
-                downloads: DownloadsScanner::default(),
-                due: Some(Instant::now()),
-                settling: false,
-                pending: VecDeque::new(),
-                outgoing: VecDeque::new(),
-            });
-        }
         // At most one dispatcher batch can wait ahead of a fresh notification.
-        let (sender, receiver) = mpsc::sync_channel(8);
+        let (raw_sender, receiver) = mpsc::sync_channel(8);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let sender = EventSender {
+            sender: raw_sender,
+            queued: Arc::clone(&queued),
+        };
         let stop = Arc::new(AtomicBool::new(false));
-        for mut root in roots {
+        let rescan = Arc::new(AtomicBool::new(false));
+        let mut workers = Vec::new();
+        let backlog = Arc::new(AtomicUsize::new(0));
+        for config in configs {
+            let worker_rescan = Arc::clone(&rescan);
+            let worker_backlog = Arc::clone(&backlog);
             let worker_stop = Arc::clone(&stop);
             let sender = sender.clone();
-            if let Err(error) = std::thread::Builder::new()
-                .name(format!("katran-folder-{:?}", root.source))
+            let worker = std::thread::Builder::new()
+                .name(format!("katran-folder-{:?}", config.source))
                 .spawn(move || {
+                    let setup = || -> Result<Root> {
+                        if fs::symlink_metadata(&config.root)?.file_type().is_symlink() {
+                            return Err(ApiError::new(
+                                "invalid_directory",
+                                "Folder root cannot be a symbolic link",
+                            ));
+                        }
+                        let root = fs::canonicalize(&config.root)?;
+                        if !root.is_dir() {
+                            return Err(ApiError::new(
+                                "invalid_directory",
+                                "Folder root must be a directory",
+                            ));
+                        }
+                        Ok(Root {
+                            source: config.source,
+                            root,
+                            native: None,
+                            failed: false,
+                            shots: SharexScanner::default(),
+                            downloads: DownloadsScanner::default(),
+                            due: Some(Instant::now()),
+                            settling: false,
+                            pending: VecDeque::new(),
+                            outgoing: VecDeque::new(),
+                        })
+                    };
+                    let mut root = match setup() {
+                        Ok(root) => root,
+                        Err(error) => {
+                            let _ = sender.try_send(FolderEvent::Error {
+                                source: config.source,
+                                message: error.message,
+                            });
+                            return;
+                        }
+                    };
+                    if worker_stop.load(Ordering::Relaxed) {
+                        return;
+                    }
                     // Windows can cancel I/O when its issuing thread exits.
                     // Arm and rearm on this long-lived thread, never the setup caller.
                     match native::Watch::new(&root.root) {
@@ -105,20 +158,59 @@ impl FolderWatcher {
                             return;
                         }
                     }
+                    let _ = sender.try_send(FolderEvent::Ready {
+                        source: root.source,
+                    });
                     while !worker_stop.load(Ordering::Relaxed) {
+                        if worker_rescan.swap(false, Ordering::Relaxed) {
+                            root.shots = SharexScanner::default();
+                            root.downloads = DownloadsScanner::default();
+                            root.due = Some(Instant::now());
+                            root.settling = false;
+                        }
                         root.tick(&sender, &worker_stop);
+                        if root.failed && root.outgoing.is_empty() {
+                            break;
+                        }
+                        worker_backlog
+                            .store(root.pending.len() + root.outgoing.len(), Ordering::Relaxed);
                         std::thread::sleep(Duration::from_millis(10));
                     }
-                })
-            {
-                stop.store(true, Ordering::Relaxed);
-                return Err(ApiError::new("watcher_error", error.to_string()));
+                });
+            match worker {
+                Ok(worker) => workers.push(worker),
+                Err(error) => {
+                    stop.store(true, Ordering::Relaxed);
+                    return Err(ApiError::new("watcher_error", error.to_string()));
+                }
             }
         }
-        Ok(Self { stop, receiver })
+        Ok(Self {
+            stop,
+            receiver,
+            workers,
+            rescan,
+            backlog,
+            queued,
+        })
+    }
+    /// Outstanding worker preparation and bounded delivery backlog snapshot.
+    pub fn backlog(&self) -> usize {
+        self.backlog.load(Ordering::Relaxed) + self.queued.load(Ordering::Relaxed)
+    }
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+    pub fn is_finished(&self) -> bool {
+        self.workers.iter().all(|worker| worker.is_finished())
+    }
+    pub fn rescan(&self) {
+        self.rescan.store(true, Ordering::Relaxed);
     }
     pub fn try_recv(&self) -> Option<FolderEvent> {
-        self.receiver.try_recv().ok()
+        self.receiver.try_recv().ok().inspect(|_| {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+        })
     }
 }
 impl Drop for FolderWatcher {
@@ -132,6 +224,7 @@ struct Root {
     source: FolderSource,
     root: PathBuf,
     native: Option<native::Watch>,
+    failed: bool,
     shots: SharexScanner,
     downloads: DownloadsScanner,
     due: Option<Instant>,
@@ -140,7 +233,7 @@ struct Root {
     outgoing: VecDeque<FolderEvent>,
 }
 impl Root {
-    fn tick(&mut self, sender: &mpsc::SyncSender<FolderEvent>, stop: &AtomicBool) {
+    fn tick(&mut self, sender: &EventSender, stop: &AtomicBool) {
         match self
             .native
             .as_mut()
@@ -169,13 +262,10 @@ impl Root {
             Ok(false) => {}
             Err(error) => {
                 // Report failure once, do not silently switch to periodic polling.
-                if self.outgoing.is_empty() {
-                    self.outgoing.push_back(FolderEvent::Error {
-                        source: self.source,
-                        message: error.message,
-                    });
-                }
+                self.queue_error(error.message);
                 self.due = None;
+                self.failed = true;
+                self.pending.clear();
             }
         }
         if self.due.is_some_and(|due| Instant::now() >= due) {
@@ -185,6 +275,17 @@ impl Root {
             };
             match paths {
                 Ok(paths) => {
+                    match self.snapshot(stop) {
+                        Ok(paths) => {
+                            self.outgoing
+                                .retain(|event| !matches!(event, FolderEvent::Snapshot { .. }));
+                            self.outgoing.push_back(FolderEvent::Snapshot {
+                                source: self.source,
+                                paths,
+                            });
+                        }
+                        Err(error) => self.queue_error(error.message),
+                    }
                     // Newly settled files overtake initial historical discovery.
                     self.pending.retain(|path| path.is_file());
                     let existing: std::collections::HashSet<_> =
@@ -195,10 +296,7 @@ impl Root {
                         }
                     }
                 }
-                Err(error) => self.outgoing.push_back(FolderEvent::Error {
-                    source: self.source,
-                    message: error.message,
-                }),
+                Err(error) => self.queue_error(error.message),
             }
             self.due = if self.settling {
                 None
@@ -235,6 +333,43 @@ impl Root {
                 Err(mpsc::TrySendError::Disconnected(_)) => break,
             }
         }
+    }
+    fn queue_error(&mut self, message: String) {
+        // Backpressure must not turn a native notification/error storm into an
+        // unbounded queue; keep the latest source health error for explicit retry.
+        self.outgoing
+            .retain(|event| !matches!(event, FolderEvent::Error { .. }));
+        self.outgoing.push_back(FolderEvent::Error {
+            source: self.source,
+            message,
+        });
+    }
+    fn snapshot(&self, stop: &AtomicBool) -> Result<Vec<PathBuf>> {
+        let mut directories = vec![self.root.clone()];
+        let mut paths = Vec::new();
+        let mut entries = 0;
+        while let Some(directory) = directories.pop() {
+            for entry in fs::read_dir(directory)? {
+                if stop.load(Ordering::Relaxed) {
+                    return Err(ApiError::new("cancelled", "Folder discovery stopped"));
+                }
+                entries += 1;
+                if entries > 20_000 {
+                    return Err(ApiError::new(
+                        "scan_limit",
+                        "Availability snapshot exceeds 20000 entries; previous availability retained",
+                    ));
+                }
+                let entry = entry?;
+                let kind = entry.file_type()?;
+                if kind.is_dir() {
+                    directories.push(entry.path());
+                } else if kind.is_file() {
+                    paths.push(entry.path());
+                }
+            }
+        }
+        Ok(paths)
     }
     fn prepare(&self, path: PathBuf, stop: &AtomicBool) -> Result<PreparedCandidate> {
         use sha2::{Digest, Sha256};

@@ -40,28 +40,89 @@ pub(super) fn install(ctx: &egui::Context) {
     ctx.set_style_of(egui::Theme::Dark, style);
 }
 
+/// Measured once; the same galleys and frame geometry are used for painting.
+pub(super) struct KeyCaps {
+    keys: Vec<std::sync::Arc<egui::Galley>>,
+    pub size: egui::Vec2,
+}
+impl KeyCaps {
+    const PAD: egui::Vec2 = egui::vec2(5.0, 2.0);
+    const GAP: f32 = 3.0;
+    pub fn measure(ui: &egui::Ui, text: &str) -> Self {
+        let keys: Vec<_> = text
+            .split_whitespace()
+            .map(|key| {
+                ui.painter().layout_no_wrap(
+                    key.to_owned(),
+                    egui::FontId::proportional(tokens::CAPTION),
+                    Color32::from_gray(220),
+                )
+            })
+            .collect();
+        let width = keys
+            .iter()
+            .map(|g| g.size().x + 2.0 * Self::PAD.x)
+            .sum::<f32>()
+            + keys.len().saturating_sub(1) as f32 * Self::GAP;
+        let height = keys
+            .iter()
+            .map(|g| g.size().y + 2.0 * Self::PAD.y)
+            .fold(0.0, f32::max);
+        Self {
+            keys,
+            size: egui::vec2(width, height),
+        }
+    }
+    pub fn measure_fitting(ui: &egui::Ui, text: &str, max_width: f32) -> Self {
+        let measured = Self::measure(ui, text);
+        if measured.size.x <= max_width {
+            return measured;
+        }
+        let mut job = egui::text::LayoutJob::simple(
+            text.to_owned(),
+            egui::FontId::proportional(tokens::CAPTION),
+            Color32::from_gray(220),
+            (max_width - 2.0 * Self::PAD.x).max(0.0),
+        );
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        let size = galley.size() + 2.0 * Self::PAD;
+        Self {
+            keys: vec![galley],
+            size,
+        }
+    }
+    pub fn paint(&self, ui: &egui::Ui, region: egui::Rect) {
+        let painter = ui
+            .painter()
+            .with_clip_rect(ui.clip_rect().intersect(region));
+        let mut x = region.right() - self.size.x;
+        for galley in &self.keys {
+            let size = galley.size() + 2.0 * Self::PAD;
+            let rect =
+                egui::Rect::from_min_size(egui::pos2(x, region.center().y - size.y / 2.0), size);
+            painter.rect(
+                rect,
+                tokens::XS as u8,
+                Color32::from_white_alpha(12),
+                egui::Stroke::new(1.0, Color32::from_white_alpha(55)),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(
+                rect.center() - galley.size() / 2.0,
+                galley.clone(),
+                Color32::from_gray(220),
+            );
+            x += size.x + Self::GAP;
+        }
+    }
+}
+
 pub(super) fn keycap(ui: &mut egui::Ui, text: &str) {
-    let mut keys: Vec<_> = text.split_whitespace().collect();
-    if ui.layout().main_dir() == egui::Direction::RightToLeft {
-        keys.reverse();
-    }
-    let spacing = ui.spacing().item_spacing.x;
-    ui.spacing_mut().item_spacing.x = 3.0;
-    for key in keys {
-        egui::Frame::new()
-            .fill(Color32::from_white_alpha(12))
-            .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(55)))
-            .corner_radius(tokens::XS as u8)
-            .inner_margin(egui::Margin::symmetric(tokens::XS as i8, 1))
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(key)
-                        .size(tokens::CAPTION)
-                        .color(Color32::from_gray(220)),
-                );
-            });
-    }
-    ui.spacing_mut().item_spacing.x = spacing;
+    let caps = KeyCaps::measure(ui, text);
+    let (rect, _) = ui.allocate_exact_size(caps.size, egui::Sense::hover());
+    caps.paint(ui, rect);
 }
 
 pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {

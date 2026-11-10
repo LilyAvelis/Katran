@@ -221,7 +221,7 @@ fn worker_digest(event: &Event) -> Option<String> {
     value
 }
 
-fn decode_digest(event: &Event) -> Option<String> {
+pub(crate) fn decode_digest(event: &Event) -> Option<String> {
     // Read a bounded immutable snapshot; validate the arrival's recorded bytes before decoding.
     use std::io::Read;
     let mut bytes = Vec::new();

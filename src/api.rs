@@ -19,6 +19,25 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    BeginJob {
+        command: Box<Command>,
+    },
+    PollJob {
+        job_id: crate::domain_jobs::JobId,
+    },
+    CancelJob {
+        job_id: crate::domain_jobs::JobId,
+    },
+    EnsurePreviewBackend,
+    PreviewBackendStatus,
+    EnsureSources,
+    PollSources {
+        limit: u8,
+    },
+    SourceStatus,
+    RescanSource {
+        source_id: crate::source_policy::SourceId,
+    },
     AdjustDensity {
         delta: i8,
     },
@@ -223,6 +242,8 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Event {
+    #[serde(default)]
+    pub delete_policy: crate::source_policy::DeletePolicy,
     #[serde(default)]
     pub revision: String,
     pub origin: origin::Origin,

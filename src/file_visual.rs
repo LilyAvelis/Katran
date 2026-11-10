@@ -9,7 +9,7 @@ use std::{fs, path::Path, time::UNIX_EPOCH};
 const CACHE_BUDGET: u64 = 128 * 1024 * 1024;
 const MAX_CACHE_ENTRY: u64 = 2 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShellVisual {
     Thumbnail,
     Icon,
@@ -53,7 +53,12 @@ struct Visual {
 }
 
 pub fn render(root: &Path, event: &Event, edge: u32) -> Result<serde_json::Value> {
-    render_with_provider(root, event, edge, &NativeShell)
+    render_with_provider(
+        root,
+        event,
+        edge,
+        &crate::shell_visual_worker::IsolatedShell,
+    )
 }
 
 pub fn render_with_provider(
@@ -68,7 +73,9 @@ pub fn render_with_provider(
             "max_edge must be 32..512 for file visuals",
         ));
     }
-    validate_source(event)?;
+    if !event.revision.starts_with("ref:") {
+        validate_source(event)?;
+    }
     // Preserve Katran's image decoder and image cache, including source checks.
     let mut reasons = Vec::new();
     match preview::render(root, event, edge) {
@@ -80,6 +87,7 @@ pub fn render_with_provider(
         Err(error) if error.code == "source_changed" => return Err(error),
         Err(error) => reasons.push(format!("image: {}", error.code)),
     }
+    // The decoder has already checked reference arrival bytes, even on decode failure.
     let directory = root.join("file-visuals");
     fs::create_dir_all(&directory)?;
     if fs::symlink_metadata(&directory)?.file_type().is_symlink() {
@@ -100,7 +108,6 @@ pub fn render_with_provider(
     );
     let cache = directory.join(format!("{key}.json"));
     if let Some(mut visual) = read_cache(&cache, event, edge) {
-        validate_source(event)?;
         visual.cache_hit = true;
         return Ok(serde_json::to_value(visual).expect("visual serialization"));
     }
