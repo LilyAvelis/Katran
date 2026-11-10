@@ -148,7 +148,8 @@ Stream origin tags identify the clipboard owner's app and, if supplied in
 CF_HTML, the browser domain. Unknown/old origins remain unknown. Origin tags do
 not collect full URLs or browser history; plain Unicode clipboard text can be
 saved as a Text fragment when Text is enabled. Origin tags appear in gallery
-and stream. Dedicated source sorting is future work.
+and stream. Source sorting (comma, then o; Shift+O reverses) uses recorded
+domain, app or source category; it does not infer a download website from a file.
 
 Shelf-only DeleteEvents never removes external original files. User-facing
 DeleteSelection follows the ownership-specific rules above. Owned blob files are reclaimed
