@@ -1,5 +1,5 @@
 param(
-    [string]$Root = (Join-Path $PSScriptRoot '..'),
+    [string]$Root,
     [string]$BinaryDirectory = 'target/build/release',
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$Version,
@@ -9,6 +9,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($Root)) { $Root = Join-Path $PSScriptRoot '..' }
 $Root = [IO.Path]::GetFullPath($Root)
 if (!$Version) {
     $cargo = Get-Content -LiteralPath (Join-Path $Root 'Cargo.toml') -Raw

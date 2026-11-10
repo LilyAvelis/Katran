@@ -418,6 +418,11 @@ mod tests {
             command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
             command
         }
+        fn exit_command(code: u8) -> std::process::Command {
+            let mut command = std::process::Command::new("cmd.exe");
+            command.args(["/d", "/c", "exit", &code.to_string()]);
+            command
+        }
         let started = std::time::Instant::now();
         for _ in 0..3 {
             assert_eq!(
@@ -431,12 +436,14 @@ mod tests {
             );
         }
         assert!(started.elapsed() < Duration::from_secs(5));
+        // Exit handling must not depend on PowerShell/.NET cold startup under
+        // parallel CI load. The hang case above retains its bounded deadline.
         assert_eq!(
-            exchange_command(powershell("exit 9"), &[], Duration::from_secs(5)).unwrap_err(),
+            exchange_command(exit_command(9), &[], Duration::from_secs(5)).unwrap_err(),
             "shell_worker_failed"
         );
         assert!(
-            exchange_command(powershell("exit 0"), &[], Duration::from_secs(5))
+            exchange_command(exit_command(0), &[], Duration::from_secs(5))
                 .unwrap()
                 .is_empty()
         );
