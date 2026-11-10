@@ -68,3 +68,13 @@ full package to update the CLI or launcher as well; future launcher protocol
 changes require a full package. An old CLI explicitly rejects unsupported newer
 data schemas instead of silently modifying them. The initial 2.0.0 package ships
 UI and CLI from the same source revision.
+
+## Retrying release infrastructure
+
+If an existing stable tag has not produced a published release, the workflow on
+main can be dispatched with `release_tag` set to that existing tag. Both checks
+and packaging check out the same tag; the tag itself is never moved. The release
+job remains gated by checks and exact Cargo/tag version matching. Asset publication
+refuses an existing release rather than replacing its files. Release preparation
+prefetches all locked dependencies because offline license metadata includes
+development dependencies that a release-only binary build may not download.

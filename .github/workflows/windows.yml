@@ -1,5 +1,11 @@
 name: Windows checks and release
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing stable release tag to build (never moved or overwritten)'
+        required: true
+        type: string
   pull_request:
   push:
     branches: [main]
@@ -8,13 +14,29 @@ permissions:
   contents: read
 env:
   RUSTUP_TOOLCHAIN: 1.95.0
+  KATRAN_RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 jobs:
   checks:
     runs-on: windows-2022
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
+      - name: Validate requested release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          if ($env:KATRAN_RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected a stable vMAJOR.MINOR.PATCH tag' }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Record checked source revision
+        id: source
+        shell: pwsh
+        run: |
+          $revision = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve source revision' }
+          "sha=$revision" >> $env:GITHUB_OUTPUT
       - name: Rust toolchain
         shell: pwsh
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
@@ -28,25 +50,38 @@ jobs:
           python tests/test_third_party_notices.py
           if ($LASTEXITCODE -ne 0) { throw 'Notice tests failed' }
   release:
-    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    if: (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: checks
     runs-on: windows-2022
     permissions:
       contents: write
     steps:
+      - name: Validate requested release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          if ($env:KATRAN_RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected a stable vMAJOR.MINOR.PATCH tag' }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          ref: ${{ needs.checks.outputs.source_sha }}
       - name: Build and package
         shell: pwsh
         run: |
           rustup toolchain install 1.95.0 --profile minimal
+          # Metadata includes development dependencies not compiled by release binaries.
+          cargo +1.95.0 fetch --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Release dependency prefetch failed' }
+          $version = (cargo +1.95.0 metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          if ($LASTEXITCODE -ne 0) { throw 'Version metadata failed' }
+          if ($env:KATRAN_RELEASE_TAG -cne "v$version") { throw 'Tag does not match Cargo version' }
+          $metadata = "$env:RUNNER_TEMP/katran-notices-metadata.json"
+          cargo +1.95.0 metadata --offline --locked --format-version 1 --features ui,clipboard-events --filter-platform x86_64-pc-windows-msvc > $metadata
+          if ($LASTEXITCODE -ne 0) { throw 'Offline dependency metadata failed' }
+          python scripts/third-party-notices.py --metadata $metadata --output "$env:RUNNER_TEMP/katran-third-party-notices.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency notice generation failed' }
           cargo +1.95.0 build --locked --release --features ui,clipboard-events --bin katran-ui --bin katran-launcher --bin katran --target-dir target/build
           if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
-          $version = (cargo +1.95.0 metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
-          if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag does not match Cargo version' }
-          python scripts/third-party-notices.py --output "$env:RUNNER_TEMP/katran-third-party-notices.txt"
-          if ($LASTEXITCODE -ne 0) { throw 'Dependency notice generation failed' }
           ./scripts/package-release.ps1 -OutputDirectory "$env:RUNNER_TEMP/katran-release" -Version $version -BuildInstaller -DependencyNoticesPath "$env:RUNNER_TEMP/katran-third-party-notices.txt"
       - name: Publish immutable release assets
         shell: pwsh
@@ -54,9 +89,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $directory = "$env:RUNNER_TEMP/katran-release"
-          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $version = $env:KATRAN_RELEASE_TAG.Substring(1)
           $notes = Join-Path $directory 'release-notes.md'
           [IO.File]::WriteAllText($notes, "Katran $version for Windows x64.`n`nPortable ZIP: extract and run Katran.exe. Installer: per-user installation. Close Katran before running setup. Updates: Settings → Updates. Unsigned binaries; no signing certificate is configured.`n`nSee docs/distribution.md for storage, update and verification contracts.")
           $assets = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Extension -in @('.zip','.exe','.json') -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object FullName)
-          gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --verify-tag --title "Katran $version" --notes-file $notes
+          gh release create $env:KATRAN_RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY --verify-tag --title "Katran $version" --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed' }
