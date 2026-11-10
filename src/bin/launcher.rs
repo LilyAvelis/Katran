@@ -6,6 +6,7 @@ use std::{
     process::Command,
 };
 mod app_registration;
+mod launcher_layout;
 
 fn target(runtime: &Path) -> io::Result<PathBuf> {
     let version = std::fs::read_to_string(runtime.join("current-version.txt"))?;
@@ -27,24 +28,21 @@ fn target(runtime: &Path) -> io::Result<PathBuf> {
 }
 fn run() -> io::Result<()> {
     let executable = std::env::current_exe()?;
-    let runtime = executable
-        .parent()
-        .ok_or_else(|| io::Error::other("Missing launcher directory"))?;
-    let root = runtime
-        .parent()
-        .ok_or_else(|| io::Error::other("Missing project directory"))?;
+    let root = launcher_layout::root(&executable)?;
+    let runtime = root.join("runtime");
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--register")) {
         let programs =
             std::env::var_os("APPDATA").ok_or_else(|| io::Error::other("APPDATA is missing"))?;
         let programs = PathBuf::from(programs).join("Microsoft/Windows/Start Menu/Programs");
         std::fs::create_dir_all(&programs)?;
-        return app_registration::write_link(root, &programs.join("Katran.lnk"));
+        return app_registration::write_link(&root, &programs.join("Katran.lnk"));
     }
-    let data = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("katran-data"));
-    Command::new(target(runtime)?)
+    let data = launcher_layout::data(
+        &root,
+        std::env::args_os().nth(1).map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+    )?;
+    Command::new(target(&runtime)?)
         .arg(data)
         .current_dir(root)
         .spawn()?;

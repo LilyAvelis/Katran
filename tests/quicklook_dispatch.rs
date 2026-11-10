@@ -76,7 +76,7 @@ fn explicit_quicklook_action_is_visible_rebindable_and_bypasses_image_preview() 
             .as_array()
             .unwrap()
             .iter()
-            .any(|a| a["id"] == "quicklook" && a["shortcut"] == "Ctrl Enter")
+            .any(|a| a["id"] == "quicklook" && (a["shortcut"].is_null() || a["shortcut"] == ""))
     );
     let r = call(Command::RunAction {
         id: "quicklook".into(),

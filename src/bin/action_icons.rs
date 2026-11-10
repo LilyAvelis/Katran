@@ -2,6 +2,7 @@
 use egui_lucide::Lucide;
 pub fn icon(id: &str) -> Lucide {
     match id {
+        id if id.starts_with("sort_") => Lucide::ArrowUpDown,
         "quicklook" | "preview" => Lucide::Eye,
         "density_more" => Lucide::ZoomOut,
         "density_less" => Lucide::ZoomIn,
@@ -14,7 +15,16 @@ pub fn icon(id: &str) -> Lucide {
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,
         "copy" => Lucide::Copy,
         "delete" => Lucide::Trash2,
-        "open" => Lucide::Eye,
+        "open" => Lucide::ExternalLink,
+        "reveal" => Lucide::FolderOpen,
+        "open_with" => Lucide::AppWindow,
+        "tabs_settings" => Lucide::PanelsTopLeft,
+        "toggle_images" | "toggle_screenshots" | "toggle_downloads" | "toggle_text"
+        | "toggle_links" | "toggle_tables" => Lucide::Eye,
+        "tables" => Lucide::Table,
+        "links" => Lucide::Link,
+        "text" => Lucide::FileText,
+        "copy_text" => Lucide::Copy,
         "save" => Lucide::Save,
         "gallery" => Lucide::Images,
         "list" => Lucide::List,

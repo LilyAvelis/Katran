@@ -64,13 +64,7 @@ impl Shelf {
                     .anchor(egui::Align2::RIGHT_BOTTOM, [-14.0, -58.0]),
             )
             .backdrop_color(Color32::from_black_alpha(24))
-            .frame(
-                egui::Frame::popup(&ctx.style_of(egui::Theme::Dark))
-                    .fill(Color32::from_rgb(69, 69, 74))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(118)))
-                    .corner_radius(12)
-                    .inner_margin(12),
-            )
+            .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width(width);
                 ui.label(
@@ -94,12 +88,16 @@ impl Shelf {
                                 );
                             }
                             let shortcut = a["shortcut"].as_str().unwrap_or("");
+                            // Sequence hints are presentation, never persisted chord bindings.
+                            let hint=sorting_ui::sequence_hint(a["id"].as_str().unwrap_or(""));
+                            let display=if shortcut.is_empty(){hint.unwrap_or("")}else{crate::action_row::primary_shortcut(shortcut)};
+                            let tooltip=hint.map(|hint|format!("Последовательность: {hint} · сначала запятая, затем клавиша")).unwrap_or_else(||shortcut.to_owned());
                             let response = crate::action_row::ActionRow::new(
                                 crate::action_row::ActionPresentation {
                                     label: a["label"].as_str().unwrap_or(""),
                                     icon: action_icons::icon(a["id"].as_str().unwrap_or("")),
-                                    primary_shortcut: crate::action_row::primary_shortcut(shortcut),
-                                    full_shortcut_tooltip: shortcut,
+                                    primary_shortcut: display,
+                                    full_shortcut_tooltip: &tooltip,
                                 },
                             )
                             .show(ui, index == self.action_selected);

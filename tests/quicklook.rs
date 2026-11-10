@@ -16,11 +16,14 @@ impl Launcher for Fake {
 }
 fn event(path: PathBuf) -> Event {
     Event {
+        kind: Default::default(),
+        text_preview: None,
         delete_policy: Default::default(),
         revision: format!("ref:{}", katran::preview::content_hash(&path).unwrap()),
         origin: Default::default(),
         id: 42,
         detected_at_ms: 0,
+        modified_at_ms: None,
         source: "synthetic".into(),
         name: path.file_name().unwrap().to_string_lossy().into(),
         storage: "reference".into(),

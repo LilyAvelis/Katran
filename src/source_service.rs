@@ -11,7 +11,10 @@ impl Service {
         if self.source_configured && (!start || self.source_runtime_started) {
             return Ok(serde_json::json!({"sources":self.source_runtime.statuses()}));
         }
-        let downloads = if self.settings.downloads_enabled {
+        let downloads = if self
+            .settings
+            .tab_enabled(crate::interaction::ShelfTab::Downloads)
+        {
             downloads::configured_folder(self.settings.downloads_folder.as_deref())?
         } else {
             self.settings.downloads_folder.clone().unwrap_or_default()
@@ -20,12 +23,16 @@ impl Service {
             (
                 SourceId::Sharex,
                 self.settings.sharex_folder.clone().unwrap_or_default(),
-                self.settings.sharex_folder.is_some(),
+                self.settings.sharex_folder.is_some()
+                    && self
+                        .settings
+                        .tab_enabled(crate::interaction::ShelfTab::Screenshots),
             ),
             (
                 SourceId::Downloads,
                 downloads,
-                self.settings.downloads_enabled,
+                self.settings
+                    .tab_enabled(crate::interaction::ShelfTab::Downloads),
             ),
         ];
         let mut configurations = Vec::new();
@@ -118,7 +125,15 @@ impl Service {
                 Err(error) => items.push(serde_json::json!({"ok":false,"path":path,"error":error})),
             }
         }
-        let classification = self.classification.poll(&self.db)?;
+        let classification = self.classification.poll_enabled(
+            &self.db,
+            self.settings
+                .tab_enabled(crate::interaction::ShelfTab::Images)
+                && self
+                    .settings
+                    .tab_enabled(crate::interaction::ShelfTab::Screenshots)
+                && self.settings.sharex_folder.is_some(),
+        )?;
         Ok(
             serde_json::json!({"classification_changed":classification["classification_changed"],"classification":classification,"scanned":true,"items":items,"sources":batch.statuses,"source_errors":batch.errors,"refresh":snapshot_changed}),
         )

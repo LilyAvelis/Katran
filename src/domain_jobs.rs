@@ -30,6 +30,7 @@ pub enum Lane {
     Foreground,
     Capture,
     Discovery,
+    Update,
 }
 impl Lane {
     fn index(self) -> usize {
@@ -37,12 +38,14 @@ impl Lane {
             Self::Foreground => 0,
             Self::Capture => 1,
             Self::Discovery => 2,
+            Self::Update => 3,
         }
     }
     fn capacity(self) -> usize {
         match self {
             Self::Foreground => 8,
             Self::Capture | Self::Discovery => 2,
+            Self::Update => 1,
         }
     }
 }
@@ -133,7 +136,7 @@ struct Entry<T> {
 pub struct DomainJobs<T: Send + 'static> {
     entries: BTreeMap<JobId, Entry<T>>,
     terminal: VecDeque<JobId>,
-    workers: [Option<Worker<T>>; 3],
+    workers: [Option<Worker<T>>; 4],
     sender: mpsc::SyncSender<(JobId, Result<T>)>,
     receiver: mpsc::Receiver<(JobId, Result<T>)>,
     next_id: u64,
@@ -309,6 +312,7 @@ impl<T: Send + 'static> DomainJobs<T> {
             Lane::Capture,
             Lane::Foreground,
             Lane::Discovery,
+            Lane::Update,
         ];
         let mut output = Vec::new();
         for _ in 0..max.min(MAX_COMPLETIONS_PER_POLL) {

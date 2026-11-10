@@ -180,6 +180,17 @@ impl Service {
                     &self.root,
                     self.quota,
                     &references,
+                    (
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Images),
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Text),
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Links),
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Tables),
+                    ),
+                    &self.owned_table_tokens.iter().cloned().collect::<Vec<_>>(),
                 );
                 self.complete_capture(ticket, snapshot)
             }
@@ -249,6 +260,43 @@ mod asynchronous_tests {
                 .complete_capture_at_sequence(latest, Ok(snapshot), 42)
                 .unwrap()["state"],
             "paused"
+        );
+        assert_eq!(count(&service), 0);
+        assert_eq!(
+            std::fs::read_dir(service.root.join("blobs"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+    #[test]
+    fn disabling_images_discards_pending_and_direct_image_receipts() {
+        let (_root, mut service) = service();
+        let ticket = begin(&mut service);
+        let snapshot = image(&service, 42);
+        service
+            .dispatch(crate::Command::SetTabEnabled {
+                tab: crate::interaction::ShelfTab::Images,
+                enabled: false,
+            })
+            .unwrap();
+        let direct = image(&service, 42);
+        assert_eq!(
+            service.commit_capture_snapshot(direct, 42).unwrap()["state"],
+            "images_disabled"
+        );
+        assert_eq!(count(&service), 0);
+        service
+            .dispatch(crate::Command::SetTabEnabled {
+                tab: crate::interaction::ShelfTab::Images,
+                enabled: true,
+            })
+            .unwrap();
+        assert_eq!(
+            service
+                .complete_capture_at_sequence(ticket, Ok(snapshot), 42)
+                .unwrap()["state"],
+            "superseded"
         );
         assert_eq!(count(&service), 0);
         assert_eq!(

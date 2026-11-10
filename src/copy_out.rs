@@ -94,6 +94,86 @@ pub struct Plan {
     attempted: Cell<bool>,
 }
 impl Plan {
+    /// Replace a fully verified link-only snapshot batch with one owned UTF-8 file.
+    pub(crate) fn group_links(&mut self, quota: u64) -> Result<(), String> {
+        use std::io::Write;
+        if !self.failures.is_empty() || self.paths.is_empty() {
+            return Err(format!(
+                "Cannot group links: {}",
+                serde_json::to_string(&self.failures).unwrap_or_default()
+            ));
+        }
+        let mut urls = Vec::with_capacity(self.paths.len());
+        let mut total = 0usize;
+        for path in &self.paths {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|e| e.to_string())?
+                .take((crate::text_fragments::MAX_TEXT_BYTES + 1) as u64)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() > crate::text_fragments::MAX_TEXT_BYTES {
+                return Err("Link snapshot exceeds 1 MiB".into());
+            }
+            let url = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+            if crate::link_fragments::recognize(&url).is_none() {
+                return Err("Invalid link snapshot".into());
+            }
+            total = total
+                .checked_add(url.len())
+                .and_then(|n| n.checked_add(usize::from(!urls.is_empty())))
+                .ok_or("Link export overflow")?;
+            if total > crate::text_fragments::MAX_MERGED_BYTES {
+                return Err("Link export exceeds 8 MiB".into());
+            }
+            urls.push(url);
+        }
+        let mut other_bytes = 0u64;
+        let exports = self.directory.parent().ok_or("Invalid export directory")?;
+        for batch in std::fs::read_dir(exports).map_err(|e| e.to_string())? {
+            let batch = batch.map_err(|e| e.to_string())?;
+            if batch.path() == self.directory
+                || !batch.file_name().to_string_lossy().starts_with("copy-")
+            {
+                continue;
+            }
+            if !batch.file_type().map_err(|e| e.to_string())?.is_dir() {
+                return Err("Unexpected entry in owned export batches".into());
+            }
+            for file in std::fs::read_dir(batch.path()).map_err(|e| e.to_string())? {
+                let file = file.map_err(|e| e.to_string())?;
+                if !file.file_type().map_err(|e| e.to_string())?.is_file() {
+                    return Err("Unexpected entry in export batch".into());
+                }
+                other_bytes = other_bytes
+                    .checked_add(file.metadata().map_err(|e| e.to_string())?.len())
+                    .ok_or("Export size overflow")?;
+            }
+        }
+        if other_bytes.saturating_add(total as u64) > quota {
+            return Err("Export quota exceeded".into());
+        }
+        let destination = self.directory.join("links.txt");
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .map_err(|e| e.to_string())?;
+        file.write_all(urls.join("\n").as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        for path in &self.paths {
+            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+        self.paths = vec![destination.canonicalize().map_err(|e| e.to_string())?];
+        Ok(())
+    }
+    /// An external application may read the path asynchronously or keep editing
+    /// it. Open-file snapshots have their own bounded cache and never retire
+    /// previously handed-off files on a later open.
+    pub(crate) fn retain_without_retiring(&self) {
+        self.published.set(true);
+    }
     /// Legacy references may point into an older export batch. Their lifetime is
     /// governed by shelf records, so clipboard rotation must retain that batch.
     /// Call with all stored external reference paths before publishing. Retained
@@ -458,11 +538,14 @@ mod tests {
         let source = dir.path().join("blob");
         std::fs::write(&source, b"synthetic").unwrap();
         let event = |id, path| crate::Event {
+            kind: Default::default(),
+            text_preview: None,
             delete_policy: Default::default(),
             origin: Default::default(),
             revision: "synthetic".into(),
             id,
             detected_at_ms: 0,
+            modified_at_ms: None,
             source: "test".into(),
             name: "photo.png".into(),
             storage: "cached".into(),
@@ -503,11 +586,14 @@ mod tests {
     }
     fn cached_event(path: PathBuf) -> crate::Event {
         crate::Event {
+            kind: Default::default(),
+            text_preview: None,
             delete_policy: Default::default(),
             origin: Default::default(),
             revision: "synthetic".into(),
             id: 1,
             detected_at_ms: 0,
+            modified_at_ms: None,
             source: "test".into(),
             name: "sample.bin".into(),
             storage: "cached".into(),
@@ -659,11 +745,14 @@ mod tests {
         image::DynamicImage::new_rgb8(2, 1).save(&original).unwrap();
         let events: Vec<_> = (1..=3)
             .map(|id| crate::Event {
+                kind: Default::default(),
+                text_preview: None,
                 delete_policy: Default::default(),
                 origin: Default::default(),
                 revision: format!("ref:{}", content_digest(&original).unwrap()),
                 id,
                 detected_at_ms: 0,
+                modified_at_ms: None,
                 source: "test".into(),
                 name: "original.png".into(),
                 storage: if id == 1 { "reference" } else { "cached" }.into(),

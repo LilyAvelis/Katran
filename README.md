@@ -4,14 +4,24 @@ Clipboard events are now the default after the owner's successful browser and
 filesystem checks. The accepted `experiment/clipboard-events` branch is merged
 into `main`. [Capture contract and verification](docs/clipboard-events-experiment.md).
 
-Independent, local Windows-first object shelf in Rust. Version1.5.0 was accepted by the owner after Windows testing of instant QuickLook preview, Actions and Tab. [Release and handoff](docs/releases/1.5.0.md). API First: UI, capture,
-CLI and future integrations use one versioned Rust command dispatcher.
+Independent, local Windows-first object shelf in Rust. **Katran 2.0.0** was
+accepted by the owner after Windows checks of text, Markdown, Links, table
+transfer between Google Sheets and Notion, sorting, and zoomable previews.
+API First: UI, capture, CLI and integrations use one Rust command dispatcher.
+[2.0 release notes](docs/releases/2.0.0.md).
 
-## Current release · 1.5.0 · owner accepted
+Download the **portable ZIP** or **per-user setup EXE** from
+[GitHub Releases](https://github.com/LilyAvelis/Katran/releases).
+Portable: extract the entire archive and run `Katran.exe`; data stays beside it.
+Setup: installs without administrator rights and keeps data in
+`%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
+an available update for the next launch. [Distribution and update contract](docs/distribution.md).
+
+## Current release · 2.0.0
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.5.0**. Existing data stays in `katran-data`.
+must say **Katran · 2.0.0**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -40,25 +50,37 @@ root, including restoration from minimized state. In Raycast, assign its app
 hotkey under Settings → Applications and select Hotkey Action → Always Show.
 [Activation, registration and manual checks](docs/application-launch.md).
 
-[Tabs and ShareX setup, API and limits](docs/tabs-and-sharex.md). This is the first
-2.0 foundation, not the complete 2.0 release.
+[Tabs and ShareX setup, API and limits](docs/tabs-and-sharex.md) records the
+earlier source setup. Current visibility and file-opening API behavior is in
+[tab visibility and opening](docs/tab-visibility-and-opening.md). The 1.5 release documents remain historical snapshots; current 2.0 behavior is
+documented with each feature.
 
 Current source contract: Images is the clipboard/manual image shelf; Screenshots
 and Downloads are live views of originals. Downloads uses the Windows Known
-Folder by default; Settings can disable it or override the root. Ctrl D is
-rebindable. Delete in Downloads uses Windows recycling; ShareX originals use
+Folder by default; Settings can disable it or override the root.
+Delete in Downloads uses Windows recycling; ShareX originals use
 permanent deletion. Single deletion is immediate; groups confirm with Enter.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 
-Tabs are positional: 1..9 select non-All tabs in their saved order. Drag tabs
+Tabs are positional: 1..9 select enabled non-All tabs in their saved order. Drag tabs
 with the mouse to reorder; All stays pinned. Tab toggles All and the remembered
 tab, including when a button has focus. Text fields/dialogs retain local input.
 Tab positions are registered in the shared shortcut catalogue; direct source
 commands no longer have Ctrl J/H/D defaults. Existing user overrides are retained.
+Settings → Tabs eye buttons hide a tab and stop its associated collection;
+the remaining number positions close the gap. Existing data is retained.
 
-Space/Enter uses Katran for supported images, and installed Windows QuickLook
-for other files in its own window. Ctrl Enter / “Открыть через QuickLook” explicitly opens either kind externally. Katran prepares QuickLook in the background at startup. The verified fast QuickLook is the main installation at its normal path. Katran starts it automatically when absent and reuses it when ready. Closing Katran leaves QuickLook running. [Fast backend, installation, rollback and limits](docs/quicklook-fast-backend.md).
+Enter uses the default app for the current file. Ctrl Enter reveals the exact
+file in Explorer; Ctrl Shift Enter opens Katran's bottom
+[Open With app picker](docs/open-app-picker.md). Space previews supported
+images, Text fragments, Links, Tables, and `.md` / `.markdown` files in Katran; other files use
+installed Windows QuickLook. The explicit QuickLook action remains available
+without a shortcut.
+Katran prepares QuickLook in the background at startup. The verified
+fast QuickLook is the main installation at its normal path. Katran starts it
+automatically when absent and reuses it when ready. Closing Katran leaves
+QuickLook running. [Fast backend, installation, rollback and limits](docs/quicklook-fast-backend.md).
 
 Ctrl− / Ctrl+ changes content density by one: gallery columns (default 4) or
 stream rows (default 3), saved independently. Fonts, controls and DPI remain
@@ -70,19 +92,28 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 | Control | Action |
 | --- | --- |
 | Ctrl K | Actions: search, arrows, Enter, Escape |
-| Ctrl , | Settings: general and keyboard |
+| Ctrl , | Settings: general, keyboard and tabs |
+| Comma, then e / m / r / n / s / a / o | Sort by extension / modification / shuffle / natural name / size / name / origin; Shift on the second key reverses order except shuffle |
 | Ctrl Shift , in Actions | Record shortcut for selected command |
+| 1..9 | Select numbered tab in compact visible order |
 | Arrow keys | Navigate gallery; Up/Down in stream |
 | Click / Ctrl-click / Shift-click | Single / individual toggle / range |
 | Shift + arrows | Range selection |
-| Enter / double-click | Open large fitted image preview |
-| Space | Toggle large preview / shelf; arrows browse adjacent objects |
+| Enter / double-click | Open current file in its default app |
+| Ctrl Enter | Reveal current file in Explorer |
+| Ctrl Shift Enter | Katran's bottom [Open With app picker](docs/open-app-picker.md); “Другое приложение…” opens the Windows chooser |
+| Space | Preview images, Text, Links, Tables, and Markdown in Katran; QuickLook other files |
+| Ctrl Left / Ctrl Right in text or Markdown preview | Markdown / original source; stays on the current item |
+| Ctrl C / drag with only Links selected | Copy URLs as text / drag one combined links.txt |
+| Ctrl C / drag with only Tables selected | Copy cells as HTML + TSV / drag a separate CSV per table |
+| Ctrl Left / Ctrl Right in Table preview | Grid / CSV source |
+| Wheel / Ctrl-wheel in Table grid | Zoom at pointer / centre; left or middle drag pans, “Вписать” fits the table |
 | Wheel in large preview / Ctrl + wheel | Zoom toward pointer / canvas center |
 | Middle-button drag in large preview | Pan the enlarged image |
 | Primary drag in enlarged preview | Grab and pan the image |
 | Drag a card / fitted preview | Native copy-only drag-out; selected group / current image |
 | Escape | Close preview/dialog/palette |
-| Ctrl C | Copy selected files/images to the Windows clipboard |
+| Ctrl C | Copy all-Text selections as joined plain text; mixed/non-Text selections use file copy |
 | Delete | Remove from shelf; groups require Enter confirmation |
 
 Preview zoom follows the Afio pattern: 1–16×, clipped to the image canvas; changing
@@ -90,14 +121,23 @@ the image or closing/reopening preview resets the fit. Window dimensions stay
 unchanged. See [zoom and font contracts](docs/preview-zoom-and-fonts.md).
 
 Use Actions to enable/pause capture, select gallery/stream, refresh or save copies
-to a folder. A green/red lamp next to Actions shows the current capture state.
-Capture is disabled at startup unless explicitly changed in Settings.
+to a folder. When Text is enabled, Actions also offers **Копировать тексты одним
+текстом**, joining selected fragments in selection order. A green/red lamp next
+to Actions shows the current capture state. Capture is disabled at startup
+unless explicitly changed in Settings.
 
 Copied Explorer files are references; browser **Copy image** creates a cached PNG.
 Arbitrary regular files remain transferable. Gallery and stream use Windows
 Shell thumbnails when available, then associated file icons or a generic icon.
 See [file visual API and limits](docs/file-visuals.md).
-Text/URL clipboard contents are not archived. File drops are supported. Capture
+Clipboard Text is optional and off by default. When enabled with capture, plain
+Unicode clipboard text is saved as Text fragments; URL-looking strings remain
+unclassified text. [Text fragment behavior, limits and API](docs/text-fragments.md).
+Ctrl+C joins all-Text selections with `\n\n`; selection order follows Ctrl
+toggle order or the current visible order for Shift ranges. Drag always exports
+files. Markdown previews offer rendered and source views with conservative
+formatting; HTML is displayed as literal text.
+File drops are supported. Capture
 uses Windows change notifications with short bounded retries. Its message-only
 listener and background logic continue while the window is minimized or hidden;
 the process must stay running. Very fast intermediate copies can still be
@@ -105,9 +145,10 @@ coalesced because Clipboard holds a current snapshot, not a history. Capture aft
 is enabled by default. Both sources use native folder notification workers.
 
 Stream origin tags identify the clipboard owner's app and, if supplied in
-CF_HTML, the browser domain. Unknown/old origins remain unknown. Full URLs and
-browser history are not collected. Origin tags appear in gallery and stream.
-Dedicated source sorting is future work.
+CF_HTML, the browser domain. Unknown/old origins remain unknown. Origin tags do
+not collect full URLs or browser history; plain Unicode clipboard text can be
+saved as a Text fragment when Text is enabled. Origin tags appear in gallery
+and stream. Dedicated source sorting is future work.
 
 Shelf-only DeleteEvents never removes external original files. User-facing
 DeleteSelection follows the ownership-specific rules above. Owned blob files are reclaimed
@@ -154,8 +195,9 @@ Automated checks use synthetic files and headless egui. The owner checks native
 Windows appearance and paste compatibility. Tests never replace her clipboard
 or manipulate the desktop.
 
-Current boundaries: no global hotkey, autostart, native folder event watchers, built-in video decoding,
-Afio adapter or protected IPC. Previews are fitted images, not original-pixel zoom.
+Current boundaries: no global hotkey, autostart, built-in video decoding,
+Afio adapter or protected IPC. Preview is fitted by default, with bounded image
+zoom and pan controls described above.
 Blobs default to a 2 GiB quota with reject-new policy. Clipboard snapshots have a
 separate budget of the same size, including the previous and prepared batch; old
 batches retire only after successful clipboard replacement. Persistent thumbnails

@@ -4,13 +4,19 @@ use katran::{interaction::ShelfTab, tab_layout};
 fn default_positions_and_stable_reorder() {
     use ShelfTab::*;
     let mut order = tab_layout::default_order();
-    assert_eq!(order, vec![Images, Screenshots, Downloads]);
+    assert_eq!(
+        order,
+        vec![Images, Screenshots, Downloads, Text, Links, Tables]
+    );
     assert_eq!(tab_layout::tab_at(&order, 0).unwrap(), All);
     for (index, tab) in order.iter().enumerate() {
         assert_eq!(tab_layout::tab_at(&order, index as u8 + 1).unwrap(), *tab);
     }
     tab_layout::reorder(&mut order, Downloads, 0).unwrap();
-    assert_eq!(order, vec![Downloads, Images, Screenshots]);
+    assert_eq!(
+        order,
+        vec![Downloads, Images, Screenshots, Text, Links, Tables]
+    );
     assert_eq!(tab_layout::tab_at(&order, 1).unwrap(), Downloads);
     tab_layout::reorder(&mut order, Downloads, 2).unwrap();
     assert_eq!(order, tab_layout::default_order());
@@ -22,12 +28,12 @@ fn default_positions_and_stable_reorder() {
 fn invalid_requests_preserve_order() {
     use ShelfTab::*;
     let original = tab_layout::default_order();
-    for (tab, index) in [(All, 0), (Images, 3), (Downloads, usize::MAX)] {
+    for (tab, index) in [(All, 0), (Images, 6), (Downloads, usize::MAX)] {
         let mut order = original.clone();
         assert!(tab_layout::reorder(&mut order, tab, index).is_err());
         assert_eq!(order, original);
     }
-    for position in 4..=u8::MAX {
+    for position in 7..=u8::MAX {
         assert_eq!(
             tab_layout::tab_at(&original, position).unwrap_err().code,
             "invalid_tab_position"

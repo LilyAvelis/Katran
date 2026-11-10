@@ -49,6 +49,10 @@ impl Service {
             && hash == item.content_hash
         {
             self.db.execute(
+                "UPDATE events SET modified_at_ms=?1 WHERE id=?2",
+                params![sorting::modified_ms(item.modified), id],
+            )?;
+            self.db.execute(
                 "UPDATE source_projection SET available=1 WHERE event_id=?1",
                 [id],
             )?;
@@ -87,8 +91,8 @@ impl Service {
             tx.last_insert_rowid()
         };
         tx.execute(
-            "UPDATE events SET delete_policy_json=?1,legacy_source_ref=0 WHERE id=?2",
-            params![serde_json::to_string(&policy).unwrap(), id],
+            "UPDATE events SET delete_policy_json=?1,legacy_source_ref=0,modified_at_ms=?3 WHERE id=?2",
+            params![serde_json::to_string(&policy).unwrap(), id, sorting::modified_ms(item.modified)],
         )?;
         tx.execute("INSERT INTO source_projection VALUES(?1,?2,?3,?4,1) ON CONFLICT(source_id,generation,path_key) DO UPDATE SET event_id=excluded.event_id,available=1",params![source,configuration.generation,key,id])?;
         tx.execute("INSERT INTO source_receipts VALUES(?1,?2,?3,?4,?5) ON CONFLICT(source_id,root_key,path_key) DO UPDATE SET hash=excluded.hash,event_id=excluded.event_id",params![source,root_key,key,item.content_hash,id])?;

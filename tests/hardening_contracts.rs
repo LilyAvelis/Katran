@@ -356,7 +356,9 @@ fn mixed_original_batch_uses_injected_recycler_and_reports_each_failure() {
 #[test]
 fn current_schema_restart_recovers_unfinished_classification_without_migration() {
     let data = tempfile::tempdir().unwrap();
+    let screenshots = tempfile::tempdir().unwrap();
     let mut api = Service::open(data.path(), 1000000).unwrap();
+    configure(&mut api, screenshots.path());
     call(
         &mut api,
         Command::IngestBytes {
@@ -372,7 +374,7 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        2
+        6
     );
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();

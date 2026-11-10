@@ -1,0 +1,2 @@
+# Keep downloaded license bytes identical to their pinned upstream SHA-256.
+*.txt -text

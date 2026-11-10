@@ -26,6 +26,13 @@ pub(crate) fn prepare_owned(
 ) -> Result<DragPreparation> {
     let mut plan = copy_out::prepare_with_budget(&root.join("drag-cache"), events, quota)
         .map_err(|e| ApiError::new("drag_error", e))?;
+    if events
+        .iter()
+        .all(|event| event.kind == crate::EventKind::LinkFragment)
+    {
+        plan.group_links(quota)
+            .map_err(|e| ApiError::new("drag_error", e))?;
+    }
     plan.protect_references(references)
         .map_err(|e| ApiError::new("drag_error", e))?;
     if plan.paths.is_empty() {

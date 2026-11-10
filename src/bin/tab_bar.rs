@@ -24,6 +24,9 @@ pub fn show(
                 ShelfTab::Images => ("Images", "images"),
                 ShelfTab::Screenshots => ("Screenshots", "screenshots"),
                 ShelfTab::Downloads => ("Downloads", "downloads"),
+                ShelfTab::Text => ("Text", "text"),
+                ShelfTab::Links => ("Links", "links"),
+                ShelfTab::Tables => ("Tables", "tables"),
             };
             let response = ui.add_enabled(
                 enabled,

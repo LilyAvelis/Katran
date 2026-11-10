@@ -15,6 +15,7 @@ try {
     $id = (Get-Content $pointer -Raw).Trim()
     $manifest = Get-Content (Join-Path $root "runtime/versions/$id/build-manifest.json") -Raw | ConvertFrom-Json
     if ($manifest.version -ne '9.8.7') { throw 'Incorrect package version' }
+    if ($manifest.update_format -ne 1 -or $manifest.minimum_launcher_protocol -ne 1) { throw 'Missing updater protocol' }
     if ($manifest.executable_sha256 -ne (Get-FileHash (Join-Path $root "runtime/versions/$id/katran-ui.exe") -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Incorrect executable hash' }
     Invoke-KatranInstall $root {} {} | Out-Null
     Write-Output 'Synthetic installation contract passed.'

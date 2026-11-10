@@ -19,6 +19,103 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    GetUpdateStatus,
+    CheckUpdates,
+    InstallUpdate,
+    TableViewGeometry {
+        viewport: crate::preview_view::Size,
+        content: crate::preview_view::Size,
+    },
+    ZoomTableView {
+        multiplier: f32,
+        anchor: crate::preview_view::Point,
+        viewport: crate::preview_view::Size,
+        content: crate::preview_view::Size,
+    },
+    PanTableView {
+        delta: crate::preview_view::Point,
+        viewport: crate::preview_view::Size,
+        content: crate::preview_view::Size,
+    },
+    FitTableView {
+        viewport: crate::preview_view::Size,
+        content: crate::preview_view::Size,
+    },
+    ResetTableView,
+    IngestTable {
+        rows: Vec<Vec<String>>,
+        source: String,
+    },
+    IngestTableTsv {
+        text: String,
+        source: String,
+    },
+    IngestTableHtml {
+        html: String,
+        source: String,
+    },
+    GetTable {
+        id: i64,
+    },
+    CopyTables {
+        items: Vec<SelectionRef>,
+    },
+    IngestLink {
+        url: String,
+        source: String,
+    },
+    GetLink {
+        id: i64,
+    },
+    CopyLinks {
+        items: Vec<SelectionRef>,
+    },
+    IngestText {
+        text: String,
+        source: String,
+    },
+    GetText {
+        id: i64,
+    },
+    GetDocumentText {
+        id: i64,
+    },
+    MergeText {
+        items: Vec<SelectionRef>,
+        separator: String,
+    },
+    CopyText {
+        items: Vec<SelectionRef>,
+        separator: String,
+    },
+    CopySelectedText,
+    CopySmart {
+        items: Vec<SelectionRef>,
+    },
+    CopySelectedObjects,
+    ListOpenApps {
+        id: i64,
+    },
+    OpenWithApp {
+        token: String,
+        app_id: Option<String>,
+    },
+    ReleaseOpenApps {
+        token: String,
+    },
+    Tabs,
+    SetTabEnabled {
+        tab: crate::interaction::ShelfTab,
+        enabled: bool,
+    },
+    ToggleTabEnabled {
+        tab: crate::interaction::ShelfTab,
+    },
+    ShowTabSettings,
+    OpenFile {
+        id: i64,
+        operation: crate::open_file::Operation,
+    },
     BeginJob {
         command: Box<Command>,
     },
@@ -71,6 +168,17 @@ pub enum Command {
         query: String,
         limit: u32,
         after_id: Option<i64>,
+    },
+    BrowseShelfSorted {
+        query: String,
+        limit: u32,
+        cursor: Option<String>,
+    },
+    SetSort {
+        mode: crate::sorting::SortMode,
+        #[serde(default)]
+        reverse: bool,
+        seed: Option<u64>,
     },
     ScanSharex,
     ScanDownloads,
@@ -243,16 +351,33 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Event {
     #[serde(default)]
+    pub kind: EventKind,
+    #[serde(default)]
+    pub text_preview: Option<String>,
+    #[serde(default)]
     pub delete_policy: crate::source_policy::DeletePolicy,
     #[serde(default)]
     pub revision: String,
     pub origin: origin::Origin,
     pub id: i64,
     pub detected_at_ms: i64,
+    #[serde(default)]
+    pub modified_at_ms: Option<i64>,
     pub source: String,
     pub name: String,
     pub storage: String,
     pub path: PathBuf,
     pub size: u64,
     pub available: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    #[default]
+    FileReference,
+    ManagedImage,
+    TextFragment,
+    LinkFragment,
+    TableFragment,
 }

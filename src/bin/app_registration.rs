@@ -39,9 +39,19 @@ pub fn write_link(project: &Path, destination: &Path) -> io::Result<()> {
         let link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(err)?;
         let launcher = wide(&project.join("runtime/Katran.exe"));
-        let icon = wide(&project.join("assets/branding/katran.ico"));
+        let icon_file = project.join("assets/branding/katran.ico");
+        let icon = wide(&if icon_file.is_file() {
+            icon_file
+        } else {
+            project.join("runtime/Katran.exe")
+        });
         let cwd = wide(project);
-        let args = format!("\"{}\"", project.join("katran-data").display())
+        let data = super::launcher_layout::data(
+            project,
+            None,
+            std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from),
+        )?;
+        let args = format!("\"{}\"", data.display())
             .encode_utf16()
             .chain(Some(0))
             .collect::<Vec<_>>();

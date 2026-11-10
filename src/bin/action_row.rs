@@ -8,7 +8,14 @@ pub(super) struct ActionPresentation<'a> {
     pub primary_shortcut: &'a str,
     pub full_shortcut_tooltip: &'a str,
 }
-pub(super) struct ActionRow<'a>(ActionPresentation<'a>);
+pub(super) struct ActionRow<'a>(ActionPresentation<'a>, Option<egui::TextureId>);
+pub(super) fn popup_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::popup(&ctx.style_of(egui::Theme::Dark))
+        .fill(Color32::from_rgb(69, 69, 74))
+        .stroke(egui::Stroke::new(1.0, Color32::from_gray(118)))
+        .corner_radius(12)
+        .inner_margin(12)
+}
 pub(super) fn primary_shortcut(shortcut: &str) -> &str {
     shortcut.split('/').next().unwrap_or("").trim()
 }
@@ -20,10 +27,14 @@ struct Regions {
 }
 impl<'a> ActionRow<'a> {
     pub fn new(presentation: ActionPresentation<'a>) -> Self {
-        Self(presentation)
+        Self(presentation, None)
+    }
+    pub fn with_texture(mut self, texture: Option<egui::TextureId>) -> Self {
+        self.1 = texture;
+        self
     }
     fn shortcut_budget(row_width: f32) -> f32 {
-        ((row_width - 42.0).max(0.0) * 0.75).max(10.0)
+        ((row_width - 42.0).max(0.0) * 0.45).max(10.0)
     }
     fn regions(row: egui::Rect, key_width: f32) -> Regions {
         let left = (row.left() + 33.0).min(row.right());
@@ -66,7 +77,11 @@ impl<'a> ActionRow<'a> {
             ui.painter()
                 .rect_filled(row, 7.0, Color32::from_rgb(100, 100, 108));
         }
-        self.0.icon.size(16.0).image().paint_at(ui, regions.icon);
+        if let Some(texture) = self.1 {
+            egui::Image::new((texture, egui::vec2(16.0, 16.0))).paint_at(ui, regions.icon);
+        } else {
+            self.0.icon.size(16.0).image().paint_at(ui, regions.icon);
+        }
         // Single-line truncation uses egui's actual font layout and same vertical anchor.
         let mut job = egui::text::LayoutJob::simple(
             self.0.label.to_owned(),
@@ -107,7 +122,13 @@ mod tests {
                 let ctx = context(scale);
                 let mut cases: Vec<_> = katran::actions::DEFS
                     .iter()
-                    .map(|d| (d.id, d.label, d.default_binding))
+                    .map(|d| {
+                        (
+                            d.id,
+                            d.label,
+                            crate::sorting_ui::sequence_hint(d.id).unwrap_or(d.default_binding),
+                        )
+                    })
                     .collect();
                 cases.extend([
                     (
@@ -120,6 +141,7 @@ mod tests {
                 for (id, label, shortcut) in cases {
                     let mut row = egui::Rect::NOTHING;
                     let mut regions = None;
+                    let mut complete_keys_fit = false;
                     let mut output = ctx.run_ui(
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(
@@ -130,6 +152,9 @@ mod tests {
                         },
                         |ui| {
                             ui.set_width(width);
+                            complete_keys_fit =
+                                KeyCaps::measure(ui, primary_shortcut(shortcut)).size.x
+                                    <= ActionRow::shortcut_budget(ui.available_width());
                             let caps = KeyCaps::measure_fitting(
                                 ui,
                                 primary_shortcut(shortcut),
@@ -214,11 +239,16 @@ mod tests {
                     }
                     assert_eq!(icons, 1, "real SVG icon must paint: {id}");
                     assert_eq!(frames > 0, !shortcut.is_empty(), "{id}");
-                    if label != "Override" && !shortcut.starts_with("Ctrl Shift Alt Super") {
+                    if complete_keys_fit {
                         assert_eq!(
                             frames,
                             primary_shortcut(shortcut).split_whitespace().count(),
-                            "normal binding must retain each complete keycap: {id}"
+                            "fitting hint/binding must retain each complete keycap: {id}"
+                        );
+                    } else {
+                        assert_eq!(
+                            frames, 1,
+                            "oversized hint/binding uses one bounded ellipsized keycap: {id}"
                         );
                     }
                 }

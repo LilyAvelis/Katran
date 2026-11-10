@@ -7,12 +7,25 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | --- | --- |
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
+| Text fragment ingest/read/merge/copy and shared-blob metadata | `src/text_fragments.rs`, `src/text_service.rs`, `src/catalogue_schema.rs`, `src/catalogue_query.rs`, `tests/text_fragments_api.rs`, `tests/text_flow.rs`, `docs/text-fragments.md` |
+| Exact HTTP(S) Links / grouped drag / functional tab | `src/link_fragments.rs`, `src/text_service.rs`, `src/drag_session.rs`, `src/copy_out.rs`, `tests/links_api.rs`, `docs/links-design.md` |
+| Table value grids / CF_HTML and CSV / rich clipboard publication | `src/table_fragments.rs`, `src/table_service.rs`, `src/table_clipboard.rs`, `tests/table_formats.rs`, `tests/tables_api.rs`, `docs/tables.md` |
+| Virtualized table and CSV preview client | `src/bin/table_preview_ui.rs` |
+| Table zoom/pan/fit geometry and API checks | `src/table_view.rs`, `tests/table_view.rs` |
+| Clipboard Text capture / bounded native Unicode decoding | `src/capture.rs`, `src/capture_events.rs` |
+| Lazy text preview client | `src/bin/text_preview_ui.rs`, `src/bin/ui.rs` |
 | Arbitrary-file gallery/stream visuals / Windows Shell thumbnail and icon boundary | `src/file_visual.rs`, `tests/file_visual.rs`, `docs/file-visuals.md` |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
 | Clipboard signals / bounded retry API / hidden-window client (default backend) | `src/clipboard_listener.rs`, `src/capture_events.rs`, `src/bin/clipboard_events_ui.rs` |
 | Selection, cursor, view, preview/settings state | `src/interaction.rs` |
+| Catalogue sorting / keyset pagination / comma input | `src/sorting.rs`, `src/shelf_tabs.rs`, `src/bin/sorting_input.rs`, `tests/sorting_api.rs`, `docs/sorting.md` |
+| Conservative Markdown parsing and preview | `src/markdown.rs`, `src/bin/markdown_ui.rs`, `tests/smart_copy.rs` |
 | Image zoom/anchor/pan bounds and canvas geometry | `src/preview_view.rs` |
 | General preferences and validation | `src/settings.rs` |
+| Functional tab switches / visible order and navigation | `src/tab_service.rs`, `src/tab_layout.rs` |
+| Default app / Explorer reveal / Windows Open With | `src/open_file.rs`, `tests/open_file_api.rs` |
+| Associated applications / revision-bound picker sessions | `src/app_handlers.rs`, `src/app_picker.rs`, `tests/open_apps_api.rs` |
+| Standalone bottom application picker / shared palette rows | `src/bin/open_apps_ui.rs`, `src/bin/action_row.rs` |
 | Shortcut catalogue, normalization, persistence/conflicts | `src/shortcuts.rs` |
 | Native copy payload preparation/publication | `src/copy_out.rs` |
 | Two-phase drag lifecycle / native OLE adapter / cursor image | `src/drag_session.rs`, `src/drag_out.rs`, `src/drag_image.rs` |
@@ -20,7 +33,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Exact-ID deletion, shared blob cleanup | `src/delete_shelf.rs` |
 | Provenance snapshot/parsing | `src/origin.rs` |
 | CLI JSON-line transport | `src/main.rs` |
-| UI shell / jobs / preview worker / palette / list-grid | `src/bin/ui.rs`, `api_client.rs`, `images.rs`, `palette.rs`, `shelf_view.rs` |
+| UI shell / jobs / image and text preview workers / palette / list-grid | `src/bin/ui.rs`, `api_client.rs`, `images.rs`, `text_preview_ui.rs`, `palette.rs`, `shelf_view.rs` |
 | Gallery geometry / image fit / clipped labels | `src/bin/gallery_card.rs` |
 | Local logging / viewport input | `src/diagnostics.rs`, `src/bin/input_log.rs` |
 | Settings / key recorder / shared visuals | `src/bin/settings_ui.rs`, `shortcuts_ui.rs`, `ui_foundation.rs`, `ui_style.rs` |

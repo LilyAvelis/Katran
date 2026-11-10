@@ -59,6 +59,14 @@ pub(super) struct Images {
 }
 impl Images {
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
+        if matches!(
+            event["kind"].as_str(),
+            Some("text_fragment" | "link_fragment" | "table_fragment")
+        ) || katran::file_types::is_markdown(std::path::Path::new(
+            event["name"].as_str().unwrap_or(""),
+        )) {
+            return;
+        }
         let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
             return;
         };
@@ -329,6 +337,19 @@ impl Drop for Images {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_never_enqueues_shell_or_image_preview() {
+        let root = tempfile::tempdir().unwrap();
+        let mut images = Images::new(root.path().into());
+        images.prefetch(
+            &egui::Context::default(),
+            &serde_json::json!({"id": 1, "revision":"blob:a", "kind":"text_fragment"}),
+            320,
+        );
+        assert!(images.requested.is_empty());
+        assert!(images.queue.0.lock().unwrap().pending.is_empty());
+    }
 
     #[test]
     fn cards_use_file_visuals_and_large_preview_keeps_image_decoder() {

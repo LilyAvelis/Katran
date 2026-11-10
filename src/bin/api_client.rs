@@ -219,14 +219,14 @@ impl Shelf {
         } else {
             1000
         };
-        let r = self.call(Command::BrowseShelf {
+        let r = self.call(Command::BrowseShelfSorted {
             query: self.query.clone(),
             limit: 1000,
-            after_id: None,
+            cursor: None,
         });
         if let Some(events) = r["events"].as_array() {
             self.events = events.clone();
-            self.next_cursor = r["next_cursor"].as_i64();
+            self.next_cursor = r["next_cursor"].as_str().map(str::to_owned);
             self.loaded_query = self.query.clone();
             while self.events.len() < target && self.next_cursor.is_some() {
                 let previous = self.events.len();
@@ -239,17 +239,17 @@ impl Shelf {
         self.capture = self.call(Command::Status)["capture_enabled"] == true;
     }
     pub(super) fn load_more(&mut self) {
-        let Some(cursor) = self.next_cursor else {
+        let Some(cursor) = self.next_cursor.clone() else {
             return;
         };
-        let r = self.call(Command::BrowseShelf {
+        let r = self.call(Command::BrowseShelfSorted {
             query: self.query.clone(),
             limit: 1000,
-            after_id: Some(cursor),
+            cursor: Some(cursor),
         });
         if let Some(events) = r["events"].as_array() {
             self.events.extend(events.iter().cloned());
-            self.next_cursor = r["next_cursor"].as_i64();
+            self.next_cursor = r["next_cursor"].as_str().map(str::to_owned);
         }
     }
     fn selected_ids(&self) -> Vec<i64> {
@@ -310,7 +310,7 @@ impl Shelf {
             self.pending_copy = Some(items);
             self.message = "Копирование в очереди".into();
         } else if self.api.is_some() {
-            if self.start_job(Command::CopyEventsChecked { items }, false, ctx.clone()) {
+            if self.start_job(Command::CopySmart { items }, false, ctx.clone()) {
                 self.message = "Копирование выполняется…".into();
                 self.actions = false;
             }
@@ -324,7 +324,7 @@ impl Shelf {
     pub(super) fn take_queued_copy(&mut self) -> Option<Command> {
         if let Some(ids) = self.pending_copy_ids.take() {
             match self.snapshot_ids(ids) {
-                Some(items) => return Some(Command::CopyEventsChecked { items }),
+                Some(items) => return Some(Command::CopySmart { items }),
                 None => {
                     self.message = "Выбор устарел; копирование не выполнено".into();
                     return None;
@@ -333,25 +333,34 @@ impl Shelf {
         }
         self.pending_copy
             .take()
-            .map(|items| Command::CopyEventsChecked { items })
+            .map(|items| Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "open_with" {
+            self.open_apps_request(ctx);
+            return;
+        }
         if id == "copy" {
             self.copy_request(ctx);
             return;
         }
-        if matches!(id.as_str(), "cleanup" | "delete") {
+        if matches!(id.as_str(), "cleanup" | "delete" | "copy_text") {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
             }
             return;
         }
-        if matches!(id.as_str(), "open" | "preview" | "quicklook")
-            && let Some(focus) = ctx.memory(|m| m.focused())
+        if matches!(
+            id.as_str(),
+            "open" | "preview" | "quicklook" | "reveal" | "open_with"
+        ) && let Some(focus) = ctx.memory(|m| m.focused())
         {
             ctx.memory_mut(|m| m.surrender_focus(focus));
         }
-        let preview_action = matches!(id.as_str(), "open" | "preview" | "quicklook");
+        let preview_action = matches!(
+            id.as_str(),
+            "open" | "preview" | "quicklook" | "reveal" | "open_with"
+        );
         if preview_action {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
@@ -368,6 +377,62 @@ impl Shelf {
         }
     }
     pub(super) fn action_result(&mut self, r: Value) {
+        if let Some(copied) = r["table_copied"].as_bool() {
+            self.message = if copied {
+                format!(
+                    "Скопировано таблиц: {} · {} × {}",
+                    r["table_count"].as_u64().unwrap_or(1),
+                    r["row_count"].as_u64().unwrap_or(0),
+                    r["column_count"].as_u64().unwrap_or(0)
+                )
+            } else if r["text_written"] == true {
+                "Скопированы значения с табуляциями; HTML таблицы записать не удалось".into()
+            } else if r["html_written"] == true {
+                "Скопирована HTML-таблица; текстовый формат записать не удалось".into()
+            } else if r["merged"] == false {
+                format!("Таблицы не скопированы: {}", item_failures(&r["items"]))
+            } else {
+                "Не удалось записать таблицы в буфер обмена".into()
+            };
+            if let Some(warnings) = r["warnings"].as_array() {
+                for warning in warnings.iter().filter_map(Value::as_str) {
+                    self.message.push_str(" · ");
+                    self.message.push_str(warning);
+                }
+            }
+        }
+        if r["sort"].is_object() {
+            self.message = sorting_ui::confirmation(&r["sort"]);
+        }
+        if let Some(copied) = r["text_copied"].as_bool() {
+            self.message = if copied && r["kind"] == "link_fragment" {
+                "Ссылки скопированы текстом".into()
+            } else if copied {
+                "Текстовые фрагменты скопированы одним текстом".into()
+            } else {
+                format!("Текст не скопирован: {}", item_failures(&r["items"]))
+            };
+        }
+        if r["requested"] == true {
+            match r["operation"].as_str() {
+                Some("open") => {
+                    self.message = if r["link"] == true {
+                        "Ссылка передана браузеру по умолчанию".into()
+                    } else {
+                        "Файл передан приложению по умолчанию".into()
+                    }
+                }
+                Some("reveal") => self.message = "Файл показан в Проводнике".into(),
+                Some("open_with") => {
+                    self.message = if r["application_id"].is_string() {
+                        "Файл передан выбранному приложению".into()
+                    } else {
+                        "Запрошен выбор приложения Windows".into()
+                    }
+                }
+                _ => {}
+            }
+        }
         if r["backend"] == "quicklook" && r["requested"] == true {
             self.message = "Запрос просмотра передан в QuickLook".into();
         }

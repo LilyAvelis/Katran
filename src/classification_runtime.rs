@@ -24,7 +24,15 @@ pub(crate) fn enqueue(db: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 impl ClassificationRuntime {
+    #[cfg(test)]
     pub(crate) fn poll(&mut self, db: &Connection) -> Result<serde_json::Value> {
+        self.poll_enabled(db, true)
+    }
+    pub(crate) fn poll_enabled(
+        &mut self,
+        db: &Connection,
+        allow_new_work: bool,
+    ) -> Result<serde_json::Value> {
         let mut changed = 0;
         if let Some(rx) = self.pending.as_ref() {
             match rx.try_recv() {
@@ -58,7 +66,7 @@ impl ClassificationRuntime {
                 }
             }
         }
-        if self.pending.is_none() {
+        if allow_new_work && self.pending.is_none() {
             let tasks = {
                 let mut stmt=db.prepare("SELECT w.event_id,w.kind,w.source_generation FROM classification_work w WHERE w.state='queued' AND (w.kind='clipboard' OR EXISTS(SELECT 1 FROM source_configurations c WHERE c.source_id='sharex' AND c.enabled=1 AND c.generation=w.source_generation)) ORDER BY w.event_id LIMIT 8")?;
                 stmt.query_map([], |r| {
@@ -110,6 +118,33 @@ impl ClassificationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn disabled_queue_waits_until_enabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = Service::open(temp.path(), 1000).unwrap();
+        service.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,reference_hash) VALUES(0,'clipboard_file','synthetic.png','unavailable',0,'r')", []).unwrap();
+        service.db.execute("INSERT INTO classification_work(event_id,revision,kind,state) VALUES(1,'ref:r','clipboard','queued')", []).unwrap();
+        let paused = service
+            .classification
+            .poll_enabled(&service.db, false)
+            .unwrap();
+        assert_eq!(paused["queued"], 1);
+        assert_eq!(paused["worker_active"], false);
+        let resumed = service
+            .classification
+            .poll_enabled(&service.db, true)
+            .unwrap();
+        assert_eq!(resumed["worker_active"], true);
+        let state: String = service
+            .db
+            .query_row(
+                "SELECT state FROM classification_work WHERE event_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "inflight");
+    }
     #[test]
     fn idle_classification_work_is_independent_of_completed_history() {
         let mut measures = Vec::new();

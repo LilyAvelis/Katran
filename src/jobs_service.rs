@@ -7,6 +7,22 @@ use crate::{
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::SystemTime};
 
+struct FencedFileLauncher {
+    launcher: std::sync::Arc<std::sync::Mutex<Box<dyn open_file::Launcher>>>,
+    cancellation: domain_jobs::Cancellation,
+}
+impl open_file::Launcher for FencedFileLauncher {
+    fn authorize(&self) -> Result<()> {
+        self.cancellation.begin_effect()
+    }
+    fn launch(&self, path: &std::path::Path, operation: open_file::Operation) -> Result<()> {
+        self.launcher
+            .lock()
+            .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?
+            .launch(path, operation)
+    }
+}
+
 pub(crate) struct PreparedReference {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
@@ -17,6 +33,24 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
+    UpdateInstalled(updater::InstalledUpdate),
+    UpdateChecked(updater::UpdateStatus),
+    UpdateReady {
+        updater: updater::Updater,
+        prepared: updater::PreparedUpdate,
+    },
+    TableCopy {
+        prepared: table_service::PreparedCopy,
+        events: Vec<Event>,
+    },
+    TextCopy {
+        result: Value,
+        events: Vec<Event>,
+    },
+    AppList {
+        event: Event,
+        apps: Vec<app_handlers::AppHandler>,
+    },
     Value(Value),
     Blob(storage::PreparedBlob),
     DeletePrepared(delete_jobs::PreparedDelete),
@@ -131,6 +165,7 @@ impl Service {
         &mut self,
         prepared: PreparedReference,
     ) -> Result<Value> {
+        self.check_ingest_enabled(&prepared.name)?;
         validate_source(&prepared.source)?;
         validate_name(&prepared.name)?;
         if prepared.path.starts_with(&self.root) {
@@ -155,6 +190,10 @@ impl Service {
             .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
         self.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,NULL,?6,?7)",params![now_ms(),prepared.source,prepared.name,path,prepared.size,serde_json::to_string(&prepared.origin).map_err(|e|ApiError::new("invalid_argument",e))?,prepared.content_hash])?;
         let id = self.db.last_insert_rowid();
+        self.db.execute(
+            "UPDATE events SET modified_at_ms=?1 WHERE id=?2",
+            params![sorting::modified_ms(prepared.modified), id],
+        )?;
         classification_runtime::enqueue(&self.db, id)?;
         Ok(json!(self.get(id)?))
     }
@@ -166,7 +205,255 @@ impl Service {
                 None => return Err(ApiError::new("unknown_action", "Unknown action")),
             }
         }
+        if matches!(command, Command::CopySelectedText) {
+            command = Command::CopyText {
+                items: self.selected_refs()?,
+                separator: "\n\n".into(),
+            };
+        }
+        if matches!(command, Command::CopySelectedObjects) {
+            command = Command::CopySmart {
+                items: self.selected_refs()?,
+            };
+        }
+        if let Command::CopySmart { items } = command {
+            command = if self.selection_is_tables(&items)? {
+                Command::CopyTables { items }
+            } else if self.selection_is_links(&items)? {
+                Command::CopyLinks { items }
+            } else if self.selection_is_text(&items)? {
+                Command::CopyText {
+                    items,
+                    separator: "\n\n".into(),
+                }
+            } else {
+                Command::CopyEventsChecked { items }
+            };
+        }
         let id = match command {
+            Command::CheckUpdates => {
+                let updater = self.updater.clone();
+                self.jobs.submit(Lane::Update, move |cancel| {
+                    cancel.check()?;
+                    let status = updater.check()?;
+                    cancel.check()?;
+                    Ok(PreparedWork::UpdateChecked(status))
+                })?
+            }
+            Command::InstallUpdate => {
+                let release = self.checked_update.clone().ok_or_else(|| {
+                    ApiError::new("update_not_checked", "Check for an available update first")
+                })?;
+                let updater = self.updater.clone();
+                self.jobs.submit(Lane::Update, move |cancel| {
+                    cancel.check()?;
+                    let prepared = updater.prepare(&release)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::UpdateReady { updater, prepared })
+                })?
+            }
+            Command::IngestTableTsv { text, source } => {
+                self.check_tables_enabled()?;
+                validate_source(&source)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let origin = self.ingest_origin.clone();
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Capture, move |cancel| {
+                    cancel.check()?;
+                    let table =
+                        table_fragments::parse_tsv(&text, true).map_err(table_service::invalid)?;
+                    cancel.check()?;
+                    let prepared = table_service::prepare(
+                        &root,
+                        quota,
+                        &table,
+                        &source,
+                        &origin,
+                        &references,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Blob(prepared))
+                })?
+            }
+            Command::IngestTableHtml { html, source } => {
+                self.check_tables_enabled()?;
+                validate_source(&source)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let origin = self.ingest_origin.clone();
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Capture, move |cancel| {
+                    cancel.check()?;
+                    let table =
+                        table_fragments::parse_html(&html).map_err(table_service::invalid)?;
+                    cancel.check()?;
+                    let prepared = table_service::prepare(
+                        &root,
+                        quota,
+                        &table,
+                        &source,
+                        &origin,
+                        &references,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Blob(prepared))
+                })?
+            }
+            Command::IngestTable { rows, source } => {
+                self.check_tables_enabled()?;
+                validate_source(&source)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let origin = self.ingest_origin.clone();
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Capture, move |cancel| {
+                    cancel.check()?;
+                    let prepared = table_service::prepare(
+                        &root,
+                        quota,
+                        &table_fragments::Table { rows },
+                        &source,
+                        &origin,
+                        &references,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Blob(prepared))
+                })?
+            }
+            Command::CopyTables { items } => {
+                let snapshot: Vec<_> = items
+                    .into_iter()
+                    .map(|item| {
+                        let event = self.get(item.id);
+                        (item, event)
+                    })
+                    .collect();
+                let events = snapshot
+                    .iter()
+                    .filter_map(|(_, event)| event.as_ref().ok().cloned())
+                    .collect();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = table_service::prepare_copy(snapshot)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::TableCopy { prepared, events })
+                })?
+            }
+            Command::IngestLink { url, source } => {
+                self.check_links_enabled()?;
+                validate_source(&source)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let origin = self.ingest_origin.clone();
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Capture, move |cancel| {
+                    cancel.check()?;
+                    Ok(PreparedWork::Blob(link_fragments::prepare(
+                        &root,
+                        quota,
+                        &url,
+                        &source,
+                        &origin,
+                        &references,
+                    )?))
+                })?
+            }
+            Command::CopyLinks { items } => {
+                let snapshot: Vec<_> = items
+                    .into_iter()
+                    .map(|item| {
+                        let event = self.get(item.id);
+                        (item, event)
+                    })
+                    .collect();
+                let events = snapshot
+                    .iter()
+                    .filter_map(|(_, event)| event.as_ref().ok().cloned())
+                    .collect();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let mut result = text_fragments::merge_snapshot_kind(snapshot, "\n", true)?;
+                    result["kind"] = json!("link_fragment");
+                    cancel.check()?;
+                    Ok(PreparedWork::TextCopy { result, events })
+                })?
+            }
+            Command::IngestText { text, source } => {
+                self.check_text_enabled()?;
+                validate_source(&source)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let origin = self.ingest_origin.clone();
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Capture, move |cancel| {
+                    cancel.check()?;
+                    Ok(PreparedWork::Blob(text_fragments::prepare(
+                        &root,
+                        quota,
+                        &text,
+                        &source,
+                        &origin,
+                        &references,
+                    )?))
+                })?
+            }
+            Command::CopyText { items, separator } => {
+                let snapshot: Vec<_> = items
+                    .into_iter()
+                    .map(|item| {
+                        let event = self.get(item.id);
+                        (item, event)
+                    })
+                    .collect();
+                let events = snapshot
+                    .iter()
+                    .filter_map(|(_, event)| event.as_ref().ok().cloned())
+                    .collect();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let result = text_fragments::merge_snapshot(snapshot, &separator)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::TextCopy { result, events })
+                })?
+            }
+            Command::ListOpenApps { id } => {
+                let event = self.get(id)?;
+                let provider = std::sync::Arc::clone(&self.app_provider);
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    cancel.check()?;
+                    let apps = {
+                        let provider = provider.lock().map_err(|_| {
+                            ApiError::new(
+                                "handlers_unavailable",
+                                "Application provider lock poisoned",
+                            )
+                        })?;
+                        app_picker::discover(&event, provider.as_ref())?
+                    };
+                    cancel.check()?;
+                    Ok(PreparedWork::AppList { event, apps })
+                })?
+            }
+            Command::OpenWithApp { token, app_id } => {
+                let session = self.app_session(&token, app_id.as_deref())?;
+                let mut launcher = self.app_launcher(&session.event, app_id, None);
+                let root = self.root.clone();
+                let quota = self.quota;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    launcher.cancellation = Some(cancel);
+                    let mut result = open_file::execute_with_cache(
+                        &session.event,
+                        open_file::Operation::OpenWith,
+                        &launcher,
+                        &root,
+                        quota,
+                    )?;
+                    result["application_id"] = json!(launcher.app_id);
+                    Ok(PreparedWork::Value(result))
+                })?
+            }
             Command::CaptureClipboard { trigger } => {
                 self.jobs.check_admission(Lane::Capture)?;
                 match self.begin_capture_event(trigger)? {
@@ -179,7 +466,15 @@ impl Service {
                     } => {
                         let root = self.root.clone();
                         let quota = self.quota;
+                        let images_enabled =
+                            self.settings.tab_enabled(interaction::ShelfTab::Images);
+                        let text_enabled = self.settings.tab_enabled(interaction::ShelfTab::Text);
+                        let links_enabled = self.settings.tab_enabled(interaction::ShelfTab::Links);
+                        let tables_enabled =
+                            self.settings.tab_enabled(interaction::ShelfTab::Tables);
                         let references = self.reference_paths()?;
+                        let owned_table_tokens: Vec<_> =
+                            self.owned_table_tokens.iter().cloned().collect();
                         self.jobs.submit(Lane::Capture, move |cancel| {
                             cancel.check()?;
                             Ok(PreparedWork::Capture {
@@ -189,6 +484,8 @@ impl Service {
                                     &root,
                                     quota,
                                     &references,
+                                    (images_enabled, text_enabled, links_enabled, tables_enabled),
+                                    &owned_table_tokens,
                                 ),
                             })
                         })?
@@ -199,14 +496,26 @@ impl Service {
                 if !self.capture_enabled {
                     return self.ready_value_job(json!({"captured":0,"state":"paused"}));
                 }
+                let images_enabled = self.settings.tab_enabled(interaction::ShelfTab::Images);
+                let text_enabled = self.settings.tab_enabled(interaction::ShelfTab::Text);
+                let links_enabled = self.settings.tab_enabled(interaction::ShelfTab::Links);
+                let tables_enabled = self.settings.tab_enabled(interaction::ShelfTab::Tables);
                 let sequence = self.clipboard_sequence;
                 let root = self.root.clone();
                 let quota = self.quota;
                 let references = self.reference_paths()?;
+                let owned_table_tokens: Vec<_> = self.owned_table_tokens.iter().cloned().collect();
                 self.jobs.submit(Lane::Capture, move |cancel| {
                     cancel.check()?;
                     Ok(PreparedWork::LegacyCapture(
-                        capture::prepare_snapshot_for_ingest(sequence, &root, quota, &references),
+                        capture::prepare_snapshot_for_ingest(
+                            sequence,
+                            &root,
+                            quota,
+                            &references,
+                            (images_enabled, text_enabled, links_enabled, tables_enabled),
+                            &owned_table_tokens,
+                        ),
                     ))
                 })?
             }
@@ -214,10 +523,31 @@ impl Service {
                 cancel.begin_effect()?;
                 Ok(PreparedWork::Value(quicklook_backend::warmup()?))
             })?,
+            Command::OpenFile { id, operation } => {
+                let event = self.get(id)?;
+                let launcher = std::sync::Arc::clone(&self.file_launcher);
+                let root = self.root.clone();
+                let quota = self.quota;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let launcher = FencedFileLauncher {
+                        launcher,
+                        cancellation: cancel,
+                    };
+                    let result = if event.kind == EventKind::LinkFragment
+                        && operation == open_file::Operation::Open
+                    {
+                        open_file::execute_link(&event, &launcher)?
+                    } else {
+                        open_file::execute_with_cache(&event, operation, &launcher, &root, quota)?
+                    };
+                    Ok(PreparedWork::Value(result))
+                })?
+            }
             Command::PreviewExternal { id } => return self.begin_preview_job(id),
             Command::OpenCurrent | Command::TogglePreview => {
                 if let Some(id) = self.interaction.cursor
-                    && !quicklook::is_native_image(&self.get(id)?)
+                    && !file_types::has_internal_preview(&self.get(id)?)
                 {
                     return self.begin_preview_job(id);
                 }
@@ -238,6 +568,7 @@ impl Service {
                 }
             }
             Command::IngestPath { path, source } => {
+                self.check_ingest_enabled(&path.to_string_lossy())?;
                 validate_source(&source)?;
                 let origin = self.ingest_origin.clone();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
@@ -312,6 +643,7 @@ impl Service {
                 bytes,
                 source,
             } => {
+                self.check_ingest_enabled(&name)?;
                 validate_name(&name)?;
                 validate_source(&source)?;
                 let root = self.root.clone();
@@ -384,6 +716,17 @@ impl Service {
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
         for (ready, result) in self.jobs.take_ready(8) {
             let result = match result {
+                Ok(PreparedWork::UpdateReady { updater, prepared }) => {
+                    let continued = self.jobs.authorize_claimed_effect(ready).and_then(|()| {
+                        self.jobs.continue_claimed(ready, move |_cancel| {
+                            Ok(PreparedWork::UpdateInstalled(updater.commit(prepared)?))
+                        })
+                    });
+                    if let Err(error) = continued {
+                        self.jobs.finish(ready, Err(error))?;
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::DeletePrepared(prepared)) => {
                     let authorized = self.authorize_delete(prepared);
                     let trash = std::sync::Arc::clone(&self.trash);
@@ -403,9 +746,15 @@ impl Service {
             };
             let result=result.and_then(|prepared|match prepared {
                 PreparedWork::Value(value)=>Ok(value),
+                PreparedWork::UpdateChecked(status)=>self.accept_update_check(status),
+                PreparedWork::UpdateReady{..}=>Err(ApiError::new("invalid_job_phase","Update preparation must be authorized before effect")),
+                PreparedWork::UpdateInstalled(installed)=>self.accept_update_install(installed),
+                PreparedWork::TableCopy{prepared,events}=>{if prepared.result["merged"]==true{self.validate_job_events(&events)?;self.jobs.authorize_claimed_effect(ready)?;}self.publish_table_copy(prepared)},
+                PreparedWork::TextCopy{result,events}=>{if result["merged"]==true{self.validate_job_events(&events)?;self.jobs.authorize_claimed_effect(ready)?;}self.publish_text_result(result)},
+                PreparedWork::AppList{event,apps}=>self.commit_open_apps(event,apps),
                 PreparedWork::DeleteDeleted(deleted)=>self.finish_delete(deleted),
                 PreparedWork::DeletePrepared(_)=>Err(ApiError::new("invalid_job_phase","Delete preparation must be authorized before effect")),
-                PreparedWork::Blob(prepared)=> { let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(json!(self.get(id)?)) }
+                PreparedWork::Blob(prepared)=> { if prepared.is_table(){self.check_tables_enabled()?;}else if prepared.is_link(){self.check_links_enabled()?;}else if prepared.is_text(){self.check_text_enabled()?;}else{self.check_ingest_enabled(prepared.name())?;} let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(json!(self.get(id)?)) }
                 PreparedWork::Capture{ticket,snapshot}=>self.complete_capture(ticket,snapshot),
                 PreparedWork::LegacyCapture(snapshot)=>snapshot.and_then(|snapshot|self.commit_capture_snapshot(snapshot,capture::sequence_number())),
                 PreparedWork::Reference(prepared)=>self.commit_prepared_reference(prepared),

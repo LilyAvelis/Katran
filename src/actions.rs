@@ -14,6 +14,230 @@ pub struct Definition {
 }
 pub const DEFS: &[Definition] = &[
     Definition {
+        id: "tables",
+        label: "Таб: Tables",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_tables",
+        label: "Включить / отключить Tables",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "sort_arrival",
+        label: "Сортировать по поступлению",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_arrival_reverse",
+        label: "Сортировать по поступлению · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_extension",
+        label: "Сортировать по расширению",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_extension_reverse",
+        label: "Сортировать по расширению · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_modified",
+        label: "Сортировать по дате изменения",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_modified_reverse",
+        label: "Сортировать по дате изменения · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_shuffle",
+        label: "Перемешать",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_natural",
+        label: "Сортировать по естественному имени",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_natural_reverse",
+        label: "Сортировать по естественному имени · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_size",
+        label: "Сортировать по размеру",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_size_reverse",
+        label: "Сортировать по размеру · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_name",
+        label: "Сортировать по имени",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_name_reverse",
+        label: "Сортировать по имени · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_origin",
+        label: "Сортировать по источнику",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_origin_reverse",
+        label: "Сортировать по источнику · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "text",
+        label: "Таб: Text",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_text",
+        label: "Включить / отключить Text",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "links",
+        label: "Открыть Links",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_links",
+        label: "Включить / отключить Links",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "copy_text",
+        label: "Копировать тексты одним текстом",
+        default_binding: "",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "reveal",
+        label: "Показать в Проводнике",
+        default_binding: "Ctrl Enter",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "open_with",
+        label: "Открыть с помощью…",
+        default_binding: "Ctrl Shift Enter",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "tabs_settings",
+        label: "Настройки вкладок",
+        default_binding: "",
+        rebindable: true,
+        group: "Приложение",
+        in_palette: true,
+    },
+    Definition {
+        id: "toggle_images",
+        label: "Включить / отключить Images",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_screenshots",
+        label: "Включить / отключить Screenshots",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_downloads",
+        label: "Включить / отключить Downloads",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
         id: "cleanup",
         label: "Повторить очистку кэша",
         default_binding: "",
@@ -40,14 +264,14 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "quicklook",
         label: "Открыть через QuickLook",
-        default_binding: "Ctrl Enter",
+        default_binding: "",
         rebindable: true,
         group: "Файл",
         in_palette: true,
     },
     Definition {
         id: "open",
-        label: "Открыть просмотр",
+        label: "Открыть приложением по умолчанию",
         default_binding: "Enter",
         rebindable: true,
         group: "Файл",
@@ -171,7 +395,7 @@ pub const DEFS: &[Definition] = &[
         default_binding: "",
         rebindable: true,
         group: "Вид",
-        in_palette: true,
+        in_palette: false,
     },
     Definition {
         id: "tab_toggle",
@@ -187,7 +411,7 @@ pub const DEFS: &[Definition] = &[
         default_binding: "",
         rebindable: true,
         group: "Вид",
-        in_palette: true,
+        in_palette: false,
     },
     Definition {
         id: "images",
@@ -195,7 +419,7 @@ pub const DEFS: &[Definition] = &[
         default_binding: "",
         rebindable: true,
         group: "Вид",
-        in_palette: true,
+        in_palette: false,
     },
     Definition {
         id: "screenshots",
@@ -203,7 +427,7 @@ pub const DEFS: &[Definition] = &[
         default_binding: "",
         rebindable: true,
         group: "Вид",
-        in_palette: true,
+        in_palette: false,
     },
     Definition {
         id: "preview",
@@ -251,6 +475,13 @@ pub enum Dispatch {
     Intent(serde_json::Value),
 }
 pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch> {
+    if let Some((mode, reverse)) = crate::sorting::action_sort(id) {
+        return Some(Dispatch::Command(Command::SetSort {
+            mode,
+            reverse,
+            seed: None,
+        }));
+    }
     let selected = || {
         if state.selected.is_empty() {
             state.cursor.into_iter().collect()
@@ -266,6 +497,25 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         return Some(Dispatch::Command(Command::SelectTabPosition { position }));
     }
     Some(match id {
+        "tables" => Dispatch::Command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Tables,
+        }),
+        "toggle_tables" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Tables,
+        }),
+        "links" => Dispatch::Command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Links,
+        }),
+        "toggle_links" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Links,
+        }),
+        "text" => Dispatch::Command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Text,
+        }),
+        "toggle_text" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Text,
+        }),
+        "copy_text" => Dispatch::Command(Command::CopySelectedText),
         "quicklook" => Dispatch::Command(Command::PreviewExternal {
             id: state
                 .cursor
@@ -289,8 +539,34 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }),
         "preview" => Dispatch::Command(Command::TogglePreview),
         "cleanup" => Dispatch::Command(Command::MaintainCache),
-        "open" => Dispatch::Command(Command::OpenCurrent),
-        "copy" => Dispatch::Command(Command::CopyEvents { ids: selected() }),
+        "open_with" => Dispatch::Command(Command::ListOpenApps {
+            id: state
+                .cursor
+                .or_else(|| state.selected.first().copied())
+                .unwrap_or(0),
+        }),
+        "open" | "reveal" => Dispatch::Command(Command::OpenFile {
+            id: state
+                .cursor
+                .or_else(|| state.selected.first().copied())
+                .unwrap_or(0),
+            operation: match id {
+                "reveal" => crate::open_file::Operation::Reveal,
+                "open_with" => crate::open_file::Operation::OpenWith,
+                _ => crate::open_file::Operation::Open,
+            },
+        }),
+        "tabs_settings" => Dispatch::Command(Command::ShowTabSettings),
+        "toggle_images" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Images,
+        }),
+        "toggle_screenshots" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Screenshots,
+        }),
+        "toggle_downloads" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Downloads,
+        }),
+        "copy" => Dispatch::Command(Command::CopySelectedObjects),
         "delete" => Dispatch::Command(Command::DeleteSelection {
             ids: selected(),
             confirmed: false,

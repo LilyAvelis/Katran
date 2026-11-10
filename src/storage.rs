@@ -77,6 +77,7 @@ fn process_has_exited(_pid: u32) -> bool {
 /// by ingesting the same bytes again. External event paths are never followed.
 pub fn initialize(db: &Connection, root: &Path) -> Result<()> {
     crate::catalogue_schema::check_version(db)?;
+    crate::sorting::register_sql(db)?;
     db.create_scalar_function(
         "katran_contains",
         2,
@@ -194,6 +195,34 @@ pub(crate) struct PreparedBlob {
     name: String,
     source: String,
     origin: Origin,
+    text: Option<String>,
+    link: bool,
+    table: bool,
+}
+impl PreparedBlob {
+    pub(crate) fn mark_text(&mut self, text: String) {
+        self.text = Some(text);
+    }
+    pub(crate) fn mark_link(&mut self, text: String) {
+        self.text = Some(text);
+        self.link = true;
+    }
+    pub(crate) fn mark_table(&mut self, tsv: String) {
+        self.text = Some(tsv);
+        self.table = true;
+    }
+    pub(crate) fn is_table(&self) -> bool {
+        self.table
+    }
+    pub(crate) fn is_link(&self) -> bool {
+        self.link
+    }
+    pub(crate) fn is_text(&self) -> bool {
+        self.text.is_some()
+    }
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
 }
 struct PublicationInterest(PathBuf);
 struct Publication {
@@ -362,6 +391,9 @@ pub(crate) fn prepare_bytes(
         name: input.name.to_owned(),
         source: input.source.to_owned(),
         origin: input.origin.clone(),
+        text: None,
+        link: false,
+        table: false,
     })
 }
 
@@ -432,7 +464,32 @@ pub(crate) fn commit_prepared_bytes(
     )?;
     tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![crate::now_ms(),prepared.source,prepared.name,encoded,prepared.size,prepared.hash,serde_json::to_string(&prepared.origin).map_err(|error|ApiError::new("invalid_argument",error))?])?;
     let id = tx.last_insert_rowid();
-    crate::classification_runtime::enqueue(&tx, id)?;
+    if let Some(content) = &prepared.text {
+        let preview: String = content.chars().take(512).collect();
+        let content_table = if prepared.table {
+            "table_contents"
+        } else {
+            "text_contents"
+        };
+        tx.execute(
+            &format!("INSERT OR IGNORE INTO {content_table}(blob_hash,content) VALUES(?1,?2)"),
+            params![prepared.hash, content],
+        )?;
+        let table = if prepared.table {
+            "table_fragments"
+        } else if prepared.link {
+            "link_fragments"
+        } else {
+            "text_fragments"
+        };
+        tx.execute(
+            &format!("INSERT INTO {table}(event_id,preview) VALUES(?1,?2)"),
+            params![id, preview],
+        )?;
+    }
+    if prepared.text.is_none() {
+        crate::classification_runtime::enqueue(&tx, id)?;
+    }
     tx.commit()?;
     Ok(id)
 }
@@ -477,8 +534,8 @@ pub fn query_events(
             "Expected limit 1..1000 and positive cursor",
         ));
     }
-    let mut stmt = db.prepare("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json FROM events
-        WHERE id <= ?1 AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2)
+    let mut stmt = db.prepare("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json,COALESCE((SELECT preview FROM text_fragments WHERE event_id=events.id),(SELECT preview FROM link_fragments WHERE event_id=events.id),(SELECT preview FROM table_fragments WHERE event_id=events.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments WHERE event_id=events.id) AS is_link, EXISTS(SELECT 1 FROM table_fragments WHERE event_id=events.id) AS is_table, modified_at_ms FROM events
+        WHERE id <= ?1 AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2) OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE l.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2))
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_app'),'') ELSE '' END,?2)
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_domain'),'') ELSE '' END,?2))
         ORDER BY id DESC LIMIT ?3")?;
@@ -500,7 +557,50 @@ pub(crate) fn event_row_with_availability(
     let path = PathBuf::from(r.get::<_, String>(4)?);
     let hash: Option<String> = r.get(6)?;
     let reference_hash: Option<String> = r.get(8)?;
+    let text_preview = r
+        .as_ref()
+        .column_index("text_preview")
+        .ok()
+        .map(|i| r.get::<_, Option<String>>(i))
+        .transpose()?
+        .flatten();
+    let name: String = r.get(3)?;
+    let is_link = r
+        .as_ref()
+        .column_index("is_link")
+        .ok()
+        .map(|i| r.get::<_, bool>(i))
+        .transpose()?
+        .unwrap_or(false);
+    let modified_at_ms = r
+        .as_ref()
+        .column_index("modified_at_ms")
+        .ok()
+        .map(|i| r.get::<_, Option<i64>>(i))
+        .transpose()?
+        .flatten();
+    let is_table = r
+        .as_ref()
+        .column_index("is_table")
+        .ok()
+        .map(|i| r.get::<_, bool>(i))
+        .transpose()?
+        .unwrap_or(false);
+    let kind = if is_table {
+        crate::EventKind::TableFragment
+    } else if is_link {
+        crate::EventKind::LinkFragment
+    } else if text_preview.is_some() {
+        crate::EventKind::TextFragment
+    } else if hash.is_some() && crate::file_types::is_native_image(Path::new(&name)) {
+        crate::EventKind::ManagedImage
+    } else {
+        crate::EventKind::FileReference
+    };
     Ok(Event {
+        kind,
+        text_preview,
+        modified_at_ms,
         delete_policy: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or_default(),
         revision: if hash.is_none() && reference_hash.is_some() {
             format!("ref:{}", reference_hash.as_deref().unwrap())
@@ -510,7 +610,7 @@ pub(crate) fn event_row_with_availability(
         id: r.get(0)?,
         detected_at_ms: r.get(1)?,
         source: r.get(2)?,
-        name: r.get(3)?,
+        name,
         available: available.unwrap_or_else(|| path.is_file()),
         path,
         size: r.get(5)?,
@@ -525,7 +625,7 @@ pub(crate) fn event_row_with_availability(
 }
 
 pub fn get_event(db: &Connection, id: i64) -> Result<Event> {
-    match db.query_row("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json FROM events WHERE id=?1",[id],event_row) {
+    match db.query_row("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json,COALESCE((SELECT preview FROM text_fragments WHERE event_id=events.id),(SELECT preview FROM link_fragments WHERE event_id=events.id),(SELECT preview FROM table_fragments WHERE event_id=events.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments WHERE event_id=events.id) AS is_link, EXISTS(SELECT 1 FROM table_fragments WHERE event_id=events.id) AS is_table, modified_at_ms FROM events WHERE id=?1",[id],event_row) {
         Err(rusqlite::Error::QueryReturnedNoRows) => Err(ApiError::new("not_found","Unknown event ID")),
         result => Ok(result?),
     }

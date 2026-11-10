@@ -231,6 +231,21 @@ impl RotatingWriter {
 /// Summarizes commands without serializing image bytes, including nested ingestion.
 pub fn summarize_command(command: &crate::Command) -> Value {
     match command {
+        crate::Command::IngestLink { url, source } => {
+            json!({"type":"ingest_link","byte_count":url.len(),"source":source})
+        }
+        crate::Command::IngestTable { rows, source } => {
+            json!({"type":"ingest_table","row_count":rows.len(),"source":source})
+        }
+        crate::Command::IngestTableTsv { text, source } => {
+            json!({"type":"ingest_table_tsv","byte_count":text.len(),"source":source})
+        }
+        crate::Command::IngestTableHtml { html, source } => {
+            json!({"type":"ingest_table_html","byte_count":html.len(),"source":source})
+        }
+        crate::Command::IngestText { text, source } => {
+            json!({"type":"ingest_text","byte_count":text.len(),"source":source})
+        }
         crate::Command::BeginJob { command } => {
             json!({"type":"begin_job","command":summarize_command(command)})
         }
@@ -258,6 +273,7 @@ pub(crate) fn hot_command(command: &crate::Command) -> Option<&'static str> {
     Some(match command {
         Interaction => "interaction",
         GetSettings => "get_settings",
+        Tabs => "tabs",
         Shortcuts => "shortcuts",
         SetVisible { .. } => "set_visible",
         Status => "status",
@@ -272,6 +288,28 @@ pub(crate) fn hot_command(command: &crate::Command) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn link_diagnostics_omit_url_in_direct_and_nested_commands() {
+        let secret = "https://example.test/private?signature=sensitive-value#personal-fragment";
+        for command in [
+            crate::Command::IngestLink {
+                url: secret.into(),
+                source: "test".into(),
+            },
+            crate::Command::BeginJob {
+                command: Box::new(crate::Command::IngestLink {
+                    url: secret.into(),
+                    source: "test".into(),
+                }),
+            },
+        ] {
+            let summary = summarize_command(&command).to_string();
+            assert!(!summary.contains("example.test"));
+            assert!(!summary.contains("sensitive-value"));
+            assert!(!summary.contains("personal-fragment"));
+            assert!(summary.contains("byte_count"));
+        }
+    }
     #[test]
     fn rotation_is_bounded_and_json_lines_are_complete() {
         let root = tempfile::tempdir().unwrap();

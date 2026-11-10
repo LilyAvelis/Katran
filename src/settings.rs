@@ -4,8 +4,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
-    #[serde(default = "crate::tab_layout::default_order")]
+    pub sort: crate::sorting::SortSpec,
+    #[serde(
+        default = "crate::tab_layout::default_order",
+        deserialize_with = "crate::tab_layout::deserialize_order"
+    )]
     pub tab_order: Vec<crate::interaction::ShelfTab>,
+    pub hidden_tabs: Vec<crate::interaction::ShelfTab>,
+    pub text_enabled: bool,
+    pub links_enabled: bool,
+    pub tables_enabled: bool,
     pub gallery_columns: u8,
     pub stream_rows: u8,
     pub quota_bytes: u64,
@@ -24,10 +32,15 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
+            sort: Default::default(),
             quota_bytes: quota,
             gallery_columns: 4,
             stream_rows: 3,
             tab_order: crate::tab_layout::default_order(),
+            hidden_tabs: Vec::new(),
+            text_enabled: false,
+            links_enabled: false,
+            tables_enabled: false,
             sharex_folder: None,
             downloads_enabled: true,
             downloads_folder: None,
@@ -36,8 +49,25 @@ impl Settings {
             capture_on_start: false,
         }
     }
+    pub fn tab_enabled(&self, tab: crate::interaction::ShelfTab) -> bool {
+        use crate::interaction::ShelfTab;
+        tab == ShelfTab::All
+            || (!self.hidden_tabs.contains(&tab)
+                && (tab != ShelfTab::Downloads || self.downloads_enabled)
+                && (tab != ShelfTab::Text || self.text_enabled)
+                && (tab != ShelfTab::Links || self.links_enabled)
+                && (tab != ShelfTab::Tables || self.tables_enabled))
+    }
+    pub fn visible_tabs(&self) -> Vec<crate::interaction::ShelfTab> {
+        self.tab_order
+            .iter()
+            .copied()
+            .filter(|tab| self.tab_enabled(*tab))
+            .collect()
+    }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
         crate::tab_layout::validate_order(&self.tab_order)?;
+        crate::tab_layout::validate_visible(&self.hidden_tabs)?;
         if !(1..=12).contains(&self.gallery_columns) || !(1..=12).contains(&self.stream_rows) {
             return Err("Density must be in 1..12".into());
         }

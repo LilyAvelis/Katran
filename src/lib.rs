@@ -21,6 +21,9 @@ mod folder_commit;
 pub mod folder_watch;
 pub mod interaction;
 mod jobs_service;
+pub mod link_fragments;
+pub mod markdown;
+pub mod open_file;
 pub mod origin;
 pub mod screenshot_identity;
 pub mod settings;
@@ -28,10 +31,17 @@ pub mod sharex;
 mod shelf_tabs;
 pub mod shell_visual_worker;
 pub mod shortcuts;
+pub mod sorting;
 pub mod source_policy;
 pub mod source_runtime;
 mod source_service;
 pub mod tab_layout;
+pub mod tab_service;
+pub mod table_clipboard;
+pub mod table_fragments;
+mod table_service;
+pub mod text_fragments;
+mod text_service;
 use interaction::Interaction;
 use std::{
     fs::{self, OpenOptions},
@@ -41,6 +51,8 @@ use std::{
 
 pub mod actions;
 pub mod api;
+pub mod app_handlers;
+mod app_picker;
 pub mod preview;
 pub mod preview_view;
 pub mod quicklook;
@@ -48,10 +60,19 @@ pub mod quicklook_backend;
 pub mod quicklook_process;
 pub mod quicklook_transport;
 pub mod storage;
+pub mod table_view;
+pub mod updater;
 pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    updater: updater::Updater,
+    checked_update: Option<updater::Release>,
+    update_status: serde_json::Value,
+    app_provider: std::sync::Arc<std::sync::Mutex<Box<dyn app_handlers::Provider>>>,
+    app_sessions: app_picker::Sessions,
+    table_clipboard: std::sync::Arc<std::sync::Mutex<Box<dyn table_clipboard::Sink>>>,
+    text_clipboard: std::sync::Arc<std::sync::Mutex<Box<dyn text_fragments::ClipboardSink>>>,
     trash: std::sync::Arc<std::sync::Mutex<Box<dyn downloads::Trash>>>,
     jobs: domain_jobs::DomainJobs<jobs_service::PreparedWork>,
     classification: classification_runtime::ClassificationRuntime,
@@ -59,6 +80,7 @@ pub struct Service {
     source_configured: bool,
     source_runtime_started: bool,
     external_preview: std::sync::Arc<std::sync::Mutex<Box<dyn quicklook::Launcher>>>,
+    file_launcher: std::sync::Arc<std::sync::Mutex<Box<dyn open_file::Launcher>>>,
     sharex_scanner: sharex::SharexScanner,
     downloads_scanner: downloads::DownloadsScanner,
     capture_events: capture_events::Schedule,
@@ -72,6 +94,7 @@ pub struct Service {
     quota: u64,
     capture_enabled: bool,
     clipboard_sequence: u32,
+    owned_table_tokens: std::collections::VecDeque<String>,
     interaction: Interaction,
     settings: settings::Settings,
     shortcuts: shortcuts::Shortcuts,
@@ -79,9 +102,42 @@ pub struct Service {
     read_only: bool,
 }
 impl Service {
+    pub fn set_updater(&mut self, updater: updater::Updater) {
+        self.updater = updater;
+        self.checked_update = None;
+        self.update_status =
+            serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")});
+    }
+    fn accept_update_check(&mut self, status: updater::UpdateStatus) -> Result<serde_json::Value> {
+        self.checked_update = status.release.clone();
+        self.update_status =
+            serde_json::to_value(status).map_err(|error| ApiError::new("update_error", error))?;
+        Ok(self.update_status.clone())
+    }
+    fn accept_update_install(
+        &mut self,
+        installed: updater::InstalledUpdate,
+    ) -> Result<serde_json::Value> {
+        self.checked_update = None;
+        self.update_status = serde_json::json!({"state":"installed","current_version":env!("CARGO_PKG_VERSION"),"installed":installed});
+        Ok(self.update_status.clone())
+    }
+    pub fn set_table_clipboard_sink(&mut self, sink: Box<dyn table_clipboard::Sink>) {
+        self.table_clipboard = std::sync::Arc::new(std::sync::Mutex::new(sink));
+    }
+    pub fn set_text_clipboard_sink(&mut self, sink: Box<dyn text_fragments::ClipboardSink>) {
+        self.text_clipboard = std::sync::Arc::new(std::sync::Mutex::new(sink));
+    }
+    pub fn set_app_provider(&mut self, provider: Box<dyn app_handlers::Provider>) {
+        self.app_provider = std::sync::Arc::new(std::sync::Mutex::new(provider));
+        self.app_sessions = Default::default();
+    }
     /// Injectable external-preview boundary for synthetic tests and embedded clients.
     pub fn set_preview_launcher(&mut self, launcher: Box<dyn quicklook::Launcher>) {
         self.external_preview = std::sync::Arc::new(std::sync::Mutex::new(launcher));
+    }
+    pub fn set_file_launcher(&mut self, launcher: Box<dyn open_file::Launcher>) {
+        self.file_launcher = std::sync::Arc::new(std::sync::Mutex::new(launcher));
     }
     pub fn set_trash(&mut self, trash: Box<dyn downloads::Trash>) {
         self.trash = std::sync::Arc::new(std::sync::Mutex::new(trash));
@@ -137,9 +193,31 @@ impl Service {
             .map_err(|e| ApiError::new("settings_error", e))?;
         let mut interaction = Interaction::default();
         interaction.view = settings.default_view;
+        interaction.sort = settings.sort.normalized();
+        if !settings.tab_enabled(interaction.tab) {
+            interaction.tab = interaction::ShelfTab::All;
+        }
+        interaction.last_tab = settings
+            .visible_tabs()
+            .first()
+            .copied()
+            .unwrap_or(interaction::ShelfTab::All);
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
+            checked_update: None,
+            update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
+            app_provider: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                app_handlers::NativeProvider,
+            ))),
+            app_sessions: Default::default(),
+            table_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                table_clipboard::NativeClipboard,
+            ))),
+            text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                text_fragments::NativeClipboard,
+            ))),
             trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
             jobs: Default::default(),
             classification: Default::default(),
@@ -148,6 +226,9 @@ impl Service {
             source_runtime_started: false,
             external_preview: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 quicklook::NativeLauncher,
+            ))),
+            file_launcher: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                open_file::NativeLauncher,
             ))),
             sharex_scanner: Default::default(),
             downloads_scanner: Default::default(),
@@ -162,6 +243,7 @@ impl Service {
             quota: settings.quota_bytes,
             capture_enabled: settings.capture_on_start,
             clipboard_sequence: 0,
+            owned_table_tokens: Default::default(),
             interaction,
             settings,
             shortcuts,
@@ -177,6 +259,19 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
+            checked_update: None,
+            update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
+            app_provider: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                app_handlers::NativeProvider,
+            ))),
+            app_sessions: Default::default(),
+            table_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                table_clipboard::NativeClipboard,
+            ))),
+            text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                text_fragments::NativeClipboard,
+            ))),
             trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
             jobs: Default::default(),
             classification: Default::default(),
@@ -185,6 +280,9 @@ impl Service {
             source_runtime_started: false,
             external_preview: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 quicklook::NativeLauncher,
+            ))),
+            file_launcher: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                open_file::NativeLauncher,
             ))),
             sharex_scanner: Default::default(),
             downloads_scanner: Default::default(),
@@ -199,6 +297,7 @@ impl Service {
             quota: DEFAULT_QUOTA,
             capture_enabled: false,
             clipboard_sequence: 0,
+            owned_table_tokens: Default::default(),
             interaction: Interaction::default(),
             settings: settings::Settings::default(),
             shortcuts: shortcuts::Shortcuts::default(),
@@ -248,7 +347,14 @@ impl Service {
         if self.read_only
             && !matches!(
                 command,
-                Command::Get { .. } | Command::PreviewImage { .. } | Command::PreviewFile { .. }
+                Command::GetUpdateStatus
+                    | Command::Get { .. }
+                    | Command::PreviewImage { .. }
+                    | Command::PreviewFile { .. }
+                    | Command::GetText { .. }
+                    | Command::GetLink { .. }
+                    | Command::GetTable { .. }
+                    | Command::GetDocumentText { .. }
             )
         {
             return Err(ApiError::new(
@@ -257,6 +363,14 @@ impl Service {
             ));
         }
         match command {
+            Command::GetUpdateStatus => Ok(self.update_status.clone()),
+            Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
+            Command::InstallUpdate => {
+                let release=self.checked_update.clone().ok_or_else(||ApiError::new("update_not_checked","Check for an available update first"))?;
+                let prepared=self.updater.prepare(&release)?;
+                let installed=self.updater.commit(prepared)?;
+                self.accept_update_install(installed)
+            },
             Command::BeginJob{command} => self.begin_job(*command),
             Command::PollJob{job_id} => self.poll_job(job_id),
             Command::CancelJob{job_id} => {
@@ -283,25 +397,97 @@ impl Service {
             Command::CommitFolderCandidates { .. } => Err(ApiError::new("untrusted_worker_result","Prepared source results are accepted only from the domain supervisor")),
             Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
             Command::CommitScreenshotMatches { .. } => Err(ApiError::new("untrusted_worker_result","Pixel identity must be verified by the domain worker")),
-            Command::SelectTabPosition { position } => {
-                let tab = tab_layout::tab_at(&self.settings.tab_order,position)?;
-                self.interaction.set_tab(tab);
+            Command::IngestText {text,source} => {
+                self.check_text_enabled()?;
+                validate_source(&source)?;
+                let prepared=text_fragments::prepare(&self.root,self.quota,&text,&source,&self.ingest_origin,&self.reference_paths()?)?;
+                let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?;
+                Ok(serde_json::json!(self.get(id)?))
+            }
+            Command::IngestTable { rows,source } => self.ingest_table(table_fragments::Table{rows},&source),
+            Command::IngestTableTsv { text,source } => {self.check_tables_enabled()?;let table=table_fragments::parse_tsv(&text,true).map_err(table_service::invalid)?;self.ingest_table(table,&source)},
+            Command::IngestTableHtml { html,source } => {self.check_tables_enabled()?;let table=table_fragments::parse_html(&html).map_err(table_service::invalid)?;self.ingest_table(table,&source)},
+            Command::GetTable {id} => self.get_table(id),
+            Command::CopyTables {items} => self.copy_tables(items),
+            Command::GetLink {id} => self.get_link(id),
+            Command::CopyLinks {items} => self.copy_links(&items),
+            Command::IngestLink {url,source} => { self.check_links_enabled()?; validate_source(&source)?; let prepared=link_fragments::prepare(&self.root,self.quota,&url,&source,&self.ingest_origin,&self.reference_paths()?)?; let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(serde_json::json!(self.get(id)?)) },
+            Command::GetText {id}=>self.get_text(id),
+            Command::GetDocumentText {id}=>self.get_document_text(id),
+            Command::MergeText {items,separator}=>self.merge_text(&items,&separator),
+            Command::CopyText {items,separator}=>self.copy_text(&items,&separator),
+            Command::CopySelectedObjects=>{let items=self.selected_refs()?;self.dispatch(Command::CopySmart{items})},
+            Command::CopySmart{items}=>{if self.selection_is_tables(&items)?{self.copy_tables(items)}else if self.selection_is_links(&items)?{self.copy_links(&items)}else if self.selection_is_text(&items)?{self.copy_text(&items,"\n\n")}else{self.dispatch(Command::CopyEventsChecked{items})}},
+            Command::CopySelectedText=>{let items=self.selected_refs()?;self.copy_text(&items,"\n\n")},
+            Command::ListOpenApps {id} => self.list_open_apps(id),
+            Command::OpenWithApp {token,app_id} => self.open_with_app(&token,app_id),
+            Command::ReleaseOpenApps {token} => Ok(serde_json::json!({"released":self.app_sessions.release(&token)})),
+            Command::Tabs => Ok(self.tabs()),
+            Command::SetTabEnabled {tab, enabled} => self.set_tab_enabled(tab, enabled),
+            Command::ToggleTabEnabled {tab} => self.set_tab_enabled(tab, !self.settings.tab_enabled(tab)),
+            Command::ShowTabSettings => {
+                self.interaction.settings_section=2;
+                self.interaction.settings_open=true;
                 Ok(serde_json::json!(self.interaction))
+            },
+            Command::OpenFile { id, operation } => {
+                let event=self.get(id)?;
+                let launcher=self.file_launcher.lock().map_err(|_|ApiError::new("open_busy","File launcher lock poisoned"))?;
+                if event.kind==EventKind::LinkFragment && operation==open_file::Operation::Open { open_file::execute_link(&event,launcher.as_ref()) } else { open_file::execute_with_cache(&event,operation,launcher.as_ref(),&self.root,self.quota) }
+            },
+            Command::SelectTabPosition { position } => {
+                let tab = tab_layout::tab_at_visible(&self.settings.visible_tabs(),position)?;
+                self.select_tab(tab)
             },
             Command::MoveTab { tab,index } => {
                 let mut settings=self.settings.clone();
-                tab_layout::reorder(&mut settings.tab_order,tab,index).map_err(|e|ApiError::new("invalid_tab_order",e))?;
+                let visible=settings.visible_tabs();
+                let target=visible.get(index).ok_or_else(||ApiError::new("invalid_tab_position","No visible tab at this position"))?;
+                if !settings.tab_enabled(tab) {return Err(ApiError::new("tab_disabled","Cannot drag a disabled tab"));}
+                let target_index=settings.tab_order.iter().position(|t|t==target).unwrap();
+                tab_layout::reorder(&mut settings.tab_order,tab,target_index).map_err(|e|ApiError::new("invalid_tab_order",e))?;
                 self.dispatch(Command::SetSettings { settings })
             },
-            Command::SetTab { tab } => { self.interaction.set_tab(tab); Ok(serde_json::json!(self.interaction)) },
-            Command::ToggleTab => { self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
+            Command::SetTab { tab } => self.select_tab(tab),
+            Command::ToggleTab => { self.normalize_tabs(); self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
             Command::BrowseShelf { query, limit, after_id } => self.browse_shelf(&query, limit, after_id),
+            Command::BrowseShelfSorted { query, limit, cursor } => self.browse_shelf_sorted(&query, limit, cursor.as_deref()),
+            Command::SetSort { mode, reverse, seed } => {
+                let mut settings = self.settings.clone();
+                settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();
+                self.dispatch(Command::SetSettings { settings })?;
+                Ok(serde_json::json!(self.interaction))
+            },
             Command::ScanSharex => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Sharex}),
             Command::ScanDownloads => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Downloads}),
             Command::CaptureClipboard { trigger } => self.capture_from_event(trigger),
             Command::ActivateWindow => {
                 self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
                 Ok(serde_json::json!({"activation_requested": true, "serial": self.interaction.activation_serial}))
+            }
+            Command::TableViewGeometry { viewport, content } => {
+                self.require_table_view()?;
+                self.interaction.table_view.geometry(viewport,content)
+            }
+            Command::ZoomTableView { multiplier, anchor, viewport, content } => {
+                self.require_table_view()?;
+                self.interaction.table_view.zoom(multiplier,anchor,viewport,content)?;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::PanTableView { delta, viewport, content } => {
+                self.require_table_view()?;
+                self.interaction.table_view.pan(delta,viewport,content)?;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::FitTableView { viewport, content } => {
+                self.require_table_view()?;
+                self.interaction.table_view.fit(viewport,content)?;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::ResetTableView => {
+                self.require_table_view()?;
+                self.interaction.table_view=Default::default();
+                Ok(serde_json::json!(self.interaction))
             }
             Command::PreviewGeometry { viewport, fitted } => {
                 if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
@@ -321,7 +507,7 @@ impl Service {
             Command::TogglePreview => {
                 if self.interaction.preview.is_none() && let Some(id)=self.interaction.cursor {
                     let event=self.get(id)?;
-                    if !quicklook::is_native_image(&event) { return self.preview_external(event.id); }
+                    if !file_types::has_internal_preview(&event) { return self.preview_external(event.id); }
                 }
                 self.interaction.set_preview(if self.interaction.preview.is_some() {
                     None
@@ -374,7 +560,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::IngestWithOrigin { origin, command } => {
                 if !matches!(
                     *command,
-                    Command::IngestPath { .. } | Command::IngestBytes { .. }
+                    Command::IngestPath { .. } | Command::IngestBytes { .. } | Command::IngestText {..} | Command::IngestTable {..} | Command::IngestTableTsv {..} | Command::IngestTableHtml {..}
                 ) {
                     return Err(ApiError::new(
                         "invalid_argument",
@@ -382,7 +568,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                     ));
                 }
                 let clipboard_source = match command.as_ref() {
-                    Command::IngestPath { source, .. } | Command::IngestBytes { source, .. } => source.starts_with("clipboard_"),
+                    Command::IngestPath { source, .. } | Command::IngestBytes { source, .. } | Command::IngestText {source,..} | Command::IngestTable {source,..} | Command::IngestTableTsv {source,..} | Command::IngestTableHtml {source,..} => source.starts_with("clipboard_"),
                     _ => false,
                 };
                 if clipboard_source && origin.source_app.as_deref().is_some_and(|app| app.eq_ignore_ascii_case("sharex")) {
@@ -432,14 +618,18 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
                 if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
                 if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
-                let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder;
+                let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder || self.settings.hidden_tabs!=settings.hidden_tabs;
+                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) {self.capture_events.cancel();}
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
+                self.interaction.sort = self.settings.sort.normalized();
+                self.normalize_tabs();
                 if sources_changed {self.source_configured = false;}
                 self.configure_sources(self.source_runtime_started)?;
                 Ok(serde_json::json!(self.settings))
             }
             Command::ShowSettings => {
+                self.interaction.settings_section = 0;
                 self.interaction.settings_open = true;
                 Ok(serde_json::json!(self.interaction))
             }
@@ -469,7 +659,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::OpenCurrent => {
                 if let Some(id)=self.interaction.cursor {
                     let event=self.get(id)?;
-                    if !quicklook::is_native_image(&event) { return self.preview_external(event.id); }
+                    if !file_types::has_internal_preview(&event) { return self.preview_external(event.id); }
                 }
                 self.interaction.set_preview(self.interaction.cursor);
                 Ok(serde_json::json!(self.interaction))
@@ -478,7 +668,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.in_palette).map(|d|serde_json::json!({"id":d.id,"label":if d.id=="capture" {if self.capture_enabled {"Приостановить захват"}else{"Включить захват"}}else{d.label},"group":d.group,"shortcut":self.shortcuts.binding(d.id)})).collect())),
+            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.in_palette && self.action_available(d.id)).map(|d|serde_json::json!({"id":d.id,"label":self.action_label(d.id,d.label),"group":d.group,"shortcut":self.shortcuts.binding(d.id)})).collect())),
             Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
             Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
             Command::PreviewFile{id,max_edge}=>file_visual::render(&self.root,&self.get(id)?,max_edge),
@@ -500,6 +690,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::List{limit}=>Ok(serde_json::json!({"events":storage::query_events(&self.db,"",limit,None)?})),
             Command::Get { id } => Ok(serde_json::json!(self.get(id)?)),
             Command::IngestPath { path, source } => {
+                self.check_ingest_enabled(&path.to_string_lossy())?;
                 validate_source(&source)?;
                 let path = fs::canonicalize(path)?;
                 if path.starts_with(&self.root){return Err(ApiError::new("managed_source","Katran's managed files cannot be ingested as external references"));}
@@ -515,7 +706,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 let id = self.insert(&name, &source, &path, meta.len(), None)?;
                 Ok(serde_json::json!(self.get(id)?))
             }
-            Command::IngestBytes{name,bytes,source}=>{validate_name(&name)?;validate_source(&source)?;let id=storage::ingest_bytes(&mut self.db,&self.root,self.quota,storage::ByteIngest{name:&name,source:&source,bytes:&bytes,origin:&self.ingest_origin})?;Ok(serde_json::json!(self.get(id)?))},
+            Command::IngestBytes{name,bytes,source}=>{self.check_ingest_enabled(&name)?;validate_name(&name)?;validate_source(&source)?;let id=storage::ingest_bytes(&mut self.db,&self.root,self.quota,storage::ByteIngest{name:&name,source:&source,bytes:&bytes,origin:&self.ingest_origin})?;Ok(serde_json::json!(self.get(id)?))},
             Command::Import { ids, destination } => {
                 if ids.is_empty() || ids.len() > 1000 {
                     return Err(ApiError::new(
@@ -570,6 +761,16 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
         };
         self.db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![now_ms(),source,name,path,size,hash,serde_json::to_string(&self.ingest_origin).unwrap(),reference_hash])?;
         let id = self.db.last_insert_rowid();
+        if hash.is_none() {
+            let modified = fs::metadata(path)?
+                .modified()
+                .ok()
+                .and_then(sorting::modified_ms);
+            self.db.execute(
+                "UPDATE events SET modified_at_ms=?1 WHERE id=?2",
+                params![modified, id],
+            )?;
+        }
         classification_runtime::enqueue(&self.db, id)?;
         Ok(id)
     }

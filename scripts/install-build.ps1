@@ -26,7 +26,7 @@ function Invoke-KatranInstall {
         New-Item -ItemType Directory -Path $stage | Out-Null
         Copy-Item -LiteralPath $built -Destination (Join-Path $stage 'katran-ui.exe')
         if ((Get-FileHash -LiteralPath (Join-Path $stage 'katran-ui.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw 'Copied executable hash mismatch' }
-        $manifest = [ordered]@{ profile = 'release'; version = $version; capture_backend = 'windows-events'; shell_visual_protocol = 1; executable_sha256 = $hash; sources = $before }
+        $manifest = [ordered]@{ profile = 'release'; version = $version; update_format = 1; minimum_launcher_protocol = 1; capture_backend = 'windows-events'; shell_visual_protocol = 1; executable_sha256 = $hash; sources = $before }
         $manifestJson = ConvertTo-Json -InputObject $manifest -Depth 5
         Set-Content -LiteralPath (Join-Path $stage 'build-manifest.json') -Value $manifestJson -Encoding utf8
         if (Test-Path -LiteralPath $destination) {

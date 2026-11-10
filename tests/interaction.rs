@@ -63,7 +63,12 @@ fn selection_actions_and_preview_via_api() {
     );
     assert_eq!(state["selected"], serde_json::json!([id]));
     assert_eq!(
-        call(&mut s, Command::RunAction { id: "open".into() })["preview"],
+        call(
+            &mut s,
+            Command::RunAction {
+                id: "preview".into()
+            }
+        )["preview"],
         id
     );
     assert_eq!(

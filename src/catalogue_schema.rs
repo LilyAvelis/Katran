@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 2;
+pub(crate) const VERSION: i64 = 6;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -30,7 +30,7 @@ pub(crate) fn backup_before_migration(db: &Connection, root: &std::path::Path) -
     std::fs::create_dir_all(&directory)?;
     for nonce in 0..100 {
         let path = directory.join(format!(
-            "index-before-v2-{}-{}-{nonce}.sqlite3",
+            "index-before-v{VERSION}-{}-{}-{nonce}.sqlite3",
             crate::now_ms(),
             std::process::id()
         ));
@@ -61,17 +61,18 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         return Ok(());
     }
     let tx = db.unchecked_transaction()?;
-    let has_policy: bool = tx.query_row(
+    if version < 2 {
+        let has_policy: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('events') WHERE name='delete_policy_json')",
         [],
         |r| r.get(0),
     )?;
-    if !has_policy {
-        tx.execute_batch("ALTER TABLE events ADD COLUMN delete_policy_json TEXT NOT NULL DEFAULT '{\"kind\":\"shelf_only\"}';
+        if !has_policy {
+            tx.execute_batch("ALTER TABLE events ADD COLUMN delete_policy_json TEXT NOT NULL DEFAULT '{\"kind\":\"shelf_only\"}';
             ALTER TABLE events ADD COLUMN legacy_source_ref INTEGER NOT NULL DEFAULT 0;
             UPDATE events SET legacy_source_ref=1 WHERE blob_hash IS NULL AND source IN ('sharex','downloads');")?;
-    }
-    tx.execute_batch("CREATE TABLE IF NOT EXISTS source_configurations(
+        }
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS source_configurations(
         source_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, root TEXT NOT NULL, enabled INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS source_projection(
         source_id TEXT NOT NULL, generation INTEGER NOT NULL, path_key TEXT NOT NULL,
@@ -113,6 +114,26 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         FROM events WHERE source IN ('clipboard','clipboard_image','clipboard_file') AND (blob_hash IS NOT NULL OR reference_hash IS NOT NULL);
       UPDATE classification_work SET state='queued' WHERE state='inflight';
       PRAGMA user_version=2;")?;
+    }
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS text_contents(blob_hash TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,content TEXT NOT NULL); CREATE TABLE IF NOT EXISTS text_fragments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,preview TEXT NOT NULL); PRAGMA user_version=3;")?;
+    if version < 4 {
+        let has_modified: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('events') WHERE name='modified_at_ms')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_modified {
+            tx.execute_batch("ALTER TABLE events ADD COLUMN modified_at_ms INTEGER;")?;
+        }
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS events_sort_name ON events(name COLLATE NOCASE,id);
+            CREATE INDEX IF NOT EXISTS events_sort_size ON events(size,id);
+            CREATE INDEX IF NOT EXISTS events_sort_modified ON events(modified_at_ms,id);
+            PRAGMA user_version=4;",
+        )?;
+    }
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS link_fragments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,preview TEXT NOT NULL); PRAGMA user_version=5;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS table_contents(blob_hash TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,content TEXT NOT NULL); CREATE TABLE IF NOT EXISTS table_fragments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,preview TEXT NOT NULL); PRAGMA user_version=6;")?;
     tx.commit()?;
     Ok(())
 }

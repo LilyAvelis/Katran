@@ -1,0 +1,84 @@
+param(
+    [string]$Root = (Join-Path $PSScriptRoot '..'),
+    [string]$BinaryDirectory = 'target/build/release',
+    [Parameter(Mandatory)][string]$OutputDirectory,
+    [string]$Version,
+    [Parameter(Mandatory)][string]$DependencyNoticesPath,
+    [switch]$BuildInstaller,
+    [string]$IsccPath = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$Root = [IO.Path]::GetFullPath($Root)
+if (!$Version) {
+    $cargo = Get-Content -LiteralPath (Join-Path $Root 'Cargo.toml') -Raw
+    if ($cargo -notmatch '(?ms)^\[package\].*?^version\s*=\s*"([^"]+)"') { throw 'Missing package version' }
+    $Version = $Matches[1]
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release version must be numeric major.minor.patch' }
+if (![IO.Path]::IsPathRooted($BinaryDirectory)) { $BinaryDirectory = Join-Path $Root $BinaryDirectory }
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+if (Test-Path -LiteralPath $OutputDirectory) { throw 'OutputDirectory must not exist; packaging never replaces existing files' }
+if (!(Test-Path -LiteralPath $DependencyNoticesPath -PathType Leaf) -or (Get-Item -LiteralPath $DependencyNoticesPath).Length -eq 0) { throw 'A nonempty dependency notices file is required' }
+if ((Get-Item -LiteralPath $DependencyNoticesPath).Length -gt 8MB) { throw 'Dependency notices exceed the updater 8 MiB limit' }
+foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) {
+    if (!(Test-Path -LiteralPath (Join-Path $BinaryDirectory $file) -PathType Leaf)) { throw "Missing release binary: $file" }
+}
+New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
+$utf8 = New-Object Text.UTF8Encoding($false)
+function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Value -Depth 8) + "`n", $utf8) }
+function Hash($Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Write-Zip($Directory, $Destination) {
+    Add-Type -AssemblyName System.IO.Compression
+    $stream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew)
+    $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in (Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object FullName)) {
+            $name = $file.FullName.Substring($Directory.Length + 1).Replace('\','/')
+            $entry = $zip.CreateEntry($name, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]::new(2020,1,1,0,0,0,[TimeSpan]::Zero)
+            $inputStream = [IO.File]::OpenRead($file.FullName)
+            $outputStream = $entry.Open()
+            try { $inputStream.CopyTo($outputStream) } finally { $inputStream.Dispose(); $outputStream.Dispose() }
+        }
+    } finally { $zip.Dispose(); $stream.Dispose() }
+}
+$hash = Hash (Join-Path $BinaryDirectory 'katran-ui.exe')
+$id = $hash.Substring(0,12)
+$portable = Join-Path $OutputDirectory 'portable'
+$update = Join-Path $OutputDirectory 'update'
+$versionDir = Join-Path $portable "runtime/versions/$id"
+New-Item -ItemType Directory -Path $versionDir,$update | Out-Null
+# Explicit whitelist: never copy a working tree, runtime tree, user data or build directory.
+Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'Katran.exe')
+Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'runtime/Katran.exe')
+Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran.exe') -Destination (Join-Path $portable 'katran-cli.exe')
+[IO.File]::WriteAllText((Join-Path $portable 'portable.flag'), '', $utf8)
+Copy-Item -LiteralPath $DependencyNoticesPath -Destination (Join-Path $portable 'THIRD-PARTY-NOTICES.txt')
+[IO.File]::WriteAllText((Join-Path $portable 'runtime/current-version.txt'), $id + "`n", $utf8)
+$sourceFiles = @('Cargo.toml','Cargo.lock','build.rs') + @(Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File -Filter '*.rs' | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+$sourceFiles += @('assets/branding/katran.ico','assets/branding/katran.rc' | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
+$sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })
+$manifest = [ordered]@{profile='release';version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash $DependencyNoticesPath);sources=$sources}
+Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-ui.exe') -Destination (Join-Path $versionDir 'katran-ui.exe')
+Copy-Item -LiteralPath $DependencyNoticesPath -Destination (Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt')
+Write-Json (Join-Path $versionDir 'build-manifest.json') $manifest
+if ((Get-Item -LiteralPath (Join-Path $versionDir 'build-manifest.json')).Length -gt 64KB) { throw 'Build manifest exceeds the updater 64 KiB limit' }
+Copy-Item -LiteralPath (Join-Path $versionDir 'katran-ui.exe'),(Join-Path $versionDir 'build-manifest.json'),(Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt') -Destination $update
+foreach ($notice in @('AFIO-LICENSE','LICENSE')) {
+    if (Test-Path -LiteralPath (Join-Path $Root $notice) -PathType Leaf) { Copy-Item -LiteralPath (Join-Path $Root $notice) -Destination $portable }
+}
+$portableZip = Join-Path $OutputDirectory "Katran-$Version-windows-x64-portable.zip"
+$updateName = "Katran-$Version-update.zip"
+$updateZip = Join-Path $OutputDirectory $updateName
+Write-Zip $portable $portableZip
+Write-Zip $update $updateZip
+Write-Json (Join-Path $OutputDirectory 'release.json') ([ordered]@{schema_version=1;data_schema_version=6;minimum_launcher_protocol=1;version=$Version;tag="v$Version";repository='LilyAvelis/Katran';update=[ordered]@{url="https://github.com/LilyAvelis/Katran/releases/download/v$Version/$updateName";size_bytes=(Get-Item -LiteralPath $updateZip).Length;sha256=(Hash $updateZip)}})
+if ($BuildInstaller) {
+    if (!(Test-Path -LiteralPath $IsccPath -PathType Leaf)) { throw 'Inno Setup 6 compiler missing; pass -IsccPath' }
+    & $IsccPath "/DAppVersion=$Version" "/DPackageRoot=$portable" "/DOutputRoot=$OutputDirectory" (Join-Path $Root 'installer/katran.iss')
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+}
+$checksums = @(Get-ChildItem -LiteralPath $OutputDirectory -File | Where-Object { $_.Extension -in @('.zip','.exe','.json') } | Sort-Object Name | ForEach-Object { "$(Hash $_.FullName)  $($_.Name)" })
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'), ($checksums -join "`n") + "`n", $utf8)
+Write-Output "Prepared Katran $Version release artifacts in $OutputDirectory"

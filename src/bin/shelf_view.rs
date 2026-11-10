@@ -62,6 +62,9 @@ impl Shelf {
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
+                        if event["kind"] == "table_fragment" { if let Some(api) = self.api.as_mut() { self.table_preview.show(ui,event,api); } } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) || katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or(""))) {
+                            self.text_preview.show(ui, event);
+                        } else {
                         let width = ui.available_width();
                         let height = ui.available_height();
                         let (title, _) = ui.allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
@@ -148,6 +151,7 @@ impl Shelf {
                                 self.images.prefetch(ctx, &visible[neighbor], 1400);
                             }
                         }
+                        }
                     }
                 } else {
                     self.images.clear_preview_geometry();
@@ -193,6 +197,7 @@ impl Shelf {
                                     .take(((row + 1) * columns).min(visible.len()))
                                     .skip(row * columns)
                                 {
+                                    let criterion=sorting_ui::criterion(event,&self.state["sort"]);
                                     let id = event["id"].as_i64().unwrap();
                                     let selected = self.state["selected"]
                                         .as_array()
@@ -217,20 +222,20 @@ impl Shelf {
                                     }
                                     if gallery {
                                         let zones = gallery_card::geometry(rect);
-                                        self.images.paint_at(ui, event, zones.image, 512);
+                                        if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
+                                        let title = if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
                                         gallery_card::text(
                                             ui,
                                             zones.name,
-                                            event["name"].as_str().unwrap_or("Файл"),
+                                            &title,
                                             14.0,
                                             Color32::from_gray(235),
                                         );
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
-                                        let label = origin
-                                            .label()
-                                            .unwrap_or_else(|| "Источник не определён".into());
+                                        let origin_label = origin.label().unwrap_or_else(|| "Источник не определён".into());
+                                        let label = criterion.as_ref().map_or_else(||origin_label.clone(),|criterion|if self.state["sort"]["mode"]=="origin" {criterion.clone()}else{format!("{criterion} · {origin_label}")});
                                         ui.painter_at(zones.origin).rect_filled(
                                             zones.origin,
                                             4.0,
@@ -249,15 +254,15 @@ impl Shelf {
                                             rect.min + Vec2::splat(10.0),
                                             Vec2::new((image_height * 1.4667).min(176.0), image_height),
                                         );
-                                        self.images.paint_at(ui, event, image, 320);
+                                        if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, image); } else { self.images.paint_at(ui, event, image, 320); }
                                         let left = image.right() + 16.0;
                                         let width = (rect.right() - left - 10.0).max(1.0);
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
                                         let lines = [
-                                            event["name"].as_str().unwrap_or("Файл").to_owned(),
-                                            event["source"].as_str().unwrap_or("").to_owned(),
+                                            if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() },
+                                            criterion.clone().unwrap_or_else(||event["source"].as_str().unwrap_or("").to_owned()),
                                             origin
                                                 .label()
                                                 .unwrap_or_else(|| "Источник не определён".into()),
@@ -296,11 +301,12 @@ impl Shelf {
                                         serde_json::from_value(event["origin"].clone())
                                             .unwrap_or_default();
                                     let response = response.on_hover_text(format!(
-                                        "{}\n{}",
+                                        "{}\n{}\n{}",
                                         event["name"].as_str().unwrap_or("Файл"),
                                         origin
                                             .label()
-                                            .unwrap_or_else(|| "Источник не определён".into())
+                                            .unwrap_or_else(|| "Источник не определён".into()),
+                                        criterion.as_deref().unwrap_or("")
                                     ));
                                     if response.drag_started() {
                                         if !selected {
@@ -318,7 +324,7 @@ impl Shelf {
                                             mode: mode(ctx.input(|i| i.modifiers)),
                                         });
                                         if response.double_clicked() {
-                                            self.state = self.call(Command::OpenCurrent);
+                                            self.start_job(Command::RunAction { id: "open".into() }, false, ctx.clone());
                                         }
                                     }
                                 }
@@ -328,9 +334,6 @@ impl Shelf {
                 }
                 if self.job.is_some() {
                     ui.label("Выполняется операция…");
-                }
-                if !self.message.is_empty() {
-                    ui.label(&self.message);
                 }
             });
         self.images.end_frame(ctx);

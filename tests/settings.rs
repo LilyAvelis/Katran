@@ -11,10 +11,15 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
+        sort: Default::default(),
         quota_bytes: 200,
         gallery_columns: 4,
         stream_rows: 3,
         tab_order: katran::tab_layout::default_order(),
+        hidden_tabs: Vec::new(),
+        text_enabled: false,
+        links_enabled: false,
+        tables_enabled: false,
         card_width: 280.0,
         default_view: View::List,
         capture_on_start: false,

@@ -9,17 +9,24 @@ mod clipboard_events_ui;
 mod gallery_card;
 mod images;
 mod input_log;
+mod markdown_ui;
 mod native_drag_ui;
+mod open_apps_ui;
 mod palette;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;
 mod single_instance;
+mod sorting_input;
+mod sorting_ui;
 mod source_jobs;
 mod tab_bar;
+mod table_preview_ui;
+mod text_preview_ui;
 mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
+mod updates_ui;
 use base64::Engine;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use katran::{Command, DEFAULT_QUOTA, Request, Service, interaction::SelectionMode};
@@ -143,6 +150,7 @@ struct Shelf {
     pending_delete_permanent: bool,
     pending_delete_recycle: bool,
     settings_ui: settings_ui::State,
+    open_apps: open_apps_ui::State,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
@@ -160,8 +168,12 @@ struct Shelf {
     stream_rows: u8,
     pending_density: Vec<String>,
     images: Images,
+    text_preview: text_preview_ui::TextPreview,
+    table_preview: table_preview_ui::TablePreview,
     events: Vec<Value>,
-    next_cursor: Option<i64>,
+    next_cursor: Option<String>,
+    sorting_input: sorting_input::State,
+    pending_sort: Option<String>,
     state: Value,
     query: String,
     loaded_query: String,
@@ -203,6 +215,7 @@ impl Shelf {
             && self.shortcut_editor.is_none()
             && !self.busy_text_editing
             && !self.actions
+            && !self.open_apps.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -223,10 +236,24 @@ impl Shelf {
         }
         let tab_input_allowed = self.shortcut_editor.is_none()
             && !self.actions
+            && !self.open_apps.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")));
+        let sort_input_allowed = tab_input_allowed
+            && self.state["preview"].is_null()
+            && !ctx.egui_wants_keyboard_input()
+            && !(self.api.is_none() && self.busy_text_editing)
+            && !self.shortcuts.iter().any(|shortcut| {
+                shortcut
+                    .binding
+                    .as_deref()
+                    .is_some_and(|binding| binding.split(" / ").any(|chord| chord == "Comma"))
+            });
+        if let Some(action) = self.sorting_input.take(&ctx, sort_input_allowed) {
+            self.pending_sort = Some(action);
+        }
         if tab_input_allowed {
             if ctx.input_mut(|i| {
                 let mut found = false;
@@ -249,7 +276,7 @@ impl Shelf {
                         s.id.starts_with("tab_position_")
                             || matches!(
                                 s.id.as_str(),
-                                "all" | "images" | "screenshots" | "downloads"
+                                "all" | "images" | "screenshots" | "downloads" | "text" | "links" | "tables"
                             )
                     })
                     .cloned()
@@ -264,6 +291,7 @@ impl Shelf {
             && self.shortcut_editor.is_none()
             && !self.busy_text_editing
             && !self.actions
+            && !self.open_apps.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -282,12 +310,20 @@ impl Shelf {
         self.finish_job();
         self.preview_warmup_tick();
         if self.api.is_some() {
+            self.open_apps_tick(&ctx);
+        }
+        if self.api.is_some() {
             for action in std::mem::take(&mut self.pending_density) {
                 self.run(action, &ctx);
             }
         }
         if self.api.is_some()
             && let Some(action) = self.pending_tab_action.take()
+        {
+            self.run(action, &ctx);
+        }
+        if self.api.is_some()
+            && let Some(action) = self.pending_sort.take()
         {
             self.run(action, &ctx);
         }
@@ -340,7 +376,10 @@ impl Shelf {
                 let catalogue: Vec<_> = self
                     .shortcuts
                     .iter()
-                    .filter(|s| !self.actions || s.id == "settings")
+                    .filter(|s| {
+                        (!self.actions || s.id == "settings")
+                            && (!self.open_apps.open || s.id == "open_with")
+                    })
                     .cloned()
                     .collect();
                 if let Some(id) = shortcuts_ui::take_action(&ctx, &catalogue) {
@@ -349,13 +388,16 @@ impl Shelf {
             }
         }
         if self.api.is_some() {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {
+            if !self.open_apps.open
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
+            {
                 self.actions = !self.actions;
                 self.focus_actions = self.actions;
                 self.action_query.clear();
                 self.action_selected = 0;
             }
             if self.shortcut_editor.is_none()
+                && !self.open_apps.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {
@@ -410,8 +452,31 @@ impl Shelf {
                     self.refresh();
                 }
                 if self.api.is_some() {
-                    let settings = self.call(Command::GetSettings);
-                    if let Ok(order) = serde_json::from_value(settings["tab_order"].clone()) {
+                    let tabs = self.call(Command::Tabs);
+                    let text_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter()
+                            .any(|tab| tab["tab"] == "text" && tab["enabled"] == true)
+                    });
+                    let link_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter()
+                            .any(|tab| tab["tab"] == "links" && tab["enabled"] == true)
+                    });
+                    let markdown_preview = self.state["preview"].as_i64().is_some_and(|id| {
+                        self.events.iter().any(|event| {
+                            event["id"] == id
+                                && event["name"].as_str().is_some_and(|name| {
+                                    katran::file_types::is_markdown(std::path::Path::new(name))
+                                })
+                        })
+                    });
+                    self.text_preview
+                        .set_enabled(text_enabled || link_enabled || markdown_preview);
+                    let tables_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter()
+                            .any(|tab| tab["tab"] == "tables" && tab["enabled"] == true)
+                    });
+                    self.table_preview.set_enabled(tables_enabled);
+                    if let Ok(order) = serde_json::from_value(tabs["visible_tabs"].clone()) {
                         self.tab_order = order;
                     }
                 }
@@ -427,6 +492,7 @@ impl Shelf {
                 }
             });
         egui::Panel::bottom("footer")
+            .exact_size(84.0)
             .frame(
                 egui::Frame::new()
                     .fill(Color32::from_rgb(54, 54, 58))
@@ -452,6 +518,16 @@ impl Shelf {
                         capture_lamp::show(ui, self.capture);
                     });
                 });
+                let status = if self.message.is_empty() {
+                    sorting_ui::confirmation(&self.state["sort"])
+                } else {
+                    self.message.clone()
+                };
+                ui.add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::Label::new(&status).truncate(),
+                )
+                .on_hover_text(status);
             });
         let visible = self.events.clone();
         self.state = self.call(Command::SetVisible {
@@ -471,7 +547,30 @@ impl Shelf {
         } else {
             1
         };
-        if self.api.is_some() && !self.actions && !self.save && self.pending_delete.is_empty() {
+        if self.api.is_some()
+            && !self.actions
+            && !self.open_apps.open
+            && !self.save
+            && self.pending_delete.is_empty()
+        {
+            let document_preview = self.state["preview"].as_i64().is_some_and(|id| {
+                self.events.iter().any(|event| {
+                    event["id"] == id
+                        && (event["kind"] == "text_fragment"
+                            || event["name"].as_str().is_some_and(|name| {
+                                katran::file_types::is_markdown(std::path::Path::new(name))
+                            }))
+                })
+            });
+            self.text_preview
+                .handle_view_shortcuts(&ctx, document_preview);
+            let table_preview = self.state["preview"].as_i64().is_some_and(|id| {
+                self.events
+                    .iter()
+                    .any(|event| event["id"] == id && event["kind"] == "table_fragment")
+            });
+            self.table_preview
+                .handle_view_shortcuts(&ctx, table_preview);
             let keys = ctx.input(|i| {
                 i.events
                     .iter()
@@ -526,9 +625,14 @@ impl Shelf {
         self.shelf_view(root, &ctx, &visible, gallery, columns);
         if self.api.is_some() {
             self.palette(&ctx);
+            self.open_apps_panel(&ctx);
         }
-        if let Some(api) = self.api.as_mut() {
-            self.settings_ui.show(&ctx, api);
+        if let Some(api) = self.api.as_mut()
+            && self.settings_ui.show(&ctx, api)
+        {
+            self.state = self.call(Command::Interaction);
+            self.refresh();
+            ctx.request_repaint();
         }
         if self.job.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
@@ -593,6 +697,7 @@ impl Shelf {
             && self.api.is_some()
             && self.native_drag.is_none()
             && !self.actions
+            && !self.open_apps.open
             && !self.save
             && self.shortcut_editor.is_none()
             && self.pending_delete.is_empty()
@@ -610,6 +715,9 @@ impl eframe::App for Shelf {
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.finish_job();
         self.preview_warmup_tick();
+        if self.api.is_some() {
+            self.open_apps_tick(ctx);
+        }
         if self.job.is_some() || self.capture_job.is_some() || self.preview_warmup.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -683,6 +791,7 @@ fn main() -> eframe::Result {
         pending_delete_permanent: false,
         pending_delete_recycle: false,
         settings_ui: settings_ui::State::default(),
+        open_apps: open_apps_ui::State::default(),
         shortcut_editor: None,
         api: Some(api),
         job: None,
@@ -699,9 +808,13 @@ fn main() -> eframe::Result {
         gallery_columns: 4,
         stream_rows: 3,
         pending_density: Vec::new(),
-        images: Images::new(root),
+        images: Images::new(root.clone()),
+        text_preview: text_preview_ui::TextPreview::new(root.clone()),
+        table_preview: table_preview_ui::TablePreview::new(root),
         events: vec![],
         next_cursor: None,
+        sorting_input: Default::default(),
+        pending_sort: None,
         state: Value::Null,
         query: String::new(),
         loaded_query: String::new(),
@@ -780,7 +893,31 @@ mod tests {
                 })
             }
         }
+        struct NoExternalFile;
+        impl katran::open_file::Launcher for NoExternalFile {
+            fn launch(
+                &self,
+                _: &std::path::Path,
+                _: katran::open_file::Operation,
+            ) -> katran::api::Result<()> {
+                Err(katran::api::ApiError {
+                    code: "test_file_disabled".into(),
+                    message: "External file disabled in tests".into(),
+                })
+            }
+        }
+        struct FakeApps;
+        impl katran::app_handlers::Provider for FakeApps {
+            fn discover(&self, _: &str) -> katran::Result<Vec<katran::app_handlers::AppHandler>> {
+                Ok(vec![])
+            }
+            fn invoke(&self, _: &str, _: &str, _: &std::path::Path) -> katran::Result<()> {
+                Ok(())
+            }
+        }
         let mut api = Service::open(root, 10000).unwrap();
+        api.set_app_provider(Box::new(FakeApps));
+        api.set_file_launcher(Box::new(NoExternalFile));
         api.set_preview_launcher(Box::new(NoExternalPreview));
         api.execute(Request {
             api_version: 1,
@@ -798,7 +935,7 @@ mod tests {
                 .clone(),
         )
         .unwrap();
-        settings.downloads_enabled = false;
+        settings.downloads_folder = Some(root.join("synthetic-downloads"));
         api.execute(Request {
             api_version: 1,
             request_id: "test-no-personal-folders".into(),
@@ -818,6 +955,7 @@ mod tests {
             pending_delete_permanent: false,
             pending_delete_recycle: false,
             settings_ui: settings_ui::State::default(),
+            open_apps: open_apps_ui::State::default(),
             shortcut_editor: None,
             api: Some(api),
             job: None,
@@ -835,8 +973,12 @@ mod tests {
             stream_rows: 3,
             pending_density: Vec::new(),
             images: Images::new(root.into()),
+            text_preview: text_preview_ui::TextPreview::new(root.into()),
+            table_preview: table_preview_ui::TablePreview::new(root.into()),
             events: vec![],
             next_cursor: None,
+            sorting_input: Default::default(),
+            pending_sort: None,
             state: Value::Null,
             query: String::new(),
             loaded_query: String::new(),
@@ -873,7 +1015,7 @@ mod tests {
         let logger = katran::diagnostics::Logger::start(root.path()).unwrap();
         app.api.as_mut().unwrap().attach_logger(logger.clone());
         let ctx = egui::Context::default();
-        app.run("open".into(), &ctx);
+        app.run("preview".into(), &ctx);
         assert_eq!(app.state["preview"], id);
         app.run("preview".into(), &ctx);
         assert!(app.state["preview"].is_null());
@@ -898,7 +1040,7 @@ mod tests {
         assert_eq!(
             commands
                 .iter()
-                .filter(|c| c.as_str() == "browse_shelf")
+                .filter(|c| c.as_str() == "browse_shelf_sorted")
                 .count(),
             1,
             "Preview must not reload catalogue; only explicit Refresh browses"
@@ -957,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_quicklook_works_from_ctrl_enter_and_palette() {
+    fn reveal_works_from_ctrl_enter_and_quicklook_from_palette() {
         for palette in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let mut app = test_shelf(root.path());
@@ -983,7 +1125,14 @@ mod tests {
                     egui::Modifiers::CTRL
                 },
             );
-            assert_eq!(app.message, "External preview disabled in tests");
+            assert_eq!(
+                app.message,
+                if palette {
+                    "External preview disabled in tests"
+                } else {
+                    "External file disabled in tests"
+                }
+            );
             assert!(app.call(Command::Interaction)["preview"].is_null());
         }
     }
@@ -1011,6 +1160,88 @@ mod tests {
         output.textures_delta.clear();
         drain_domain_job(app);
     }
+    #[test]
+    fn document_ctrl_arrows_keep_preview_and_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Text,
+            enabled: true,
+        });
+        for text in ["# Первый", "# Второй"] {
+            app.call(Command::IngestText {
+                text: text.into(),
+                source: "test".into(),
+            });
+        }
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Text,
+        });
+        app.refresh();
+        let id = app.events[0]["id"].as_i64().unwrap();
+        app.call(Command::SetVisible {
+            ids: app.events.iter().filter_map(|e| e["id"].as_i64()).collect(),
+        });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Space, egui::Modifiers::NONE);
+        let before = app.call(Command::Interaction);
+        frame(&mut app, &ctx, egui::Key::ArrowRight, egui::Modifiers::CTRL);
+        let right = app.call(Command::Interaction);
+        assert_eq!(right["preview"], before["preview"]);
+        assert_eq!(right["selected"], before["selected"]);
+        frame(&mut app, &ctx, egui::Key::ArrowLeft, egui::Modifiers::CTRL);
+        let left = app.call(Command::Interaction);
+        assert_eq!(left["preview"], before["preview"]);
+        assert_eq!(left["selected"], before["selected"]);
+    }
+    #[test]
+    fn tables_space_opens_internal_grid_and_mode_keys_keep_current_item() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Tables,
+            enabled: true,
+        });
+        for s in ["first", "second"] {
+            app.call(Command::IngestTable {
+                rows: vec![vec![s.into()]],
+                source: "test".into(),
+            });
+        }
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Tables,
+        });
+        app.refresh();
+        let ids: Vec<_> = app
+            .events
+            .iter()
+            .filter_map(|event| event["id"].as_i64())
+            .collect();
+        let id = ids[0];
+        app.call(Command::SetVisible { ids });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Space, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["preview"], id);
+        assert!(!app.message.contains("External preview"));
+        frame(&mut app, &ctx, egui::Key::ArrowRight, egui::Modifiers::CTRL);
+        assert_eq!(app.call(Command::Interaction)["preview"], id);
+        frame(&mut app, &ctx, egui::Key::ArrowLeft, egui::Modifiers::CTRL);
+        assert_eq!(app.call(Command::Interaction)["preview"], id);
+        assert_eq!(
+            app.call(Command::Interaction)["selected"],
+            serde_json::json!([id])
+        );
+    }
     fn drain_domain_job(app: &mut Shelf) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while matches!(app.job, Some(UiJob::Domain { .. })) {
@@ -1018,6 +1249,57 @@ mod tests {
             assert!(Instant::now() < deadline, "domain UI job did not complete");
             std::thread::yield_now();
         }
+    }
+    #[test]
+    fn comma_sort_routes_domain_action_and_preserves_text_and_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::NONE);
+        frame(&mut app, &ctx, egui::Key::O, egui::Modifiers::SHIFT);
+        assert_eq!(app.call(Command::Interaction)["sort"]["mode"], "origin");
+        assert_eq!(app.call(Command::Interaction)["sort"]["reverse"], true);
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::NONE);
+        frame(&mut app, &ctx, egui::Key::A, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["sort"]["mode"], "origin");
+        let mut released = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Comma,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        released.textures_delta.clear();
+        frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::CTRL);
+        assert_eq!(app.call(Command::Interaction)["settings_open"], true);
+    }
+    #[test]
+    fn custom_comma_shortcut_keeps_precedence_over_sort_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.call(Command::SetView {
+            view: katran::interaction::View::List,
+        });
+        app.call(Command::SetShortcut {
+            id: "gallery".into(),
+            binding: Some("Comma".into()),
+            replace: false,
+            reset: false,
+        });
+        frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["view"], "gallery");
+        frame(&mut app, &ctx, egui::Key::O, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["sort"]["mode"], "arrival");
     }
     #[test]
     fn tabs_shortcuts_and_hidden_selection_use_domain_api() {
@@ -1059,7 +1341,7 @@ mod tests {
         .unwrap();
         app.finish_job();
         assert!(
-            matches!(app.take_queued_copy(), Some(Command::CopyEventsChecked { items }) if items.len()==1 && items[0].id==id)
+            matches!(app.take_queued_copy(), Some(Command::CopySmart { items }) if items.len()==1 && items[0].id==id)
         );
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
         assert_eq!(app.state["tab"], "all");
@@ -1273,6 +1555,20 @@ mod tests {
                 .contains("blocked")
         );
     }
+    #[test]
+    fn table_copy_status_reports_partial_formats_and_item_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.action_result(serde_json::json!({"table_copied":false,"merged":true,"html_written":false,"text_written":true,"warnings":["synthetic HTML failure"]}));
+        assert!(app.message.contains("значения с табуляциями"));
+        assert!(app.message.contains("synthetic HTML failure"));
+        app.action_result(serde_json::json!({"table_copied":false,"merged":false,"items":[{"id":5,"ok":false,"error":{"message":"stale table"}}]}));
+        assert!(app.message.contains("#5: stale table"));
+        app.action_result(
+            serde_json::json!({"table_copied":true,"table_count":2,"row_count":5,"column_count":3}),
+        );
+        assert!(app.message.contains("2 · 5 × 3"));
+    }
     fn visible_landmarks(app: &mut Shelf, ctx: &egui::Context) -> Vec<egui::Pos2> {
         fn find(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
             match shape {
@@ -1382,7 +1678,7 @@ mod tests {
             .unwrap();
         app.finish_job();
         match app.take_queued_copy().unwrap() {
-            Command::CopyEventsChecked { items } => {
+            Command::CopySmart { items } => {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].id, selected_id);
                 assert_eq!(items[0].revision, selected_revision);
@@ -1410,9 +1706,9 @@ mod tests {
             egui::Modifiers::SHIFT,
         );
         assert_eq!(app.state["selected"], serde_json::json!([3, 2]));
-        frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
-        assert_eq!(app.state["preview"], 2);
         frame(&mut app, &ctx, egui::Key::Space, egui::Modifiers::NONE);
+        assert_eq!(app.state["preview"], 2);
+        app.run("preview".into(), &ctx);
         assert!(app.state["preview"].is_null());
         // A second tap requires release; holding Space must not flicker modes.
         let mut released = ctx.run_ui(
@@ -1479,7 +1775,7 @@ mod tests {
         assert!(app.pending_delete.is_empty());
         assert_eq!(app.events.len(), 3);
         app.call(Command::SetShortcut {
-            id: "open".into(),
+            id: "preview".into(),
             binding: Some("F6".into()),
             replace: false,
             reset: false,

@@ -8,6 +8,9 @@ pub enum ShelfTab {
     Images,
     Screenshots,
     Downloads,
+    Text,
+    Links,
+    Tables,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -27,8 +30,10 @@ pub enum SelectionMode {
 }
 #[derive(Default, Serialize)]
 pub struct Interaction {
+    pub sort: crate::sorting::SortSpec,
     pub activation_serial: u64,
     pub settings_open: bool,
+    pub settings_section: usize,
     pub view: View,
     pub tab: ShelfTab,
     pub last_tab: ShelfTab,
@@ -37,7 +42,10 @@ pub struct Interaction {
     pub selected: Vec<i64>,
     pub preview: Option<i64>,
     pub preview_view: crate::preview_view::State,
+    pub table_view: crate::table_view::State,
     anchor: Option<i64>,
+    #[serde(skip)]
+    range_order: bool,
 }
 impl Interaction {
     pub fn set_tab(&mut self, tab: ShelfTab) {
@@ -56,15 +64,29 @@ impl Interaction {
     pub fn set_preview(&mut self, id: Option<i64>) {
         if self.preview != id {
             self.preview_view = Default::default();
+            self.table_view = Default::default();
         }
         self.preview = id;
     }
     pub fn visible(&mut self, ids: Vec<i64>) {
+        if ids == self.visible {
+            return;
+        }
         let previous = self
             .cursor
             .and_then(|id| self.visible.iter().position(|i| *i == id))
             .unwrap_or(0);
         self.visible = ids;
+        if self.range_order {
+            let ranks: std::collections::HashMap<_, _> = self
+                .visible
+                .iter()
+                .enumerate()
+                .map(|(rank, id)| (*id, rank))
+                .collect();
+            self.selected
+                .sort_by_key(|id| ranks.get(id).copied().unwrap_or(usize::MAX));
+        }
         if self.preview.is_some_and(|id| !self.visible.contains(&id)) {
             self.set_preview(None);
         }
@@ -84,10 +106,12 @@ impl Interaction {
         };
         match mode {
             SelectionMode::Replace => {
+                self.range_order = false;
                 self.selected = vec![id];
                 self.anchor = Some(id);
             }
             SelectionMode::Toggle => {
+                self.range_order = false;
                 if self.selected.contains(&id) {
                     self.selected.retain(|i| *i != id);
                 } else {
@@ -96,6 +120,7 @@ impl Interaction {
                 self.anchor = Some(id);
             }
             SelectionMode::Range => {
+                self.range_order = true;
                 let anchor = self.anchor.or(self.cursor).unwrap_or(id);
                 self.anchor = Some(anchor);
                 let start = self

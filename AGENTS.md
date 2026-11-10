@@ -37,16 +37,21 @@ The owner accepted the optimized architecture, QuickLook, Actions and Tab as
 version1.5.0 on2026-11-10 and explicitly authorized pushing this baseline to GitHub.
 Do not infer authorization to push future experimental work from this release.
 
-Use existing Garden masks. Read C:/Users/lilya/.codex/garden-personas/README.md and
-the selected card in cards.md before assigning a subagent. Polly/Appolion leads;
+Use existing Garden masks. Read C:/Users/lilya/.codex/garden-personas/README.md,
+run garden.py list and garden.py profile NAME before assigning a subagent.
+The local SQLite mirror is the normal source; cards.md may not exist. Polly/Appolion leads;
 mask names do not create persistent memory. Supply task contracts and durable
 handoff/context instead of repeatedly spawning context-free replacements.
 
-Prefer working alone or with one justified helper. Routine bounded work belongs
-to an appropriate junior/mid mask (usually Terra medium); call Sol/senior review
-only when complexity or cost of error warrants it. Do not optimize for the number
-of agents or tests. Keep disjoint file ownership and shared API integration with
-the lead; verify the domain API before editing GUI clients.
+Owner refinement on2026-11-10: actively delegate suitable bounded work to the
+Garden team to conserve the Pro budget. Reuse already-created agents within the
+session for follow-up work instead of repeatedly creating replacements. Routine
+implementation belongs to junior/mid masks; senior review needs a concrete reason.
+Set effort explicitly: Terra medium/high for substantial implementation, low for
+tiny fixes; Sol low; Luna high/xhigh; dedicated deep analysis such as Azuros xhigh.
+Astra requires the owner's explicit approval before each invocation.
+Keep disjoint file ownership and shared API integration with the lead; verify the
+domain API before editing GUI clients. Do not create agents merely for names.
 
 ## Screenshots original-file exception · owner decision 2026-11-10
 

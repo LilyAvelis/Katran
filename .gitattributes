@@ -1,3 +1,2 @@
-* text=auto eol=lf
-*.cmd text eol=crlf
-*.ps1 text eol=crlf
+# Preserve the exact upstream license bytes and intentional upstream whitespace.
+scripts/license-texts/** -text -whitespace

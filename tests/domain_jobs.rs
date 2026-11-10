@@ -46,6 +46,24 @@ fn completion_is_owned_once_and_finish_cannot_be_replayed() {
     assert_eq!(jobs.stats().active, 0);
 }
 #[test]
+fn blocked_update_keeps_copy_and_capture_workers_available() {
+    let mut jobs = DomainJobs::<u64>::new();
+    let (tx, rx) = mpsc::channel();
+    let update = jobs
+        .submit(Lane::Update, move |_| {
+            rx.recv().unwrap();
+            Ok(1)
+        })
+        .unwrap();
+    let foreground = jobs.submit(Lane::Foreground, |_| Ok(2)).unwrap();
+    let capture = jobs.submit(Lane::Capture, |_| Ok(3)).unwrap();
+    ready(&mut jobs, foreground);
+    ready(&mut jobs, capture);
+    assert_ne!(jobs.status(update).unwrap().state, JobState::Ready);
+    tx.send(()).unwrap();
+    ready(&mut jobs, update);
+}
+#[test]
 fn blocked_discovery_cannot_take_foreground_or_capture_workers() {
     let mut jobs = DomainJobs::<u64>::new();
     let (release, blocked) = mpsc::channel();

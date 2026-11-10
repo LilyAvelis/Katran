@@ -3,6 +3,243 @@
 use crate::{ApiError, Event, Result, interaction::ShelfTab, storage};
 use rusqlite::{Connection, params};
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct OrderedCursor {
+    version: u8,
+    tab: ShelfTab,
+    query: String,
+    sort: crate::sorting::SortSpec,
+    generation: String,
+    missing: bool,
+    key: CursorKey,
+    name: String,
+    id: i64,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+enum CursorKey {
+    Integer(i64),
+    Text(String),
+    Blob(Vec<u8>),
+}
+impl CursorKey {
+    fn value(&self) -> rusqlite::types::Value {
+        match self {
+            Self::Integer(v) => (*v).into(),
+            Self::Text(v) => v.clone().into(),
+            Self::Blob(v) => v.clone().into(),
+        }
+    }
+}
+
+/// The SQL projection filters the entire source before keyset ordering/LIMIT.
+/// Only page rows are decoded; original paths are never accessed here.
+pub(crate) fn query_sorted(
+    db: &Connection,
+    tab: ShelfTab,
+    needle: &str,
+    limit: u32,
+    cursor: Option<&str>,
+    sort: crate::sorting::SortSpec,
+    features: (bool, bool, bool, bool),
+) -> Result<(Vec<Event>, Option<String>)> {
+    let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
+    use crate::sorting::SortMode;
+    if !(1..=1000).contains(&limit) {
+        return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
+    }
+    let sort = sort.normalized();
+    let sources: String = db.query_row("SELECT COALESCE(group_concat(source_id||':'||generation||':'||enabled,';'),'') FROM (SELECT * FROM source_configurations ORDER BY source_id)", [], |r| r.get(0))?;
+    let generation =
+        format!("{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}");
+    let after = cursor
+        .map(|value| {
+            if value.len() > 131072 {
+                return Err(ApiError::new("invalid_cursor", "Cursor too large"));
+            }
+            let value: OrderedCursor =
+                serde_json::from_str(value).map_err(|e| ApiError::new("invalid_cursor", e))?;
+            if value.version != 1
+                || value.tab != tab
+                || value.query != needle
+                || value.sort != sort
+                || value.generation != generation
+                || value.id <= 0
+            {
+                return Err(ApiError::new(
+                    "stale_cursor",
+                    "Sort, filter or source changed; restart browsing",
+                ));
+            }
+            Ok(value)
+        })
+        .transpose()?;
+    let ordinary = matches!(
+        tab,
+        ShelfTab::All | ShelfTab::Images | ShelfTab::Text | ShelfTab::Links | ShelfTab::Tables
+    );
+    let source = match tab {
+        ShelfTab::Screenshots => "sharex",
+        ShelfTab::Downloads => "downloads",
+        _ => "",
+    };
+    if sort.mode == SortMode::Arrival {
+        // Preserve the indexed UNION merge path for the default large-history
+        // view. No outer computed-key sort/materialization is needed for IDs.
+        let mut sql = projection_sql(
+            tab,
+            images_enabled,
+            text_enabled,
+            links_enabled,
+            tables_enabled,
+        );
+        if sort.reverse {
+            sql = sql
+                .replace("e.id <= ?4", "e.id >= ?4")
+                .replace("p.event_id <= ?4", "p.event_id >= ?4")
+                .replace("ORDER BY id DESC", "ORDER BY id ASC");
+        }
+        let bound = after
+            .as_ref()
+            .map_or(if sort.reverse { 0 } else { i64::MAX }, |c| {
+                if sort.reverse {
+                    c.id.saturating_add(1)
+                } else {
+                    c.id - 1
+                }
+            });
+        let mut statement = db.prepare_cached(&sql)?;
+        let mut events = statement
+            .query_map(
+                params![
+                    ordinary,
+                    tab == ShelfTab::Images,
+                    source,
+                    bound,
+                    needle,
+                    limit + 1
+                ],
+                |r| storage::event_row_with_availability(r, r.get(10)?),
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let more = events.len() > limit as usize;
+        events.truncate(limit as usize);
+        let next = if more {
+            events
+                .last()
+                .map(|event| {
+                    serde_json::to_string(&OrderedCursor {
+                        version: 1,
+                        tab,
+                        query: needle.into(),
+                        sort,
+                        generation,
+                        missing: false,
+                        key: CursorKey::Integer(event.id),
+                        name: crate::sorting::name_key(&event.name),
+                        id: event.id,
+                    })
+                })
+                .transpose()
+                .map_err(|e| ApiError::new("invalid_cursor", e))?
+        } else {
+            None
+        };
+        return Ok((events, next));
+    }
+    let projection = projection_sql(
+        tab,
+        images_enabled,
+        text_enabled,
+        links_enabled,
+        tables_enabled,
+    );
+    let projection = projection
+        .trim()
+        .strip_suffix("ORDER BY id DESC LIMIT ?6")
+        .expect("known projection tail");
+    let key = match sort.mode {
+        SortMode::Arrival => "p.id",
+        SortMode::Name => "katran_name_key(p.name)",
+        SortMode::Extension => "katran_extension_key(p.name)",
+        SortMode::Natural => "katran_natural_key(p.name)",
+        SortMode::Modified => "m.modified_at_ms",
+        SortMode::Size => "p.size",
+        SortMode::Shuffle => "katran_shuffle_key(p.id,?7)",
+        SortMode::Origin => {
+            "katran_origin_key(CASE WHEN json_valid(p.origin_json) THEN json_extract(p.origin_json,'$.source_domain') END,CASE WHEN json_valid(p.origin_json) THEN json_extract(p.origin_json,'$.source_app') END,p.source)"
+        }
+    };
+    let descending = (sort.mode == SortMode::Arrival) != sort.reverse;
+    let direction = if descending { "DESC" } else { "ASC" };
+    let relation = if descending { "<" } else { ">" };
+    // Missing primary values always last; COALESCE supplies only a cursor value,
+    // never a fabricated modification date/provenance.
+    let sql = format!(
+        "WITH projection AS ({projection}), keyed AS (SELECT p.*,({key} IS NULL) AS missing,COALESCE({key},0) AS sort_key,katran_name_key(p.name) AS name_key FROM projection p JOIN events m ON m.id=p.id) SELECT * FROM keyed WHERE ?8=0 OR missing>?9 OR (missing=?9 AND (sort_key {relation} ?10 OR (sort_key=?10 AND (name_key {relation} ?11 OR (name_key=?11 AND id {relation} ?12))))) ORDER BY missing ASC,sort_key {direction},name_key {direction},id {direction} LIMIT ?6"
+    );
+    let mut statement = db.prepare_cached(&sql)?;
+    let mut rows = statement.query(params![
+        ordinary,
+        tab == ShelfTab::Images,
+        source,
+        i64::MAX,
+        needle,
+        limit + 1,
+        sort.seed as i64,
+        after.is_some(),
+        after.as_ref().is_some_and(|c| c.missing),
+        after.as_ref().map_or(0.into(), |c| c.key.value()),
+        after.as_ref().map_or("", |c| c.name.as_str()),
+        after.as_ref().map_or(0, |c| c.id)
+    ])?;
+    let mut events = Vec::new();
+    let mut last = None;
+    let mut more = false;
+    while let Some(row) = rows.next()? {
+        if events.len() == limit as usize {
+            more = true;
+            break;
+        }
+        let event = storage::event_row_with_availability(row, row.get(10)?)?;
+        let key = match row.get_ref("sort_key")? {
+            rusqlite::types::ValueRef::Integer(v) => CursorKey::Integer(v),
+            rusqlite::types::ValueRef::Text(v) => {
+                CursorKey::Text(String::from_utf8_lossy(v).into_owned())
+            }
+            rusqlite::types::ValueRef::Blob(v) => CursorKey::Blob(v.to_vec()),
+            _ => {
+                return Err(ApiError::new(
+                    "invalid_sort_key",
+                    "Unsupported catalogue key",
+                ));
+            }
+        };
+        last = Some(OrderedCursor {
+            version: 1,
+            tab,
+            query: needle.into(),
+            sort,
+            generation: generation.clone(),
+            missing: row.get("missing")?,
+            key,
+            name: row.get("name_key")?,
+            id: event.id,
+        });
+        events.push(event);
+    }
+    let next = if more {
+        last.map(|c| serde_json::to_string(&c))
+            .transpose()
+            .map_err(|e| ApiError::new("invalid_cursor", e))?
+    } else {
+        None
+    };
+    Ok((events, next))
+}
+
+#[cfg(test)]
 pub(crate) fn query(
     db: &Connection,
     tab: ShelfTab,
@@ -10,19 +247,41 @@ pub(crate) fn query(
     limit: u32,
     after: Option<i64>,
 ) -> Result<Vec<Event>> {
+    query_features(db, tab, needle, limit, after, (true, true, true, true))
+}
+
+pub(crate) fn query_features(
+    db: &Connection,
+    tab: ShelfTab,
+    needle: &str,
+    limit: u32,
+    after: Option<i64>,
+    features: (bool, bool, bool, bool),
+) -> Result<Vec<Event>> {
+    let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
     if !(1..=1000).contains(&limit) || after.is_some_and(|id| id <= 0) {
         return Err(ApiError::new(
             "invalid_argument",
             "Expected limit 1..1000 and positive cursor",
         ));
     }
-    let ordinary = matches!(tab, ShelfTab::All | ShelfTab::Images);
+    let ordinary = matches!(
+        tab,
+        ShelfTab::All | ShelfTab::Images | ShelfTab::Text | ShelfTab::Links | ShelfTab::Tables
+    );
     let source = match tab {
         ShelfTab::Screenshots => "sharex",
         ShelfTab::Downloads => "downloads",
         _ => "",
     };
-    let mut statement = db.prepare_cached(&sql())?;
+    let sql = projection_sql(
+        tab,
+        images_enabled,
+        text_enabled,
+        links_enabled,
+        tables_enabled,
+    );
+    let mut statement = db.prepare_cached(&sql)?;
     Ok(statement
         .query_map(
             params![
@@ -38,12 +297,53 @@ pub(crate) fn query(
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+fn projection_sql(
+    tab: ShelfTab,
+    images_enabled: bool,
+    text_enabled: bool,
+    links_enabled: bool,
+    tables_enabled: bool,
+) -> String {
+    let mut sql = sql();
+    if !images_enabled {
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!(
+                "AND e.legacy_source_ref=0 AND NOT {}",
+                crate::file_types::sql_image_predicate()
+            ),
+        );
+    }
+    if tab == ShelfTab::Text {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM text_fragments t WHERE t.event_id=e.id)");
+        sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    }
+    if tab == ShelfTab::Links {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
+        sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    }
+    if !links_enabled {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
+    }
+    if tab == ShelfTab::Tables {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id)");
+        sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    }
+    if !tables_enabled {
+        sql=sql.replace("AND e.legacy_source_ref=0","AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id)");
+    }
+    if !text_enabled {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM text_fragments t WHERE t.event_id=e.id)");
+    }
+    sql
+}
+
 // Keep ORDER BY on the compound statement: wrapping this UNION in a SELECT
 // causes SQLite to materialize and sort the entire history before LIMIT.
 fn sql() -> String {
     let search = |app: &str| {
         format!(
-            "(?5='' OR katran_contains(e.name,?5) OR katran_contains(e.source,?5) OR katran_contains({app},?5) OR katran_contains(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_domain'),'') ELSE '' END,?5))"
+            "(?5='' OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE l.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR katran_contains(e.name,?5) OR katran_contains(e.source,?5) OR katran_contains({app},?5) OR katran_contains(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_domain'),'') ELSE '' END,?5))"
         )
     };
     // Separate source branches bind all leading browse-index columns. CROSS
@@ -54,7 +354,7 @@ fn sql() -> String {
             r#"
         SELECT p.event_id AS id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,
           json_set(CASE WHEN json_valid(e.origin_json) THEN e.origin_json ELSE '{{}}' END,'$.source_app','{app}'),
-          e.reference_hash,e.delete_policy_json,p.available AS projected_available
+          e.reference_hash,e.delete_policy_json,p.available AS projected_available,NULL AS text_preview,0 AS is_link,0 AS is_table,e.modified_at_ms
         FROM source_projection p CROSS JOIN events e ON e.id=p.event_id
         WHERE ?2=0 AND (?3='' OR ?3='{source}') AND p.source_id='{source}' AND p.available=1
           AND p.generation=(SELECT generation FROM source_configurations WHERE source_id='{source}' AND enabled=1)
@@ -70,7 +370,7 @@ fn sql() -> String {
     format!(
         r#"
             SELECT e.id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,e.origin_json,e.reference_hash,e.delete_policy_json,
-                   NULL AS projected_available
+                   NULL AS projected_available,COALESCE((SELECT preview FROM text_fragments t WHERE t.event_id=e.id),(SELECT preview FROM link_fragments l WHERE l.event_id=e.id),(SELECT preview FROM table_fragments t WHERE t.event_id=e.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id) AS is_table,e.modified_at_ms
             FROM events e
             WHERE ?1 AND e.id <= ?4 AND e.legacy_source_ref=0
               AND {ordinary_search}
