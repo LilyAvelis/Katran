@@ -35,7 +35,7 @@ disjoint implementation modules and synthetic tests. API proof before GUI.
 
 ## Current QuickLook experiment (not installed)
 
-Separate lab: `C:/Users/lilya/Lilia Avelis/QuickLook-Latency-Lab`.
+Separate lab: `C:/Users/lilya/Lilia Avelis/Katran/local-experiments/QuickLook-Latency-Lab`.
 `REPORT.md` and `DESIGN-NEXT.md` contain evidence and integration gates. Same
 isolated server: warm 30 samples/type/mode, full CLI medians259–270ms versus
 minimal client84–88ms, p95 client94–103ms. First66-call run had a PNG393ms outlier;

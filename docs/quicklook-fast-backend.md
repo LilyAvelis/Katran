@@ -1,6 +1,6 @@
 # Maintained QuickLook bridge · integration contract
 
-Katran's Rust backend uses a separate, versioned QuickLook endpoint. The maintained QuickLook application is a separate GPL artifact. Its source is outside this MIT repository in `C:\Users\lilya\Lilia Avelis\QuickLook-Latency-Lab\production-source`; its normal candidate is `production-candidate` beside that checkout. Nothing from QuickLook's viewer implementation is embedded in Katran.
+Katran's Rust backend uses a separate, versioned QuickLook endpoint. The maintained QuickLook application is a separate GPL artifact. Its source is outside this MIT repository in `C:\Users\lilya\Lilia Avelis\Katran\local-experiments\QuickLook-Latency-Lab\production-source`; its normal candidate is `production-candidate` beside that checkout. Nothing from QuickLook's viewer implementation is embedded in Katran.
 
 ## Backend API
 
