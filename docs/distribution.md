@@ -54,9 +54,11 @@ Windows may display an unknown-publisher warning. Never claim signed provenance.
 
 CI pins Rust 1.95.0 for reproducible checks and release builds. It runs fmt,
 API/headless tests, Clippy and synthetic whitelist/determinism tests
-on Windows. Tag builds additionally compile setup and publish assets only after
-checks pass. Default workflow permissions are read-only; only the tag release job
-can write releases. Checkout is pinned to an official action commit. Inno Setup is
+on Windows. After checks pass, release builds produce three binaries and notices;
+a separate job packages them and compiles setup, then a publish job uploads the
+finished assets. Default workflow permissions are read-only; only the publish job
+can write releases. Official checkout, cache and artifact actions are pinned to
+commits. Inno Setup is
 provided by the [official Windows runner image](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md).
 Synthetic checks: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/release-package-contract.ps1`.
 
@@ -72,9 +74,30 @@ UI and CLI from the same source revision.
 ## Retrying release infrastructure
 
 If an existing stable tag has not produced a published release, the workflow on
-main can be dispatched with `release_tag` set to that existing tag. Both checks
-and packaging check out the same tag; the tag itself is never moved. The release
-job remains gated by checks and exact Cargo/tag version matching. Asset publication
+main can be dispatched with `release_tag` set to that existing tag. Checks resolve
+the tag to a commit and the build and packaging jobs check out that same commit;
+the tag itself is never moved. Publishing remains gated by checks and exact
+Cargo/tag version matching. Asset publication
 refuses an existing release rather than replacing its files. Release preparation
 prefetches all locked dependencies because offline license metadata includes
 development dependencies that a release-only binary build may not download.
+The build checks that the installer compiler exists before compiling and records
+the commit, toolchain, target, features, profile, lockfile hash and four input
+file hashes in a receipt. Packaging verifies that receipt against its checkout and
+the downloaded files; publication verifies the final asset whitelist and checksums
+and confirms that the tag still resolves to the checked commit before creating a release.
+
+The workflow stores immutable build and packaged artifacts for 30 days, named with
+the checked commit and run attempt. Within that retention period, GitHub's rerun
+failed jobs can retry packaging using the successful build artifact, or publication
+using the successful packaged artifact, without compiling again. A new dispatch
+is a new run and performs its checks and build again. A partially created release
+still requires manual investigation: publication never replaces existing assets.
+
+Cargo registry/git and `target/build` caches are keyed by Windows image,
+architecture, Rust version, features, profile, lockfile and commit, with a
+same-lockfile fallback for later commits. Pull requests may restore but never save
+caches. No working tree, runtime/data directory, or local credentials are cached.
+Warm-cache speed depends on runner and cache transfer costs; no benchmark is claimed.
+Only obsolete main/PR checks share cancellation groups; tag and dispatched release
+runs have separate groups and cannot cancel one another.

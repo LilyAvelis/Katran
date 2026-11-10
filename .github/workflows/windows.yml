@@ -18,6 +18,9 @@ env:
 jobs:
   checks:
     runs-on: windows-2022
+    concurrency:
+      group: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && format('checks-{0}', github.ref) || format('release-checks-{0}', github.run_id) }}
+      cancel-in-progress: true
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -40,21 +43,41 @@ jobs:
       - name: Rust toolchain
         shell: pwsh
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - name: Restore checks cache
+        id: checks-cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/build
+          key: windows-2022-x64-rust-1.95.0-ui-clipboard-events-debug-${{ hashFiles('Cargo.lock') }}-${{ steps.source.outputs.sha }}
+          restore-keys: |
+            windows-2022-x64-rust-1.95.0-ui-clipboard-events-debug-${{ hashFiles('Cargo.lock') }}-
       - run: cargo +1.95.0 fmt --check
-      - run: cargo +1.95.0 test --locked --features ui,clipboard-events --target-dir target/build
-      - run: cargo +1.95.0 clippy --locked --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
       - name: Synthetic packaging contract
         shell: pwsh
         run: |
           ./tests/release-package-contract.ps1
           python tests/test_third_party_notices.py
           if ($LASTEXITCODE -ne 0) { throw 'Notice tests failed' }
-  release:
+      - run: cargo +1.95.0 test --locked --features ui,clipboard-events --target-dir target/build
+      - run: cargo +1.95.0 clippy --locked --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
+      - name: Save checks cache
+        if: github.event_name != 'pull_request' && steps.checks-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/build
+          key: windows-2022-x64-rust-1.95.0-ui-clipboard-events-debug-${{ hashFiles('Cargo.lock') }}-${{ steps.source.outputs.sha }}
+  build:
     if: (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: checks
     runs-on: windows-2022
-    permissions:
-      contents: write
+    outputs:
+      artifact: ${{ steps.artifact.outputs.name }}
     steps:
       - name: Validate requested release tag
         if: github.event_name == 'workflow_dispatch'
@@ -65,10 +88,28 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.checks.outputs.source_sha }}
-      - name: Build and package
+      - name: Rust toolchain
+        shell: pwsh
+        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Check installer compiler
         shell: pwsh
         run: |
-          rustup toolchain install 1.95.0 --profile minimal
+          if (!(Test-Path -LiteralPath "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" -PathType Leaf)) { throw 'Inno Setup 6 compiler missing' }
+          if (-not ((rustc +1.95.0 -vV) -ccontains 'host: x86_64-pc-windows-msvc')) { throw 'Unexpected Rust host target' }
+      - name: Restore release cache
+        id: release-cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/build
+          key: windows-2022-x64-rust-1.95.0-ui-clipboard-events-release-${{ hashFiles('Cargo.lock') }}-${{ needs.checks.outputs.source_sha }}
+          restore-keys: |
+            windows-2022-x64-rust-1.95.0-ui-clipboard-events-release-${{ hashFiles('Cargo.lock') }}-
+      - name: Build release binaries and notices
+        shell: pwsh
+        run: |
           # Metadata includes development dependencies not compiled by release binaries.
           cargo +1.95.0 fetch --locked
           if ($LASTEXITCODE -ne 0) { throw 'Release dependency prefetch failed' }
@@ -82,14 +123,106 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependency notice generation failed' }
           cargo +1.95.0 build --locked --release --features ui,clipboard-events --bin katran-ui --bin katran-launcher --bin katran --target-dir target/build
           if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
-          ./scripts/package-release.ps1 -OutputDirectory "$env:RUNNER_TEMP/katran-release" -Version $version -BuildInstaller -DependencyNoticesPath "$env:RUNNER_TEMP/katran-third-party-notices.txt"
+      - name: Save release cache
+        if: steps.release-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/build
+          key: windows-2022-x64-rust-1.95.0-ui-clipboard-events-release-${{ hashFiles('Cargo.lock') }}-${{ needs.checks.outputs.source_sha }}
+      - name: Stage build artifact
+        id: artifact
+        shell: pwsh
+        run: |
+          $directory = "$env:RUNNER_TEMP/katran-build"
+          New-Item -ItemType Directory -Path $directory | Out-Null
+          foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) { Copy-Item -LiteralPath "target/build/release/$file" -Destination $directory }
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP/katran-third-party-notices.txt" -Destination $directory
+          $files = @{}
+          foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe','katran-third-party-notices.txt')) { $files[$file] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $directory $file)).Hash.ToLowerInvariant() }
+          $receipt = @{ source_sha='${{ needs.checks.outputs.source_sha }}'; toolchain='1.95.0'; target='x86_64-pc-windows-msvc'; features='ui,clipboard-events'; profile='release'; cargo_lock_sha256=(Get-FileHash -Algorithm SHA256 Cargo.lock).Hash.ToLowerInvariant(); files=$files }
+          $receipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $directory 'receipt.json') -Encoding utf8
+          "name=katran-build-${{ needs.checks.outputs.source_sha }}-${{ github.run_attempt }}" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}/katran-build/*
+          if-no-files-found: error
+          retention-days: 30
+  package:
+    needs: [checks, build]
+    runs-on: windows-2022
+    outputs:
+      artifact: ${{ steps.artifact.outputs.name }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.checks.outputs.source_sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: ${{ runner.temp }}/katran-build
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $directory = "$env:RUNNER_TEMP/katran-build"
+          $expected = @('katran-ui.exe','katran-launcher.exe','katran.exe','katran-third-party-notices.txt')
+          $actual = @(Get-ChildItem -LiteralPath $directory -File | ForEach-Object Name)
+          if (@(Compare-Object ($expected + 'receipt.json' | Sort-Object) ($actual | Sort-Object)).Count -ne 0) { throw 'Unexpected build artifact files' }
+          $receipt = Get-Content -Raw -LiteralPath (Join-Path $directory 'receipt.json') | ConvertFrom-Json
+          if ($receipt.source_sha -cne '${{ needs.checks.outputs.source_sha }}' -or $receipt.toolchain -cne '1.95.0' -or $receipt.target -cne 'x86_64-pc-windows-msvc' -or $receipt.features -cne 'ui,clipboard-events' -or $receipt.profile -cne 'release' -or $receipt.cargo_lock_sha256 -cne (Get-FileHash -Algorithm SHA256 Cargo.lock).Hash.ToLowerInvariant()) { throw 'Build artifact identity mismatch' }
+          if (@(Compare-Object ($expected | Sort-Object) ($receipt.files.PSObject.Properties.Name | Sort-Object)).Count -ne 0) { throw 'Unexpected receipt files' }
+          foreach ($file in $expected) { if ($receipt.files.$file -cne (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $directory $file)).Hash.ToLowerInvariant()) { throw "Build artifact hash mismatch: $file" } }
+          $version = $env:KATRAN_RELEASE_TAG.Substring(1)
+          ./scripts/package-release.ps1 -BinaryDirectory "$env:RUNNER_TEMP/katran-build" -OutputDirectory "$env:RUNNER_TEMP/katran-release" -Version $version -BuildInstaller -DependencyNoticesPath "$env:RUNNER_TEMP/katran-build/katran-third-party-notices.txt"
+      - name: Name packaged artifact
+        id: artifact
+        shell: pwsh
+        run: '"name=katran-package-${{ needs.checks.outputs.source_sha }}-${{ github.run_attempt }}" >> $env:GITHUB_OUTPUT'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            ${{ runner.temp }}/katran-release/*.zip
+            ${{ runner.temp }}/katran-release/*.exe
+            ${{ runner.temp }}/katran-release/*.json
+            ${{ runner.temp }}/katran-release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: [checks, build, package]
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.package.outputs.artifact }}
+          path: ${{ runner.temp }}/katran-release
       - name: Publish immutable release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if ($env:KATRAN_RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected a stable vMAJOR.MINOR.PATCH tag' }
+          $tagRevision = gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:KATRAN_RELEASE_TAG" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $tagRevision -cne '${{ needs.checks.outputs.source_sha }}') { throw 'Release tag no longer resolves to the checked revision' }
           $directory = "$env:RUNNER_TEMP/katran-release"
           $version = $env:KATRAN_RELEASE_TAG.Substring(1)
+          $expected = @("Katran-$version-windows-x64-portable.zip", "Katran-$version-update.zip", "Katran-$version-windows-x64-setup.exe", 'release.json')
+          $actual = @(Get-ChildItem -LiteralPath $directory -File | ForEach-Object Name)
+          if (@(Compare-Object ($expected + 'SHA256SUMS.txt' | Sort-Object) ($actual | Sort-Object)).Count -ne 0) { throw 'Unexpected release artifact files' }
+          $seen = @{}
+          foreach ($line in Get-Content -LiteralPath (Join-Path $directory 'SHA256SUMS.txt')) {
+            if ($line -cnotmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$') { throw 'Invalid checksum entry' }
+            $hash, $file = $Matches[1], $Matches[2]
+            if ($file -cnotin $expected -or $seen.ContainsKey($file) -or $hash -cne (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $directory $file)).Hash.ToLowerInvariant()) { throw "Invalid checksum: $file" }
+            $seen[$file] = $true
+          }
+          if ($seen.Count -ne $expected.Count) { throw 'Missing release checksums' }
           $notes = Join-Path $directory 'release-notes.md'
           [IO.File]::WriteAllText($notes, "Katran $version for Windows x64.`n`nPortable ZIP: extract and run Katran.exe. Installer: per-user installation. Close Katran before running setup. Updates: Settings → Updates. Unsigned binaries; no signing certificate is configured.`n`nSee docs/distribution.md for storage, update and verification contracts.")
           $assets = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Extension -in @('.zip','.exe','.json') -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object FullName)

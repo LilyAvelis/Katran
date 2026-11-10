@@ -31,6 +31,14 @@ and provide a runnable build for manual visual feedback.
 - Use synthetic data for tests; never silently overwrite or delete source files.
 - Keep technical contracts, build instructions and limitations with the code.
 
+## Build and release discipline
+
+Follow [DevOps execution rules](docs/devops.md). Reuse verified artifacts and
+successful checks for unchanged inputs; retry only the affected stage. Preflight
+metadata/licenses/tools before expensive compilation. Do not run minute-by-minute
+LLM polling loops, duplicate clean builds or new release gates without a concrete
+reason. Global owner rules in `~/.codex/AGENTS.md` also apply across projects.
+
 ## Agent collaboration
 
 The owner accepted the optimized architecture, QuickLook, Actions and Tab as
