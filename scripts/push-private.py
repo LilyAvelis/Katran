@@ -1,10 +1,18 @@
 """Push the current branch using a local, Git-ignored credential file."""
 import base64
+import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 from urllib.parse import urlparse
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--tag", help="Push one existing stable release tag without force")
+arguments = parser.parse_args()
+if arguments.tag and not re.fullmatch(r"v\d+\.\d+\.\d+", arguments.tag):
+    parser.error("Expected a stable release tag such as v2.0.0")
 
 root = Path(__file__).resolve().parent.parent
 token = os.environ.get("GITHUB_TOKEN", "")
@@ -34,8 +42,13 @@ env.update({
     ).decode(),
     "GIT_TERMINAL_PROMPT": "0",
 })
+push = ["git", "-c", "credential.helper=", "push"]
+if arguments.tag:
+    push += ["origin", "refs/tags/" + arguments.tag]
+else:
+    push += ["-u", "origin", "HEAD"]
 result = subprocess.run(
-    ["git", "-c", "credential.helper=", "push", "-u", "origin", "HEAD"],
+    push,
     cwd=root, env=env,
 )
 sys.exit(result.returncode)
