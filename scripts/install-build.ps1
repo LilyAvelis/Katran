@@ -49,7 +49,7 @@ function Invoke-KatranInstall {
         if ((ConvertTo-Json -InputObject $finalManifest -Depth 5 -Compress) -cne (ConvertTo-Json -InputObject ($manifestJson | ConvertFrom-Json) -Depth 5 -Compress)) { throw 'Installed manifest changed before pointer update' }
         [IO.File]::WriteAllText($pointerTemp, $id + "`r`n", [Text.Encoding]::ASCII)
         if (Test-Path -LiteralPath $pointer) { [IO.File]::Replace($pointerTemp, $pointer, $pointerBackup) } else { [IO.File]::Move($pointerTemp, $pointer) }
-        Write-Output "Prepared Katran $version Test: $id"
+        Write-Output "Prepared Katran ${version}: $id"
     } finally {
         # Both cleanup targets are generated direct children of the controlled runtime tree.
         if ((Split-Path -Parent $stage) -ceq $versions -and (Split-Path -Leaf $stage) -match '^\.stage-[0-9a-f]{32}$' -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
@@ -57,6 +57,3 @@ function Invoke-KatranInstall {
         if ((Split-Path -Parent $pointerTemp) -ceq (Join-Path $Root 'runtime') -and (Split-Path -Leaf $pointerTemp) -match '^\.pointer-[0-9a-f]{32}$' -and (Test-Path -LiteralPath $pointerTemp)) { Remove-Item -LiteralPath $pointerTemp -Force -ErrorAction SilentlyContinue }
     }
 }
-
-
-

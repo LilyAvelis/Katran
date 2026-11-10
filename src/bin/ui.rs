@@ -39,7 +39,7 @@ fn poll_delay(elapsed: Duration) -> Duration {
 const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events-test") {
     concat!("Katran · EVENTS TEST · ", env!("CARGO_PKG_VERSION"))
 } else if cfg!(feature = "clipboard-events") {
-    concat!("Katran · ", env!("CARGO_PKG_VERSION"), " · Test")
+    concat!("Katran · ", env!("CARGO_PKG_VERSION"))
 } else {
     concat!("Katran · ", env!("CARGO_PKG_VERSION"), " · Legacy Polling")
 };

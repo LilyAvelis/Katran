@@ -33,16 +33,20 @@ and provide a runnable build for manual visual feedback.
 
 ## Agent collaboration
 
-Development builds for the 2.0 work are tested locally. Do not push them to
-GitHub; publication waits for the owner's 2.0 release instruction. Local Git
-diffs and checkpoints remain useful for review and rollback.
+The owner accepted the optimized architecture, QuickLook, Actions and Tab as
+version1.5.0 on2026-11-10 and explicitly authorized pushing this baseline to GitHub.
+Do not infer authorization to push future experimental work from this release.
 
-The owner sets product scope; the lead agent owns integration and architecture.
-Use Terra (`gpt-6.1-terra`, medium effort) by default for simple file creation,
-small edits, tidy-up and validation tasks. Delegate nontrivial bounded
-implementation modules to Sol (`gpt-6.1-sol`, low effort), or the effort explicitly
-requested by the owner. Luna may handle minor tasks when useful. Keep module ownership disjoint and shared API edits with the
-integrator. Verify the domain API before editing GUI clients.
+Use existing Garden masks. Read C:/Users/lilya/.codex/garden-personas/README.md and
+the selected card in cards.md before assigning a subagent. Polly/Appolion leads;
+mask names do not create persistent memory. Supply task contracts and durable
+handoff/context instead of repeatedly spawning context-free replacements.
+
+Prefer working alone or with one justified helper. Routine bounded work belongs
+to an appropriate junior/mid mask (usually Terra medium); call Sol/senior review
+only when complexity or cost of error warrants it. Do not optimize for the number
+of agents or tests. Keep disjoint file ownership and shared API integration with
+the lead; verify the domain API before editing GUI clients.
 
 ## Screenshots original-file exception · owner decision 2026-11-10
 

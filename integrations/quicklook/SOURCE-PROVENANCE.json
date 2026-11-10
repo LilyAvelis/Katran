@@ -1,0 +1,13 @@
+{
+  "application": "QuickLook 4.4.0-katran-bridge1",
+  "upstream": "https://github.com/QL-Win/QuickLook/tree/4.4.0",
+  "upstream_commit": "be7f0f3dc9a2f782b67d19e98a3ba7651206b5e6",
+  "common_upstream": "https://github.com/QL-Win/QuickLook.Common",
+  "common_commit": "9dda0f93dae34d0337ad39220733c254715fd09d",
+  "source_archive": "QuickLook-katran-bridge-source.zip",
+  "source_archive_sha256": "9ba530437e100062589a290b6be077726ed613daea73d39d0b12f6d5f1f04349",
+  "plugins": "Unchanged plugins copied read-only from existing official QuickLook4.4 distribution; original licenses retained in plugin folders.",
+  "build": "dotnet build QuickLook/QuickLook.csproj -c Release -p:PreBuildEvent= -v:q",
+  "runtime": "net462",
+  "lab": false
+}

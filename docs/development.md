@@ -1,7 +1,7 @@
 # Developer and agent entry point
 
 Read `AGENTS.md`, current `README.md`, then this map and the relevant API test.
-Current source structure and1.3 contracts are listed below. Historical reviews describe their examined snapshots; current behavior is in [domain-jobs.md](domain-jobs.md).
+Current source structure and1.5 contracts are listed below. Historical reviews describe their examined snapshots; current behavior is in [domain-jobs.md](domain-jobs.md).
 
 | Responsibility | Current owner files |
 | --- | --- |
@@ -30,7 +30,7 @@ Current source structure and1.3 contracts are listed below. Historical reviews d
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 
-## Current1.3 ownership
+## Current1.5 ownership
 
 | Responsibility | Modules |
 | --- | --- |
@@ -105,12 +105,15 @@ distinguishes debug/release, source API response and actual rendering. Source
 roots remain bounded to20,000 entries; large catalogue/idle work tests do not remove
 that limit. Explicit maintenance/native-finalization limitations remain documented.
 
-Use Sol low for ordinary bounded implementation tasks, Terra medium for small
-ordered edits/validation, and Luna for suitable tiny tasks. The owner explicitly
-requested Sol medium for the QuickLook experiment and Sol xhigh for Azuros review.
-The lead integrates shared contracts; assign disjoint files to parallel workers.
+The owner accepted this baseline as1.5.0 and authorized its GitHub push. See
+[release/handoff](releases/1.5.0.md). Do not resume experiments without new scope.
 
-No GitHub publication until the owner's2.0 release instruction. Tests must not
-scan personal roots: Settings synchronizes source authority but starts no workers
-until EnsureSources/PollSources; synthetic source tests configure temporary roots
-before invoking those commands. The owner performs actual Windows acceptance.
+For delegation, read the existing Garden mask map and selected card first. Prefer
+the lead alone or one justified helper; use junior/mid masks for routine work,
+seniors for genuinely difficult decisions/review. Reuse durable task context and
+handoffs; names do not grant persistent memory. Owner cost feedback supersedes
+older recipes that automatically assigned every module to a new Sol instance.
+
+Tests must not scan personal roots: Settings synchronizes source authority but
+starts no workers until EnsureSources/PollSources. Configure synthetic temporary
+roots before those commands. The owner performs actual Windows acceptance.

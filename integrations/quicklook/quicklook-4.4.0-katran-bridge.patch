@@ -1,0 +1,545 @@
+diff --git a/QuickLook/App.xaml.cs b/QuickLook/App.xaml.cs
+index 8902434..5006c22 100644
+--- a/QuickLook/App.xaml.cs
++++ b/QuickLook/App.xaml.cs
+@@ -114,6 +114,8 @@ public partial class App : Application
+ 
+     protected override void OnStartup(StartupEventArgs e)
+     {
++        if (BridgeIdentity.Lab && (!IsPortable || !AppPath.Contains("QuickLook-Latency-Lab")))
++            throw new InvalidOperationException("Isolated bridge build requires lab path and portable marker");
+         if (!EnsureOSVersion()
+          || !EnsureFirstInstance(e.Args)
+          || !EnsureFolderWritable(SettingHelper.LocalDataPath))
+@@ -223,7 +225,8 @@ public partial class App : Application
+         // Initialize MessageBox patching
+         MessageBoxPatcher.Initialize();
+ 
+-        CheckUpdate();
++        // Maintained build: stock update channel cannot replace the bridge.
++        BridgeServer.Ready = true;
+     }
+ 
+     protected virtual void OnSessionEnding(object sender, SessionEndingEventArgs e)
+@@ -249,8 +252,9 @@ public partial class App : Application
+         _isRunning.ReleaseMutex();
+ 
+         PipeServerManager.GetInstance().Dispose();
+-        TrayIconManager.GetInstance().Dispose();
+-        KeystrokeDispatcher.GetInstance().Dispose();
++        if (!BridgeIdentity.Lab) TrayIconManager.GetInstance().Dispose();
++        BridgeServer.Instance?.Dispose();
++        if (!BridgeIdentity.Lab) KeystrokeDispatcher.GetInstance().Dispose();
+         ViewWindowManager.GetInstance().Dispose();
+     }
+ 
+@@ -284,7 +288,7 @@ public partial class App : Application
+ 
+     private bool EnsureFirstInstance(string[] args)
+     {
+-        _isRunning = new Mutex(true, "QuickLook.App.Mutex", out bool isFirst);
++        _isRunning = new Mutex(true, BridgeIdentity.Mutex, out bool isFirst);
+ 
+         if (isFirst)
+             return true;
+@@ -318,17 +322,20 @@ public partial class App : Application
+ 
+     private void RunListener(StartupEventArgs e)
+     {
+-        TrayIconManager.GetInstance();
+-        if (!e.Args.Contains("/autorun") && !IsUWP)
+-            TrayIconManager.ShowNotification(string.Empty, TranslationHelper.Get("APP_START"));
+-        if (e.Args.Contains("/first"))
+-            AutoStartupHelper.CreateAutorunShortcut();
+-
+-        NativeMethods.QuickLook.Init();
+-
++        BridgeServer.Start(path => Current.Dispatcher.InvokeAsync(
++            () => ViewWindowManager.GetInstance().TogglePreview(path),
++            System.Windows.Threading.DispatcherPriority.Normal).Task);
++        if (!BridgeIdentity.Lab)
++        {
++            TrayIconManager.GetInstance();
++            if (!e.Args.Contains("/autorun") && !IsUWP)
++                TrayIconManager.ShowNotification(string.Empty, TranslationHelper.Get("APP_START"));
++            if (e.Args.Contains("/first")) AutoStartupHelper.CreateAutorunShortcut();
++            NativeMethods.QuickLook.Init();
++        }
+         PluginManager.GetInstance();
+         ViewWindowManager.GetInstance();
+-        KeystrokeDispatcher.GetInstance();
++        if (!BridgeIdentity.Lab) KeystrokeDispatcher.GetInstance();
+         PipeServerManager.GetInstance();
+     }
+ }
+diff --git a/QuickLook/BridgeServer.cs b/QuickLook/BridgeServer.cs
+new file mode 100644
+index 0000000..ca6eca4
+--- /dev/null
++++ b/QuickLook/BridgeServer.cs
+@@ -0,0 +1,117 @@
++// GPL-3.0-or-later. Versioned, acknowledged bridge for maintained QuickLook.
++using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO;
++using System.IO.Pipes;
++using System.Security.AccessControl;
++using System.Security.Principal;
++using System.Text;
++using System.Threading;
++using System.Threading.Tasks;
++using Newtonsoft.Json.Linq;
++namespace QuickLook;
++
++public static class BridgeIdentity
++{
++#if KATRAN_BRIDGE_LAB
++    public static bool Lab { get; } = true;
++    public const string Mutex = "QuickLook.KatranBridge.Lab.Mutex";
++    public const string LegacyPrefix = "QuickLook.KatranBridge.Lab.Legacy.";
++    public const string BridgePrefix = "QuickLook.KatranBridge.Lab.v1.";
++#else
++    public static bool Lab { get; } = false;
++    public const string Mutex = "QuickLook.App.Mutex";
++    public const string LegacyPrefix = "QuickLook.App.Pipe.";
++    public const string BridgePrefix = "QuickLook.KatranBridge.v1.";
++#endif
++}
++
++public sealed class BridgeServer : IDisposable
++{
++    public static BridgeServer Instance { get; private set; }
++    public static bool Ready { get; set; }
++    public const int MaxFrame = 131072;
++    private readonly string name;
++    private readonly Func<string, Task> dispatch;
++    private readonly CancellationTokenSource stop = new CancellationTokenSource();
++    private readonly object gate = new object();
++    private readonly Dictionary<string,JObject> results = new Dictionary<string,JObject>();
++    private readonly Dictionary<string,string> paths = new Dictionary<string,string>();
++    private readonly Queue<string> order = new Queue<string>();
++    private NamedPipeServerStream active;
++    private readonly Task worker;
++    private readonly string nonce = Guid.NewGuid().ToString("N");
++    private int disposed, pending;
++    public static void Start(Func<string,Task> dispatch) { Instance = new BridgeServer(BridgeIdentity.BridgePrefix + WindowsIdentity.GetCurrent().User.Value, dispatch); }
++    public BridgeServer(string name, Func<string,Task> dispatch) { this.name=name; this.dispatch=dispatch; worker=Task.Run(Run); }
++    private JObject Response(string state,bool ok=true,string id=null,string error=null) { return new JObject { ["protocol"]=1,["ok"]=ok,["state"]=state,["request_id"]=id,["error"]=error,["pid"]=Process.GetCurrentProcess().Id,["instance"]=nonce,["version"]="4.4.0-katran-bridge1" }; }
++    private JObject Handle(JObject request)
++    {
++        if ((int?)request["protocol"]!=1) return Response("rejected",false,error:"unsupported_protocol");
++        string command=(string)request["command"];
++        if(command=="status") return Response(Ready ? "ready":"initializing");
++        string id=(string)request["request_id"];
++        if(string.IsNullOrWhiteSpace(id)||id.Length>128) return Response("rejected",false,error:"invalid_request_id");
++        if(command=="request_status") {lock(gate){return results.TryGetValue(id,out var old)?(JObject)old.DeepClone():Response("unknown",false,id,"unknown_request");}}
++        if(command!="preview") return Response("rejected",false,id,"unknown_command");
++        string path=(string)request["path"];
++        if(path==null||path.Length>32767||path.IndexOfAny(new[]{'\0','\r','\n','|'})>=0||!Path.IsPathRooted(path)||!File.Exists(path)) return Response("rejected",false,id,"invalid_path");
++        lock(gate)
++        {
++            if(results.TryGetValue(id,out var old)) return paths[id]==path?(JObject)old.DeepClone():Response("rejected",false,id,"request_id_conflict");
++            if(!Ready) return Response("rejected",false,id,"not_ready");
++            if(pending>=4) return Response("rejected",false,id,"queue_full");
++            // Completed outcomes can be evicted; in-flight requests are retained.
++            while(order.Count>=256){string first=order.Dequeue();if((string)results[first]["state"]=="accepted"){order.Enqueue(first);continue;}results.Remove(first);paths.Remove(first);break;}
++            results[id]=Response("accepted",true,id);paths[id]=path;order.Enqueue(id);pending++;
++        }
++        _ = Dispatch(id,path);
++        lock(gate) return (JObject)results[id].DeepClone();
++    }
++    private async Task Dispatch(string id,string path)
++    {
++        JObject result;
++        try { await dispatch(path).ConfigureAwait(false); result=Response("dispatched",true,id); }
++        catch(Exception e) { result=Response("failed",false,id,e.GetType().Name+": "+e.Message); }
++        lock(gate){results[id]=result;pending--;}
++    }
++    private NamedPipeServerStream Create()
++    {
++        var security=new PipeSecurity();security.SetAccessRuleProtection(true,false);
++        security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User,PipeAccessRights.FullControl,AccessControlType.Allow));
++        return new NamedPipeServerStream(name,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous,4096,4096,security);
++    }
++    private async Task Run()
++    {
++        while(!stop.IsCancellationRequested)
++        {
++            NamedPipeServerStream pipe=null;
++            try {
++                pipe=Create();lock(gate){if(stop.IsCancellationRequested){pipe.Dispose();return;}active=pipe;}
++                await pipe.WaitForConnectionAsync(stop.Token).ConfigureAwait(false);
++                var work=Serve(pipe);
++                if(await Task.WhenAny(work,Task.Delay(2000,stop.Token)).ConfigureAwait(false)!=work){pipe.Dispose();}
++                try{await work.ConfigureAwait(false);}catch(Exception e){Debug.WriteLine(e);}
++            }catch(Exception e){Debug.WriteLine(e);if(!stop.IsCancellationRequested)await Task.Delay(20).ConfigureAwait(false);}
++            finally {lock(gate){if(ReferenceEquals(active,pipe))active=null;}if(pipe!=null){try{if(pipe.IsConnected)pipe.Disconnect();}catch(Exception e){Debug.WriteLine(e);}pipe.Dispose();}}
++        }
++    }
++    private async Task ReadExact(Stream stream,byte[] bytes)
++    {int pos=0;while(pos<bytes.Length){int n=await stream.ReadAsync(bytes,pos,bytes.Length-pos,stop.Token).ConfigureAwait(false);if(n==0)throw new EndOfStreamException();pos+=n;}}
++    private async Task Serve(Stream pipe)
++    {
++        var header=new byte[4];await ReadExact(pipe,header).ConfigureAwait(false);
++        int n=BitConverter.ToInt32(header,0);if(n<=0||n>MaxFrame)throw new InvalidDataException("Frame limit");
++        var payload=new byte[n];await ReadExact(pipe,payload).ConfigureAwait(false);
++        JObject response;
++        try{var text=new UTF8Encoding(false,true).GetString(payload);using(var reader=new Newtonsoft.Json.JsonTextReader(new StringReader(text))){reader.MaxDepth=16;var request=JObject.Load(reader);if(reader.Read())throw new InvalidDataException("Trailing JSON");response=Handle(request);}}
++        catch(Exception e){response=Response("rejected",false,error:e.GetType().Name);}
++        byte[] answer=new UTF8Encoding(false).GetBytes(response.ToString(Newtonsoft.Json.Formatting.None));
++        byte[] length=BitConverter.GetBytes(answer.Length);await pipe.WriteAsync(length,0,4,stop.Token).ConfigureAwait(false);await pipe.WriteAsync(answer,0,answer.Length,stop.Token).ConfigureAwait(false);
++        // Keep the server connection alive until the reader consumes the frame
++        // and closes. DisconnectNamedPipe would otherwise discard buffered ACK.
++        await pipe.ReadAsync(new byte[1],0,1,stop.Token).ConfigureAwait(false);
++    }
++    public void Dispose(){if(Interlocked.Exchange(ref disposed,1)!=0)return;stop.Cancel();lock(gate){active?.Dispose();}if(!worker.Wait(3000))throw new TimeoutException("Bridge did not stop");stop.Dispose();}
++}
+diff --git a/QuickLook/HardenedPipeReceiver.cs b/QuickLook/HardenedPipeReceiver.cs
+new file mode 100644
+index 0000000..2e26307
+--- /dev/null
++++ b/QuickLook/HardenedPipeReceiver.cs
+@@ -0,0 +1,91 @@
++// GPL-3.0-or-later; isolated QuickLook latency experiment.
++using System;
++using System.Diagnostics;
++using System.IO;
++using System.IO.Pipes;
++using System.Text;
++using System.Threading;
++using System.Threading.Tasks;
++namespace QuickLook;
++
++// One bounded newline-terminated UTF-8 message per connection. EOF is never a command.
++public sealed class HardenedPipeReceiver : IDisposable
++{
++    public const int MaximumBytes = 131072;
++    private readonly string name;
++    private readonly Func<string, bool> received;
++    private readonly CancellationTokenSource stop = new CancellationTokenSource();
++    private readonly object gate = new object();
++    private NamedPipeServerStream active;
++    private readonly Task worker;
++    private int disposed;
++    public HardenedPipeReceiver(string name, Func<string, bool> received)
++    {
++        this.name = name; this.received = received;
++        worker = Task.Run(Run);
++    }
++    private async Task Run()
++    {
++        while (!stop.IsCancellationRequested)
++        {
++            NamedPipeServerStream pipe = null;
++            try
++            {
++                pipe = new NamedPipeServerStream(name, PipeDirection.In, 1,
++                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
++                lock (gate) { if (stop.IsCancellationRequested) { pipe.Dispose(); return; } active = pipe; }
++                await pipe.WaitForConnectionAsync(stop.Token).ConfigureAwait(false);
++                var read = ReadLine(pipe);
++                if (await Task.WhenAny(read, Task.Delay(1000, stop.Token)).ConfigureAwait(false) != read)
++                {
++                    pipe.Dispose();
++                    try { await read.ConfigureAwait(false); } catch (Exception e) { Debug.WriteLine(e); }
++                    continue;
++                }
++                string line = await read.ConfigureAwait(false);
++                if (line != null && received(line)) return;
++            }
++            catch (Exception e)
++            { Debug.WriteLine(e); }
++            finally
++            {
++                lock (gate) { if (ReferenceEquals(active, pipe)) active = null; }
++                if (pipe != null)
++                {
++                    try { if (pipe.IsConnected) pipe.Disconnect(); } catch (IOException) { }
++                    catch (ObjectDisposedException) { }
++                    pipe.Dispose();
++                }
++            }
++        }
++    }
++    private async Task<string> ReadLine(NamedPipeServerStream pipe)
++    {
++        var bytes = new byte[MaximumBytes]; int used = 0;
++        var buffer = new byte[1024];
++        while (used < bytes.Length)
++        {
++            int n = await pipe.ReadAsync(buffer, 0, Math.Min(buffer.Length, bytes.Length-used), stop.Token).ConfigureAwait(false);
++            if (n == 0) return null;
++            for (int i=0; i<n; i++)
++            {
++                if (buffer[i] == 10)
++                {
++                    if (used == 0) return null;
++                    if (bytes[used-1] == 13) used--;
++                    return new UTF8Encoding(false, true).GetString(bytes, 0, used);
++                }
++                bytes[used++] = buffer[i];
++            }
++        }
++        return null;
++    }
++    public void Dispose()
++    {
++        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
++        stop.Cancel();
++        lock (gate) { active?.Dispose(); }
++        if (!worker.Wait(3000)) throw new TimeoutException("Lab receiver did not stop");
++        stop.Dispose();
++    }
++}
+diff --git a/QuickLook/Helpers/Updater.cs b/QuickLook/Helpers/Updater.cs
+index 78ee118..7c58470 100644
+--- a/QuickLook/Helpers/Updater.cs
++++ b/QuickLook/Helpers/Updater.cs
+@@ -1,4 +1,4 @@
+-﻿// Copyright © 2017-2026 QL-Win Contributors
++// Copyright © 2017-2026 QL-Win Contributors
+ //
+ // This file is part of QuickLook program.
+ //
+@@ -32,52 +32,7 @@ internal class Updater
+ {
+     public static void CheckForUpdates(bool silent = false)
+     {
+-        if (App.IsUWP)
+-        {
+-            if (!silent)
+-                Process.Start("ms-windows-store://pdp/?productid=9NV4BS3L1H4S");
+-
+-            return;
+-        }
+-
+-        Task.Run(() =>
+-        {
+-            try
+-            {
+-                var json = DownloadJson("https://api.github.com/repos/QL-Win/QuickLook/releases/latest");
+-
+-                var nVersion = (string)json["tag_name"];
+-                //nVersion = "9.2.1";
+-
+-                if (new Version(nVersion) <= Assembly.GetExecutingAssembly().GetName().Version)
+-                {
+-                    if (!silent)
+-                        Application.Current.Dispatcher.Invoke(
+-                            () => TrayIconManager.ShowNotification(string.Empty,
+-                                TranslationHelper.Get("Update_NoUpdate")));
+-                    return;
+-                }
+-
+-                CollectAndShowReleaseNotes();
+-
+-                Application.Current.Dispatcher.Invoke(
+-                    () =>
+-                    {
+-                        TrayIconManager.ShowNotification(string.Empty,
+-                            string.Format(TranslationHelper.Get("Update_Found"), nVersion),
+-                            timeout: 20000,
+-                            clickEvent:
+-                            () => Process.Start("https://github.com/QL-Win/QuickLook/releases/latest"));
+-                    });
+-            }
+-            catch (Exception e)
+-            {
+-                Debug.WriteLine(e.Message);
+-                Application.Current.Dispatcher.Invoke(
+-                    () => TrayIconManager.ShowNotification(string.Empty,
+-                        string.Format(TranslationHelper.Get("Update_Error"), e.Message)));
+-            }
+-        });
++        if (!silent) MessageBox.Show("This maintained QuickLook build is updated with Katran. The stock update channel is disabled.", "QuickLook · Katran bridge");
+     }
+ 
+     private static void CollectAndShowReleaseNotes()
+diff --git a/QuickLook/PipeServerManager.cs b/QuickLook/PipeServerManager.cs
+index db13216..c9eafd5 100644
+--- a/QuickLook/PipeServerManager.cs
++++ b/QuickLook/PipeServerManager.cs
+@@ -1,4 +1,4 @@
+-﻿// Copyright © 2017-2026 QL-Win Contributors
++// Copyright © 2017-2026 QL-Win Contributors
+ //
+ // This file is part of QuickLook program.
+ //
+@@ -40,46 +40,22 @@ public static class PipeMessages
+ 
+ public class PipeServerManager : IDisposable
+ {
+-    private static readonly string PipeName = "QuickLook.App.Pipe." + WindowsIdentity.GetCurrent().User?.Value;
++    private static readonly string PipeName = BridgeIdentity.LegacyPrefix + WindowsIdentity.GetCurrent().User?.Value;
+     private static PipeServerManager _instance;
+ 
+     private DispatcherOperation _lastOperation;
+ 
+-    private NamedPipeServerStream _server;
++    private readonly HardenedPipeReceiver _receiver;
+ 
+     public PipeServerManager()
+     {
+-        _server = new NamedPipeServerStream(PipeName, PipeDirection.In);
+-
+-        _ = Task.Factory.StartNew(() =>
+-        {
+-            using var reader = new StreamReader(_server);
+-            Debug.WriteLine("PipeManager: Ready");
+-
+-            while (true)
+-            {
+-                _server.WaitForConnection();
+-                var msg = reader.ReadLine();
+-
+-                Debug.WriteLine($"PipeManager: {msg}");
+-
+-                // dispatch message
+-                if (MessageReceived(msg))
+-                    return;
+-
+-                _server.Disconnect();
+-            }
+-        }, TaskCreationOptions.LongRunning);
++        _receiver = new HardenedPipeReceiver(PipeName, MessageReceived);
+     }
+ 
+     public void Dispose()
+     {
++        _receiver.Dispose();
+         GC.SuppressFinalize(this);
+-
+-        if (_server != null)
+-            SendMessage(PipeMessages.Quit);
+-        _server?.Dispose();
+-        _server = null;
+     }
+ 
+     [SuppressMessage("Style", "IDE0063:Use simple 'using' statement")]
+@@ -92,7 +68,7 @@ public class PipeServerManager : IDisposable
+         {
+             using (var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out))
+             {
+-                client.Connect();
++                client.Connect(1000);
+ 
+                 using (var writer = new StreamWriter(client))
+                 {
+@@ -109,10 +85,18 @@ public class PipeServerManager : IDisposable
+ 
+     private bool MessageReceived(string msg)
+     {
++        if (string.IsNullOrWhiteSpace(msg)) return false;
+         var split = msg.Split('|');
+-        if (split.Length <= 1)
++        if (split.Length != 3)
+             return false;
+ 
++        if (Array.IndexOf(new[] { PipeMessages.RunAndClose, PipeMessages.Invoke,
++            PipeMessages.Switch, PipeMessages.Toggle, PipeMessages.Forget,
++            PipeMessages.Close, PipeMessages.Quit }, split[0]) < 0) return false;
++        if ((split[0] == PipeMessages.Toggle || split[0] == PipeMessages.Invoke ||
++            split[0] == PipeMessages.Switch) &&
++            (string.IsNullOrWhiteSpace(split[1]) || split[1].IndexOf('\0') >= 0)) return false;
++
+         if (_lastOperation != null && _lastOperation.Status == DispatcherOperationStatus.Pending)
+         {
+             _lastOperation.Abort();
+diff --git a/QuickLook/QuickLook.csproj b/QuickLook/QuickLook.csproj
+index 36a34b5..a1fc92e 100644
+--- a/QuickLook/QuickLook.csproj
++++ b/QuickLook/QuickLook.csproj
+@@ -1,7 +1,8 @@
+-﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
++<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+ 
+     <PropertyGroup>
+         <OutputType>WinExe</OutputType>
++        <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+         <TargetFramework>net462</TargetFramework>
+         <AssemblyName>QuickLook</AssemblyName>
+         <FileAlignment>512</FileAlignment>
+@@ -78,13 +79,13 @@
+         <Reference Include="System.Management" />
+         <Reference Include="Microsoft.CSharp" />
+         <Reference Include="windows">
+-            <HintPath>$(SystemRoot)\..\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.26100.0\Facade\windows.winmd</HintPath>
++            <HintPath>..\dependencies\windows.winmd</HintPath>
+         </Reference>
+         <Reference Include="Windows.Foundation.FoundationContract">
+-            <HintPath>$(SystemRoot)\..\Program Files (x86)\Windows Kits\10\References\10.0.26100.0\Windows.Foundation.FoundationContract\4.0.0.0\Windows.Foundation.FoundationContract.winmd</HintPath>
++            <HintPath>..\dependencies\Windows.Foundation.FoundationContract.winmd</HintPath>
+         </Reference>
+         <Reference Include="Windows.Foundation.UniversalApiContract">
+-            <HintPath>$(SystemRoot)\..\Program Files (x86)\Windows Kits\10\References\10.0.26100.0\Windows.Foundation.UniversalApiContract\19.0.0.0\Windows.Foundation.UniversalApiContract.winmd</HintPath>
++            <HintPath>..\dependencies\Windows.Foundation.UniversalApiContract.winmd</HintPath>
+         </Reference>
+     </ItemGroup>
+ 
+@@ -93,6 +94,7 @@
+             <PrivateAssets>all</PrivateAssets>
+             <IncludeAssets>compile; runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+         </PackageReference>
++        <PackageReference Include="System.Resources.Extensions" Version="8.0.0" />
+         <PackageReference Include="Newtonsoft.Json" Version="13.0.4">
+             <PrivateAssets>all</PrivateAssets>
+         </PackageReference>
+diff --git a/QuickLook/ViewWindowManager.cs b/QuickLook/ViewWindowManager.cs
+index 3ab9ae3..6ee95a7 100644
+--- a/QuickLook/ViewWindowManager.cs
++++ b/QuickLook/ViewWindowManager.cs
+@@ -1,4 +1,4 @@
+-﻿// Copyright © 2017-2026 QL-Win Contributors
++// Copyright © 2017-2026 QL-Win Contributors
+ //
+ // This file is part of QuickLook program.
+ //
+@@ -76,7 +76,10 @@ public class ViewWindowManager : IDisposable
+     public void TogglePreview(string path = null, string options = null)
+     {
+         if (string.IsNullOrEmpty(path))
++        {
++            if (BridgeIdentity.Lab) return;
+             path = NativeMethods.QuickLook.GetCurrentSelection();
++        }
+ 
+         if (!string.IsNullOrEmpty(options))
+             InvokePreviewWithOption(path, options);
+@@ -89,12 +92,12 @@ public class ViewWindowManager : IDisposable
+ 
+     private void RunFocusMonitor()
+     {
+-        FocusMonitor.GetInstance().Start();
++        if (!BridgeIdentity.Lab) FocusMonitor.GetInstance().Start();
+     }
+ 
+     private void StopFocusMonitor()
+     {
+-        FocusMonitor.GetInstance().Stop();
++        if (!BridgeIdentity.Lab) FocusMonitor.GetInstance().Stop();
+     }
+ 
+     internal void ForgetCurrentWindow()
+@@ -112,7 +115,10 @@ public class ViewWindowManager : IDisposable
+             return;
+ 
+         if (string.IsNullOrEmpty(path))
++        {
++            if (BridgeIdentity.Lab) return;
+             path = NativeMethods.QuickLook.GetCurrentSelection();
++        }
+ 
+         if (string.IsNullOrEmpty(path))
+             return;
+@@ -143,7 +149,10 @@ public class ViewWindowManager : IDisposable
+     public void InvokePreview(string path = null)
+     {
+         if (string.IsNullOrEmpty(path))
++        {
++            if (BridgeIdentity.Lab) return;
+             path = NativeMethods.QuickLook.GetCurrentSelection();
++        }
+ 
+         if (string.IsNullOrEmpty(path))
+             return;

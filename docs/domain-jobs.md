@@ -1,6 +1,6 @@
-# 1.3 domain contracts
+# 1.5 domain contracts
 
-Checkpoint before changes: `585df0c` (1.2.6). No GitHub push. Initial audit:
+Checkpoint before changes: `585df0c` (1.2.6). The owner accepted this work as1.5.0 and authorized its GitHub push. Initial audit:
 [azuros-1.3-readiness.md](reviews/azuros-1.3-readiness.md).
 
 ## Jobs and clients

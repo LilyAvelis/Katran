@@ -4,14 +4,14 @@ Clipboard events are now the default after the owner's successful browser and
 filesystem checks. The accepted `experiment/clipboard-events` branch is merged
 into `main`. [Capture contract and verification](docs/clipboard-events-experiment.md).
 
-Independent, local Windows-first object shelf in Rust. API First: UI, capture,
+Independent, local Windows-first object shelf in Rust. Version1.5.0 was accepted by the owner after Windows testing of instant QuickLook preview, Actions and Tab. [Release and handoff](docs/releases/1.5.0.md). API First: UI, capture,
 CLI and future integrations use one versioned Rust command dispatcher.
 
-## Current build · 1.3.0 Test · QuickLook and architecture hardening
+## Current release · 1.5.0 · owner accepted
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 1.3.0 · Test**. Existing data stays in `katran-data`.
+must say **Katran · 1.5.0**. Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -49,7 +49,7 @@ Folder by default; Settings can disable it or override the root. Ctrl D is
 rebindable. Delete in Downloads uses Windows recycling; ShareX originals use
 permanent deletion. Single deletion is immediate; groups confirm with Enter.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
-[hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the 1.3.0 boundaries. The older latency document records its measured snapshot.
+[hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 
 Tabs are positional: 1..9 select non-All tabs in their saved order. Drag tabs
 with the mouse to reorder; All stays pinned. Tab toggles All and the remembered
