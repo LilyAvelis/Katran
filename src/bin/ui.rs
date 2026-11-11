@@ -252,8 +252,17 @@ impl Shelf {
         }
         theme_ui::background(&ctx,ctx.content_rect());
         self.resident_close_requested(&ctx);
-        if !self.sorting_input.is_open() {self.overlay_escape(&ctx);}
         input_log::record(&ctx, self.logger.as_ref());
+        if self.api.is_some(){self.state=self.call(Command::Interaction);}
+        let sort_allowed=self.shortcut_editor.is_none() && !self.actions && !self.open_apps.open
+            && !self.workspace.open && !self.info.is_open() && !self.pinned_ui.open && !self.save
+            && self.pending_delete.is_empty() && self.state["settings_open"]!=true && self.state["preview"].is_null()
+            && !ctx.memory(|m|m.has_focus(egui::Id::new("shelf-search")))
+            && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
+            && !(self.api.is_none() && self.busy_text_editing);
+        if let Some(action)=self.sorting_input.take(&ctx,sort_allowed){self.pending_sort=Some(action);}
+        if !self.sorting_input.is_open(){self.overlay_escape(&ctx);}
+
         if self.api.is_some() && !self.info.is_open() { if !self.sorting_input.is_open(){self.pinned_input(&ctx);} self.pinned_tick(&ctx); if !self.pinned_ui.open && !self.sorting_input.is_open(){self.workspace_input(&ctx);} self.workspace_tick(&ctx); }
         if self.api.is_none()
             && self.job.is_some()
@@ -294,13 +303,6 @@ impl Shelf {
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")));
-        let sort_input_allowed = tab_input_allowed
-            && self.state["preview"].is_null()
-            && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
-            && !(self.api.is_none() && self.busy_text_editing);
-        if let Some(action) = self.sorting_input.take(&ctx, sort_input_allowed) {
-            self.pending_sort = Some(action);
-        }
         if tab_input_allowed && !self.sorting_input.is_open() {
             if ctx.input_mut(|i| i.events.iter().any(|event| matches!(event, egui::Event::Key {key:egui::Key::Tab,pressed:true,modifiers,..} if *modifiers == egui::Modifiers::NONE)) && i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
                 self.pending_tab_action = Some("tab_toggle".into());
@@ -842,7 +844,10 @@ impl eframe::App for Shelf {
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
         self.perform_native_drag(ctx, input);
-        let modal=self.modal_owns_input();
+        let starts_sort=!self.modal_owns_input() && !ctx.egui_wants_keyboard_input() && input.events.iter().any(|e|matches!(e,
+            egui::Event::Key{key,physical_key,pressed:true,modifiers,..}
+                if physical_key.unwrap_or(*key)==egui::Key::Comma && !modifiers.ctrl && !modifiers.alt && !modifiers.command));
+        let modal=self.modal_owns_input() || starts_sort;
         if self.navigation_input.intercept(ctx, input, modal) {
             self.pending_tab_action = Some("tab_toggle".into());
         }
@@ -2084,6 +2089,15 @@ mod tests {
         frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
         frame(&mut app,&ctx,egui::Key::V,egui::Modifiers::CTRL);
         assert_eq!(app.state["tab"],tab);assert!(app.sorting_input.is_open());assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(),0);
+    }
+    #[test]
+    fn comma_and_tab_in_one_frame_open_sort_without_switching_context() {
+        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());let ctx=egui::Context::default();ui_style::install(&ctx);
+        let before=app.call(Command::Interaction)["tab"].clone();
+        let mut input=egui::RawInput{events:[egui::Key::Comma,egui::Key::Tab].into_iter().map(|key|egui::Event::Key{key,physical_key:Some(key),pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}).collect(),..Default::default()};
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
+        let mut output=ctx.run_ui(input,|ui|app.render(ui));output.textures_delta.clear();
+        assert_eq!(app.state["tab"],before);assert!(app.sorting_input.is_open());assert!(app.pending_tab_action.is_none());
     }
     #[test]
     fn sort_notice_obeys_preference_and_expiry_without_focus() {

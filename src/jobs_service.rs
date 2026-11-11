@@ -246,7 +246,7 @@ impl Service {
             Command::UseSelectedImageAsBackground => {
                 let event=self.selected_background_image()?;
                 self.jobs.submit(Lane::Foreground,move |cancel| {
-                    cancel.check()?;let prepared=theme_backgrounds::prepare(&event.path)?;cancel.check()?;
+                    cancel.check()?;let prepared=theme_backgrounds::prepare_event(&event)?;cancel.check()?;
                     Ok(PreparedWork::ThemeBackground{prepared,event:Some(event),activate:true})
                 })?
             },

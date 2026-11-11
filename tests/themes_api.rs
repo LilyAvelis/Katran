@@ -65,3 +65,11 @@ fn call(api:&mut Service,c:Command)->Value{let r=api.execute(Request{api_version
  assert_eq!(started["state"],"queued");call(&mut api,Command::CancelJob{job_id});
  assert!(call(&mut api,Command::ListThemeBackgrounds)["backgrounds"].as_array().unwrap().is_empty());
 }
+
+#[test]fn image_action_availability_is_metadata_only_but_execution_checks_actual_bytes(){
+ let root=tempfile::tempdir().unwrap();let source=tempfile::tempdir().unwrap();let png=source.path().join("image.png");image::RgbaImage::new(8,6).save(&png).unwrap();let mut api=Service::open(root.path(),10000).unwrap();let e=call(&mut api,Command::IngestBytes{name:"stale.png".into(),bytes:std::fs::read(&png).unwrap(),source:"synthetic".into()});let id=e["id"].as_i64().unwrap();call(&mut api,Command::SetVisible{ids:vec![id]});call(&mut api,Command::Select{id,mode:katran::interaction::SelectionMode::Replace});
+ image::RgbaImage::from_pixel(8,6,image::Rgba([30u8,90,180,255])).save(&png).unwrap();std::fs::write(e["path"].as_str().unwrap(),std::fs::read(png).unwrap()).unwrap();
+ assert!(call(&mut api,Command::Actions).as_array().unwrap().iter().any(|a|a["id"]=="use_as_background"));
+ let reply=api.execute(Request{api_version:1,request_id:"stale".into(),command:Command::UseSelectedImageAsBackground});assert_eq!(reply["error"]["code"],"source_changed");
+ assert_eq!(call(&mut api,Command::Themes)["current"]["preset"],"standard");
+}

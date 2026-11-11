@@ -416,7 +416,8 @@ impl Service {
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
             Command::UseSelectedImageAsBackground => {
                 let event=self.selected_background_image()?;
-                let result=theme_backgrounds::import(&self.root,&event.path)?;
+                let prepared=theme_backgrounds::prepare_event(&event)?;
+                let result=theme_backgrounds::commit(&self.root,prepared)?;
                 self.activate_background(result)
             },
             Command::ImportThemeBackground {path} => theme_backgrounds::import(&self.root,&path),

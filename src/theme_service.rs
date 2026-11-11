@@ -7,7 +7,7 @@ impl Service {
   let event=self.get(items[0].id)?;
   if event.revision!=items[0].revision || matches!(event.kind,EventKind::TextFragment|EventKind::LinkFragment|EventKind::TableFragment){return Err(ApiError::new("invalid_image","Выберите изображение"));}
   if !file_types::is_native_image(std::path::Path::new(&event.name)){return Err(ApiError::new("invalid_image","Выберите изображение"));}
-  open_file::validate(&event)?;Ok(event)
+  Ok(event)
  }
  pub(crate) fn activate_background(&mut self,mut result:serde_json::Value)->Result<serde_json::Value>{
   let id=result["id"].as_str().ok_or_else(||ApiError::new("invalid_background","Background ID missing"))?.to_owned();

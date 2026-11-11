@@ -85,7 +85,7 @@ fn name_for(path: &Path) -> String {
         name
     }
 }
-fn image_bytes(source: &Path) -> Result<Vec<u8>> {
+fn read_source(source: &Path) -> Result<Vec<u8>> {
     let metadata = fs::metadata(source)?;
     if !metadata.is_file() || metadata.len() > MAX_INPUT {
         return Err(ApiError::new(
@@ -100,6 +100,10 @@ fn image_bytes(source: &Path) -> Result<Vec<u8>> {
     if bytes.len() as u64 > MAX_INPUT {
         return Err(ApiError::new("invalid_background", "Image exceeds 32 MiB"));
     }
+    Ok(bytes)
+}
+
+fn image_bytes(bytes: Vec<u8>) -> Result<Vec<u8>> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| ApiError::new("invalid_background", e))?;
@@ -168,7 +172,38 @@ pub(crate) struct PreparedBackground {
 /// Perform potentially expensive source IO, decode, resize, encode and hashing
 /// without creating or modifying the destination directory.
 pub(crate) fn prepare(source: &Path) -> Result<PreparedBackground> {
-    let png = image_bytes(source)?;
+    prepare_bytes(source, read_source(source)?)
+}
+
+/// Validate the selected revision against the exact source bytes used for decoding.
+pub(crate) fn prepare_event(event: &crate::Event) -> Result<PreparedBackground> {
+    let expected_hash = event
+        .revision
+        .strip_prefix("ref:")
+        .or_else(|| event.revision.strip_prefix("blob:"));
+    let stale = || {
+        ApiError::new(
+            "source_changed",
+            "Source contents changed since this arrival",
+        )
+    };
+    if expected_hash.is_none() && crate::preview::revision(&event.path, None) != event.revision {
+        return Err(stale());
+    }
+    let bytes = read_source(&event.path)?;
+    let matches = if let Some(expected) = expected_hash {
+        format!("{:x}", Sha256::digest(&bytes)) == expected
+    } else {
+        crate::preview::revision(&event.path, None) == event.revision
+    };
+    if !matches {
+        return Err(stale());
+    }
+    prepare_bytes(&event.path, bytes)
+}
+
+fn prepare_bytes(source: &Path, bytes: Vec<u8>) -> Result<PreparedBackground> {
+    let png = image_bytes(bytes)?;
     let id = format!("{:x}", Sha256::digest(&png));
     Ok(PreparedBackground {
         png,
@@ -420,6 +455,46 @@ mod tests {
             get(root.path(), value["id"].as_str().unwrap()).unwrap(),
             value
         );
+    }
+    #[test]
+    fn event_preparation_checks_content_and_metadata_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("synthetic.png");
+        image::RgbaImage::from_pixel(4, 3, image::Rgba([1, 2, 3, 255]))
+            .save(&path)
+            .unwrap();
+        let mut event = crate::Event {
+            kind: Default::default(),
+            text_preview: None,
+            delete_policy: Default::default(),
+            revision: format!("ref:{}", crate::preview::content_hash(&path).unwrap()),
+            origin: Default::default(),
+            id: 1,
+            detected_at_ms: 0,
+            modified_at_ms: None,
+            source: "test".into(),
+            name: "synthetic.png".into(),
+            storage: "reference".into(),
+            path: path.clone(),
+            size: 0,
+            available: true,
+        };
+        assert!(prepare_event(&event).is_ok());
+        event.revision = event.revision.replacen("ref:", "blob:", 1);
+        assert!(prepare_event(&event).is_ok());
+        image::RgbaImage::from_pixel(7, 3, image::Rgba([8, 9, 10, 255]))
+            .save(&path)
+            .unwrap();
+        assert_eq!(prepare_event(&event).err().unwrap().code, "source_changed");
+        event.revision = crate::preview::revision(&path, None);
+        assert!(prepare_event(&event).is_ok());
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
+        assert_eq!(prepare_event(&event).err().unwrap().code, "source_changed");
     }
     #[test]
     fn jpeg_exif_rotation_is_applied_before_normalization() {
