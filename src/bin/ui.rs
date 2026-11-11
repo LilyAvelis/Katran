@@ -587,6 +587,9 @@ impl Shelf {
                 self.pending_density.push(action);
             }
         }
+        if self.overlay_ui.animation.take_hidden() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
         self.finish_job();
         self.preview_warmup_tick();
         if self.api.is_some() {
@@ -1130,6 +1133,9 @@ impl eframe::App for Shelf {
             .tick(self.native_window, self.video_background.frame_serial())
         {
             ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if self.overlay_ui.animation.take_hidden() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
         self.preview_warmup_tick();

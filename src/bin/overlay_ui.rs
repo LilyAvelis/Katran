@@ -31,10 +31,15 @@ impl Shelf {
         }
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
-        if !visible {
+        self.call(Command::SetWindowVisibility { visible });
+        if !visible && self.overlay_ui.animation.start_hide(self.native_window) {
+            self.overlay_ui.summoned = false;
+            ctx.request_repaint();
+            return;
+        }
+        if visible {
             self.overlay_ui.animation.cancel(self.native_window);
         }
-        self.call(Command::SetWindowVisibility { visible });
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(visible));
         if visible {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -257,10 +262,7 @@ impl Shelf {
                             serde_json::json!({"reason":"paste_sent","resident":true}),
                         );
                     }
-                    self.overlay_ui.summoned = false;
-                    self.overlay_ui.animation.cancel(self.native_window);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    self.call(Command::SetWindowVisibility { visible: false });
+                    self.apply_window_visibility(ctx, false);
                 }
             }
         }
