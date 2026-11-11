@@ -265,3 +265,54 @@ fn sessions_are_bounded_and_no_extension_has_an_explicit_empty_list() {
         json!([])
     );
 }
+
+#[test]
+fn synchronous_link_open_with_passes_exact_url_to_offered_handler() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    api.set_app_provider(Box::new(Fake {
+        calls: Arc::clone(&calls),
+    }));
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Links,
+            enabled: true,
+        },
+    );
+    let url = "https://example.test/путь?x=1&y=two#фрагмент";
+    let id = call(
+        &mut api,
+        Command::IngestLink {
+            url: url.into(),
+            source: "test".into(),
+        },
+    )["id"]
+        .as_i64()
+        .unwrap();
+    let list = call(&mut api, Command::ListOpenApps { id });
+    let token = list["token"].as_str().unwrap().to_owned();
+    let receipt = call(
+        &mut api,
+        Command::OpenWithApp {
+            token,
+            app_id: Some("first".into()),
+        },
+    );
+    assert_eq!(receipt["link"], true);
+    assert_eq!(receipt["operation"], "open_with");
+    let invocations = calls.lock().unwrap();
+    assert_eq!(invocations.len(), 1);
+    assert_eq!(invocations[0].0, ".html");
+    assert_eq!(invocations[0].1, "first");
+    assert_eq!(invocations[0].2.as_os_str(), std::ffi::OsStr::new(url));
+}
+
+#[test]fn async_link_open_with_passes_exact_url(){
+ let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();let calls=Arc::new(Mutex::new(Vec::new()));api.set_app_provider(Box::new(Fake{calls:calls.clone()}));
+ call(&mut api,Command::SetTabEnabled{tab:katran::interaction::ShelfTab::Links,enabled:true});let url="https://example.test/путь?a=1#exact";
+ let id=call(&mut api,Command::IngestLink{url:url.into(),source:"synthetic".into()})["id"].as_i64().unwrap();let token=call(&mut api,Command::ListOpenApps{id})["token"].as_str().unwrap().to_owned();
+ let job=call(&mut api,Command::BeginJob{command:Box::new(Command::OpenWithApp{token,app_id:Some("first".into())})});let job_id=serde_json::from_value(job["job_id"].clone()).unwrap();let deadline=Instant::now()+Duration::from_secs(3);loop{let status=call(&mut api,Command::PollJob{job_id});if status["state"]=="succeeded"{assert_eq!(status["result"]["link"],true);break;}assert!(Instant::now()<deadline,"{status}");std::thread::yield_now();}
+ assert_eq!(calls.lock().unwrap()[0].2.as_os_str(),std::ffi::OsStr::new(url));
+}

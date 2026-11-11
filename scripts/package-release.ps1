@@ -25,6 +25,9 @@ if ((Get-Item -LiteralPath $DependencyNoticesPath).Length -gt 8MB) { throw 'Depe
 foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) {
     if (!(Test-Path -LiteralPath (Join-Path $BinaryDirectory $file) -PathType Leaf)) { throw "Missing release binary: $file" }
 }
+foreach ($file in @('es.exe','LICENSE','NOTICE.txt')) {
+    if (!(Test-Path -LiteralPath (Join-Path $Root "assets/everything/$file") -PathType Leaf)) { throw "Missing Everything asset: $file" }
+}
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 $utf8 = New-Object Text.UTF8Encoding($false)
 function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Value -Depth 8) + "`n", $utf8) }
@@ -55,14 +58,23 @@ Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Desti
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'runtime/Katran.exe')
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran.exe') -Destination (Join-Path $portable 'katran-cli.exe')
 [IO.File]::WriteAllText((Join-Path $portable 'portable.flag'), '', $utf8)
-Copy-Item -LiteralPath $DependencyNoticesPath -Destination (Join-Path $portable 'THIRD-PARTY-NOTICES.txt')
+$combinedNotices = (Get-Content -LiteralPath $DependencyNoticesPath -Raw) + "`n`nEverything ES:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Raw) + "`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Raw)
+foreach($assetNotice in @('assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) {
+    $combinedNotices += "`n`n$assetNotice`n" + (Get-Content -LiteralPath (Join-Path $Root $assetNotice) -Raw)
+}
+[IO.File]::WriteAllText((Join-Path $portable 'THIRD-PARTY-NOTICES.txt'), $combinedNotices, $utf8)
+if ((Get-Item -LiteralPath (Join-Path $portable 'THIRD-PARTY-NOTICES.txt')).Length -gt 8MB) { throw 'Combined notices exceed updater limit' }
 [IO.File]::WriteAllText((Join-Path $portable 'runtime/current-version.txt'), $id + "`n", $utf8)
 $sourceFiles = @('Cargo.toml','Cargo.lock','build.rs') + @(Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File -Filter '*.rs' | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+$sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt')
 $sourceFiles += @('assets/branding/katran.ico','assets/branding/katran.rc' | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
 $sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })
-$manifest = [ordered]@{profile='release';version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash $DependencyNoticesPath);sources=$sources}
+$manifest = [ordered]@{profile='release';version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash (Join-Path $portable 'THIRD-PARTY-NOTICES.txt'));everything_es_sha256=(Hash (Join-Path $Root 'assets/everything/es.exe'));everything_license_sha256=(Hash (Join-Path $Root 'assets/everything/LICENSE'));everything_notice_sha256=(Hash (Join-Path $Root 'assets/everything/NOTICE.txt'));sources=$sources}
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-ui.exe') -Destination (Join-Path $versionDir 'katran-ui.exe')
-Copy-Item -LiteralPath $DependencyNoticesPath -Destination (Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt')
+Copy-Item -LiteralPath (Join-Path $portable 'THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt')
+Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/es.exe') -Destination (Join-Path $versionDir 'es.exe')
+Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Destination (Join-Path $versionDir 'Everything-ES-LICENSE.txt')
+Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Destination (Join-Path $versionDir 'Everything-ES-NOTICE.txt')
 Write-Json (Join-Path $versionDir 'build-manifest.json') $manifest
 if ((Get-Item -LiteralPath (Join-Path $versionDir 'build-manifest.json')).Length -gt 64KB) { throw 'Build manifest exceeds the updater 64 KiB limit' }
 Copy-Item -LiteralPath (Join-Path $versionDir 'katran-ui.exe'),(Join-Path $versionDir 'build-manifest.json'),(Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt') -Destination $update

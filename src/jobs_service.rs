@@ -33,6 +33,7 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
+    ThemeBackground {prepared:theme_backgrounds::PreparedBackground,event:Option<Event>,activate:bool},
     UpdateInstalled(updater::InstalledUpdate),
     UpdateChecked(updater::UpdateStatus),
     UpdateReady {
@@ -238,6 +239,17 @@ impl Service {
             };
         }
         let id = match command {
+            Command::ImportThemeBackground {path} => self.jobs.submit(Lane::Foreground,move |cancel| {
+                cancel.check()?;let prepared=theme_backgrounds::prepare(&path)?;cancel.check()?;
+                Ok(PreparedWork::ThemeBackground{prepared,event:None,activate:false})
+            })?,
+            Command::UseSelectedImageAsBackground => {
+                let event=self.selected_background_image()?;
+                self.jobs.submit(Lane::Foreground,move |cancel| {
+                    cancel.check()?;let prepared=theme_backgrounds::prepare(&event.path)?;cancel.check()?;
+                    Ok(PreparedWork::ThemeBackground{prepared,event:Some(event),activate:true})
+                })?
+            },
             Command::SearchFolders { query, limit } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     cancel.check()?;
@@ -463,13 +475,7 @@ impl Service {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
                     launcher.cancellation = Some(cancel);
-                    let mut result = open_file::execute_with_cache(
-                        &session.event,
-                        open_file::Operation::OpenWith,
-                        &launcher,
-                        &root,
-                        quota,
-                    )?;
+                    let mut result=crate::app_picker::execute_selected(&session.event,&launcher,&root,quota)?;
                     result["application_id"] = json!(launcher.app_id);
                     Ok(PreparedWork::Value(result))
                 })?
@@ -793,6 +799,12 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::ThemeBackground{prepared,event,activate}=>{
+                    if let Some(event)=event {self.validate_job_events(&[event])?;}
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let result=theme_backgrounds::commit(&self.root,prepared)?;
+                    if activate {self.activate_background(result)}else{Ok(result)}
+                },
                 PreparedWork::Value(value)=>Ok(value),
                 PreparedWork::UpdateChecked(status)=>self.accept_update_check(status),
                 PreparedWork::UpdateReady{..}=>Err(ApiError::new("invalid_job_phase","Update preparation must be authorized before effect")),
@@ -808,7 +820,7 @@ impl Service {
                 PreparedWork::Reference(prepared)=>self.commit_prepared_reference(prepared),
                 PreparedWork::Copy{events,plan,mut sink}=> {
                     self.validate_job_events(&events)?;
-                    let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;self.record_clipboard_publication(receipt.sequence);
+                    let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;if receipt.failures.is_empty() {self.record_selection_publication(receipt.sequence,&events.iter().map(|event|event.id).collect::<Vec<_>>());}else{self.record_clipboard_publication(receipt.sequence);}
                     Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings}))
                 }
                 PreparedWork::Drag{events,prepared}=> {self.validate_job_events(&events)?;self.commit_drag_preparation(prepared)}

@@ -363,12 +363,6 @@ pub fn list_recovery(root: &Path) -> Result<serde_json::Value> {
         {
             continue;
         }
-        if items.len() == 1000 {
-            return Err(ApiError::new(
-                "recovery_limit",
-                "More than 1000 recovery journals",
-            ));
-        }
         let stage = entry.path();
         let inspected = (|| -> Result<serde_json::Value> {
             let metadata = fs::symlink_metadata(&stage)?;
@@ -440,6 +434,44 @@ pub fn list_recovery(root: &Path) -> Result<serde_json::Value> {
                 }
                 Err(error) => return Err(error),
             };
+            // Skip only a verified, internally consistent completed receipt when
+            // the private data directory is still a real child and the staged
+            // pathname is absent. Uncertain, malformed and unfinished entries
+            // remain visible and count toward the bound.
+            let receipt = outcome.as_ref().and_then(|value| value.get("receipt"));
+            let complete = receipt.is_some_and(|receipt| {
+                let same_id = receipt["operation_id"].as_str() == Some(operation_id);
+                let same_path = receipt["original_path"]
+                    .as_str()
+                    .is_some_and(|path| Path::new(path) == original);
+                let no_recovery = receipt
+                    .get("recovery_path")
+                    .is_some_and(serde_json::Value::is_null);
+                let valid_status = match receipt["status"].as_str() {
+                    Some("recycled") => {
+                        receipt["recycled"] == true
+                            && receipt["original_removed"] == true
+                            && receipt.get("error").is_some_and(serde_json::Value::is_null)
+                    }
+                    Some("restored") => {
+                        receipt["recycled"] == false && receipt["original_removed"] == false
+                    }
+                    _ => false,
+                };
+                same_id && same_path && no_recovery && valid_status
+            });
+            let data = stage.join("data");
+            let safe_data = fs::symlink_metadata(&data).is_ok_and(|metadata| {
+                metadata.is_dir()
+                    && metadata.file_attributes() & 0x400 == 0
+                    && data.canonicalize().ok().as_deref().and_then(Path::parent)
+                        == Some(stage.as_path())
+            });
+            let staged_absent = fs::symlink_metadata(&staged)
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+            if complete && safe_data && staged_absent {
+                return Ok(serde_json::Value::Null);
+            }
             let mut recovery_path = None;
             let mut staged_state = "missing";
             if staged.exists() {
@@ -467,10 +499,18 @@ pub fn list_recovery(root: &Path) -> Result<serde_json::Value> {
                 serde_json::json!({"operation_id":operation_id,"original_path":original,"staged_state":staged_state,"recovery_path":recovery_path,"outcome":outcome,"original_exists":original.exists()}),
             )
         })();
-        match inspected {
-            Ok(item) => items.push(item),
-            Err(e) => items.push(serde_json::json!({"journal_dir":stage,"error":e})),
+        let item = match inspected {
+            Ok(item) if item.is_null() => continue,
+            Ok(item) => item,
+            Err(e) => serde_json::json!({"journal_dir":stage,"error":e}),
+        };
+        if items.len() == 1000 {
+            return Err(ApiError::new(
+                "recovery_limit",
+                "More than 1000 unresolved recovery journals",
+            ));
         }
+        items.push(item);
     }
     Ok(serde_json::json!({"items":items}))
 }
@@ -546,6 +586,76 @@ mod tests {
             listing["items"][0]["recovery_path"].as_str().unwrap(),
             receipt.recovery_path.unwrap().to_string_lossy()
         );
+    }
+    #[test]
+    fn completed_journals_do_not_hide_verified_unresolved_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical = root.path().canonicalize().unwrap();
+        let original = canonical.join("unresolved.png");
+        fs::write(&original, b"synthetic original").unwrap();
+        let hash = crate::preview::content_hash(&original).unwrap();
+        let fake = Fake {
+            original: original.clone(),
+            replace: true,
+            success: false,
+        };
+        let receipt = recycle_verified(&original, &canonical, &hash, &fake).unwrap();
+        let recovery = receipt.recovery_path.unwrap();
+        for n in 0..1000 {
+            let id = format!("completed-{n}");
+            let stage = canonical.join(format!(".katran-recovery-{id}"));
+            fs::create_dir(&stage).unwrap();
+            fs::create_dir(stage.join("data")).unwrap();
+            let source = canonical.join(format!("completed-{n}.png"));
+            let staged = stage.join("data").join(source.file_name().unwrap());
+            let prepared = serde_json::json!({"operation_id":id,"original_path":source,"staged_path":staged,"hash":"00".repeat(32),"identity":{"volume":1,"index":1}});
+            let outcome = serde_json::json!({"receipt":{"operation_id":id,"original_path":source,"status":"recycled","original_removed":true,"recycled":true,"recovery_path":null,"error":null}});
+            fs::write(
+                stage.join("prepared.json"),
+                serde_json::to_vec(&prepared).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                stage.join("outcome.json"),
+                serde_json::to_vec(&outcome).unwrap(),
+            )
+            .unwrap();
+        }
+        let listing = list_recovery(&canonical).unwrap();
+        let items = listing["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0]["recovery_path"].as_str(),
+            Some(recovery.to_str().unwrap())
+        );
+        assert_eq!(fs::read(&recovery).unwrap(), b"synthetic original");
+        assert_eq!(fs::read(&original).unwrap(), b"independent replacement");
+        assert!(canonical.join(".katran-recovery-completed-0").exists());
+    }
+    #[test]
+    fn mismatched_completed_receipt_remains_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let stage = root.join(".katran-recovery-example");
+        fs::create_dir(&stage).unwrap();
+        fs::create_dir(stage.join("data")).unwrap();
+        let original = root.join("example.png");
+        let staged = stage.join("data").join("example.png");
+        let prepared = serde_json::json!({"operation_id":"example","original_path":original,"staged_path":staged,"hash":"00".repeat(32),"identity":{"volume":1,"index":1}});
+        let outcome = serde_json::json!({"receipt":{"operation_id":"other","original_path":original,"status":"recycled","original_removed":true,"recycled":true,"recovery_path":null,"error":null}});
+        fs::write(
+            stage.join("prepared.json"),
+            serde_json::to_vec(&prepared).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            stage.join("outcome.json"),
+            serde_json::to_vec(&outcome).unwrap(),
+        )
+        .unwrap();
+        let listing = list_recovery(&root).unwrap();
+        assert_eq!(listing["items"].as_array().unwrap().len(), 1);
+        assert_eq!(listing["items"][0]["operation_id"], "example");
     }
     #[test]
     fn fake_success_receipt_requires_staged_file_to_be_consumed() {

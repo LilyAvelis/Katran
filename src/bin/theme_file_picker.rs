@@ -1,15 +1,26 @@
 //! Explicit native file picker for the optional theme background.
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::mpsc::Receiver};
+
+pub(super) type PickResult = Result<Option<PathBuf>, String>;
+
+#[cfg(any(windows, test))]
+fn start_worker(
+    worker: impl FnOnce() -> PickResult + Send + 'static,
+) -> Result<Receiver<PickResult>, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("katran-theme-picker".into())
+        .spawn(move || {
+            let _ = sender.send(worker());
+        })
+        .map_err(|error| format!("Не удалось открыть выбор изображения: {error}"))?;
+    Ok(receiver)
+}
 
 /// Opens only on a user action. No file is read or copied by this adapter.
 #[cfg(windows)]
-pub(super) fn pick_image() -> Result<Option<PathBuf>, String> {
-    std::thread::Builder::new()
-        .name("katran-theme-picker".into())
-        .spawn(pick_on_sta)
-        .map_err(|error| format!("Не удалось открыть выбор изображения: {error}"))?
-        .join()
-        .map_err(|_| "Диалог выбора изображения завершился с ошибкой".to_owned())?
+pub(super) fn start_pick_image() -> Result<Receiver<PickResult>, String> {
+    start_worker(pick_on_sta)
 }
 
 #[cfg(windows)]
@@ -82,6 +93,34 @@ fn pick_on_sta() -> Result<Option<PathBuf>, String> {
 }
 
 #[cfg(not(windows))]
-pub(super) fn pick_image() -> Result<Option<PathBuf>, String> {
+pub(super) fn start_pick_image() -> Result<Receiver<PickResult>, String> {
     Err("Выбор изображения доступен только в Windows".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn worker_returns_immediately_and_delivers_result_later() {
+        let (release, blocked) = mpsc::channel();
+        let receiver = start_worker(move || {
+            blocked.recv().map_err(|error| error.to_string())?;
+            Ok(Some(PathBuf::from("synthetic.png")))
+        })
+        .unwrap();
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release.send(()).unwrap();
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap(),
+            Some(PathBuf::from("synthetic.png"))
+        );
+    }
 }

@@ -226,6 +226,12 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
     }
 }
 impl Shelf {
+    /// Shared input ownership includes overlays before any early command handler.
+    fn modal_owns_input(&self)->bool {
+        self.sorting_input.is_open() || self.shortcut_editor.is_some() || self.actions || self.open_apps.open
+            || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save
+            || !self.pending_delete.is_empty() || self.state["settings_open"]==true
+    }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
@@ -248,12 +254,13 @@ impl Shelf {
         self.resident_close_requested(&ctx);
         if !self.sorting_input.is_open() {self.overlay_escape(&ctx);}
         input_log::record(&ctx, self.logger.as_ref());
-        if self.api.is_some() && !self.info.is_open() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
+        if self.api.is_some() && !self.info.is_open() { if !self.sorting_input.is_open(){self.pinned_input(&ctx);} self.pinned_tick(&ctx); if !self.pinned_ui.open && !self.sorting_input.is_open(){self.workspace_input(&ctx);} self.workspace_tick(&ctx); }
         if self.api.is_none()
             && self.job.is_some()
             && self.shortcut_editor.is_none()
             && !self.busy_text_editing
             && !self.actions
+            && !self.sorting_input.is_open()
             && !self.open_apps.open
             && !self.workspace.open
             && !self.info.is_open()
@@ -323,6 +330,7 @@ impl Shelf {
             && self.shortcut_editor.is_none()
             && !self.busy_text_editing
             && !self.actions
+            && !self.sorting_input.is_open()
             && !self.open_apps.open
             && !self.workspace.open
             && !self.info.is_open()
@@ -605,6 +613,7 @@ impl Shelf {
         };
         if self.api.is_some()
             && !self.actions
+            && !self.sorting_input.is_open()
             && !self.open_apps.open
             && !self.workspace.open
             && !self.info.is_open()
@@ -699,7 +708,7 @@ impl Shelf {
             ctx.request_repaint();
         }
         if self.api.is_some() && self.job.is_none() && self.capture_job.is_none()
-            && !self.overlay_ui.pending && self.settings_ui.take_restart_requested() {
+            && !self.overlay_ui.pending && !self.settings_ui.background_busy() && self.settings_ui.take_restart_requested() {
             let result=self.call(Command::RestartApplication);
             if result["restart_requested"]==true {
                 match restart_ui::spawn_successor(){Ok(())=>self.quit_application(&ctx),Err(error)=>self.message=error}
@@ -768,6 +777,7 @@ impl Shelf {
             && self.api.is_some()
             && self.native_drag.is_none()
             && !self.actions
+            && !self.sorting_input.is_open()
             && !self.open_apps.open
             && !self.workspace.open
             && !self.info.is_open()
@@ -832,9 +842,7 @@ impl eframe::App for Shelf {
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
         self.perform_native_drag(ctx, input);
-        let modal = self.shortcut_editor.is_some() || self.actions || self.open_apps.open
-            || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save
-            || !self.pending_delete.is_empty() || self.state["settings_open"] == true;
+        let modal=self.modal_owns_input();
         if self.navigation_input.intercept(ctx, input, modal) {
             self.pending_tab_action = Some("tab_toggle".into());
         }
@@ -2062,6 +2070,20 @@ mod tests {
         let after=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect"))).unwrap();
         assert!(after.height()<before.height());
         assert!(ctx.memory(|m|m.focused()).is_none());
+    }
+    #[test]
+    fn sort_modal_owns_tab_transfer_and_paste_keys_before_early_handlers() {
+        let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
+        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder{path:folder.path().into()});let e=app.call(Command::IngestBytes{name:"stay.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});let id=e["id"].as_i64().unwrap();
+        app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
+        let ctx=egui::Context::default();ui_style::install(&ctx);app.sorting_input.open();
+        let tab=app.state["tab"].clone();
+        let mut input=egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:Some(egui::Key::Tab),pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}],..Default::default()};
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut input);assert!(app.pending_tab_action.is_none());
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
+        frame(&mut app,&ctx,egui::Key::V,egui::Modifiers::CTRL);
+        assert_eq!(app.state["tab"],tab);assert!(app.sorting_input.is_open());assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(),0);
     }
     #[test]
     fn sort_notice_obeys_preference_and_expiry_without_focus() {

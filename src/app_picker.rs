@@ -68,8 +68,12 @@ pub(crate) fn discover(
     Ok(apps)
 }
 
-pub(crate) fn event_extension(event:&Event)->Option<String> {
-    if event.kind==crate::EventKind::LinkFragment {Some(".html".into())}else{app_handlers::extension(&event.name)}
+pub(crate) fn event_extension(event: &Event) -> Option<String> {
+    if event.kind == crate::EventKind::LinkFragment {
+        Some(".html".into())
+    } else {
+        app_handlers::extension(&event.name)
+    }
 }
 
 pub(crate) struct AppLauncher {
@@ -100,6 +104,23 @@ impl open_file::Launcher for AppLauncher {
                 .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?
                 .launch(path, open_file::Operation::OpenWith)
         }
+    }
+}
+
+/// Route both synchronous and job-based application selection through one
+/// revision-checked boundary. Link handlers receive the exact URL, not its blob.
+pub(crate) fn execute_selected(
+    event: &Event,
+    launcher: &AppLauncher,
+    root: &std::path::Path,
+    quota: u64,
+) -> Result<Value> {
+    if event.kind == crate::EventKind::LinkFragment {
+        let mut result = open_file::execute_link(event, launcher)?;
+        result["operation"] = json!(open_file::Operation::OpenWith);
+        Ok(result)
+    } else {
+        open_file::execute_with_cache(event, open_file::Operation::OpenWith, launcher, root, quota)
     }
 }
 
@@ -188,13 +209,7 @@ impl Service {
     pub(crate) fn open_with_app(&mut self, token: &str, app_id: Option<String>) -> Result<Value> {
         let session = self.app_session(token, app_id.as_deref())?;
         let launcher = self.app_launcher(&session.event, app_id, None);
-        let mut result = open_file::execute_with_cache(
-            &session.event,
-            open_file::Operation::OpenWith,
-            &launcher,
-            &self.root,
-            self.quota,
-        )?;
+        let mut result = execute_selected(&session.event, &launcher, &self.root, self.quota)?;
         result["application_id"] = json!(launcher.app_id);
         Ok(result)
     }

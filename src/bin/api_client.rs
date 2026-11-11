@@ -2,7 +2,7 @@
 use super::*;
 impl Shelf {
     pub(super) fn direct_transfer_input(&mut self, ctx:&egui::Context) {
-        if self.api.is_none() || self.shortcut_editor.is_some() || self.actions || self.open_apps.open || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save || !self.pending_delete.is_empty() || self.state["settings_open"]==true || ctx.memory(|m|m.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some()) {return;}
+        if self.api.is_none() || self.modal_owns_input() || ctx.memory(|m|m.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some()) {return;}
         let catalogue:Vec<_>=self.shortcuts.iter().filter(|shortcut|shortcut.id=="transfer_selection").cloned().collect();
         if shortcuts_ui::take_action_with_editing(ctx,&catalogue,false).is_some() {
             if self.job.is_some() {self.message="Дождитесь завершения текущей операции".into();return;}
@@ -389,7 +389,7 @@ impl Shelf {
             self.copy_request(ctx);
             return;
         }
-        if matches!(id.as_str(), "cleanup" | "delete" | "copy_text") {
+        if matches!(id.as_str(), "cleanup" | "delete" | "copy_text" | "use_as_background") {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
             }
@@ -451,6 +451,7 @@ impl Shelf {
                 }
             }
         }
+        if r["background_applied"]==true {self.message="Изображение сохранено и установлено на фон".into();}
         if r["sort"].is_object() {
             self.message = sorting_ui::confirmation(&r["sort"]);
         }

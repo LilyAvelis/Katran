@@ -2,7 +2,8 @@
 //! Adapted from Afiocira's `everything.rs`; see `AFIO-LICENSE`.
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Read,
+    io::{Read, Write},
+    fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -39,7 +40,57 @@ fn error(code: &str, message: impl Into<String>) -> EverythingError {
 pub fn search_folders(query: &str, limit: usize) -> Result<EverythingFolders, EverythingError> {
     let executable =
         std::env::current_exe().map_err(|e| error("helper_unavailable", e.to_string()))?;
-    search_with_runner(query, limit, &executable.with_file_name("es.exe"), run)
+    if query.trim().is_empty() || query.contains('\0') || query.encode_utf16().count() > 16_000 || !(1..=MAX_RESULTS).contains(&limit) {
+        return search_with_runner(query, limit, Path::new(""), run);
+    }
+    let local=std::env::var_os("LOCALAPPDATA").ok_or_else(||error("helper_unavailable","LOCALAPPDATA unavailable"))?;
+    let helper=resolve_helper(&executable,&PathBuf::from(local))?;
+    search_with_runner(query, limit, &helper, run)
+}
+
+/// Resolve an installed helper or materialize the verified embedded fallback.
+/// The explicit cache root also supports isolated updater validation.
+pub fn resolve_helper(executable:&Path,cache_root:&Path)->Result<PathBuf,EverythingError>{
+    let adjacent=executable.with_file_name("es.exe");
+    if adjacent.is_file(){return Ok(adjacent);}
+    extract_helper(cache_root,include_bytes!("../assets/everything/es.exe"))
+}
+
+// Never accept a link or Windows reparse point as a cache component.
+fn check_directory(path: &Path) -> Result<(), EverythingError> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| error("helper_unavailable", e.to_string()))?;
+    #[cfg(windows)]
+    { use std::os::windows::fs::MetadataExt; if metadata.file_attributes() & 0x400 != 0 { return Err(error("helper_unavailable", "Helper cache contains a reparse point")); } }
+    if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err(error("helper_unavailable", "Invalid helper cache directory")); }
+    Ok(())
+}
+fn extract_helper(base: &Path, payload: &[u8]) -> Result<PathBuf, EverythingError> {
+    use sha2::{Digest, Sha256};
+    if payload.is_empty() || payload.len() > 4 * 1024 * 1024 { return Err(error("helper_unavailable", "Invalid helper size")); }
+    let digest = format!("{:x}", Sha256::digest(payload));
+    check_directory(base)?;
+    let mut dir = base.to_path_buf();
+    for component in ["Katran", "helpers", digest.as_str()] {
+        dir.push(component);
+        match fs::create_dir(&dir) { Ok(()) => (), Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (), Err(e) => return Err(error("helper_unavailable", e.to_string())) }
+        check_directory(&dir)?;
+    }
+    let target = dir.join("es.exe");
+    if !target.exists() {
+        let temp = dir.join(format!(".es-{}-{:?}.tmp", std::process::id(), std::thread::current().id()));
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&temp).map_err(|e| error("helper_unavailable", e.to_string()))?;
+        let result = (|| { file.write_all(payload)?; file.sync_all()?; fs::hard_link(&temp, &target) })();
+        drop(file);
+        let _ = fs::remove_file(&temp);
+        if let Err(e) = result && e.kind() != std::io::ErrorKind::AlreadyExists {return Err(error("helper_unavailable",e.to_string()));}
+    }
+    let metadata = fs::symlink_metadata(&target).map_err(|e| error("helper_unavailable", e.to_string()))?;
+    #[cfg(windows)]
+    { use std::os::windows::fs::MetadataExt; if metadata.file_attributes() & 0x400 != 0 { return Err(error("helper_unavailable", "Helper is a reparse point")); } }
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != payload.len() as u64 { return Err(error("helper_unavailable", "Invalid cached helper")); }
+    let bytes = fs::read(&target).map_err(|e| error("helper_unavailable", e.to_string()))?;
+    if Sha256::digest(&bytes).as_slice() != Sha256::digest(payload).as_slice() { return Err(error("helper_unavailable", "Cached helper hash mismatch")); }
+    Ok(target)
 }
 
 fn search_with_runner<F>(
@@ -203,6 +254,15 @@ fn run(helper: &Path, query: &str, limit: usize) -> Result<Vec<u8>, EverythingEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn embedded_helper_cache_rejects_tampering() {
+        let root = tempfile::tempdir().unwrap();
+        let path = extract_helper(root.path(), b"synthetic helper").unwrap();
+        assert_eq!(extract_helper(root.path(), b"synthetic helper").unwrap(), path);
+        fs::write(&path, b"synthetic tamper").unwrap();
+        assert!(extract_helper(root.path(), b"synthetic helper").is_err());
+        assert!(extract_helper(root.path(), b"").is_err());
+    }
     #[test]
     fn filters_files_and_parses_unicode_and_empty() {
         let output = "[{\"filename\":\"C:\\\\папка\\\\\",\"attributes\":16},{\"filename\":\"C:\\\\file\",\"attributes\":32}]";

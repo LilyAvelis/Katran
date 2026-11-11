@@ -7,6 +7,7 @@ pub fn icon(id: &str) -> Lucide {
         "density_more" => Lucide::ZoomOut,
         "density_less" => Lucide::ZoomIn,
         "all" => Lucide::LayoutGrid,
+        "use_as_background" => Lucide::Image,
         "images" => Lucide::Image,
         "screenshots" => Lucide::Camera,
         "downloads" => Lucide::Download,

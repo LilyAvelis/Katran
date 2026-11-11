@@ -48,3 +48,20 @@ fn call(api:&mut Service,c:Command)->Value{let r=api.execute(Request{api_version
  assert_eq!(call(&mut api,Command::Themes)["current"]["lily_background"],3);
  let r=api.execute(Request{api_version:1,request_id:"invalid".into(),command:Command::GetThemeBackground{id:"../outside".into()}});assert_eq!(r["ok"],false);
 }
+
+#[test]fn selected_image_action_copies_and_applies_background_through_sync_and_job_api(){
+ for worker in [false,true] {
+ let root=tempfile::tempdir().unwrap();let source=tempfile::tempdir().unwrap();let png=source.path().join("image.png");image::RgbaImage::new(8,6).save(&png).unwrap();let bytes=std::fs::read(png).unwrap();
+ let mut api=Service::open(root.path(),10000).unwrap();let e=call(&mut api,Command::IngestBytes{name:"my.png".into(),bytes:bytes.clone(),source:"synthetic".into()});let id=e["id"].as_i64().unwrap();call(&mut api,Command::SetVisible{ids:vec![id]});call(&mut api,Command::Select{id,mode:katran::interaction::SelectionMode::Replace});
+ assert!(call(&mut api,Command::Actions).as_array().unwrap().iter().any(|a|a["id"]=="use_as_background"));
+ let result=if worker {let job=call(&mut api,Command::BeginJob{command:Box::new(Command::RunAction{id:"use_as_background".into()})});let job_id=serde_json::from_value(job["job_id"].clone()).unwrap();let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);loop{let status=call(&mut api,Command::PollJob{job_id});if status["state"]=="succeeded"{break status["result"].clone();}assert!(std::time::Instant::now()<deadline,"{status}");std::thread::yield_now();}}else{call(&mut api,Command::RunAction{id:"use_as_background".into()})};
+ assert_eq!(result["background_applied"],true);assert_eq!(call(&mut api,Command::Themes)["current"]["custom_background"],result["id"]);assert_eq!(std::fs::read(e["path"].as_str().unwrap()).unwrap(),bytes);
+ }
+}
+
+#[test]fn cancelled_background_job_never_commits_a_managed_copy(){
+ let root=tempfile::tempdir().unwrap();let source=tempfile::tempdir().unwrap();let path=source.path().join("bg.png");image::RgbaImage::new(8,6).save(&path).unwrap();let mut api=Service::open(root.path(),10000).unwrap();
+ let started=call(&mut api,Command::BeginJob{command:Box::new(Command::ImportThemeBackground{path})});let job_id=serde_json::from_value(started["job_id"].clone()).unwrap();
+ assert_eq!(started["state"],"queued");call(&mut api,Command::CancelJob{job_id});
+ assert!(call(&mut api,Command::ListThemeBackgrounds)["backgrounds"].as_array().unwrap().is_empty());
+}

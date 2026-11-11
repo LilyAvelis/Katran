@@ -20,24 +20,11 @@ pub trait ClipboardSink: Send {
     fn write(&self, text: &str) -> Result<u32>;
 }
 pub struct NativeClipboard;
+#[path = "text_clipboard.rs"]
+mod text_clipboard;
 impl ClipboardSink for NativeClipboard {
     fn write(&self, text: &str) -> Result<u32> {
-        #[cfg(windows)]
-        {
-            arboard::Clipboard::new()
-                .map_err(|error| ApiError::new("clipboard_error", error))?
-                .set_text(text.to_owned())
-                .map_err(|error| ApiError::new("clipboard_error", error))?;
-            Ok(crate::capture::sequence_number())
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = text;
-            Err(ApiError::new(
-                "unsupported_platform",
-                "Windows clipboard adapter required",
-            ))
-        }
+        text_clipboard::write(text)
     }
 }
 

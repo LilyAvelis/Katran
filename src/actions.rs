@@ -13,6 +13,7 @@ pub struct Definition {
     pub in_palette: bool,
 }
 pub const DEFS: &[Definition] = &[
+ Definition{id:"use_as_background",label:"Использовать как фон",default_binding:"",rebindable:true,group:"Изображение",in_palette:true},
     Definition {
         id: "quit",
         label: "Выйти из Katran",
@@ -656,6 +657,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "list" => Dispatch::Command(Command::SetView { view: View::List }),
         "capture" => Dispatch::Command(Command::SetCaptureEnabled { enabled: !capture }),
         "refresh" => Dispatch::Command(Command::List { limit: 1000 }),
+        "use_as_background" => Dispatch::Command(Command::UseSelectedImageAsBackground),
         "settings" => Dispatch::Command(Command::ShowSettings),
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),
         _ => return None,

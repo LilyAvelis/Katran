@@ -5,6 +5,8 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 
 #[derive(Default)]
 pub struct State {
+    picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
+    background_job: Option<katran::domain_jobs::JobId>,
     custom_backgrounds: Option<serde_json::Value>,
     restart_confirmation: bool,
     restart_requested: bool,
@@ -108,6 +110,7 @@ fn apply_theme(
     Ok(())
 }
 impl State {
+    pub(super) fn background_busy(&self)->bool {self.picker.is_some() || self.background_job.is_some()}
     pub(super) fn take_restart_requested(&mut self)->bool {std::mem::take(&mut self.restart_requested)}
 
     pub fn set_overlay_status(&mut self, status: String) {
@@ -119,7 +122,38 @@ impl State {
     pub fn is_recording_overlay(&self) -> bool {
         self.global_editor.is_some()
     }
+    fn tick_background(&mut self,api:&mut Service,ctx:&egui::Context) {
+        if let Some(picker)=&self.picker {
+            match picker.try_recv() {
+                Ok(result)=>{self.picker=None;match result {
+                    Ok(Some(path))=>{let response=call(api,Command::BeginJob{command:Box::new(Command::ImportThemeBackground{path})});
+                        self.background_job=response["result"]["job_id"].as_u64().map(katran::domain_jobs::JobId);
+                        if response["ok"]!=true {self.error=response["error"]["message"].as_str().unwrap_or("Не удалось импортировать фон").into();}
+                    },Ok(None)=>{},Err(error)=>self.error=error,
+                }},
+                Err(std::sync::mpsc::TryRecvError::Empty)=>ctx.request_repaint_after(std::time::Duration::from_millis(50)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)=>{self.picker=None;self.error="Диалог выбора изображения завершился без результата".into();},
+            }
+        }
+        if let Some(job_id)=self.background_job {
+            let response=call(api,Command::PollJob{job_id});let status=&response["result"];
+            match status["state"].as_str() {
+                Some("queued"|"running"|"ready")=>ctx.request_repaint_after(std::time::Duration::from_millis(50)),
+                Some("succeeded")=>{self.background_job=None;ctx.request_repaint();
+                    if let Some(id)=status["result"]["id"].as_str(){
+                        let current=call(api,Command::Themes);
+                        if let Ok(mut theme)=serde_json::from_value::<katran::theme::ThemePreferences>(current["result"]["current"].clone()) {
+                            theme.custom_background=Some(id.to_owned());theme.lily_background=None;
+                            self.error=apply_theme(api,&mut self.draft,theme).err().unwrap_or_default();self.custom_backgrounds=None;
+                        }
+                    }
+                },
+                _=>{self.background_job=None;self.error=status["error"]["message"].as_str().or_else(||response["error"]["message"].as_str()).unwrap_or("Импорт фона отменён или не выполнен").into();},
+            }
+        }
+    }
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
+        self.tick_background(api,ctx);
         self.updates.tick(api, ctx);
         let interaction = call(api, Command::Interaction);
         let open = interaction["result"]["settings_open"] == true;
@@ -321,11 +355,8 @@ impl State {
               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme_intent=Some(theme.clone());}
              }
             });
-            if ui.button("Загрузить изображение…").clicked(){
-             match super::theme_file_picker::pick_image(){
-              Ok(Some(path))=>{let r=call(api,Command::ImportThemeBackground{path});if let Some(id)=r["result"]["id"].as_str(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;self.custom_backgrounds=None;theme_intent=Some(theme.clone());}else{self.error=r["error"]["message"].as_str().unwrap_or("Не удалось загрузить фон").into();}},
-              Ok(None)=>{},Err(error)=>self.error=error,
-             }
+            if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать из папки…")).clicked(){
+                match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
@@ -399,6 +430,16 @@ mod tests {
     use super::*;
     use katran::interaction::ShelfTab;
 
+    #[test]
+    fn pending_native_picker_does_not_block_dispatcher_or_change_theme() {
+        let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
+        let (sender,receiver)=std::sync::mpsc::channel();let mut state=State{picker:Some(receiver),..Default::default()};let ctx=egui::Context::default();
+        let before=call(&mut api,Command::Themes);
+        state.tick_background(&mut api,&ctx);assert!(state.picker.is_some());
+        let result=call(&mut api,Command::IngestBytes{name:"capture.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});assert_eq!(result["ok"],true);
+        assert_eq!(call(&mut api,Command::Themes),before);
+        sender.send(Ok(None)).unwrap();state.tick_background(&mut api,&ctx);assert!(state.picker.is_none());
+    }
     #[test]
     fn ctrl_comma_closes_settings_and_is_consumed() {
         let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();

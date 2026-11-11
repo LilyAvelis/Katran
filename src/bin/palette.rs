@@ -168,6 +168,8 @@ impl Shelf {
         if !self.sorting_input.is_open() {return;}
         let catalogue=self.call(Command::Actions);
         let anchor=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("sorting-button-rect"))).map(|r|r.right_top()+egui::vec2(0.0,-6.0)).unwrap_or(ctx.content_rect().right_bottom()-egui::vec2(8.0,40.0));
+        let selected=self.sorting_input.selected();
+        let scroll=self.sorting_input.take_scroll();
         let mut picked=None;
         let response=egui::Modal::new(egui::Id::new("sorting-menu"))
             .area(egui::Area::new(egui::Id::new("sorting-menu")).order(egui::Order::Foreground).pivot(egui::Align2::RIGHT_BOTTOM).fixed_pos(anchor))
@@ -177,13 +179,14 @@ impl Shelf {
                 ui.heading("Сортировка");
                 ui.weak("Клавиша — выбрать · Shift — обратный порядок · Esc — назад");
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-160.0).clamp(80.0,420.0)).show(ui,|ui| {
-                    for item in catalogue.as_array().into_iter().flatten().filter(|a|a["id"].as_str().is_some_and(|id|id.starts_with("sort_"))) {
+                    for (index,item) in catalogue.as_array().into_iter().flatten().filter(|a|a["id"].as_str().is_some_and(|id|id.starts_with("sort_"))).enumerate() {
                         let id=item["id"].as_str().unwrap();
                         let hint=sorting_ui::sequence_hint(id).unwrap_or("").trim_start_matches(", ");
                         let row=crate::action_row::ActionRow::new(crate::action_row::ActionPresentation {
                             label:item["label"].as_str().unwrap_or(id),icon:action_icons::icon(id),
                             primary_shortcut:hint,full_shortcut_tooltip:hint,
-                        }).show(ui,false);
+                        }).show(ui,index==selected);
+                        if index==selected && scroll {row.scroll_to_me(None);}
                         if row.clicked(){picked=Some(id.to_owned());}
                     }
                 });

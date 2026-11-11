@@ -83,6 +83,7 @@ pub mod overlay_windows;
 pub mod tray;
 pub mod theme;
 pub mod theme_backgrounds;
+mod theme_service;
 mod overlay_service;
 pub mod emoji_render;
 
@@ -413,6 +414,11 @@ impl Service {
         }
         match command {
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
+            Command::UseSelectedImageAsBackground => {
+                let event=self.selected_background_image()?;
+                let result=theme_backgrounds::import(&self.root,&event.path)?;
+                self.activate_background(result)
+            },
             Command::ImportThemeBackground {path} => theme_backgrounds::import(&self.root,&path),
             Command::ListThemeBackgrounds => theme_backgrounds::list(&self.root),
             Command::GetThemeBackground {id} => theme_backgrounds::get(&self.root,&id),
@@ -654,7 +660,8 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 plan.protect_references(&references.into_iter().map(PathBuf::from).collect::<Vec<_>>()).map_err(|e|ApiError::new("copy_error",e))?;
                 let receipt = copy_out::commit(&plan, &mut copy_out::NativeClipboard)
                     .map_err(|e| ApiError::new("clipboard_error", e))?;
-                self.record_clipboard_publication(receipt.sequence);
+                if receipt.failures.is_empty() {self.record_selection_publication(receipt.sequence,&events.iter().map(|event|event.id).collect::<Vec<_>>());}
+                else {self.record_clipboard_publication(receipt.sequence);}
                 Ok(
                     serde_json::json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}),
                 )

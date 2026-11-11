@@ -1,3 +1,4 @@
+//! Reuse these components and the recipes in docs/design-patterns.md for new UI.
 #![allow(dead_code)]
 //! Shared geometry for settings and command lists. All dimensions are logical points.
 use eframe::egui::{self, Color32};

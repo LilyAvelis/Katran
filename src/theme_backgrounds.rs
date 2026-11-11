@@ -106,7 +106,7 @@ fn image_bytes(source: &Path) -> Result<Vec<u8>> {
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(MAX_ALLOC);
     reader.limits(limits);
-    let decoder = reader
+    let mut decoder = reader
         .into_decoder()
         .map_err(|e| ApiError::new("invalid_background", e))?;
     let (width, height) = decoder.dimensions();
@@ -116,8 +116,12 @@ fn image_bytes(source: &Path) -> Result<Vec<u8>> {
             "Image exceeds 32 million pixels",
         ));
     }
-    let image = image::DynamicImage::from_decoder(decoder)
+    let orientation = decoder
+        .orientation()
         .map_err(|e| ApiError::new("invalid_background", e))?;
+    let mut image = image::DynamicImage::from_decoder(decoder)
+        .map_err(|e| ApiError::new("invalid_background", e))?;
+    image.apply_orientation(orientation);
     let image = if width.max(height) > MAX_EDGE {
         image.resize(MAX_EDGE, MAX_EDGE, image::imageops::FilterType::Lanczos3)
     } else {
@@ -153,15 +157,40 @@ fn entries(dir: &Path) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+/// Prepared independently of the destination; owns all data needed for commit.
+/// This value is Send and contains no borrowed source file or handle.
+pub(crate) struct PreparedBackground {
+    png: Vec<u8>,
+    id: String,
+    name: String,
+}
+
+/// Perform potentially expensive source IO, decode, resize, encode and hashing
+/// without creating or modifying the destination directory.
+pub(crate) fn prepare(source: &Path) -> Result<PreparedBackground> {
+    let png = image_bytes(source)?;
+    let id = format!("{:x}", Sha256::digest(&png));
+    Ok(PreparedBackground {
+        png,
+        id,
+        name: name_for(source),
+    })
+}
+
 /// A stable ID always identifies the normalized PNG bytes, never the source path.
 pub fn import(root: &Path, source: &Path) -> Result<Value> {
+    let prepared = prepare(source)?;
+    commit(root, prepared)
+}
+
+/// Recheck storage and publish the already prepared immutable image atomically.
+pub(crate) fn commit(root: &Path, prepared: PreparedBackground) -> Result<Value> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| ApiError::new("background_busy", "Background import lock poisoned"))?;
-    let png = image_bytes(source)?;
-    let id = format!("{:x}", Sha256::digest(&png));
+    let PreparedBackground { png, id, name } = prepared;
     let dir = directory(root)?;
     let destination = dir.join(format!("{id}.png"));
     match fs::symlink_metadata(&destination) {
@@ -216,11 +245,7 @@ pub fn import(root: &Path, source: &Path) -> Result<Value> {
         .create_new(true)
         .open(sidecar)
     {
-        let _ = file.write_all(
-            serde_json::json!({"name":name_for(source)})
-                .to_string()
-                .as_bytes(),
-        );
+        let _ = file.write_all(serde_json::json!({"name":name}).to_string().as_bytes());
         let _ = file.sync_all();
     }
     get(root, &id)
@@ -373,6 +398,104 @@ mod tests {
                 .code,
             "invalid_background"
         );
+    }
+    #[test]
+    fn preparation_is_source_independent_and_writes_only_on_commit() {
+        fn assert_send<T: Send>() {}
+        assert_send::<PreparedBackground>();
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = outside.path().join("synthetic.png");
+        image::RgbaImage::from_pixel(5, 3, image::Rgba([2, 7, 12, 255]))
+            .save(&source)
+            .unwrap();
+        let prepared = prepare(&source).unwrap();
+        assert!(!root.path().join("theme-backgrounds").exists());
+        fs::remove_file(&source).unwrap();
+        let value = commit(root.path(), prepared).unwrap();
+        assert_eq!(value["name"], "synthetic.png");
+        assert_eq!(value["width"], 5);
+        assert_eq!(value["height"], 3);
+        assert_eq!(
+            get(root.path(), value["id"].as_str().unwrap()).unwrap(),
+            value
+        );
+    }
+    #[test]
+    fn jpeg_exif_rotation_is_applied_before_normalization() {
+        let root = tempfile::tempdir().unwrap();
+        let source_root = tempfile::tempdir().unwrap();
+        let mut pixels = image::RgbImage::new(40, 20);
+        for (x, _, pixel) in pixels.enumerate_pixels_mut() {
+            *pixel = if x < 20 {
+                image::Rgb([240, 15, 15])
+            } else {
+                image::Rgb([15, 15, 240])
+            };
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+            .encode_image(&pixels)
+            .unwrap();
+        for (orientation, top_red) in [(6u8, true), (8u8, false)] {
+            // Minimal big-endian EXIF TIFF with exactly the orientation tag.
+            let exif = [
+                b'E',
+                b'x',
+                b'i',
+                b'f',
+                0,
+                0,
+                b'M',
+                b'M',
+                0,
+                42,
+                0,
+                0,
+                0,
+                8,
+                0,
+                1,
+                1,
+                18,
+                0,
+                3,
+                0,
+                0,
+                0,
+                1,
+                0,
+                orientation,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ];
+            let length = (exif.len() + 2) as u16;
+            let mut encoded = vec![0xff, 0xd8, 0xff, 0xe1, (length >> 8) as u8, length as u8];
+            encoded.extend_from_slice(&exif);
+            encoded.extend_from_slice(&jpeg[2..]);
+            let path = source_root
+                .path()
+                .join(format!("orientation-{orientation}.jpg"));
+            fs::write(&path, &encoded).unwrap();
+            let result = import(root.path(), &path).unwrap();
+            assert_eq!(result["width"], 20);
+            assert_eq!(result["height"], 40);
+            let image = image::open(result["path"].as_str().unwrap())
+                .unwrap()
+                .to_rgb8();
+            let upper = image.get_pixel(10, 5);
+            let lower = image.get_pixel(10, 35);
+            if top_red {
+                assert!(upper[0] > upper[2] && lower[2] > lower[0]);
+            } else {
+                assert!(upper[2] > upper[0] && lower[0] > lower[2]);
+            }
+            assert_eq!(fs::read(path).unwrap(), encoded);
+        }
     }
     #[cfg(unix)]
     #[test]
