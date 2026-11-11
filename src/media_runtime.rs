@@ -11,8 +11,13 @@ use std::{
     time::Duration,
 };
 
-const URL: &str =
-    "https://github.com/LilyAvelis/Katran/releases/download/v3.1.0/Katran-3.1.0-media-runtime.zip";
+const URL: &str = concat!(
+    "https://github.com/LilyAvelis/Katran/releases/download/v",
+    env!("CARGO_PKG_VERSION"),
+    "/Katran-",
+    env!("CARGO_PKG_VERSION"),
+    "-media-runtime.zip"
+);
 const DIGEST: &str = "4ac2a4a732ee66707ab2a4d7fc135d085e1da691f365cdb2f1b48f8f3816d4d8";
 const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
 const MAX_EXTRACTED: u64 = 384 * 1024 * 1024;

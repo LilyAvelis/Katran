@@ -92,6 +92,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/release-package-contract.ps1
+          ./tests/release-version-contract.ps1
           python tests/test_third_party_notices.py
           if ($LASTEXITCODE -ne 0) { throw 'Notice tests failed' }
       - run: cargo +1.95.0 test --locked --no-fail-fast --features ui,clipboard-events --target-dir target/build
@@ -158,8 +159,10 @@ jobs:
           # Metadata includes development dependencies not compiled by release binaries.
           cargo +1.95.0 fetch --locked
           if ($LASTEXITCODE -ne 0) { throw 'Release dependency prefetch failed' }
-          $version = (cargo +1.95.0 metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $workspaceMetadata = cargo +1.95.0 metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Version metadata failed' }
+          . ./scripts/release-version.ps1
+          $version = Get-KatranReleaseVersion $workspaceMetadata
           if ($env:KATRAN_RELEASE_TAG -cne "v$version") { throw 'Tag does not match Cargo version' }
           $metadata = "$env:RUNNER_TEMP/katran-notices-metadata.json"
           cargo +1.95.0 metadata --offline --locked --format-version 1 --features ui,clipboard-events --filter-platform x86_64-pc-windows-msvc > $metadata
