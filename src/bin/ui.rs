@@ -189,6 +189,7 @@ struct Shelf {
     sorting_input: sorting_input::State,
     pending_sort: Option<String>,
     glass_active: bool,
+    transparent_viewport: bool,
     sort_notice: Option<(String, Instant)>,
     state: Value,
     query: String,
@@ -773,7 +774,9 @@ impl Shelf {
 }
 impl eframe::App for Shelf {
     fn clear_color(&self, _: &egui::Visuals) -> [f32;4] {
-        if self.glass_active {[0.0,0.0,0.0,0.0]} else {[0.035,0.055,0.085,1.0]}
+        if self.glass_active {[0.0,0.0,0.0,0.0]}
+        else if self.transparent_viewport {Color32::from_rgb(12,12,12).to_normalized_gamma_f32()}
+        else {Color32::from_rgba_unmultiplied(12,12,12,180).to_normalized_gamma_f32()}
     }
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.tray_tick(ctx);
@@ -895,6 +898,7 @@ fn main() -> eframe::Result {
         sorting_input: Default::default(),
         pending_sort: None,
         glass_active: false,
+        transparent_viewport: false,
         sort_notice: None,
         state: Value::Null,
         query: String::new(),
@@ -919,6 +923,7 @@ fn main() -> eframe::Result {
     app.preview_warmup = warmup["job_id"].as_u64().map(katran::domain_jobs::JobId);
     let theme:katran::theme::ThemePreferences=serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
     let glass_start=theme.preset==katran::theme::Preset::BlueExperimental && theme.glass;
+    app.transparent_viewport=glass_start;
     eframe::run_native(
         "Katran",
         eframe::NativeOptions {
@@ -1077,6 +1082,7 @@ mod tests {
             sorting_input: Default::default(),
             pending_sort: None,
         glass_active: false,
+        transparent_viewport: false,
         sort_notice: None,
             state: Value::Null,
             query: String::new(),
