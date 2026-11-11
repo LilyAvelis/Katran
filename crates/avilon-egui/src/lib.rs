@@ -1,4 +1,6 @@
 //! Host-styled action rows and shortcut keycaps. No actions are executed here.
+pub mod optics;
+
 use egui::{self, Color32};
 
 /// Host-supplied fonts and colors for keycaps.

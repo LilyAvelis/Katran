@@ -6,6 +6,7 @@ mod app_identity;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
 mod gallery_card;
+mod glass_lab;
 mod images;
 mod info_bar;
 mod input_log;
@@ -993,6 +994,14 @@ impl eframe::App for Shelf {
     }
 }
 fn main() -> eframe::Result {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--glass-lab")) {
+        return glass_lab::run();
+    }
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--glass-lab-render")) {
+        return glass_lab::export()
+            .map_err(|e| eframe::Error::AppCreation(Box::new(std::io::Error::other(e))));
+    }
+
     restart_ui::wait_for_predecessor()
         .map_err(|error| eframe::Error::AppCreation(Box::new(std::io::Error::other(error))))?;
     if let Some(code) = katran::shell_visual_worker::run_if_requested() {
