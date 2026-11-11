@@ -264,6 +264,7 @@ impl Shelf {
                                         8.0,
                                         theme_ui::color(ctx,if selected {theme_ui::Role::Selection}else{theme_ui::Role::Surface},Color32::from_gray(if selected {74}else{46})),
                                     );
+                                    theme_ui::paint_optical(ui, rect, 8.0);
                                     if cursor {
                                         ui.painter().rect_stroke(
                                             rect,

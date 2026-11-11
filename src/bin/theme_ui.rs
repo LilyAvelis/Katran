@@ -344,6 +344,7 @@ mod tests {
                 custom_background: None,
                 glass: false,
                 compact_header: false,
+                optical_strength: 0,
             },
         );
         let mut blue = ctx.run_ui(egui::RawInput::default(), |ui| decorate(ui, bounds));
@@ -369,6 +370,7 @@ mod tests {
             custom_background: None,
             glass: false,
             compact_header: false,
+            optical_strength: 0,
         };
         apply(&ctx, &first);
         let blue = ctx.style_of(egui::Theme::Dark);
@@ -444,6 +446,7 @@ mod tests {
             custom_background: None,
             glass: false,
             compact_header: false,
+            optical_strength: 0,
         };
         apply(&ctx, &blue);
         assert_eq!(
@@ -471,5 +474,80 @@ mod tests {
             original.spacing.interact_size
         );
         assert_eq!(color(&ctx, Role::Accent, legacy), legacy);
+    }
+}
+
+/// Samples only the application's selected background, never other windows.
+pub(super) fn optical_shape(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    radius: f32,
+) -> Option<egui::Shape> {
+    let theme = current(ctx);
+    if theme.preset != Preset::BlueExperimental
+        || theme.optical_strength == 0
+        || !ctx
+            .data(|d| d.get_temp::<bool>(egui::Id::new("optical-gpu-ready")))
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let texture = if let Some(id) = theme.custom_background {
+        ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(custom_key()))
+            .filter(|(cached, _)| cached == &id)
+            .map(|(_, t)| t)
+    } else {
+        theme.lily_background.and_then(|i| {
+            ctx.data(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new(("lily-background", i))))
+        })
+    }?;
+    let background = ctx.content_rect();
+    Some(crate::optical_gpu::shape(
+        ctx,
+        rect,
+        texture.id(),
+        background,
+        cover_uv(background.size(), texture.size_vec2()),
+        radius,
+        f32::from(theme.optical_strength) / 100.0,
+    ))
+}
+pub(super) fn paint_optical(ui: &egui::Ui, rect: egui::Rect, radius: f32) {
+    if let Some(shape) = optical_shape(ui.ctx(), rect, radius) {
+        ui.painter().add(shape);
+    }
+}
+#[cfg(test)]
+mod optical_tests {
+    use super::*;
+    #[test]
+    fn optical_layer_requires_opt_in_source_and_gpu_host() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(180.0, 100.0));
+        assert!(optical_shape(&ctx, rect, 8.0).is_none());
+        apply(
+            &ctx,
+            &ThemePreferences {
+                preset: Preset::BlueExperimental,
+                lily_background: Some(1),
+                optical_strength: 50,
+                ..Default::default()
+            },
+        );
+        background(&ctx, rect);
+        assert!(optical_shape(&ctx, rect, 8.0).is_none());
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("optical-gpu-ready"), true));
+        assert!(matches!(
+            optical_shape(&ctx, rect, 8.0),
+            Some(egui::Shape::Callback(_))
+        ));
+        apply(
+            &ctx,
+            &ThemePreferences {
+                optical_strength: 50,
+                ..Default::default()
+            },
+        );
+        assert!(optical_shape(&ctx, rect, 8.0).is_none());
     }
 }

@@ -66,6 +66,7 @@ impl Shelf {
         let anchor = trigger
             .map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
             .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
+        let mut optical_slot = None;
         let result = egui::Modal::new(egui::Id::new("actions"))
             .area(
                 egui::Area::new(egui::Id::new("actions")).order(egui::Order::Foreground)
@@ -75,6 +76,7 @@ impl Shelf {
             .backdrop_color(Color32::from_black_alpha(24))
             .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
+                optical_slot=Some((ui.painter().clone(),ui.painter().add(egui::Shape::Noop)));
                 ui.set_width(width);
                 ui.label(
                     RichText::new("Действия с выделением и полкой")
@@ -141,6 +143,11 @@ impl Shelf {
                     ui_style::keycap(ui, "Esc");
                 });
             });
+        if let Some((painter, index)) = optical_slot
+            && let Some(shape) = theme_ui::optical_shape(ctx, result.response.rect, 12.0)
+        {
+            painter.set(index, shape);
+        }
         #[cfg(test)]
         ctx.data_mut(|d| {
             d.insert_temp(
@@ -185,6 +192,7 @@ impl Shelf {
         let selected = self.sorting_input.selected();
         let scroll = self.sorting_input.take_scroll();
         let mut picked = None;
+        let mut optical_slot = None;
         let response = egui::Modal::new(egui::Id::new("sorting-menu"))
             .area(
                 egui::Area::new(egui::Id::new("sorting-menu"))
@@ -194,6 +202,7 @@ impl Shelf {
             )
             .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
+                optical_slot = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
                 ui.set_width((ctx.content_rect().width() - 40.0).clamp(200.0, 420.0));
                 ui.heading("Сортировка");
                 ui.weak("Клавиша — выбрать · Shift — обратный порядок · Esc — назад");
@@ -229,6 +238,11 @@ impl Shelf {
                         }
                     });
             });
+        if let Some((painter, index)) = optical_slot
+            && let Some(shape) = theme_ui::optical_shape(ctx, response.response.rect, 12.0)
+        {
+            painter.set(index, shape);
+        }
         if let Some(id) = picked {
             self.sorting_input.close();
             self.run(id, ctx);

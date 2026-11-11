@@ -17,6 +17,7 @@ pub struct ThemePreferences {
     pub custom_background: Option<String>,
     pub glass: bool,
     pub compact_header: bool,
+    pub optical_strength: u8,
 }
 impl Default for ThemePreferences {
     fn default() -> Self {
@@ -28,6 +29,7 @@ impl Default for ThemePreferences {
             custom_background: None,
             glass: false,
             compact_header: true,
+            optical_strength: 0,
         }
     }
 }

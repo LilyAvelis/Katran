@@ -14,6 +14,7 @@ mod markdown_ui;
 mod native_drag_ui;
 mod navigation_input;
 mod open_apps_ui;
+mod optical_gpu;
 mod overlay_ui;
 mod palette;
 mod pinned_ui;
@@ -903,6 +904,12 @@ impl Shelf {
     }
 }
 impl eframe::App for Shelf {
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        if let Some(gl) = gl {
+            optical_gpu::destroy(gl);
+        }
+    }
+
     fn clear_color(&self, _: &egui::Visuals) -> [f32; 4] {
         if self.glass_active {
             [0.0, 0.0, 0.0, 0.0]
@@ -1008,10 +1015,17 @@ fn main() -> eframe::Result {
         std::process::exit(code);
     }
     app_identity::initialize();
-    let root = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("katran-data"));
+    let optical_demo =
+        std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--optical-demo"));
+    let root = if optical_demo {
+        PathBuf::from("runtime/optical-demo-data")
+    } else {
+        std::env::args_os()
+            .nth(1)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("katran-data"))
+    };
+    let new_optical_demo = optical_demo && !root.join("settings.json").exists();
     let Some(instance) = single_instance::acquire(&root)
         .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?
     else {
@@ -1021,6 +1035,45 @@ fn main() -> eframe::Result {
         eprintln!("{}", e.message);
         std::process::exit(1)
     });
+    if optical_demo {
+        let mut execute = |command| {
+            api.execute(Request {
+                api_version: 1,
+                request_id: "optical-demo".into(),
+                command,
+            })
+        };
+        if new_optical_demo {
+            let mut settings = katran::settings::Settings::defaults(DEFAULT_QUOTA);
+            settings.capture_on_start = false;
+            settings.downloads_enabled = false;
+            settings.theme = katran::theme::ThemePreferences {
+                preset: katran::theme::Preset::BlueExperimental,
+                lily_background: Some(1),
+                optical_strength: 65,
+                ..Default::default()
+            };
+            execute(Command::SetSettings { settings });
+            for i in 0..6u8 {
+                let mut image = image::RgbaImage::new(64, 64);
+                for (x, y, pixel) in image.enumerate_pixels_mut() {
+                    if (x as i32 - 32).pow(2) + (y as i32 - 32).pow(2) < 225 {
+                        *pixel = image::Rgba([50 + i * 30, 180, 230, 230]);
+                    }
+                }
+                let mut bytes = std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(image)
+                    .write_to(&mut bytes, image::ImageFormat::Png)
+                    .expect("synthetic demo PNG");
+                execute(Command::IngestBytes {
+                    name: format!("Avilon-{}.png", i + 1),
+                    bytes: bytes.into_inner(),
+                    source: "optical-demo".into(),
+                });
+            }
+        }
+        execute(Command::SetCaptureEnabled { enabled: false });
+    }
     let logger = katran::diagnostics::Logger::start(&root).ok();
     if let Some(logger) = &logger {
         api.attach_logger(logger.clone());
@@ -1110,6 +1163,8 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(move |cc| {
+            cc.egui_ctx
+                .data_mut(|d| d.insert_temp(egui::Id::new("optical-gpu-ready"), cc.gl.is_some()));
             cc.egui_ctx
                 .options_mut(|options| options.zoom_with_keyboard = false);
             #[cfg(feature = "clipboard-events")]
@@ -2378,6 +2433,7 @@ mod tests {
                 custom_background: None,
                 glass: false,
                 compact_header: false,
+                optical_strength: 0,
             },
         });
         let blue = visible_landmarks(&mut app, &ctx);

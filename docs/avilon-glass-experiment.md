@@ -37,3 +37,31 @@ GPU performance claim has been established by this preview.
 Sources: [Microsoft Acrylic](https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic),
 [Composition brushes](https://learn.microsoft.com/en-us/windows/apps/develop/composition/composition-brushes),
 [egui custom rendering](https://github.com/emilk/egui/blob/main/examples/custom_3d_glow/src/main.rs).
+
+## Element GPU prototype
+
+The current experimental branch additionally has an opt-in OpenGL330 callback
+in Katran: gallery card surfaces and Actions/Sort frames sample the selected
+lily/custom background beneath their text and icons. This does not sample other
+cards, text, other windows, or the desktop. Shader/VAO resources are cached per
+GL context and explicitly destroyed through App::on_exit while GL is current.
+The callback restores touched program/VAO/texture state; missing texture or shader
+failure leaves the existing normal fill intact. GPU frame timing and live GLSL
+compilation still require native owner acceptance; headless Rust tests do not
+establish them.
+
+Blue theme exposes optical_strength0..100 through the existing SetTheme API;
+zero is the default. Invalid values fail without saving, and a valid value
+survives reopening. The in-app slider applies without an Acrylic restart.
+Acrylic and element optics are independent. A supplied background is required.
+
+`--optical-demo` opens the ordinary Katran UI with a separate
+runtime/optical-demo-data profile, six synthetic PNG cards, the first lily and
+strength65 on first run. Capture and Downloads discovery are disabled. It does
+not read or write the original profile. Use Themes → Оптика элементов · GPU and
+Comma/Ctrl+K to compare strengths and menus. Demo settings are retained between
+runs. Do not use this demo profile as the production launcher/data directory.
+
+Verification: theme API9 tests; existing113 UI/headless tests; additional callback
+emission gate checks opt-in + background + GPU-host availability and Standard
+fallback. UI-bin Clippy passed. The GPU image itself is not tested by those checks.

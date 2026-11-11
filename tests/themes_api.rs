@@ -29,6 +29,7 @@ fn theme_is_optional_persistent_and_does_not_change_behavior_preferences() {
         custom_background: None,
         glass: false,
         compact_header: false,
+        optical_strength: 0,
     };
     call(
         &mut api,
@@ -98,6 +99,7 @@ fn experimental_window_preferences_roundtrip_through_api() {
         glass: true,
         lily_background: Some(2),
         compact_header: true,
+        optical_strength: 0,
         ..Default::default()
     };
     call(
@@ -337,5 +339,45 @@ fn image_action_availability_is_metadata_only_but_execution_checks_actual_bytes(
     assert_eq!(
         call(&mut api, Command::Themes)["current"]["preset"],
         "standard"
+    );
+}
+#[test]
+fn optical_strength_is_optional_bounded_and_persistent() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["optical_strength"],
+        0
+    );
+    let theme = ThemePreferences {
+        preset: Preset::BlueExperimental,
+        optical_strength: 45,
+        ..Default::default()
+    };
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    let invalid = ThemePreferences {
+        optical_strength: 101,
+        ..theme
+    };
+    let reply = api.execute(Request {
+        api_version: 1,
+        request_id: "optical-invalid".into(),
+        command: Command::SetTheme { theme: invalid },
+    });
+    assert_eq!(reply["ok"], false);
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["optical_strength"],
+        45
+    );
+    drop(api);
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["optical_strength"],
+        45
     );
 }

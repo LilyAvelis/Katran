@@ -391,6 +391,9 @@ impl State {
            SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
+           SettingsRow::show(ui,"Оптика элементов · GPU","Преломление фона под карточками и меню. Нужен фон с лилиями или собственное изображение. 0 — выключено.",|ui|{
+            if ui.add(egui::Slider::new(&mut theme.optical_strength,0..=100).text("Сила")).changed(){theme_intent=Some(theme.clone());}
+           });
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
             for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme_intent=Some(theme.clone());}}
@@ -593,6 +596,7 @@ mod tests {
             custom_background: None,
             glass: false,
             compact_header: false,
+            optical_strength: 0,
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =

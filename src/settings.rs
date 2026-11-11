@@ -77,6 +77,9 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if self.theme.optical_strength > 100 {
+            return Err("Сила оптического стекла: от 0 до 100".into());
+        }
         if self.theme.custom_background.is_some() && self.theme.lily_background.is_some() {
             return Err("Выберите пресет или собственный фон".into());
         }
