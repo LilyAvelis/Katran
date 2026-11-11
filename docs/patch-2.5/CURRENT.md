@@ -1,5 +1,7 @@
 # Katran 2.5 — current engineering handoff
 
+Latest runnable artifact and verified product commit: [ARTIFACTS.md](ARTIFACTS.md).
+
 2026-11-11. This supersedes onboarding and intermediate status in HANDOFF.md. The local implementation is unaccepted; public release remains 2.0.0. Read TEAM.md for reusable sessions and PIPELINE.md for the agreed order.
 
 ## Checkpoints
