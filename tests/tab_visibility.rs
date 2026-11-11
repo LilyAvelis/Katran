@@ -23,7 +23,7 @@ fn old_settings_and_filtered_positions_are_compatible() {
     assert_eq!(restored.hidden_tabs, vec![Images]);
     assert_eq!(
         restored.tab_order,
-        vec![Images, Screenshots, Downloads, Text, Links, Tables]
+        vec![Images, Screenshots, Downloads, Text, Links, Tables, Pods]
     );
 }
 

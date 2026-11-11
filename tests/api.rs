@@ -3,11 +3,18 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 #[test]
-fn capture_is_explicit_and_pause_prevents_clipboard_reads() {
+fn capture_defaults_on_and_pause_prevents_clipboard_reads() {
     let root = tempdir().unwrap();
     let mut service = Service::open(root.path(), 100).unwrap();
     assert_eq!(
         call(&mut service, json!({"type":"status"}))["result"]["capture_enabled"],
+        true
+    );
+    assert_eq!(
+        call(
+            &mut service,
+            json!({"type":"set_capture_enabled","enabled":false})
+        )["result"]["capture_enabled"],
         false
     );
     assert_eq!(
