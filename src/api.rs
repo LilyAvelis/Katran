@@ -19,6 +19,11 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    PreviewPath {path: PathBuf, revision: String, max_edge: u32, #[serde(default)] image_only: bool},
+    ReadDocumentPath {path: PathBuf, revision: String},
+    StageTransfer {items: Vec<SelectionRef>, #[serde(default)] cut: bool},
+    PasteToFolder,
+    AddFolderFiles {ids: Vec<i64>},
     ChooseFolder { path: PathBuf },
     CurrentFolder,
     SearchFolders { query: String, limit: u32 },

@@ -72,18 +72,55 @@
   `TEAM.md` before implementation; Polly retains shared API/dispatcher/schema
   and catalogue edits.
 
-## Integration order
+## Initial onboarding plan
+
+Superseded for sequencing by the current checkpoints and [PIPELINE.md](PIPELINE.md).
 
 1. Settle external-object identity, transfer receipts and pin revalidation; Walter reviews original-file safety.
 2. Domain state/persistence/transfer contracts and synthetic API verification.
 3. GUI clients and preview invalidation after domain behavior is verified.
 4. Rhea serializes targeted checks and artifact builds; Kiki's scenarios guide owner-operated acceptance; Pax measures matching inputs.
 
-This is sufficient to resume work and negotiate the main contracts. Inspect the dirty tree and resolve external
-object identity, transfer receipts, pin revalidation, and Folder source/view
-generations first.
+## Implementation status — current
 
-No public push, release or permission to modify personal files inferred from onboarding.
+Autonomous local implementation is authorized. Baseline checkpoint `ecb30e5`;
+P1 domain checkpoint `1544666` includes the Folder transfer module. The full
+checkpoint and build pipeline is [PIPELINE.md](PIPELINE.md).
+
+- Domain implemented: Folder, pin/properties/tags/history/favorites, Everything
+  backend, copy materialization, staged cut with locked managed source and
+  destination, explicit import API, and negative-snapshot preview API.
+- GUI connected: Folder picker/navigation, pin/transfer actions and previews.
+  Native Windows owner acceptance is still pending.
+- Observed gates: 9 integration tests across pinned/work_folder/delete_shelf;
+  83 library tests passed and 1 ignored; snapshot2 tests passed; transfer3
+  tests passed (including managed Downloads mixed pin/same-folder); workspace
+  API2 tests passed.
+- A parallel headless UI run crashed after 3 outdated All fixtures. Fenna
+  updated fixtures and added tests. Full serial UI gate is currently running;
+  do not report it as passed. Clippy's first run found a test `cmp_owned` lint,
+  fixed by Polly; recheck is pending.
+- Cargo version is 2.5.0 and is not accepted. Build has not run. No user
+  originals, clipboard, or desktop were touched. Rhea's preview script keeps
+  snapshot/build/package separate under `runtime/preview` without changing the
+  active pointer. The Everything backend is bundled with its license.
+
+### Open product work and next steps
+
+1. Finish the current serial UI gate and clippy recheck; then make the first
+   preview build using Rhea's script and report its exact result.
+2. P2: complete original-file delete/recycle and import representations,
+   including typed source references and external clipboard paste. Screenshots
+   still have historical permanent deletion, unresolved against the 2.5
+   recycle requirement. Folder negative IDs are copy-only; Folder delete is
+   unsupported. Imported arbitrary non-images may have no visible category.
+3. P3: properties/tags GUI. P4: Raycast evidence and decision.
+
+Other current limits: properties/tags GUI is pending; return-import source
+references are not typed. Use [PIPELINE.md](PIPELINE.md) for sequencing. These
+limits are not accepted release claims; 2.5.0 remains unaccepted.
+
+No public push or release is authorized. No personal-file operations were performed.
 
 ## Walter — safety review and first integration ticket
 
@@ -95,4 +132,4 @@ All nine assigned sessions completed onboarding. No product code, tests, builds,
 - Folder has no pin feature, but may address the very same real file pinned in Downloads/Screenshots. Resolve alias protection by real file identity so Folder deletion cannot bypass the pin.
 - Per-item transfer receipts distinguish copied/moved/pinned-copy/skipped-pinned and destination-created/source-not-removed, including destination path/reason. Preserve verified copies after source-removal failure; retries must not silently duplicate them. Delete a shared owned blob only after all event references are gone.
 - Synthetic race checks: external rewrite/replace after pin; pin after preparation; source replacement before effect; same-folder/conflict/verification failure; partial receipt; shared blob and Folder alias; migration failure/restart/WAL backup and coherent restore.
-- First integration ticket: Mira and Nemi define one short PreparedTransfer/authorized-effect/per-item-receipt contract covering identity, pin barrier, aliasing and recycle failure. Polly integrates shared API/schema; Walter reviews that bounded contract and race evidence before enabling destructive adapters.
+- Original onboarding recommendation: Mira and Nemi define a short PreparedTransfer/authorized-effect/per-item-receipt contract covering identity, pin barrier, aliasing and recycle failure; Polly integrates shared API/schema and Walter reviews destructive-boundary race evidence. Current implementation status and next steps are above.

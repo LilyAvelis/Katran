@@ -4,7 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 type Key = (i64, String);
 struct Queue {
-    next: Option<(Key, egui::Context)>,
+    next: Option<(Key, Option<PathBuf>, egui::Context)>,
     closed: bool,
 }
 struct Worker {
@@ -49,7 +49,7 @@ impl TextPreview {
         std::thread::spawn(move || {
             let mut api = Service::open_read_only(&root);
             loop {
-                let (key, ctx) = {
+                let (key, path, ctx) = {
                     let (lock, wake) = &*worker;
                     let mut q = lock.lock().unwrap();
                     while q.next.is_none() && !q.closed {
@@ -64,7 +64,10 @@ impl TextPreview {
                     Ok(api) => api.execute(Request {
                         api_version: 1,
                         request_id: "text-preview".into(),
-                        command: Command::GetDocumentText { id: key.0 },
+                        command: match path {
+                            Some(path) => Command::ReadDocumentPath { path, revision: key.1.clone() },
+                            None => Command::GetDocumentText { id: key.0 },
+                        },
                     }),
                     Err(error) => serde_json::json!({"ok":false,"error":error}),
                 };
@@ -152,6 +155,10 @@ impl TextPreview {
             return;
         };
         let key = (id, revision.to_owned());
+        let path = if id < 0 {
+            let Some(path) = event["path"].as_str() else { return; };
+            Some(PathBuf::from(path))
+        } else { None };
         let is_link = event["kind"] == "link_fragment";
         self.start();
         if self.wanted.as_ref() != Some(&key) {
@@ -160,7 +167,7 @@ impl TextPreview {
             self.document = None;
             self.rendered = true;
             let (lock, wake) = &*self.worker.as_ref().unwrap().queue;
-            lock.lock().unwrap().next = Some((key, ui.ctx().clone()));
+            lock.lock().unwrap().next = Some((key, path, ui.ctx().clone()));
             wake.notify_one();
         }
         while let Ok((key, result)) = self.worker.as_ref().unwrap().rx.try_recv() {
@@ -492,7 +499,9 @@ mod tests {
         });
         assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text().contains("Первая строка"))));
         output.textures_delta.clear();
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Text });
         app.refresh();
+        assert!(app.events.iter().any(|event| event["id"] == id));
         app.call(Command::SetVisible { ids: vec![id] });
         app.call(Command::Select {
             id,
@@ -550,15 +559,14 @@ mod tests {
         let source = "# Привет 🐄\n\n- **важно** и `код`\n<script>literal</script>";
         std::fs::write(&path, source).unwrap();
         let mut app = crate::tests::test_shelf(root.path());
-        let event = app.call(Command::IngestPath {
-            path,
-            source: "test".into(),
-        });
-        let id = event["id"].as_i64().unwrap();
+        app.call(Command::ChooseFolder { path: originals.path().to_path_buf() });
         app.call(Command::SetTab {
             tab: katran::interaction::ShelfTab::All,
         });
         app.refresh();
+        let event = app.events.iter().find(|event| event["name"] == "synthetic.md").unwrap();
+        let id = event["id"].as_i64().unwrap();
+        assert!(id < 0);
         app.call(Command::SetVisible { ids: vec![id] });
         app.call(Command::Select {
             id,

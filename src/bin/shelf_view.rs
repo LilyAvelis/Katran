@@ -371,6 +371,7 @@ mod tests {
             for busy in [false, true] {
                 let root = tempfile::tempdir().unwrap();
                 let mut app = super::super::tests::test_shelf(root.path());
+                app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
                 app.call(Command::IngestBytes {
                     name: "synthetic.png".into(),
                     bytes: vec![1],

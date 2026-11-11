@@ -1,0 +1,7 @@
+Everything ES 1.1.0.38 x64, Copyright (c) 2025 voidtools, MIT license; see LICENSE.
+Binary archive: https://www.voidtools.com/ES-1.1.0.38.x64.zip
+SHA256 5E0C70CBF4F694080C34AA7C6C745E606C16FE76A4B5423B93EBF9DC34274C99
+Source archive: https://www.voidtools.com/ES-1.1.0.38.src.zip
+SHA256 2E36D1177633218821CBF1CE6430BA88E6FC5192CC81A1C254D16E72DF63A8EE
+The executable was verified against the binary archive in the local Afiocira cache.
+Everything itself must be installed and running with IPC enabled.

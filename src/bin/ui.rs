@@ -27,6 +27,7 @@ mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
 mod updates_ui;
+mod workspace_ui;
 use base64::Engine;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use katran::{Command, DEFAULT_QUOTA, Request, Service, interaction::SelectionMode};
@@ -151,6 +152,7 @@ struct Shelf {
     pending_delete_recycle: bool,
     settings_ui: settings_ui::State,
     open_apps: open_apps_ui::State,
+    workspace: workspace_ui::State,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
@@ -210,12 +212,14 @@ impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         input_log::record(&ctx, self.logger.as_ref());
+        if self.api.is_some() { self.workspace_input(&ctx); self.workspace_tick(&ctx); }
         if self.api.is_none()
             && self.job.is_some()
             && self.shortcut_editor.is_none()
             && !self.busy_text_editing
             && !self.actions
             && !self.open_apps.open
+            && !self.workspace.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -237,6 +241,7 @@ impl Shelf {
         let tab_input_allowed = self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
+            && !self.workspace.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -255,15 +260,7 @@ impl Shelf {
             self.pending_sort = Some(action);
         }
         if tab_input_allowed {
-            if ctx.input_mut(|i| {
-                let mut found = false;
-                i.events.retain(|event| {
-                    let matches = matches!(event, egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if modifiers.is_none());
-                    found |= matches;
-                    !matches
-                });
-                found
-            }) {
+            if ctx.input_mut(|i| i.events.iter().any(|event| matches!(event, egui::Event::Key {key:egui::Key::Tab,pressed:true,modifiers,..} if *modifiers == egui::Modifiers::NONE)) && i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
                 self.pending_tab_action = Some("tab_toggle".into());
                 if let Some(id) = ctx.memory(|m| m.focused()) {
                     ctx.memory_mut(|m| m.surrender_focus(id));
@@ -292,6 +289,7 @@ impl Shelf {
             && !self.busy_text_editing
             && !self.actions
             && !self.open_apps.open
+            && !self.workspace.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -367,6 +365,7 @@ impl Shelf {
                 self.shortcut_editor = None;
             }
             if self.shortcut_editor.is_none()
+                && !self.workspace.open
                 && !self.save
                 && self.state["settings_open"] != true
                 && self.pending_delete.is_empty()
@@ -388,7 +387,7 @@ impl Shelf {
             }
         }
         if self.api.is_some() {
-            if !self.open_apps.open
+            if !self.open_apps.open && !self.workspace.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
             {
                 self.actions = !self.actions;
@@ -398,6 +397,7 @@ impl Shelf {
             }
             if self.shortcut_editor.is_none()
                 && !self.open_apps.open
+            && !self.workspace.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {
@@ -448,6 +448,12 @@ impl Shelf {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
+                if self.state["pinned_only"] == true { ui.label(RichText::new("Закреплённые").size(12.0).color(Color32::from_gray(185))); }
+                if self.state["tab"] == "folder" {
+                    let text = self.state["folder_path"].as_str().unwrap_or("Выберите папку · Ctrl Shift K");
+                    ui.label(RichText::new(text).size(12.0).color(Color32::from_gray(185))).on_hover_text(text);
+                    ui.weak("Ctrl Shift K · выбрать папку   Ctrl V · вставить   Ctrl Shift C · добавить в Катран   Ctrl . · избранное");
+                }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .id(egui::Id::new("shelf-search"))
@@ -537,6 +543,14 @@ impl Shelf {
                 )
                 .on_hover_text(status);
             });
+        if self.state["tab"] == "folder" {
+            if self.state["folder_path"].is_null() { self.events.clear(); self.next_cursor = None; }
+            else if self.workspace.last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(1)) {
+                self.workspace.last_refresh = Some(Instant::now());
+                self.refresh();
+            }
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
         let visible = self.events.clone();
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
@@ -558,6 +572,7 @@ impl Shelf {
         if self.api.is_some()
             && !self.actions
             && !self.open_apps.open
+            && !self.workspace.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -632,6 +647,7 @@ impl Shelf {
         }
         self.shelf_view(root, &ctx, &visible, gallery, columns);
         if self.api.is_some() {
+            self.workspace_panel(&ctx);
             self.palette(&ctx);
             self.open_apps_panel(&ctx);
         }
@@ -706,6 +722,7 @@ impl Shelf {
             && self.native_drag.is_none()
             && !self.actions
             && !self.open_apps.open
+            && !self.workspace.open
             && !self.save
             && self.shortcut_editor.is_none()
             && self.pending_delete.is_empty()
@@ -800,6 +817,7 @@ fn main() -> eframe::Result {
         pending_delete_recycle: false,
         settings_ui: settings_ui::State::default(),
         open_apps: open_apps_ui::State::default(),
+        workspace: workspace_ui::State::default(),
         shortcut_editor: None,
         api: Some(api),
         job: None,
@@ -964,6 +982,7 @@ mod tests {
             pending_delete_recycle: false,
             settings_ui: settings_ui::State::default(),
             open_apps: open_apps_ui::State::default(),
+            workspace: workspace_ui::State::default(),
             shortcut_editor: None,
             api: Some(api),
             job: None,
@@ -1111,6 +1130,7 @@ mod tests {
         for palette in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
             let event = app.call(Command::IngestBytes {
                 name: "selected.png".into(),
                 bytes: vec![1],
@@ -1173,6 +1193,7 @@ mod tests {
     fn escape_closes_overlays_and_preview_before_clearing_selection() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
         let first = app.call(Command::IngestBytes {
             name: "first.png".into(),
             bytes: vec![1],
@@ -1365,54 +1386,127 @@ mod tests {
     fn tabs_shortcuts_and_hidden_selection_use_domain_api() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        let id = app.call(Command::IngestBytes {
-            name: "hidden.png".into(),
-            bytes: vec![1],
-            source: "test".into(),
-        })["id"]
-            .as_i64()
-            .unwrap();
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let id = app.call(Command::IngestBytes { name: "hidden.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
         app.refresh();
         app.call(Command::SetVisible { ids: vec![id] });
-        app.state = app.call(Command::Select {
-            id,
-            mode: SelectionMode::Replace,
-        });
+        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
-        frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "screenshots");
-        assert!(app.events.is_empty());
-        assert_eq!(app.selection_snapshot().unwrap()[0].id, id);
-        frame(&mut app, &ctx, egui::Key::Num3, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "downloads");
-        assert_eq!(app.selection_snapshot().unwrap()[0].id, id);
-        // A worker may own the API when copy arrives with an invisible selection.
+        // A worker may own the API when the selected item is temporarily unavailable.
         let api = app.api.take().unwrap();
         let (tx, rx) = mpsc::channel();
         app.job = Some(UiJob::UnavailableTransport(rx));
+        app.events.clear();
         app.copy_request(&ctx);
         assert_eq!(app.pending_copy_ids, Some(vec![id]));
-        tx.send((
-            api,
-            serde_json::json!({"ok":true,"result":{"captured":0}}),
-            true,
-        ))
-        .unwrap();
+        tx.send((api, serde_json::json!({"ok":true,"result":{"captured":0}}), true)).unwrap();
         app.finish_job();
-        assert!(
-            matches!(app.take_queued_copy(), Some(Command::CopySmart { items }) if items.len()==1 && items[0].id==id)
-        );
+        assert!(matches!(app.take_queued_copy(), Some(Command::CopySmart { items }) if items.len()==1 && items[0].id==id));
+        frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "screenshots");
+        assert!(app.events.is_empty());
+        assert!(app.state["selected"].as_array().unwrap().is_empty());
+        assert!(app.state["cursor"].is_null());
+        frame(&mut app, &ctx, egui::Key::Num3, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "downloads");
+        assert!(app.state["selected"].as_array().unwrap().is_empty());
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "all");
-        // Settings and palette keep Tab for local focus navigation.
+        assert_eq!(app.state["tab"], "folder");
         app.call(Command::ShowSettings);
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "all");
+        assert_eq!(app.state["tab"], "folder");
         app.call(Command::CloseSettings);
         app.actions = true;
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "all");
+        assert_eq!(app.state["tab"], "folder");
+    }
+    #[test]
+    fn copy_event_and_key_produce_one_shortcut_action() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let shortcuts: Vec<katran::shortcuts::ShortcutInfo> = serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput { events: vec![egui::Event::Copy, egui::Event::Key {
+            key: egui::Key::C, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL,
+        }], ..Default::default() };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(input, |_ui| {
+            actions.push(shortcuts_ui::take_action_with_editing(&ctx, &shortcuts, false));
+            actions.push(shortcuts_ui::take_action_with_editing(&ctx, &shortcuts, false));
+        });
+        output.textures_delta.clear();
+        assert_eq!(actions, vec![Some("copy".into()), None]);
+    }
+    #[test]
+    fn folder_modal_history_and_keyboard_do_not_leak() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::ChooseFolder { path: folder.path().into() });
+        app.state = app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        assert!(app.workspace.open);
+        frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["tab"], "images");
+        frame(&mut app, &ctx, egui::Key::H, egui::Modifiers::CTRL);
+        frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(!app.workspace.open);
+        let state = app.call(Command::Interaction);
+        assert_eq!(state["tab"], "folder");
+        assert_eq!(state["folder_path"].as_str().map(PathBuf::from), Some(folder.path().canonicalize().unwrap()));
+    }
+    #[test]
+    fn repeated_digit_switches_pinned_without_retaining_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let id = app.call(Command::IngestBytes { name: "pinned.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::TogglePins { ids: vec![id] });
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "images");
+        assert_eq!(app.state["pinned_only"], true);
+        assert!(app.state["selected"].as_array().unwrap().is_empty());
+        assert!(app.events.iter().any(|item| item["id"] == id));
+        // A second physical press follows key release; holding a key must not toggle repeatedly.
+        let mut released = ctx.run_ui(egui::RawInput { events: vec![egui::Event::Key {
+            key: egui::Key::Num1, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE,
+        }], ..Default::default() }, |ui| app.render(ui));
+        released.textures_delta.clear();
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
+        assert_eq!(app.state["pinned_only"], false);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn cut_then_tab_and_paste_moves_synthetic_file() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::ChooseFolder { path: folder.path().into() });
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let id = app.call(Command::IngestBytes { name: "synthetic.png".into(), bytes: b"synthetic bytes".to_vec(), source: "test".into() })["id"].as_i64().unwrap();
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::X, egui::Modifiers::CTRL);
+        assert!(app.message.contains("Подготовлено к перемещению"), "cut was not staged: {} state: {}", app.message, app.state);
+        assert_eq!(app.call(Command::Get { id })["id"], id);
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "folder");
+        frame(&mut app, &ctx, egui::Key::V, egui::Modifiers::CTRL);
+        let outputs: Vec<_> = std::fs::read_dir(folder.path()).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(outputs.len(), 1, "paste receipt: {}; state: {}; outputs: {:?}", app.message, app.state, outputs);
+        assert_eq!(outputs[0].file_name().unwrap(), "synthetic.png", "paste receipt: {}", app.message);
+        assert_eq!(std::fs::read(&outputs[0]).unwrap(), b"synthetic bytes");
+        assert!(app.message.contains("перемещено"));
+        assert!(app.call(Command::Get { id }).is_null());
     }
     #[test]
     fn repeated_tab_and_positional_shortcuts_follow_api_order() {
@@ -1440,7 +1534,7 @@ mod tests {
         output.textures_delta.clear();
         assert_eq!(app.state["tab"], "images");
         app.call(Command::SelectTabPosition { position: 1 });
-        for expected in ["all", "downloads", "all", "downloads"] {
+        for expected in ["folder", "downloads", "folder", "downloads"] {
             // A focusable button must never trap repeated tab toggling.
             ctx.memory_mut(|m| m.request_focus(egui::Id::new("button-focus")));
             frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
@@ -1499,6 +1593,7 @@ mod tests {
             .save(folder.join("synthetic.png"))
             .unwrap();
         let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Screenshots });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(folder);
@@ -1527,6 +1622,7 @@ mod tests {
         let original = shots.path().join("synthetic.png");
         image::RgbaImage::new(2, 2).save(&original).unwrap();
         let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Screenshots });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(shots.path().to_path_buf());
@@ -1687,6 +1783,7 @@ mod tests {
     fn keyboard_gallery_range_preview_and_actions() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
         // A stale visual selection must never start a native clipboard write.
         app.state = serde_json::json!({"selected": [999], "cursor": 999});
         app.run("copy".into(), &egui::Context::default());
@@ -1801,7 +1898,7 @@ mod tests {
         assert_eq!(app.call(Command::Interaction)["view"], "list");
         // A paused idle frame must not re-query storage every old poll deadline.
         app.call(Command::IngestBytes {
-            name: "external.bin".into(),
+            name: "external.png".into(),
             bytes: vec![42],
             source: "test".into(),
         });

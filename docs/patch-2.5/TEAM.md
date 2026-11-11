@@ -36,11 +36,19 @@ Onboarding is read-only except these source snapshots and team/handoff documents
 
 Existing uncommitted changes at entry: README.md, src/api.rs, src/bin/ui.rs, src/downloads.rs, src/interaction.rs, src/lib.rs, tests/downloads.rs, tests/interaction.rs. Preserve them and inspect before implementation.
 
-Polly owns shared API/dispatcher/schema integration. Proposed implementation ownership is subject to real module inspection; nobody currently has permission to edit shared Rust files. API behavior is verified before GUI implementation.
+Autonomous local implementation and Git checkpoints are authorized; GitHub push is not. Polly owns shared API/dispatcher/schema integration. API behavior is verified before GUI implementation. Native Windows acceptance remains owner-operated.
 
 Scope: Folder replaces All; nonrecursive live files; Everything/history/favorites; copy/move materialization with pin protection; explicit return import; category-local pinned/properties/tags; owned timestamps; Raycast investigation. Afio app integration deferred to 3.0.
 
 New 2.5 recycle-delete requirement for managed folders supersedes historical permanent ShareX behavior for this patch; make the behavior change explicit in implementation documentation. No file deletion during onboarding.
+
+## Current implementation checkpoint
+
+Baseline checkpoint `ecb30e5`; P1 domain checkpoint `1544666` includes the
+Folder transfer module. Current implementation and remaining gates are recorded
+in `HANDOFF.md`; execution order and artifact handling are in
+[`PIPELINE.md`](PIPELINE.md). No build or preview artifact has been produced;
+version 2.5.0 is not accepted. Native owner acceptance is pending.
 
 ## Resume
 

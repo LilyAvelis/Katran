@@ -36,3 +36,16 @@ fn folder_history_session_and_pinned_navigation_via_dispatcher() {
     call(&mut api,Command::ClearFolderHistory{confirmed:true});
     assert_eq!(call(&mut api,Command::FavoriteFolders{query:"".into()})["items"].as_array().unwrap().len(),1);
 }
+
+#[test]
+fn folder_preview_snapshot_via_read_only_dispatcher() {
+    let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();
+    let path=folder.path().join("sample.md");std::fs::write(&path,"# Synthetic").unwrap();
+    drop(Service::open(root.path(),100000).unwrap());
+    let mut api=Service::open_read_only(root.path()).unwrap();
+    let revision=katran::preview::revision(&path,None);
+    assert_eq!(call(&mut api,Command::ReadDocumentPath{path:path.clone(),revision:revision.clone()})["text"],"# Synthetic");
+    std::fs::write(&path,"different content").unwrap();
+    let r=api.execute(Request{api_version:1,request_id:"stale".into(),command:Command::ReadDocumentPath{path,revision}});
+    assert_eq!(r["ok"],false);assert_eq!(r["error"]["code"],"source_changed");
+}

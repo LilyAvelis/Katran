@@ -149,7 +149,11 @@ fn owned_time(event: &Event) -> Result<SystemTime> {
         .checked_add(Duration::from_millis(ms))
         .ok_or_else(|| ApiError::new("invalid_timestamp", "Arrival timestamp out of range"))
 }
-fn materialize_one(event: &Event, root: &Path, created: &mut Option<PathBuf>) -> Result<(PathBuf, String)> {
+fn materialize_one(
+    event: &Event,
+    root: &Path,
+    created: &mut Option<PathBuf>,
+) -> Result<(PathBuf, String)> {
     open_file::validate(event)?;
     let bytes = match event.kind {
         EventKind::TextFragment => {

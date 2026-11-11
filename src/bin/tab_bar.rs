@@ -12,7 +12,10 @@ pub fn show(
     let mut intent = None;
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(enabled, egui::Button::new("All").selected(active == "all"))
+            .add_enabled(
+                enabled,
+                egui::Button::new("Folder").selected(active == "folder"),
+            )
             .clicked()
         {
             intent = Some(Command::SetTab { tab: ShelfTab::All });
@@ -55,7 +58,9 @@ pub fn show(
                     index,
                 });
             } else if response.clicked() {
-                intent = Some(Command::SetTab { tab });
+                intent = Some(Command::SelectTabPosition {
+                    position: (index + 1) as u8,
+                });
             }
         }
     });
@@ -80,7 +85,7 @@ mod tests {
         };
         let mut output = ctx.run_ui(raw(), |ui| {
             ui.horizontal(|ui| {
-                let _ = ui.button("All");
+                let _ = ui.button("Folder");
                 ui.separator();
                 for (i, label) in ["Images", "Screenshots", "Downloads"].iter().enumerate() {
                     targets.push(ui.button(format!("{} {label}", i + 1)).rect.center());
@@ -101,7 +106,7 @@ mod tests {
         ];
         let mut command = None;
         let mut output = ctx.run_ui(input, |ui| {
-            command = show(ui, &order, &Value::String("all".into()), true);
+            command = show(ui, &order, &Value::String("folder".into()), true);
         });
         output.textures_delta.clear();
         let command = command.expect("drop emits dispatcher intent");

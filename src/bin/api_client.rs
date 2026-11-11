@@ -235,6 +235,9 @@ impl Shelf {
                     break;
                 }
             }
+        } else {
+            self.events.clear();
+            self.next_cursor = None;
         }
         self.capture = self.call(Command::Status)["capture_enabled"] == true;
     }
@@ -252,7 +255,7 @@ impl Shelf {
             self.next_cursor = r["next_cursor"].as_str().map(str::to_owned);
         }
     }
-    fn selected_ids(&self) -> Vec<i64> {
+    pub(super) fn selected_ids(&self) -> Vec<i64> {
         let ids: Vec<i64> = self.state["selected"]
             .as_array()
             .into_iter()
@@ -306,11 +309,15 @@ impl Shelf {
             self.message = "Выбор устарел. Обновите полку и выберите объекты заново.".into();
             return;
         };
+        if self.api.is_some() {
+            let staged = self.call(Command::StageTransfer { items: items.clone(), cut: false });
+            if staged.is_null() { return; }
+        }
         if self.job.is_some() {
             self.pending_copy = Some(items);
             self.message = "Копирование в очереди".into();
         } else if self.api.is_some() {
-            if self.start_job(Command::CopySmart { items }, false, ctx.clone()) {
+            if self.start_job(Command::CopySelectedObjects, false, ctx.clone()) {
                 self.message = "Копирование выполняется…".into();
                 self.actions = false;
             }
@@ -322,18 +329,21 @@ impl Shelf {
         }
     }
     pub(super) fn take_queued_copy(&mut self) -> Option<Command> {
-        if let Some(ids) = self.pending_copy_ids.take() {
+        let items = if let Some(ids) = self.pending_copy_ids.take() {
             match self.snapshot_ids(ids) {
-                Some(items) => return Some(Command::CopySmart { items }),
+                Some(items) => items,
                 None => {
                     self.message = "Выбор устарел; копирование не выполнено".into();
                     return None;
                 }
             }
+        } else {
+            self.pending_copy.take()?
+        };
+        if self.call(Command::StageTransfer { items: items.clone(), cut: false }).is_null() {
+            return None;
         }
-        self.pending_copy
-            .take()
-            .map(|items| Command::CopySmart { items })
+        Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
         if id == "open_with" {

@@ -18,6 +18,7 @@ pub mod folder_transfer;
 pub mod pinned;
 pub mod work_folder;
 mod workspace_service;
+mod transfer_service;
 pub mod drag_out;
 mod drag_session;
 pub mod file_types;
@@ -59,6 +60,7 @@ pub mod api;
 pub mod app_handlers;
 mod app_picker;
 pub mod preview;
+pub mod preview_snapshot;
 pub mod preview_view;
 pub mod quicklook;
 pub mod quicklook_backend;
@@ -71,6 +73,7 @@ pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    transfer_intent: Option<(Vec<SelectionRef>,bool)>,
     work_folder: work_folder::State,
     updater: updater::Updater,
     checked_update: Option<updater::Release>,
@@ -211,6 +214,7 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            transfer_intent: None,
             work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
@@ -266,6 +270,7 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            transfer_intent: None,
             work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
@@ -363,6 +368,8 @@ impl Service {
                     | Command::GetLink { .. }
                     | Command::GetTable { .. }
                     | Command::GetDocumentText { .. }
+                    | Command::PreviewPath { .. }
+                    | Command::ReadDocumentPath { .. }
             )
         {
             return Err(ApiError::new(
@@ -371,6 +378,11 @@ impl Service {
             ));
         }
         match command {
+            Command::PreviewPath {path,revision,max_edge,image_only} => preview_snapshot::preview_file(&path,&revision,max_edge,image_only,&self.root),
+            Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
+            Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
+            Command::PasteToFolder => self.paste_to_folder(),
+            Command::AddFolderFiles {ids} => self.import_from_folder(ids),
             Command::ChooseFolder { path } => self.choose_folder(path),
             Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
             Command::SearchFolders {query,limit} => everything::search_folders(&query,limit as usize).map(|v|serde_json::json!(v)).map_err(|e|ApiError::new(&e.code,e.message)),
