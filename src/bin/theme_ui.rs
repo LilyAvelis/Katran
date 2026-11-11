@@ -12,6 +12,7 @@ pub(super) enum Role {
     Muted,
     Accent,
     Selection,
+    SelectionOutline,
 }
 fn key() -> egui::Id {
     egui::Id::new("katran-theme-preferences")
@@ -35,10 +36,34 @@ fn selection_color(preference: &ThemePreferences) -> Color32 {
     };
     Color32::from_rgb(blend(0), blend(1), blend(2))
 }
+fn selection_rgb(preference: &ThemePreferences) -> Option<[u8; 3]> {
+    preference.selection.or_else(|| {
+        (preference.preset == Preset::BlueExperimental)
+            .then_some(preference.accent.unwrap_or([107, 174, 255]))
+    })
+}
+fn selection_fill(surface: Color32, rgb: [u8; 3], intensity: u8) -> Color32 {
+    let weight = (u32::from(intensity.min(100)) * 22).min(3500);
+    let blend = |base: u8, selected: u8| {
+        ((u32::from(base) * (3500 - weight) + u32::from(selected) * weight + 1750) / 3500) as u8
+    };
+    Color32::from_rgba_unmultiplied(
+        blend(surface.r(), rgb[0]),
+        blend(surface.g(), rgb[1]),
+        blend(surface.b(), rgb[2]),
+        surface.a(),
+    )
+}
 pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32 {
     let preference = current(ctx);
     if preference.preset == Preset::Standard {
-        return legacy;
+        return match (role, preference.selection) {
+            (Role::Selection, Some(rgb)) => {
+                selection_fill(legacy, rgb, preference.selection_intensity)
+            }
+            (Role::SelectionOutline, Some([r, g, b])) => Color32::from_rgb(r, g, b),
+            _ => legacy,
+        };
     }
     let glass = preference.glass
         && ctx
@@ -68,7 +93,15 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
             let [r, g, b] = preference.accent.unwrap_or([107, 174, 255]);
             Color32::from_rgb(r, g, b)
         }
-        Role::Selection => selection_color(&preference),
+        Role::Selection => selection_fill(
+            Color32::from_rgb(16, 30, 50),
+            selection_rgb(&preference).unwrap_or([107, 174, 255]),
+            preference.selection_intensity,
+        ),
+        Role::SelectionOutline => {
+            let [r, g, b] = selection_rgb(&preference).unwrap_or([107, 174, 255]);
+            Color32::from_rgb(r, g, b)
+        }
     };
     if glass && matches!(role, Role::Surface | Role::Raised | Role::Selection) {
         Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 200)
@@ -95,11 +128,11 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
         visuals.faint_bg_color = get(Role::Surface);
         visuals.override_text_color = Some(get(Role::Text));
         visuals.selection.bg_fill = get(Role::Selection);
-        visuals.selection.stroke.color = get(Role::Accent);
+        visuals.selection.stroke.color = get(Role::SelectionOutline);
         visuals.hyperlink_color = get(Role::Accent);
         let normal = get(Role::Raised);
         let hover = Color32::from_rgb(36, 65, 96);
-        let selection = get(Role::Selection);
+        let selection = selection_color(preference);
         let surface = get(Role::Surface);
         let text = get(Role::Text);
         let border = get(Role::Border);
@@ -116,6 +149,15 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
             widget.bg_stroke = egui::Stroke::new(1.0, stroke);
             widget.fg_stroke.color = text;
         }
+    }
+    if preference.preset == Preset::Standard && preference.selection.is_some() {
+        style.visuals.selection.bg_fill =
+            color(ctx, Role::Selection, style.visuals.selection.bg_fill);
+        style.visuals.selection.stroke.color = color(
+            ctx,
+            Role::SelectionOutline,
+            style.visuals.selection.stroke.color,
+        );
     }
     ctx.set_theme(egui::Theme::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
@@ -423,6 +465,68 @@ mod tests {
         assert_eq!(restored.visuals.widgets.open, standard.visuals.widgets.open);
     }
     #[test]
+    fn independent_selection_changes_fill_and_outline_without_recoloring_buttons() {
+        let ctx = egui::Context::default();
+        crate::ui_style::install(&ctx);
+        let blue = ThemePreferences {
+            preset: Preset::BlueExperimental,
+            accent: Some([230, 20, 40]),
+            ..Default::default()
+        };
+        apply(&ctx, &blue);
+        let button = ctx.style_of(egui::Theme::Dark).visuals.widgets.active;
+        let changed = ThemePreferences {
+            selection: Some([20, 230, 70]),
+            selection_intensity: 80,
+            ..blue.clone()
+        };
+        apply(&ctx, &changed);
+        assert_eq!(
+            color(&ctx, Role::Accent, Color32::BLACK),
+            Color32::from_rgb(230, 20, 40)
+        );
+        assert_eq!(
+            color(&ctx, Role::SelectionOutline, Color32::BLACK),
+            Color32::from_rgb(20, 230, 70)
+        );
+        let fill = color(&ctx, Role::Selection, Color32::BLACK);
+        assert!(fill.g() > fill.r());
+        assert_eq!(
+            ctx.style_of(egui::Theme::Dark).visuals.widgets.active,
+            button
+        );
+        apply(
+            &ctx,
+            &ThemePreferences {
+                selection_intensity: 0,
+                ..changed
+            },
+        );
+        assert_eq!(
+            color(&ctx, Role::Selection, Color32::BLACK),
+            color(&ctx, Role::Surface, Color32::BLACK)
+        );
+        assert_eq!(
+            color(&ctx, Role::SelectionOutline, Color32::BLACK),
+            Color32::from_rgb(20, 230, 70)
+        );
+        let legacy = Color32::from_gray(74);
+        apply(&ctx, &ThemePreferences::default());
+        assert_eq!(color(&ctx, Role::Selection, legacy), legacy);
+        apply(
+            &ctx,
+            &ThemePreferences {
+                selection: Some([20, 230, 70]),
+                ..Default::default()
+            },
+        );
+        assert_ne!(color(&ctx, Role::Selection, legacy), legacy);
+        assert_eq!(
+            color(&ctx, Role::SelectionOutline, legacy),
+            Color32::from_rgb(20, 230, 70)
+        );
+    }
+    #[test]
     fn standard_is_exact_and_roundtrip_restores_visuals() {
         let ctx = egui::Context::default();
         crate::ui_style::install(&ctx);
@@ -437,6 +541,7 @@ mod tests {
             Role::Muted,
             Role::Accent,
             Role::Selection,
+            Role::SelectionOutline,
         ] {
             assert_eq!(color(&ctx, role, legacy), legacy);
         }
@@ -486,6 +591,14 @@ pub(super) fn optical_shape(
     rect: egui::Rect,
     radius: f32,
 ) -> Option<egui::Shape> {
+    optical_shape_for(ctx, rect, radius, false)
+}
+fn optical_shape_for(
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    radius: f32,
+    selected: bool,
+) -> Option<egui::Shape> {
     let theme = current(ctx);
     if theme.preset != Preset::BlueExperimental
         || theme.optical_strength == 0
@@ -495,9 +608,9 @@ pub(super) fn optical_shape(
     {
         return None;
     }
-    let texture = if let Some(id) = theme.custom_background {
+    let texture = if let Some(id) = &theme.custom_background {
         ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(custom_key()))
-            .filter(|(cached, _)| cached == &id)
+            .filter(|(cached, _)| cached == id)
             .map(|(_, t)| t)
     } else {
         theme.lily_background.and_then(|i| {
@@ -512,17 +625,31 @@ pub(super) fn optical_shape(
         cover_uv(background.size(), texture.size_vec2()),
         radius,
         f32::from(theme.optical_strength) / 100.0,
-        [
-            theme.optical_refraction,
-            theme.optical_blur,
-            theme.optical_highlight,
-            theme.optical_chromatic,
-        ]
-        .map(|n| f32::from(n) / 100.0),
+        crate::optical_gpu::Material {
+            adjustments: [
+                theme.optical_refraction,
+                theme.optical_blur,
+                theme.optical_highlight,
+                theme.optical_chromatic,
+            ]
+            .map(|n| f32::from(n) / 100.0),
+            selection_tint: if selected {
+                selection_rgb(&theme).map(|[r, g, b]| {
+                    [
+                        f32::from(r) / 255.0,
+                        f32::from(g) / 255.0,
+                        f32::from(b) / 255.0,
+                        f32::from(theme.selection_intensity.min(100)) / 100.0,
+                    ]
+                })
+            } else {
+                None
+            },
+        },
     ))
 }
-pub(super) fn paint_optical(ui: &egui::Ui, rect: egui::Rect, radius: f32) {
-    if let Some(shape) = optical_shape(ui.ctx(), rect, radius) {
+pub(super) fn paint_selected_optical(ui: &egui::Ui, rect: egui::Rect, radius: f32, selected: bool) {
+    if let Some(shape) = optical_shape_for(ui.ctx(), rect, radius, selected) {
         ui.painter().add(shape);
     }
 }

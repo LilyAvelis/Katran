@@ -3,6 +3,50 @@ use katran::{
     theme::{Preset, ThemePreferences},
 };
 use serde_json::Value;
+#[test]
+fn selection_color_is_independent_persistent_and_validated() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let old: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert_eq!(old.selection, None);
+    assert_eq!(old.selection_intensity, 35);
+    let theme = ThemePreferences {
+        preset: Preset::BlueExperimental,
+        accent: Some([240, 50, 70]),
+        selection: Some([40, 230, 100]),
+        selection_intensity: 70,
+        ..Default::default()
+    };
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    drop(api);
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"],
+        serde_json::to_value(&theme).unwrap()
+    );
+    let mut invalid = theme.clone();
+    invalid.selection_intensity = 101;
+    let response = api.execute(Request {
+        api_version: 1,
+        request_id: "invalid-selection".into(),
+        command: Command::SetTheme { theme: invalid },
+    });
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "invalid_settings");
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"],
+        serde_json::to_value(theme).unwrap()
+    );
+    let mut reset = old;
+    reset.preset = Preset::BlueExperimental;
+    call(&mut api, Command::SetTheme { theme: reset });
+    assert!(call(&mut api, Command::Themes)["current"]["selection"].is_null());
+}
 fn call(api: &mut Service, c: Command) -> Value {
     let r = api.execute(Request {
         api_version: 1,

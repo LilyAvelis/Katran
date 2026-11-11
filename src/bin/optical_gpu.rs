@@ -27,6 +27,12 @@ pub(super) fn destroy(gl: &glow::Context) {
     });
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Material {
+    pub adjustments: [f32; 4],
+    pub selection_tint: Option<[f32; 4]>,
+}
+
 /// A callback shape that can be inserted below text with `Painter::set`.
 /// The supplied texture and mapping must represent an application-owned background;
 /// this does not capture or read the desktop or framebuffer.
@@ -37,8 +43,12 @@ pub(super) fn shape(
     background_uv: egui::Rect,
     radius: f32,
     strength: f32,
-    adjustments: [f32; 4],
+    material: Material,
 ) -> egui::Shape {
+    let Material {
+        adjustments,
+        selection_tint,
+    } = material;
     if !rect.is_finite()
         || !background_rect.is_finite()
         || !background_uv.is_finite()
@@ -54,6 +64,13 @@ pub(super) fn shape(
     if adjustments
         .iter()
         .any(|x| !x.is_finite() || !(0.0..=2.0).contains(x))
+    {
+        return egui::Shape::Noop;
+    }
+    let selection_tint = selection_tint.unwrap_or([0.0; 4]);
+    if selection_tint
+        .iter()
+        .any(|x| !x.is_finite() || !(0.0..=1.0).contains(x))
     {
         return egui::Shape::Noop;
     }
@@ -132,6 +149,13 @@ pub(super) fn shape(
                     adjustments[2],
                     adjustments[3],
                 );
+                gl.uniform_4_f32(
+                    uniform("selection_tint").as_ref(),
+                    selection_tint[0],
+                    selection_tint[1],
+                    selection_tint[2],
+                    selection_tint[3],
+                );
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 gl.bind_texture(
                     glow::TEXTURE_2D,
@@ -195,6 +219,7 @@ uniform sampler2D image;
 uniform vec4 viewport, lens, background, uv_rect;
 uniform float radius, strength;
 uniform vec4 optics;
+uniform vec4 selection_tint;
 out vec4 color;
 vec2 uv_at(vec2 p) {
     vec2 uv = uv_rect.xy + ((p-background.xy)/background.zw)*(uv_rect.zw-uv_rect.xy);
@@ -226,5 +251,43 @@ void main() {
     c.b = texture(image,uv_at(sample_p+normal*chroma)).b;
     float shine = strength*0.18*optics.z*pow(edge,4.0)*max(dot(normal,normalize(vec2(-1.0,-1.0))),0.0);
     c.rgb = min(mix(c.rgb,vec3(c.a),shine),vec3(c.a));
+    float selected_weight = selection_tint.a * (0.30 + 0.20 * edge * edge);
+    c.rgb = min(mix(c.rgb, selection_tint.rgb * c.a, selected_weight), vec3(c.a));
     color = c;
 }"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn selection_tint_is_optional_and_rejects_invalid_channels() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(120.0, 80.0));
+        let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+        let render = |tint| {
+            shape(
+                rect,
+                egui::TextureId::User(1),
+                rect,
+                uv,
+                8.0,
+                0.5,
+                Material {
+                    adjustments: [1.0; 4],
+                    selection_tint: tint,
+                },
+            )
+        };
+        assert!(matches!(render(None), egui::Shape::Callback(_)));
+        assert!(matches!(
+            render(Some([0.1, 0.8, 0.2, 0.5])),
+            egui::Shape::Callback(_)
+        ));
+        for invalid in [
+            [f32::NAN, 0.0, 0.0, 0.5],
+            [0.0, 0.0, 0.0, 1.1],
+            [-0.1, 0.0, 0.0, 0.0],
+        ] {
+            assert!(matches!(render(Some(invalid)), egui::Shape::Noop));
+        }
+    }
+}

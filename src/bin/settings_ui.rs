@@ -75,6 +75,98 @@ fn apply_global_hotkey(
         false
     }
 }
+fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
+    let mut changed = false;
+    SettingsRow::show(
+        ui,
+        "Цвет выделения",
+        "Отдельный цвет выбранных карточек. По умолчанию — цвет темы.",
+        |ui| {
+            let fallback = if theme.preset == katran::theme::Preset::BlueExperimental {
+                theme.accent.unwrap_or([107, 174, 255])
+            } else {
+                let c = ui.visuals().selection.stroke.color;
+                [c.r(), c.g(), c.b()]
+            };
+            let mut color = theme.selection.unwrap_or(fallback);
+            ui.horizontal_wrapped(|ui| {
+                if ui.color_edit_button_srgb(&mut color).changed() {
+                    theme.selection = Some(color);
+                    changed = true;
+                }
+                if ui
+                    .button("Цвет темы")
+                    .on_hover_text("Сбросить собственный цвет выделения")
+                    .clicked()
+                {
+                    theme.selection = None;
+                    changed = true;
+                }
+            });
+        },
+    );
+    SettingsRow::show(
+        ui,
+        "Интенсивность выделения",
+        "Оттенок заливки и света в оптике. При 0 остаётся контур.",
+        |ui| {
+            let available = ui.available_width();
+            ui.spacing_mut().slider_width = (available - 64.0).clamp(80.0, 180.0);
+            changed |= ui
+                .add(egui::Slider::new(&mut theme.selection_intensity, 0..=100).suffix(" %"))
+                .changed();
+        },
+    );
+    changed
+}
+
+#[cfg(test)]
+mod selection_layout_tests {
+    use super::*;
+    #[test]
+    fn selection_controls_stay_inside_narrow_and_scaled_settings() {
+        for width in [280.0, 580.0, 900.0] {
+            for scale in [1.0, 1.5, 2.0] {
+                let ctx = egui::Context::default();
+                ctx.set_pixels_per_point(scale);
+                let mut theme = katran::theme::ThemePreferences::default();
+                let mut area = egui::Rect::NOTHING;
+                let mut boundary = egui::Rect::NOTHING;
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1100.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.scope_builder(
+                            egui::UiBuilder::new()
+                                .max_rect(egui::Rect::from_min_size(
+                                    ui.cursor().min,
+                                    egui::vec2(width, 700.0),
+                                ))
+                                .layout(egui::Layout::top_down(egui::Align::Min)),
+                            |ui| {
+                                ui.set_width(width);
+                                ui.set_max_width(width);
+                                boundary = ui.max_rect();
+                                selection_settings(ui, &mut theme);
+                                area = ui.min_rect();
+                            },
+                        );
+                    },
+                );
+                out.textures_delta.clear();
+                assert!(
+                    area.right() <= boundary.right() + 1.0,
+                    "width={width}, scale={scale}: {area:?} exceeds {boundary:?}"
+                );
+            }
+        }
+    }
+}
 fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
     let mut changed = false;
     let mut enabled = theme.optical_strength > 0;
@@ -526,6 +618,7 @@ impl State {
           SettingsRow::show(ui,"Синяя","Экспериментальная тема с голубыми акцентами.",|ui|{
            if ui.selectable_value(&mut theme.preset,katran::theme::Preset::BlueExperimental,"Выбрать").changed(){theme_intent=Some(theme.clone());}
           });
+          if selection_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
           if theme.preset==katran::theme::Preset::BlueExperimental {
            SettingsRow::show(ui,"Цвет акцента","Выберите свой цвет или верните исходный.",|ui|{
             let mut accent=theme.accent.unwrap_or([75,139,210]);

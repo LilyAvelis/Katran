@@ -12,6 +12,8 @@ pub enum Preset {
 pub struct ThemePreferences {
     pub preset: Preset,
     pub accent: Option<[u8; 3]>,
+    pub selection: Option<[u8; 3]>,
+    pub selection_intensity: u8,
     pub decoration: bool,
     pub lily_background: Option<u8>,
     pub custom_background: Option<String>,
@@ -28,6 +30,8 @@ impl Default for ThemePreferences {
         Self {
             preset: Preset::Standard,
             accent: None,
+            selection: None,
+            selection_intensity: 35,
             decoration: true,
             lily_background: None,
             custom_background: None,

@@ -6,6 +6,26 @@ enum PreviewDrag {
     Export,
 }
 
+fn card_outline(ctx: &egui::Context, selected: bool, cursor: bool) -> Option<egui::Stroke> {
+    if selected {
+        Some(egui::Stroke::new(
+            if cursor { 3.0 } else { 2.0 },
+            theme_ui::color(
+                ctx,
+                theme_ui::Role::SelectionOutline,
+                Color32::from_gray(180),
+            ),
+        ))
+    } else if cursor {
+        Some(egui::Stroke::new(
+            1.5,
+            theme_ui::color(ctx, theme_ui::Role::Accent, Color32::from_gray(180)),
+        ))
+    } else {
+        None
+    }
+}
+
 fn preview_drag(factor: f64) -> PreviewDrag {
     if factor > 1.0 {
         PreviewDrag::Pan
@@ -387,19 +407,12 @@ impl Shelf {
                                             Color32::from_gray(if selected { 74 } else { 46 }),
                                         ),
                                     );
-                                    theme_ui::paint_optical(ui, rect, 8.0);
-                                    if cursor {
+                                    theme_ui::paint_selected_optical(ui, rect, 8.0, selected);
+                                    if let Some(stroke) = card_outline(ctx, selected, cursor) {
                                         ui.painter().rect_stroke(
                                             rect,
                                             8.0,
-                                            egui::Stroke::new(
-                                                1.5,
-                                                theme_ui::color(
-                                                    ctx,
-                                                    theme_ui::Role::Accent,
-                                                    Color32::from_gray(180),
-                                                ),
-                                            ),
+                                            stroke,
                                             egui::StrokeKind::Inside,
                                         );
                                     }
@@ -752,6 +765,29 @@ mod tests {
         assert!(!labelled, "tile must not paint title or origin");
         assert_eq!(tile.width(), tile.height());
         assert!(tile.width() <= 96.0);
+    }
+    #[test]
+    fn selected_cards_have_independent_outline_even_without_cursor() {
+        let ctx = egui::Context::default();
+        theme_ui::apply(
+            &ctx,
+            &katran::theme::ThemePreferences {
+                preset: katran::theme::Preset::BlueExperimental,
+                accent: Some([220, 30, 30]),
+                selection: Some([20, 210, 70]),
+                selection_intensity: 0,
+                ..Default::default()
+            },
+        );
+        for cursor in [false, true] {
+            let stroke = card_outline(&ctx, true, cursor).unwrap();
+            assert_eq!(stroke.width, if cursor { 3.0 } else { 2.0 });
+            assert_eq!(stroke.color, Color32::from_rgb(20, 210, 70));
+        }
+        let cursor = card_outline(&ctx, false, true).unwrap();
+        assert_eq!(cursor.width, 1.5);
+        assert_eq!(cursor.color, Color32::from_rgb(220, 30, 30));
+        assert!(card_outline(&ctx, false, false).is_none());
     }
     #[test]
     fn pods_preview_loads_full_description_through_dispatcher() {

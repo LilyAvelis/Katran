@@ -48,3 +48,25 @@ Themes → Собственные фоны provides a native Windows image picke
 Custom selection and glass work together using the same cover cropping/translucent paint as lilies. Custom texture cache retains only the active custom image; catalogue is loaded once per settings session/import, not read/hashed every UI frame. An import/selection applies immediately, so no restart prompt is needed. The earlier glass confirmation/restart flow remains.
 
 Validation: managed-background module synthetic cases cover invalid/oversized input, dedup, moved source, ID traversal and tamper; full UI run106 passed with the new Ctrl+Comma case corrected to read the API envelope and passed in its focused rerun. Five Themes API cases passed, including import/select/reopen and preserved presets; shared Text/Table surface headless gate passed. All-target clippy passed. Native file picker, borderless settings feel and custom art appearance await owner acceptance. No release/push, no native desktop automation or personal file imports performed.
+
+## Independent selection color
+
+`ThemePreferences.selection` is an optional RGB color independent of `accent`.
+None follows the theme's existing selection/accent. `selection_intensity` is
+0–100 (default35) and controls the interior tint; zero keeps the visible outline.
+Both are persisted and validated through SetTheme/SetSettings. The Themes page
+applies these controls immediately and offers a reset to the theme color.
+
+Chosen cards use the separate selection outline in gallery, stream and Pods.
+With optics enabled, only selected card surfaces mix that RGB into their
+refracted application-owned background and edge light. Unselected surfaces and
+the Actions/Sort optical treatment remain unchanged. Thumbnails, emoji and text
+are painted above the optical surface. Without optics the same setting controls
+the ordinary selection fill. Standard theme with no custom color retains its
+legacy fallback. An independent border preserves the selection cue regardless
+of interior intensity; custom colors do not change the main accent or links.
+
+API tests cover migration, persistence, independent accent/selection values and
+rejection above100 without losing saved settings. Headless tests check semantic
+colors, selected-only optical parameters and narrow settings layouts. GPU
+appearance remains subject to the owner's manual Windows check.

@@ -82,6 +82,9 @@ impl Settings {
         if !crate::emoji_fonts::valid_id(&self.emoji_font) {
             return Err("Неизвестный шрифт эмодзи".into());
         }
+        if self.theme.selection_intensity > 100 {
+            return Err("Интенсивность выделения: от 0 до 100".into());
+        }
         if self.theme.optical_strength > 100 {
             return Err("Сила оптического стекла: от 0 до 100".into());
         }
