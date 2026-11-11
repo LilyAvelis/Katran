@@ -43,7 +43,7 @@ fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
     );
     assert_eq!(tabs["visible_tabs"], json!(["screenshots", "downloads"]));
     assert_eq!(tabs["tabs"][1]["position"], Value::Null);
-    assert_eq!(call(&mut api, Command::Interaction)["tab"], "all");
+    assert_eq!(call(&mut api, Command::Interaction)["tab"], "folder");
     assert_eq!(call(&mut api, Command::ToggleTab)["tab"], "screenshots");
     assert_eq!(
         call(&mut api, Command::SelectTabPosition { position: 2 })["tab"],
@@ -90,7 +90,7 @@ fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
         call(&mut api, Command::Tabs)["visible_tabs"],
         json!(["downloads", "screenshots"])
     );
-    assert_eq!(call(&mut api, Command::Interaction)["tab"], "all");
+    assert_eq!(call(&mut api, Command::Interaction)["tab"], "folder");
     call(
         &mut api,
         Command::SetTabEnabled {
@@ -105,7 +105,7 @@ fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
             enabled: false,
         },
     );
-    assert_eq!(call(&mut api, Command::ToggleTab)["tab"], "all");
+    assert_eq!(call(&mut api, Command::ToggleTab)["tab"], "folder");
     call(
         &mut api,
         Command::ToggleTabEnabled {
@@ -145,8 +145,14 @@ fn image_switch_blocks_api_ingestion_and_hides_history_without_deleting_it() {
             enabled: false,
         },
     );
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
-    let page = call(
+    let folder = tempfile::tempdir().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    let empty = call(
         &mut api,
         Command::BrowseShelf {
             query: "".into(),
@@ -154,20 +160,25 @@ fn image_switch_blocks_api_ingestion_and_hides_history_without_deleting_it() {
             after_id: None,
         },
     );
-    assert_eq!(page["events"][0]["id"], file["id"]);
-    assert!(
-        call(
-            &mut api,
-            Command::BrowseShelf {
-                query: "".into(),
-                limit: 1,
-                after_id: file["id"].as_i64()
-            }
-        )["events"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+    assert!(empty["events"].as_array().unwrap().is_empty());
+    let page = call(
+        &mut api,
+        Command::SearchPage {
+            query: "".into(),
+            limit: 1,
+            after_id: None,
+        },
     );
+    assert_eq!(page["events"][0]["id"], file["id"]);
+    let next = call(
+        &mut api,
+        Command::SearchPage {
+            query: "".into(),
+            limit: 1,
+            after_id: file["id"].as_i64(),
+        },
+    );
+    assert_eq!(next["events"][0]["id"], image["id"]);
     assert_eq!(
         call(
             &mut api,
@@ -204,20 +215,22 @@ fn image_switch_blocks_api_ingestion_and_hides_history_without_deleting_it() {
             enabled: true,
         },
     );
-    assert_eq!(
-        call(
-            &mut api,
-            Command::BrowseShelf {
-                query: "".into(),
-                limit: 10,
-                after_id: None
-            }
-        )["events"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
     );
+    let page = call(
+        &mut api,
+        Command::BrowseShelf {
+            query: "".into(),
+            limit: 10,
+            after_id: None,
+        },
+    );
+    assert_eq!(page["events"].as_array().unwrap().len(), 1);
+    assert_eq!(page["events"][0]["id"], image["id"]);
 }
 
 #[test]

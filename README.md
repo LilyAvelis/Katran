@@ -1,5 +1,12 @@
 # Katran
 
+> **Local Katran 2.5 preview is under development.** The accepted public
+> release remains Katran 2.0.0; 2.5 is not accepted or published. Its current
+> branch uses Folder in place of All and recycles managed originals, including
+> ShareX screenshots. See [Folder](docs/work-folder.md), [Pinned](docs/pinned.md),
+> and the [2.5 preview notes](docs/releases/2.5.0-preview.md). Build details:
+> [preview build procedure](docs/patch-2.5/BUILD.md).
+
 Clipboard events are now the default after the owner's successful browser and
 filesystem checks. The accepted `experiment/clipboard-events` branch is merged
 into `main`. [Capture contract and verification](docs/clipboard-events-experiment.md).
@@ -55,11 +62,13 @@ earlier source setup. Current visibility and file-opening API behavior is in
 [tab visibility and opening](docs/tab-visibility-and-opening.md). The 1.5 release documents remain historical snapshots; current 2.0 behavior is
 documented with each feature.
 
-Current source contract: Images is the clipboard/manual image shelf; Screenshots
+Accepted 2.0 contract: Images is the clipboard/manual image shelf; Screenshots
 and Downloads are live views of originals. Downloads uses the Windows Known
-Folder by default; Settings can disable it or override the root.
-Delete in Downloads uses Windows recycling; ShareX originals use
-permanent deletion. Single deletion is immediate; groups confirm with Enter.
+Folder by default; Settings can disable it or override the root. In the local
+2.5 preview, All is replaced by Folder and managed originals in Downloads,
+Screenshots, and Folder use Windows recycling. Single deletion is immediate;
+groups confirm with Enter. This preview behavior is not part of the accepted
+public 2.0 release.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 

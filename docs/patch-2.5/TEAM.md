@@ -44,11 +44,10 @@ New 2.5 recycle-delete requirement for managed folders supersedes historical per
 
 ## Current implementation checkpoint
 
-Baseline checkpoint `ecb30e5`; P1 domain checkpoint `1544666` includes the
-Folder transfer module. Current implementation and remaining gates are recorded
-in `HANDOFF.md`; execution order and artifact handling are in
-[`PIPELINE.md`](PIPELINE.md). No build or preview artifact has been produced;
-version 2.5.0 is not accepted. Native owner acceptance is pending.
+Baseline checkpoint `ecb30e5`; P1 checkpoint `1544666`; P1 preview checkpoint `ea92a3e`; P2/P3 checkpoint `fff5309`.
+Implementation and regression reconciliation are complete for the documented scope. Early P1 remains immutable for comparison; the final preview is packaged separately. Read [CURRENT.md](CURRENT.md) before the historical handoff.
+Version 2.5.0 is not accepted. See `HANDOFF.md` for gates and
+[`PIPELINE.md`](PIPELINE.md) for artifact handling.
 
 ## Resume
 

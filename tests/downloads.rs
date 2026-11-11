@@ -109,6 +109,7 @@ fn recycling_checks_revision_and_containment_before_injected_boundary() {
 
 #[cfg(windows)]
 #[test]
+#[ignore = "Native Shell smoke: run explicitly outside sandbox on disposable data"]
 fn native_windows_recycles_canonicalized_download_through_api() {
     let shelf = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();

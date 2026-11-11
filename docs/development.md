@@ -6,6 +6,9 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 
 | Responsibility | Current owner files |
 | --- | --- |
+| 2.5 Folder session, transfer, clipboard paste, recycle and explicit import | `src/work_folder.rs`, `src/workspace_service.rs`, `src/transfer_service.rs`, `src/paste_service.rs`, `src/clipboard_files.rs`, `src/folder_delete.rs`, `src/safe_recycle.rs`, `src/folder_import.rs` |
+| 2.5 Pinned metadata, tags and saved application handlers | `src/pinned.rs`, `src/pinned_open.rs`, `src/bin/pinned_ui.rs` |
+| 2.5 Everything folder search and negative-ID previews | `src/everything.rs`, `src/preview_snapshot.rs`, `src/bin/workspace_ui.rs`, `assets/everything/` |
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
 | Text fragment ingest/read/merge/copy and shared-blob metadata | `src/text_fragments.rs`, `src/text_service.rs`, `src/catalogue_schema.rs`, `src/catalogue_query.rs`, `tests/text_fragments_api.rs`, `tests/text_flow.rs`, `docs/text-fragments.md` |

@@ -1,0 +1,32 @@
+# Controlled recycle for managed files
+
+2026-11-11. Proposed P2 implementation contract, not implemented or verified. P1 ea92a3e remains frozen. Owner authorized technical implementation choices; no permanent-delete fallback.
+
+## Decision and boundary
+
+Use handle-bound same-volume rename into an application-controlled staging directory, followed by Shell recycling of the staged path. This closes accidental replacement of the original pathname between verification and deletion: Shell never receives that original pathname. It does not provide an atomic transaction with Explorer, SQLite, or another process running as the same Windows user. A same-user process able to tamper with Katran's private directory/journal is outside this bounded protection. Do not claim absolute identity guarantees across the final Shell pathname call.
+
+No evidence establishes that creating an IShellItem from a pathname binds subsequent deletion to an immutable file ID. Do not substitute that assumption for staging. Unsupported filesystem/volume, unsafe staging permissions, or inability to rename by verified handle means fail closed for that item; other items continue.
+
+## Minimal operation
+
+1. Resolve each selection, including negative Folder IDs, into a private authoritative descriptor: canonical root, source/view generation, source path, content revision, Windows volume/file ID. Folder entries must be immediate regular-file children; reject directories, reparse points and escapes. Deduplicate actual files. Check pinned aliases using file identity plus existing conservative path protection. Folder itself cannot be deleted.
+2. Open the original with read/delete access, deny write/replacement sharing, verify final handle path, file identity and hash. Retain this exact handle through authorization and rename. Recheck current generation and pin under the existing actor/job barrier. No pathname-based fs::rename fallback.
+3. Choose a random operation ID and unique private same-volume staging directory outside browsable source content where possible. Use a fixed application-owned directory with a restrictive current-user/System ACL; validate directory identity and reject reparse points. If a safe same-volume location cannot be established, fail closed rather than use another volume or an untrusted temp directory. Do not recursively clean any staging directory.
+4. Durably journal a prepared row before the effect: operation ID, original/staging paths, volume/file ID, hash and source event/revision. Journal persistence must be committed with durable SQLite settings for this boundary. Rename through SetFileInformationByHandle with replacement disabled into the validated staging directory; destination must be unique. Keep handle open and confirm final path/identity, then durably mark staged. Crash between rename and staged update is recovered by checking both recorded paths and identities, not by trusting the phase alone.
+5. Release the handle only when ready to invoke Trash on the staged path. Recheck staged identity/hash immediately before the adapter call. Request recycle-only behavior with explicit error on unavailable recycling; never accept a silent permanent-delete fallback. Treat Shell cancellation/aborted operations as failure. Persist successful receipt, then remove only the completed journal row. Retain enough completion information for a retried API request to return its prior outcome.
+6. On failure, reopen and verify staged identity. Attempt handle-bound no-replace restoration only when original name is free. If occupied, do not overwrite it: preserve staged file and journal, return recovery path and original path. If staged identity changed or outcome is ambiguous, report recovery_required and do not manipulate either candidate. Source metadata is removed only after confirmed recycle; staged/recovery objects must not be presented as an ordinary missing-original deletion success.
+
+Startup scans only its journal and exact recorded paths. Classify original-present/staged-present/missing/identity-conflict, expose pending recovery to the API/UI, and offer restoration. No automatic retry of destructive recycle and no silent cleanup. A prepared row with original identity present and no staged object is safe to retire as not performed; ambiguous rows remain visible. Database backup restoration alone cannot undo staging/recycle.
+
+## Adapter and receipts
+
+Keep the injected Trash boundary: orchestration performs verified handle staging; Trash receives only a private staged descriptor, never the user's original path. Native adapter owns recycle-only flags and completion checks. Fake adapter records requests and returns success/failure/cancellation without touching real Shell. Never route fake/unsupported results into a native fallback. Tests use synthetic files and a fake adapter that can simulate consumption of staged synthetic files.
+
+Per item return original path, event/Folder ID, operation ID, status (skipped_pinned, recycled, failed_source_retained, restored, recovery_required), error and recovery path when present. Distinguish source moved into staging from source actually recycled. Mixed batches are not atomic. Multiple distinct selections retain the existing confirmation rule; pinned items remain untouched.
+
+## Minimum implementation handoff to Mira
+
+Implement one staging/orchestration module with injected Trash and durable journal; Polly integrates shared API/schema and negative-ID resolution. Reuse existing LockedOriginal but add handle-bound no-replace rename and file-ID access. Start with safe same-volume local NTFS support and explicit per-item unsupported errors elsewhere. Keep own cached-object shelf cleanup separate from managed-original recycling. Do not rebuild P1 for this design document.
+
+Required synthetic checks: replacement/write attempts while original handle held; original-path replacement after staging preserved; pinned Folder alias skipped; duplicate aliases; fake recycle failure restores; occupied original preserves recovery path; crashes before/after rename and before/after recycle; changed staged identity fails closed; cancellation and unavailable recycle preserve file; mixed partial batch and repeat operation ID receipts. One owner-operated Windows smoke on disposable files validates real recycle/restore behavior after API tests. Review the handle rename and native recycle flags before enabling the adapter.

@@ -69,3 +69,13 @@ Single-file deletion is immediate; multiple distinct IDs require confirmation. R
 item failure. Existing `DeleteEvents` remains shelf-only. Images and other
 external references retain the original non-deletion contract. Never delete
 personal files as part of tests or reconciliation.
+
+## Katran 2.5 local implementation · 2026-11-11
+
+Work on `codex/katran-2.5` uses local Git checkpoints; no GitHub push is authorized.
+Folder replaces All and remains session-only. Pinned guards every destructive
+domain path, including Folder aliases. Managed Folder/Downloads/Screenshots
+deletions use recoverable handle-bound staging and recycle-only Windows calls;
+there is no permanent fallback. Recovery journals are excluded from discovery.
+Check `docs/patch-2.5/TEAM.md` and `HANDOFF.md` before assigning followup work.
+The accepted public version remains 2.0; a local 2.5 preview is not owner acceptance.

@@ -36,7 +36,7 @@ pub(crate) fn discover(
     provider: &dyn app_handlers::Provider,
 ) -> Result<Vec<AppHandler>> {
     open_file::validate(event)?;
-    let Some(extension) = app_handlers::extension(&event.name) else {
+    let Some(extension) = event_extension(event) else {
         return Ok(Vec::new());
     };
     let mut seen = HashSet::new();
@@ -66,6 +66,10 @@ pub(crate) fn discover(
         .collect();
     apps.sort_by_key(|app| (!app.recommended, app.name.to_lowercase()));
     Ok(apps)
+}
+
+pub(crate) fn event_extension(event:&Event)->Option<String> {
+    if event.kind==crate::EventKind::LinkFragment {Some(".html".into())}else{app_handlers::extension(&event.name)}
 }
 
 pub(crate) struct AppLauncher {
@@ -176,7 +180,7 @@ impl Service {
         AppLauncher {
             provider: Arc::clone(&self.app_provider),
             fallback: Arc::clone(&self.file_launcher),
-            extension: app_handlers::extension(&event.name).unwrap_or_default(),
+            extension: event_extension(event).unwrap_or_default(),
             app_id,
             cancellation,
         }

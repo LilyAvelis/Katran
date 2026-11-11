@@ -97,7 +97,7 @@ fn tab_navigation_stays_out_of_actions_but_keeps_routes_and_bindings() {
     );
 
     for (id, tab) in [
-        ("all", "all"),
+        ("all", "folder"),
         ("images", "images"),
         ("screenshots", "screenshots"),
         ("downloads", "downloads"),

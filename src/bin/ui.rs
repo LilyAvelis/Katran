@@ -71,7 +71,7 @@ fn item_failures(items: &Value) -> String {
                 .as_str()
                 .or_else(|| item["error"]["message"].as_str())
                 .unwrap_or("Ошибка");
-            format!("{name}: {error}")
+            if let Some(path)=item["recovery_path"].as_str() {format!("{name}: {error} · Файл сохранён: {path}")}else{format!("{name}: {error}")}
         })
         .collect::<Vec<_>>()
         .join("; ")

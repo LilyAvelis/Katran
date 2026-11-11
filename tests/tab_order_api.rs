@@ -24,7 +24,7 @@ fn positions_follow_persisted_order_and_tab_memory_uses_identity() {
         )["ok"],
         true
     );
-    assert_eq!(call(&mut s, Command::ToggleTab)["result"]["tab"], "all");
+    assert_eq!(call(&mut s, Command::ToggleTab)["result"]["tab"], "folder");
     assert_eq!(
         call(&mut s, Command::ToggleTab)["result"]["tab"],
         "screenshots"

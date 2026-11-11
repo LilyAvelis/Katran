@@ -43,7 +43,7 @@ fn ingest(api: &mut Service, name: &str, source: &str) -> i64 {
 }
 
 #[test]
-fn tabs_filter_before_pagination_and_preserve_hidden_selection() {
+fn tabs_filter_before_pagination_and_clear_selection_on_switch() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
     let first = ingest(&mut api, "needle-first.png", "test");
@@ -102,15 +102,30 @@ fn tabs_filter_before_pagination_and_preserve_hidden_selection() {
             ids: vec![screenshot],
         },
     );
-    assert_eq!(state["selected"], serde_json::json!([first]));
-    assert_eq!(call(&mut api, Command::ToggleTab)["tab"], "all");
+    assert_eq!(state["selected"], serde_json::json!([]));
+    let folder = tempfile::tempdir().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
     assert_eq!(
         browse(&mut api, "needle", 10, None)["events"]
             .as_array()
             .unwrap()
             .len(),
-        4
+        0
     );
+    let history = call(
+        &mut api,
+        Command::SearchPage {
+            query: "needle".into(),
+            limit: 10,
+            after_id: None,
+        },
+    );
+    assert_eq!(history["events"].as_array().unwrap().len(), 4);
     assert_eq!(call(&mut api, Command::ToggleTab)["tab"], "screenshots");
     assert_eq!(
         reply(
@@ -166,7 +181,12 @@ fn sharex_scan_is_stable_durable_and_deletion_keeps_original() {
     drop(api);
     let mut api = Service::open(root.path(), 100_000).unwrap();
     assert!(source_api::settle(&mut api, katran::source_policy::SourceId::Sharex).is_empty());
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Screenshots,
+        },
+    );
     assert!(
         browse(&mut api, "", 10, None)["events"]
             .as_array()

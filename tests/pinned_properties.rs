@@ -189,7 +189,7 @@ fn selected_link_handler_receives_validated_url() {
         },
     );
     let calls = calls.lock().unwrap();
-    assert_eq!(calls[0].0, ".txt");
+    assert_eq!(calls[0].0, ".html");
     assert_eq!(calls[0].2, PathBuf::from("https://example.test/path?q=1"));
 }
 

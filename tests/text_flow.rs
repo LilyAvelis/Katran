@@ -114,7 +114,14 @@ fn feature_visibility_search_and_file_transfer_share_the_domain() {
             enabled: false,
         },
     );
-    assert_eq!(call(&mut api, Command::Interaction)["tab"], "all");
+    assert_eq!(call(&mut api, Command::Interaction)["tab"], "folder");
+    let empty_folder = tempfile::tempdir().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: empty_folder.path().into(),
+        },
+    );
     assert!(
         call(
             &mut api,

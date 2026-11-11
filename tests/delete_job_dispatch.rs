@@ -4,7 +4,7 @@ use katran::{Command, Service, domain_jobs::JobId, source_policy::SourceId};
 use serde_json::Value;
 use source_api::call;
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
@@ -105,6 +105,7 @@ fn queued_original_delete_rejects_settings_change_before_authorization() {
     assert!(path.is_file());
     assert_eq!(call(&mut service, Command::Get { id })["id"], id);
 }
+#[cfg(windows)]
 #[test]
 fn asynchronous_single_delete_requires_actor_authorization_and_reports_receipt() {
     let root = tempfile::tempdir().unwrap();
@@ -112,6 +113,13 @@ fn asynchronous_single_delete_requires_actor_authorization_and_reports_receipt()
     let path = shots.path().join("synthetic.png");
     screenshot(&path);
     let mut service = Service::open(root.path(), 1024 * 1024).unwrap();
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &Path) -> katran::Result<()> {
+            std::fs::remove_file(path).map_err(Into::into)
+        }
+    }
+    service.set_trash(Box::new(SyntheticTrash));
     configure(&mut service, shots.path());
     let event = source_api::wait_event(&mut service, SourceId::Sharex, &path);
     let id = event["id"].as_i64().unwrap();
@@ -131,6 +139,7 @@ fn asynchronous_single_delete_requires_actor_authorization_and_reports_receipt()
     let result = poll(&mut service, deletion);
     assert_eq!(result["deleted"], 1);
     assert_eq!(result["items"][0]["original_removed"], true);
+    assert_eq!(result["items"][0]["recycle"]["recycled"], true);
     assert!(!path.exists());
     let absent = service.execute(katran::Request {
         api_version: 1,
@@ -140,12 +149,12 @@ fn asynchronous_single_delete_requires_actor_authorization_and_reports_receipt()
     assert_eq!(absent["ok"], false);
 }
 struct BlockingTrash {
-    started: mpsc::Sender<()>,
+    started: mpsc::Sender<PathBuf>,
     release: Mutex<mpsc::Receiver<()>>,
 }
 impl katran::downloads::Trash for BlockingTrash {
     fn recycle(&self, path: &Path) -> katran::Result<()> {
-        self.started.send(()).unwrap();
+        self.started.send(path.to_owned()).unwrap();
         self.release
             .lock()
             .unwrap()
@@ -154,6 +163,7 @@ impl katran::downloads::Trash for BlockingTrash {
         std::fs::remove_file(path).map_err(Into::into)
     }
 }
+#[cfg(windows)]
 #[test]
 fn authorized_recycle_effect_keeps_actor_responsive_and_cannot_be_cancelled() {
     let root = tempfile::tempdir().unwrap();
@@ -187,18 +197,30 @@ fn authorized_recycle_effect_keeps_actor_responsive_and_cannot_be_cancelled() {
     );
     let job_id: JobId = serde_json::from_value(deletion["job_id"].clone()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
+    let staged = loop {
         call(&mut service, Command::PollJob { job_id });
-        if observed.try_recv().is_ok() {
-            break;
+        if let Ok(staged) = observed.try_recv() {
+            break staged;
         }
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
-    }
+    };
+    assert!(!path.exists());
+    assert_eq!(
+        std::fs::read(&staged).unwrap(),
+        b"synthetic recyclable original"
+    );
+    std::fs::write(&path, b"independent replacement").unwrap();
     let started = Instant::now();
     call(&mut service, Command::Interaction);
     call(&mut service, Command::Status);
     assert!(started.elapsed() < Duration::from_millis(500));
+    let pin = service.execute(katran::Request {
+        api_version: 1,
+        request_id: "pin-during-effect".into(),
+        command: Command::TogglePins { ids: vec![id] },
+    });
+    assert_eq!(pin["ok"], false, "{pin}");
     let cancelled = service.execute(katran::Request {
         api_version: 1,
         request_id: "cancel-effect".into(),
@@ -212,10 +234,11 @@ fn authorized_recycle_effect_keeps_actor_responsive_and_cannot_be_cancelled() {
         serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
     settings.downloads_folder = Some(next.path().into());
     call(&mut service, Command::SetSettings { settings });
-    assert!(path.exists());
+    assert_eq!(std::fs::read(&path).unwrap(), b"independent replacement");
     release.send(()).unwrap();
     let result = poll(&mut service, deletion);
     assert_eq!(result["deleted"], 1);
     assert_eq!(result["items"][0]["original_removed"], true);
-    assert!(!path.exists());
+    assert_eq!(result["items"][0]["recycle"]["recycled"], true);
+    assert_eq!(std::fs::read(&path).unwrap(), b"independent replacement");
 }

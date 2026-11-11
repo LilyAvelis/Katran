@@ -164,20 +164,6 @@ fn values_persist_search_and_blob_dedup_and_visibility_is_functional() {
         )["error"]["code"],
         "tab_disabled"
     );
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
-    assert!(
-        call(
-            &mut api,
-            Command::BrowseShelfSorted {
-                query: "".into(),
-                limit: 100,
-                cursor: None
-            }
-        )["events"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
     assert_eq!(
         call(
             &mut api,
@@ -187,6 +173,28 @@ fn values_persist_search_and_blob_dedup_and_visibility_is_functional() {
         )["id"],
         a["id"]
     );
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Tables,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Tables,
+        },
+    );
+    let restored = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "multiline".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    assert_eq!(restored["events"].as_array().unwrap().len(), 2);
 }
 #[test]
 fn rich_copy_stacks_in_selection_order_and_reports_partial_publication() {
@@ -378,6 +386,16 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
     );
     assert_eq!(result["error"]["code"], "invalid_table");
     assert!(calls.lock().unwrap().is_empty());
+    let id = ordinary["id"].as_i64().unwrap();
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    call(
+        &mut api,
+        Command::SetPinnedProperties {
+            id,
+            display_name: Some("Kept CSV".into()),
+            opener: None,
+        },
+    );
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
     db.execute_batch("DROP TABLE table_fragments;PRAGMA user_version=5;")
@@ -397,8 +415,11 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        6
+        8
     );
+    let properties = call(&mut api, Command::GetPinnedProperties { id });
+    assert_eq!(properties["properties"]["pinned"], true);
+    assert_eq!(properties["properties"]["display_name"], "Kept CSV");
     assert!(
         std::fs::read_dir(root.path().join("backups"))
             .unwrap()
@@ -406,7 +427,7 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("before-v6"))
+                .contains("before-v8"))
     );
 }
 #[test]

@@ -23,22 +23,22 @@ fn tabs_default_to_images_and_toggle_remembers_last_non_all_tab() {
 }
 
 #[test]
-fn filtering_preserves_selection_but_keeps_cursor_and_preview_visible() {
+fn filtering_preserves_selection_within_category_but_switching_clears_it() {
     let mut state = Interaction::default();
     state.visible(vec![1, 2, 3]);
     state.select(1, SelectionMode::Replace);
     state.select(3, SelectionMode::Toggle);
     state.set_preview(Some(3));
-    state.set_tab(ShelfTab::Screenshots);
     state.visible(vec![2]);
     assert_eq!(state.selected, vec![1, 3]);
     assert_eq!(state.cursor, Some(2));
     assert_eq!(state.preview, None);
+    state.set_tab(ShelfTab::Screenshots);
+    assert!(state.selected.is_empty());
+    state.visible(vec![2]);
+    state.select(2, SelectionMode::Replace);
     state.set_tab(ShelfTab::All);
-    state.visible(vec![1, 2, 3]);
-    assert_eq!(state.selected, vec![1, 3]);
-    state.visible(vec![]);
-    assert_eq!(state.selected, vec![1, 3]);
+    assert!(state.selected.is_empty());
     assert_eq!(state.cursor, None);
     state.visible(vec![1, 2, 3]);
     state.select(2, SelectionMode::Replace);

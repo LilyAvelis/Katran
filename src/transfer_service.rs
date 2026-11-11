@@ -8,6 +8,7 @@ impl Service {
         // A rejected replacement must not leave an older, surprising cut armed.
         self.transfer_intent = None;
         self.transfer_sequence = None;
+        if cut && items.iter().any(|item|item.id<0) {return Err(ApiError::new("folder_cut_unavailable","Folder cut is unavailable; use ordinary file copy"));}
         if items.is_empty() || items.len() > 1000 {
             return Err(ApiError::new(
                 "invalid_argument",

@@ -84,7 +84,12 @@ fn live_projection_hides_clipboard_and_missing_references_without_deleting_histo
             .unwrap()
             .is_empty()
     );
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Screenshots,
+        },
+    );
     assert_eq!(
         browse(&mut api, "", None)["events"]
             .as_array()
@@ -106,7 +111,27 @@ fn live_projection_hides_clipboard_and_missing_references_without_deleting_histo
             .unwrap()
             .is_empty()
     );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    assert!(
+        browse(&mut api, "", None)["events"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let history = call(&mut api, Command::List { limit: 100 });
     for event in [first, latest, clip] {
+        assert!(
+            history["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == event["id"])
+        );
         let kept = call(
             &mut api,
             Command::Get {

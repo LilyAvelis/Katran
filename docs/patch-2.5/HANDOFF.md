@@ -1,5 +1,7 @@
 # Katran 2.5 — onboarding findings
 
+> Historical onboarding/intermediate notes. Read [CURRENT.md](CURRENT.md) first for the authoritative latest implementation, verification and remaining acceptance.
+
 2026-11-11. Planning and source inspection only; no implementation or test success claimed.
 
 ## Fenna — application and API
@@ -84,41 +86,43 @@ Superseded for sequencing by the current checkpoints and [PIPELINE.md](PIPELINE.
 ## Implementation status — current
 
 Autonomous local implementation is authorized. Baseline checkpoint `ecb30e5`;
-P1 domain checkpoint `1544666` includes the Folder transfer module. The full
-checkpoint and build pipeline is [PIPELINE.md](PIPELINE.md).
+P1 domain checkpoint `1544666` includes the Folder transfer module. P2 is in
+progress and its checkpoint/build remain pending. See [PIPELINE.md](PIPELINE.md).
 
-- Domain implemented: Folder, pin/properties/tags/history/favorites, Everything
-  backend, copy materialization, staged cut with locked managed source and
-  destination, explicit import API, and negative-snapshot preview API.
-- GUI connected: Folder picker/navigation, pin/transfer actions and previews.
-  Native Windows owner acceptance is still pending.
-- Observed gates: 9 integration tests across pinned/work_folder/delete_shelf;
-  83 library tests passed and 1 ignored; snapshot2 tests passed; transfer3
-  tests passed (including managed Downloads mixed pin/same-folder); workspace
-  API2 tests passed.
-- A parallel headless UI run crashed after 3 outdated All fixtures. Fenna
-  updated fixtures and added tests. Full serial UI gate is currently running;
-  do not report it as passed. Clippy's first run found a test `cmp_owned` lint,
-  fixed by Polly; recheck is pending.
-- Cargo version is 2.5.0 and is not accepted. Build has not run. No user
-  originals, clipboard, or desktop were touched. Rhea's preview script keeps
-  snapshot/build/package separate under `runtime/preview` without changing the
-  active pointer. The Everything backend is bundled with its license.
+- P1 domain and GUI: Folder, pin/properties/tags/history/favorites, Everything,
+  verified transfer, explicit import API and preview are implemented. P2 adds
+  verified managed-file recycle/delete and import representations. P2 checkpoint
+  and build are pending. GUI tag/property coverage is in progress.
+- Early P1 preview exists at `runtime/preview` (checkpoint `ea92a3e`, executable
+  SHA-256 prefix `e936…`). It is stale for current P2. The existing installed
+  runtime remains unchanged; do not present this artifact as current 2.5.
+- Observed gates: 16 integration tests (deletejob3, delete5, external1,
+  foldercopy2, import2, pinproperties3); recycle unit3; native disposable-file
+  recycle smoke passed; P3 UI tag test passed. Last full UI gate had 75 passed
+  and 1 outdated recycle fixture, now fixed. Eleven targeted legacy All/schema/
+  recycle assertions remain pending. Other full-gate checks were reported as
+  passed, but the aggregate gate is not complete until those 11 assertions pass.
+- No user originals, clipboard or desktop were touched. Everything backend is
+  bundled with its license. Cargo 2.5.0 remains unaccepted; native full owner
+  acceptance and P2 build are pending.
 
 ### Open product work and next steps
 
-1. Finish the current serial UI gate and clippy recheck; then make the first
-   preview build using Rhea's script and report its exact result.
-2. P2: complete original-file delete/recycle and import representations,
-   including typed source references and external clipboard paste. Screenshots
-   still have historical permanent deletion, unresolved against the 2.5
-   recycle requirement. Folder negative IDs are copy-only; Folder delete is
-   unsupported. Imported arbitrary non-images may have no visible category.
-3. P3: properties/tags GUI. P4: Raycast evidence and decision.
+1. Resolve the 11 targeted legacy All/schema/recycle assertions; do not infer
+   aggregate success from the other gates that passed.
+2. Finish remaining P2 gaps: external clipboard paste is not implemented;
+   return-import source references are untyped; unsupported file types return
+   errors; prior metadata is not restored. Folder negative-ID cut is copy-only
+   and same-folder transfer is a no-op. Folder delete uses verified
+   staging/recycle; recovery may require manual paths.
+3. Complete P3 properties/tags GUI and P4 Raycast evidence. Raycast filtering is
+   not implemented because no reliable marker is established; retain intentional
+   emoji. Own modified timestamps use ingest time plus late export; external
+   timestamps remain unchanged.
 
-Other current limits: properties/tags GUI is pending; return-import source
-references are not typed. Use [PIPELINE.md](PIPELINE.md) for sequencing. These
-limits are not accepted release claims; 2.5.0 remains unaccepted.
+Choose-app metadata stores an opaque handler ID; native browser URL opening is
+uncertain. Imported unsupported formats have no visible category. These limits
+are not accepted release claims; 2.5.0 remains unaccepted.
 
 No public push or release is authorized. No personal-file operations were performed.
 

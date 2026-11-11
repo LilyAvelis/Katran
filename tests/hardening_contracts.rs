@@ -33,13 +33,26 @@ fn source_event(api: &mut Service) -> Value {
 }
 #[test]
 fn provenance_is_not_delete_authority_and_supervisor_is() {
+    struct FakeTrash(std::path::PathBuf);
+    impl katran::downloads::Trash for FakeTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            assert!(path.components().any(|c| {
+                c.as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".katran-recovery-")
+            }));
+            std::fs::rename(path, self.0.join(path.file_name().unwrap())).map_err(Into::into)
+        }
+    }
     let data = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
     let path = folder.path().join("fixture.png");
     image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]))
         .save(&path)
         .unwrap();
     let mut api = Service::open(data.path(), 1000000).unwrap();
+    api.set_trash(Box::new(FakeTrash(bin.path().into())));
     configure(&mut api, folder.path());
     let generic = call(
         &mut api,
@@ -79,6 +92,8 @@ fn provenance_is_not_delete_authority_and_supervisor_is() {
     );
     assert_eq!(result["result"]["deleted"], 1, "{result}");
     assert!(!path.exists());
+    assert!(bin.path().join("fixture.png").is_file());
+    assert_eq!(result["result"]["items"][0]["recycle"]["recycled"], true);
 }
 #[test]
 fn changing_configuration_immediately_revokes_old_original_authority() {
@@ -347,10 +362,31 @@ fn mixed_original_batch_uses_injected_recycler_and_reports_each_failure() {
     assert_eq!(r["result"]["deleted"], 3, "{r}");
     let items = r["result"]["items"].as_array().unwrap();
     assert_eq!(items.iter().filter(|i| i["ok"] == false).count(), 2);
-    assert!(downloads.path().join("fail.txt").exists());
+    assert_eq!(
+        std::fs::read(downloads.path().join("fail.txt")).unwrap(),
+        b"keep"
+    );
     assert!(!shot.exists());
     assert_eq!(std::fs::read(bin.path().join("good.txt")).unwrap(), b"good");
-    assert_eq!(calls.lock().unwrap().len(), 2);
+    assert!(bin.path().join("shot.png").is_file());
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 3);
+    let mut names: Vec<_> = calls
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["fail.txt", "good.txt", "shot.png"]);
+    assert!(calls.iter().all(|path| path.components().any(|c| {
+        c.as_os_str()
+            .to_string_lossy()
+            .starts_with(".katran-recovery-")
+    })));
+    let failed = items
+        .iter()
+        .find(|item| item["recycle"]["status"] == "restored")
+        .unwrap();
+    assert_eq!(failed["ok"], false);
 }
 
 #[test]
@@ -374,7 +410,7 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        6
+        8
     );
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();

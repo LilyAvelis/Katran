@@ -44,12 +44,17 @@ fn names(value: &Value) -> Vec<String> {
 fn fixture() -> (tempfile::TempDir, Service) {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), DEFAULT_QUOTA).unwrap();
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
     for (name, size) in [
-        ("file10.txt", 10),
+        ("file10.webp", 10),
         ("file2.PNG", 2),
-        ("file1.md", 1),
-        ("other.bin", 5),
+        ("file1.jpg", 1),
+        ("other.gif", 5),
     ] {
         call(
             &mut api,
@@ -67,7 +72,7 @@ fn orders_entire_filter_before_page_and_cursor_survives_deleted_anchor() {
     let (_root, mut api) = fixture();
     sort(&mut api, SortMode::Natural, false);
     let first = page(&mut api, "file", 1, None);
-    assert_eq!(names(&first), ["file1.md"]);
+    assert_eq!(names(&first), ["file1.jpg"]);
     let cursor = first["next_cursor"].as_str().unwrap().to_owned();
     let id = first["events"][0]["id"].as_i64().unwrap();
     call(
@@ -85,7 +90,7 @@ fn orders_entire_filter_before_page_and_cursor_survives_deleted_anchor() {
         1,
         Some(second["next_cursor"].as_str().unwrap().into()),
     );
-    assert_eq!(names(&third), ["file10.txt"]);
+    assert_eq!(names(&third), ["file10.webp"]);
     assert!(third["next_cursor"].is_null());
 }
 #[test]
@@ -160,9 +165,9 @@ fn cursor_binds_filter_sort_tab_and_source_generation() {
 fn recorded_mtime_unknown_last_without_stat_and_origin_provenance() {
     let (root, mut api) = fixture();
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute("UPDATE events SET modified_at_ms=CASE name WHEN 'file1.md' THEN 10 WHEN 'file2.PNG' THEN 20 END",[]).unwrap();
+    db.execute("UPDATE events SET modified_at_ms=CASE name WHEN 'file1.jpg' THEN 10 WHEN 'file2.PNG' THEN 20 END",[]).unwrap();
     db.execute(
-        "UPDATE events SET origin_json=?1 WHERE name='file1.md'",
+        "UPDATE events SET origin_json=?1 WHERE name='file1.jpg'",
         [json!({"source_domain":"z.example"}).to_string()],
     )
     .unwrap();
@@ -182,10 +187,10 @@ fn recorded_mtime_unknown_last_without_stat_and_origin_provenance() {
         10
     );
     let result = names(&page_result);
-    assert_eq!(&result[..2], ["file1.md", "file2.PNG"]);
+    assert_eq!(&result[..2], ["file1.jpg", "file2.PNG"]);
     sort(&mut api, SortMode::Modified, true);
     let result = names(&page(&mut api, "", 100, None));
-    assert_eq!(&result[..2], ["file2.PNG", "file1.md"]);
+    assert_eq!(&result[..2], ["file2.PNG", "file1.jpg"]);
     sort(&mut api, SortMode::Origin, false);
     assert_eq!(names(&page(&mut api, "", 100, None))[0], "file2.PNG");
 }
@@ -240,25 +245,40 @@ fn migration_preserves_v3_events_unknown_metadata_and_old_settings() {
     let (root, api) = fixture();
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
+    db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,origin_json) VALUES(42,'manual','legacy-external.txt','absent-synthetic',1,'{}')", []).unwrap();
     db.execute_batch("DROP INDEX events_sort_modified;ALTER TABLE events DROP COLUMN modified_at_ms;PRAGMA user_version=3;").unwrap();
     drop(db);
     let mut api = Service::open(root.path(), DEFAULT_QUOTA).unwrap();
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
     assert_eq!(names(&page(&mut api, "", 100, None)).len(), 4);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        6
+        8
     );
     assert_eq!(
         db.query_row(
-            "SELECT COUNT(*) FROM events WHERE modified_at_ms IS NULL",
+            "SELECT COUNT(*) FROM events WHERE blob_hash IS NOT NULL AND modified_at_ms=detected_at_ms",
             [],
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
         4
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT modified_at_ms FROM events WHERE name='legacy-external.txt'",
+            [],
+            |r| r.get::<_, Option<i64>>(0)
+        )
+        .unwrap(),
+        None
     );
     assert_eq!(
         std::fs::read_dir(root.path().join("backups"))
@@ -358,21 +378,21 @@ fn cursor_rejects_changed_tab_generation_bad_payload_and_supports_large_filtered
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
     let tx = db.unchecked_transaction().unwrap();
     for n in 0..1010 {
-        tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,origin_json,delete_policy_json) VALUES(0,'manual',?1,'absent-synthetic',1,'{}','{\"kind\":\"shelf_only\"}')",[format!("bulk{n}.txt")]).unwrap();
+        tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,origin_json,delete_policy_json) VALUES(0,'manual',?1,'absent-synthetic',1,'{}','{\"kind\":\"shelf_only\"}')",[format!("bulk{n}.png")]).unwrap();
     }
     tx.commit().unwrap();
     sort(&mut api, SortMode::Natural, false);
     let first = page(&mut api, "bulk", 1000, None);
     assert_eq!(first["events"].as_array().unwrap().len(), 1000);
-    assert_eq!(names(&first)[999], "bulk999.txt");
+    assert_eq!(names(&first)[999], "bulk999.png");
     let cursor = first["next_cursor"].as_str().unwrap().to_owned();
     let second = page(&mut api, "bulk", 1000, Some(cursor.clone()));
-    assert_eq!(names(&second)[0], "bulk1000.txt");
+    assert_eq!(names(&second)[0], "bulk1000.png");
     assert_eq!(names(&second).len(), 10);
     call(
         &mut api,
         Command::SetTab {
-            tab: ShelfTab::Images,
+            tab: ShelfTab::Screenshots,
         },
     );
     let bad = |api: &mut Service, cursor: String| {
@@ -390,7 +410,12 @@ fn cursor_rejects_changed_tab_generation_bad_payload_and_supports_large_filtered
         bad(&mut api, cursor.clone())["error"]["code"],
         "stale_cursor"
     );
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
     db.execute(
         "UPDATE source_configurations SET generation=generation+1",
         [],

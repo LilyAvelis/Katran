@@ -139,8 +139,15 @@ fn link_is_optional_exact_searchable_and_survives_restart() {
             enabled: false,
         },
     );
-    call(&mut api, Command::SetTab { tab: ShelfTab::All });
-    let all = call(
+    assert_eq!(call(&mut api, Command::GetLink { id })["url"], url);
+    enabled(&mut api, ShelfTab::Links);
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Links,
+        },
+    );
+    let links = call(
         &mut api,
         Command::BrowseShelf {
             query: "".into(),
@@ -149,7 +156,7 @@ fn link_is_optional_exact_searchable_and_survives_restart() {
         },
     );
     assert!(
-        !all["events"]
+        links["events"]
             .as_array()
             .unwrap()
             .iter()
@@ -388,6 +395,20 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
             source: "test".into(),
         },
     );
+    call(
+        &mut api,
+        Command::TogglePins {
+            ids: vec![item(&old).id],
+        },
+    );
+    call(
+        &mut api,
+        Command::SetPinnedProperties {
+            id: item(&old).id,
+            display_name: Some("Kept name".into()),
+            opener: None,
+        },
+    );
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
     db.execute_batch("DROP TABLE link_fragments; PRAGMA user_version=4;")
@@ -407,7 +428,15 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        6
+        8
+    );
+    assert_eq!(
+        call(&mut api, Command::GetPinnedProperties { id: item(&old).id })["properties"]["display_name"],
+        "Kept name"
+    );
+    assert_eq!(
+        call(&mut api, Command::GetPinnedProperties { id: item(&old).id })["properties"]["pinned"],
+        true
     );
     assert!(
         std::fs::read_dir(root.path().join("backups"))
@@ -416,6 +445,6 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("before-v6"))
+                .contains("before-v8"))
     );
 }
