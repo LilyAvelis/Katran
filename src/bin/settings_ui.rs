@@ -201,6 +201,7 @@ impl State {
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.global_editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
          SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
+         SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
          SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});
@@ -282,6 +283,10 @@ impl State {
             let mut accent=theme.accent.unwrap_or([75,139,210]);
             if ui.color_edit_button_srgb(&mut accent).changed(){theme.accent=Some(accent);theme_intent=Some(theme.clone());}
             if ui.button("Сбросить цвет").clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
+           });
+           SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
+            if ui.selectable_value(&mut theme.lily_background,None,"Сплошной").changed(){theme_intent=Some(theme.clone());}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
@@ -398,7 +403,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([40, 100, 220]),
-            decoration: false,
+            decoration: false, lily_background:None,
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =

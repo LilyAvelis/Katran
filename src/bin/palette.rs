@@ -5,7 +5,8 @@ impl Shelf {
         if !self.actions {
             return;
         }
-        let catalogue = self.call(Command::Actions);
+        let mut catalogue = self.call(Command::Actions);
+        if let Some(items)=catalogue.as_array_mut() {items.retain(|a| !a["id"].as_str().unwrap_or("").starts_with("sort_"));}
         let actions: Vec<_> = catalogue
             .as_array()
             .into_iter()
@@ -159,5 +160,31 @@ impl Shelf {
         } else if result.should_close() {
             self.actions = false;
         }
+    }
+}
+
+impl Shelf {
+    pub(super) fn sort_menu(&mut self, ctx: &egui::Context) {
+        if !self.sorting_input.is_open() {return;}
+        let catalogue=self.call(Command::Actions);
+        let anchor=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("sorting-button-rect"))).map(|r|r.right_top()+egui::vec2(0.0,-6.0)).unwrap_or(ctx.content_rect().right_bottom()-egui::vec2(8.0,40.0));
+        let mut picked=None;
+        let response=egui::Modal::new(egui::Id::new("sorting-menu"))
+            .area(egui::Area::new(egui::Id::new("sorting-menu")).order(egui::Order::Foreground).pivot(egui::Align2::RIGHT_BOTTOM).fixed_pos(anchor))
+            .frame(crate::action_row::popup_frame(ctx))
+            .show(ctx,|ui| {
+                ui.set_width((ctx.content_rect().width()-40.0).clamp(200.0,420.0));
+                ui.heading("Сортировка");
+                ui.weak("Клавиша — выбрать · Shift — обратный порядок · Esc — назад");
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-160.0).clamp(80.0,420.0)).show(ui,|ui| {
+                    for item in catalogue.as_array().into_iter().flatten().filter(|a|a["id"].as_str().is_some_and(|id|id.starts_with("sort_"))) {
+                        let id=item["id"].as_str().unwrap();
+                        let hint=sorting_ui::sequence_hint(id).unwrap_or("").trim_start_matches(", ");
+                        if ui.button(format!("{}    {hint}",item["label"].as_str().unwrap_or(id))).clicked(){picked=Some(id.to_owned());}
+                    }
+                });
+            });
+        if let Some(id)=picked {self.sorting_input.close();self.run(id,ctx);}
+        else if response.should_close(){self.sorting_input.close();}
     }
 }

@@ -3,6 +3,8 @@ use serde_json::Value;
 
 pub fn sequence_hint(id: &str) -> Option<&'static str> {
     Some(match id {
+        "sort_arrival" => ", t",
+        "sort_arrival_reverse" => ", Shift+T",
         "sort_extension" => ", e",
         "sort_extension_reverse" => ", Shift+E",
         "sort_modified" => ", m",
@@ -156,9 +158,6 @@ mod tests {
             .iter()
             .filter(|d| d.id.starts_with("sort_"))
         {
-            if def.id.starts_with("sort_arrival") {
-                continue;
-            }
             let hint = sequence_hint(def.id).unwrap();
             assert!(hint.starts_with(", "));
             assert!(def.default_binding.is_empty());

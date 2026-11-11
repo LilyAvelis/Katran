@@ -26,9 +26,20 @@ fn friendly_path(path: &str) -> String {
     }
 }
 impl Shelf {
+    pub(super) fn sort_notice(&mut self, ctx: &egui::Context) {
+        let Some((text, started)) = &self.sort_notice else {return;};
+        if started.elapsed() >= Duration::from_secs(2) {self.sort_notice=None;return;}
+        let text=text.clone();
+        if self.call(Command::GetSettings)["sort_notifications"] == false {self.sort_notice=None;return;}
+        egui::Area::new(egui::Id::new("sort-notice"))
+            .order(egui::Order::Foreground).interactable(false)
+            .anchor(egui::Align2::CENTER_BOTTOM,[0.0,-42.0])
+            .show(ctx,|ui| {crate::action_row::popup_frame(ctx).show(ui,|ui| {ui.label(text);});});
+        ctx.request_repaint_after(Duration::from_millis(50));
+    }
+
     pub(super) fn info_bar(&mut self, ui: &mut egui::Ui) {
         let folder = self.state["tab"] == "folder";
-        let pods = self.state["tab"] == "pods";
         let path = self.state["folder_path"]
             .as_str()
             .map(friendly_path)
@@ -49,7 +60,7 @@ impl Shelf {
             (egui_lucide::Lucide::CircleQuestionMark, Page::Status, status),
             (egui_lucide::Lucide::RefreshCw, Page::Recovery, "Восстановление файлов".into()),
         ] {
-            if (pods && page == Page::Sort) || (!folder && page == Page::Recovery) { continue; }
+            if page == Page::Sort || (!folder && page == Page::Recovery) { continue; }
             if crate::ui_style::status_icon(ui, icon, &tooltip).clicked() {
                 self.info.page = Some(page);
                 if page == Page::Recovery {

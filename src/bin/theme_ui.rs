@@ -37,6 +37,7 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
         return legacy;
     }
     match role {
+        Role::Background if preference.lily_background.is_some() => Color32::TRANSPARENT,
         Role::Background => Color32::from_rgb(11, 20, 35),
         Role::Surface => Color32::from_rgb(16, 30, 50),
         Role::Raised => Color32::from_rgb(23, 43, 70),
@@ -94,11 +95,43 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
     ctx.set_theme(egui::Theme::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
+/// Embedded owner-provided artwork, decoded once per selected variant.
+pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
+    let theme = current(ctx);
+    if theme.preset != Preset::BlueExperimental { return; }
+    let Some(index) = theme.lily_background else { return; };
+    let bytes: &[u8] = match index {
+        1 => include_bytes!("../../assets/themes/lilies/lily-1.png"),
+        2 => include_bytes!("../../assets/themes/lilies/lily-2.png"),
+        3 => include_bytes!("../../assets/themes/lilies/lily-3.png"),
+        4 => include_bytes!("../../assets/themes/lilies/lily-4.png"),
+        5 => include_bytes!("../../assets/themes/lilies/lily-5.png"),
+        _ => return,
+    };
+    let id = egui::Id::new(("lily-background", index));
+    let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)).or_else(|| {
+        let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+        let size = [rgba.width() as usize, rgba.height() as usize];
+        let texture = ctx.load_texture(format!("lily-{index}"), egui::ColorImage::from_rgba_unmultiplied(size,rgba.as_raw()), egui::TextureOptions::LINEAR);
+        ctx.data_mut(|data| data.insert_temp(id,texture.clone()));
+        Some(texture)
+    });
+    if let Some(texture) = texture {
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        // Contain the whole illustration; navy fills any letterboxing.
+        painter.rect_filled(rect,0.0,Color32::from_rgb(11,20,35));
+        let size = texture.size_vec2();
+        let scale = (rect.width()/size.x).min(rect.height()/size.y);
+        let dest = egui::Rect::from_center_size(rect.center(),size*scale);
+        painter.image(texture.id(),dest,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),Color32::WHITE);
+    }
+}
 /// Decorative arcs occupy existing bounds and never affect layout.
 pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
     let theme = current(ui.ctx());
     if theme.preset != Preset::BlueExperimental
         || !theme.decoration
+        || theme.lily_background.is_some()
         || rect.width() <= 0.0
         || rect.height() <= 0.0
     {
@@ -138,7 +171,7 @@ mod tests {
             &ThemePreferences {
                 preset: Preset::BlueExperimental,
                 accent: None,
-                decoration: true,
+                decoration: true, lily_background:None,
             },
         );
         let mut blue = ctx.run_ui(egui::RawInput::default(), |ui| decorate(ui, bounds));
@@ -159,7 +192,7 @@ mod tests {
         let first = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([220, 50, 80]),
-            decoration: false,
+            decoration: false, lily_background:None,
         };
         apply(&ctx, &first);
         let blue = ctx.style_of(egui::Theme::Dark);
@@ -230,7 +263,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([18, 90, 180]),
-            decoration: true,
+            decoration: true, lily_background:None,
         };
         apply(&ctx, &blue);
         assert_eq!(

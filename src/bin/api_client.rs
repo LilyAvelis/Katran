@@ -413,7 +413,12 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
             return;
         }
+        let sort_action = id.starts_with("sort_");
         let r = self.call(Command::RunAction { id });
+        if sort_action && r["sort"].is_object() {
+            let enabled = self.call(Command::GetSettings)["sort_notifications"] != false;
+            self.sort_notice = enabled.then(|| (sorting_ui::confirmation(&r["sort"]), Instant::now()));
+        }
         self.action_result(r);
         if preview_action {
             self.state = self.call(Command::Interaction);

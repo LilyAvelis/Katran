@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
+    pub sort_notifications: bool,
     pub pods_tile_size: u16,
     pub sort: crate::sorting::SortSpec,
     #[serde(
@@ -38,6 +39,7 @@ impl Settings {
         Self {
             theme: Default::default(),
             overlay_hotkey: String::new(),
+            sort_notifications: true,
             pods_tile_size: 96,
             sort: Default::default(),
             quota_bytes: quota,
@@ -75,6 +77,7 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if self.theme.lily_background.is_some_and(|n| !(1..=5).contains(&n)) {return Err("Неизвестный фон лилии".into());}
         if !(48..=192).contains(&self.pods_tile_size) {return Err("Pods: размер плитки должен быть 48–192".into());}
         if !self.overlay_hotkey.trim().is_empty() {
             crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error|error.message)?;
