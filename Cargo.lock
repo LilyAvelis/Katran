@@ -1006,6 +1006,14 @@ name = "garden-actions"
 version = "0.1.0"
 
 [[package]]
+name = "garden-egui"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui-lucide",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1579,6 +1587,7 @@ dependencies = [
  "egui_extras",
  "embed-resource",
  "garden-actions",
+ "garden-egui",
  "image",
  "raw-window-handle",
  "reqwest",

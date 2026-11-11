@@ -1,0 +1,11 @@
+[package]
+name = "garden-egui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Host-styled egui action rows and shortcut keycaps"
+publish = false
+
+[dependencies]
+egui = "=0.36.2"
+egui-lucide = "=0.1.0"

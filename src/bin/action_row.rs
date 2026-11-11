@@ -1,13 +1,8 @@
-//! Readonly action presentation. Owns layout and paint, never action execution.
+//! Katran styling adapter for reusable, presentation-only Garden rows.
+#[cfg(test)]
 use crate::ui_style::KeyCaps;
 use eframe::egui::{self, Color32};
-
-pub(super) struct ActionPresentation<'a> {
-    pub label: &'a str,
-    pub icon: egui_lucide::Lucide,
-    pub primary_shortcut: &'a str,
-    pub full_shortcut_tooltip: &'a str,
-}
+pub(super) use garden_egui::{ActionPresentation, primary_shortcut};
 pub(super) struct ActionRow<'a>(ActionPresentation<'a>, Option<egui::TextureId>);
 pub(super) fn popup_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::popup(&ctx.style_of(egui::Theme::Dark))
@@ -23,15 +18,6 @@ pub(super) fn popup_frame(ctx: &egui::Context) -> egui::Frame {
         .corner_radius(12)
         .inner_margin(12)
 }
-pub(super) fn primary_shortcut(shortcut: &str) -> &str {
-    shortcut.split('/').next().unwrap_or("").trim()
-}
-
-struct Regions {
-    icon: egui::Rect,
-    label: egui::Rect,
-    keys: egui::Rect,
-}
 impl<'a> ActionRow<'a> {
     pub fn new(presentation: ActionPresentation<'a>) -> Self {
         Self(presentation, None)
@@ -40,81 +26,28 @@ impl<'a> ActionRow<'a> {
         self.1 = texture;
         self
     }
-    fn shortcut_budget(row_width: f32) -> f32 {
-        ((row_width - 42.0).max(0.0) * 0.45).max(10.0)
+    #[cfg(test)]
+    fn shortcut_budget(width: f32) -> f32 {
+        garden_egui::ActionRow::shortcut_budget(width)
     }
-    fn regions(row: egui::Rect, key_width: f32) -> Regions {
-        let left = (row.left() + 33.0).min(row.right());
-        let right = (row.right() - 9.0).max(left);
-        let available = right - left;
-        // Ordinary bindings retain their intrinsic width. Oversized user bindings
-        // are ellipsized inside one bounded keycap; full text is a tooltip.
-        let width = key_width.min(available);
-        Regions {
-            icon: egui::Rect::from_center_size(
-                egui::pos2(row.left() + 17.0, row.center().y),
-                egui::vec2(16.0, 16.0),
-            ),
-            label: egui::Rect::from_min_max(
-                egui::pos2(left, row.top()),
-                egui::pos2((right - width - 6.0).max(left), row.bottom()),
-            ),
-            keys: egui::Rect::from_min_max(
-                egui::pos2(right - width, row.top()),
-                egui::pos2(right, row.bottom()),
-            ),
-        }
+    #[cfg(test)]
+    fn regions(row: egui::Rect, key_width: f32) -> garden_egui::RowRegions {
+        garden_egui::ActionRow::regions(row, key_width)
     }
     pub fn show(self, ui: &mut egui::Ui, selected: bool) -> egui::Response {
-        let caps = KeyCaps::measure_fitting(
-            ui,
-            self.0.primary_shortcut,
-            Self::shortcut_budget(ui.available_width()),
-        );
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        let height = 38.0_f32
-            .max(caps.size.y + 6.0)
-            .max(ui.fonts_mut(|f| f.row_height(&font)) + 6.0);
-        let (row, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), height),
-            egui::Sense::click(),
-        );
-        let regions = Self::regions(row, caps.size.x);
-        if selected || response.hovered() {
-            ui.painter().rect_filled(
-                row,
-                7.0,
-                crate::theme_ui::color(
-                    ui.ctx(),
-                    crate::theme_ui::Role::Selection,
-                    Color32::from_rgb(100, 100, 108),
-                ),
-            );
-        }
-        if let Some(texture) = self.1 {
-            egui::Image::new((texture, egui::vec2(16.0, 16.0))).paint_at(ui, regions.icon);
-        } else {
-            self.0.icon.size(16.0).image().paint_at(ui, regions.icon);
-        }
-        // Single-line truncation uses egui's actual font layout and same vertical anchor.
-        let mut job = egui::text::LayoutJob::simple(
-            self.0.label.to_owned(),
-            egui::TextStyle::Body.resolve(ui.style()),
-            ui.visuals().text_color(),
-            regions.label.width(),
-        );
-        job.wrap.max_rows = 1;
-        job.wrap.break_anywhere = true;
-        let galley = ui.fonts_mut(|f| f.layout_job(job));
-        ui.painter()
-            .with_clip_rect(ui.clip_rect().intersect(regions.label))
-            .galley(
-                egui::pos2(regions.label.left(), row.center().y - galley.size().y / 2.0),
-                galley,
-                ui.visuals().text_color(),
-            );
-        caps.paint(ui, regions.keys);
-        response.on_hover_text(self.0.full_shortcut_tooltip)
+        let style = garden_egui::ActionStyle {
+            label_font: egui::TextStyle::Body.resolve(ui.style()),
+            label_color: ui.visuals().text_color(),
+            selection_fill: crate::theme_ui::color(
+                ui.ctx(),
+                crate::theme_ui::Role::Selection,
+                Color32::from_rgb(100, 100, 108),
+            ),
+            keycaps: crate::ui_style::keycaps_style(ui),
+        };
+        garden_egui::ActionRow::new(self.0, style)
+            .with_texture(self.1)
+            .show(ui, selected)
     }
 }
 

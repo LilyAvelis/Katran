@@ -38,11 +38,60 @@ The crate starts at internal version 0.1.0, `publish = false`, MIT. No crates.io
 publication or new application release is authorized by this extraction.
 Owner-supplied lily artwork is not bundled into the library.
 
+## Second component: garden-egui
+
+`crates/garden-egui` now owns ActionRow/ActionPresentation, primary-shortcut
+presentation and measured KeyCaps. Katran's thin adapters supply its fonts,
+semantic colors and exact Standard fallbacks; popup styling remains in Katran.
+The shared rows are already used by Actions, Sort and Open With through that
+adapter. They return egui responses and do not execute commands. The host owns
+icon loaders, texture lifetime and theme state. Egui is pinned to 0.36.2.
+
+## Use from another Rust project
+
+Initially use local path dependencies; no external package registry is needed:
+
+```toml
+[dependencies]
+garden-actions = { path = "../Katran/crates/garden-actions" }
+garden-egui = { path = "../Katran/crates/garden-egui" }
+```
+
+Use only the first dependency if the application does not use egui. Supply a
+catalogue and reserved-key callback to `plan_set`, then save its returned map
+before adopting it. For rows, construct `ActionStyle`/`KeyCapsStyle` from the
+application's own design tokens; never copy a Katran dispatcher into a widget.
+
+The console example is runnable with
+`cargo run --offline -p garden-actions --example shortcuts`. It does not open a
+window, register a hotkey or modify settings. Each crate carries its own MIT
+license; dependencies retain their own licenses. README usage and limitations
+are included beside each crate.
+
+## Verification and checkpoints
+
+- `garden-actions`: five policy tests, two distinct catalogues and the neutral
+  example compiled; crate/all-target Clippy passed.
+- Katran adapter: 23 targeted API tests and two original shortcut unit tests
+  passed. The new storage-failure test confirms the planned binding does not
+  become live when persistence fails. Walter's bounded comparison against
+  `9fe7214` found no P1/P2 semantic changes in the policy extraction.
+- `garden-egui`: two headless layout tests cover narrow/wide rows, DPI scaling,
+  custom textures and ancestor scroll clipping. Physical-pixel image snapping
+  uses the original half-pixel tolerance.
+- Katran after UI extraction: all 113 UI/headless tests passed, including the
+  existing production-catalogue geometry and scrolling cases. Workspace
+  all-target Clippy with `ui,clipboard-events` passed. No native window was
+  opened or owner desktop manipulated.
+
+The implementation checkpoints are local Git commits; release tags continue to
+reference their original source. Library extraction is not evidence that the
+separate public release pipeline completed.
+
 ## Next reusable pieces
 
-After this component is integrated and verified, the next bounded extraction
-is egui ActionRow/KeyCaps with host-supplied visual tokens. The Sort palette and
-Ctrl+K can then share an injected choice model and modal input ownership.
+The Sort palette and Ctrl+K can next share an injected choice model and modal
+input ownership when a second host needs those behaviors.
 Everything, Open With, QuickLook and native overlay remain optional Windows
 adapters; they do not belong in the pure policy crate. File ownership, source
 revisions, pinned protection and recovery remain Katran domain behavior.

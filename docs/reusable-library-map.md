@@ -2,6 +2,17 @@
 
 Walter Wallace · source inventory, 2026-11-11 · baseline `ae9b03b`.
 
+## Extraction update · 2026-11-11
+
+The owner subsequently requested implementation while the immutable release CI
+runs. Local branch `codex/garden-framework` now contains `garden-actions` and
+`garden-egui`, both consumed by Katran through compatibility/style adapters.
+They are internal0.1 packages, not published and not part of the3.0 release tags.
+See [implemented contracts, usage and verification](garden-framework.md).
+The original inventory below records the extraction rationale and later adapter
+candidates; its “no extraction performed” closing line describes that review,
+not the subsequent implementation.
+
 Katran already contains useful building blocks for another Rust desktop app.
 Preserve them now as a source map; extract the first small library **after 3.0**,
 when a second real application can exercise its API. This document does not
