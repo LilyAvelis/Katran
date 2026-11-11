@@ -84,7 +84,7 @@ impl Shelf {
                                 ui.label(
                                     RichText::new(&group)
                                         .size(11.0)
-                                        .color(Color32::from_gray(185)),
+                                        .color(theme_ui::color(ctx,theme_ui::Role::Muted,Color32::from_gray(185))),
                                 );
                             }
                             let shortcut = a["shortcut"].as_str().unwrap_or("");

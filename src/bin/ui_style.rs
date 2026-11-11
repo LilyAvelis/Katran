@@ -3,6 +3,13 @@ use eframe::egui::{self, Color32};
 
 pub(super) fn install(ctx: &egui::Context) {
     crate::ui_fonts::install(ctx);
+    let style = standard_style(ctx);
+    ctx.set_theme(egui::Theme::Dark);
+    ctx.set_style_of(egui::Theme::Dark, style);
+    crate::theme_ui::reset(ctx);
+}
+
+pub(super) fn standard_style(ctx: &egui::Context) -> egui::Style {
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = Color32::from_rgb(39, 39, 42);
@@ -36,8 +43,7 @@ pub(super) fn install(ctx: &egui::Context) {
         egui::TextStyle::Button,
         egui::FontId::proportional(tokens::BODY),
     );
-    ctx.set_theme(egui::Theme::Dark);
-    ctx.set_style_of(egui::Theme::Dark, style);
+    style
 }
 
 /// Measured once; the same galleys and frame geometry are used for painting.
@@ -55,7 +61,11 @@ impl KeyCaps {
                 ui.painter().layout_no_wrap(
                     key.to_owned(),
                     egui::FontId::proportional(tokens::CAPTION),
-                    Color32::from_gray(220),
+                    crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::Text,
+                        Color32::from_gray(220),
+                    ),
                 )
             })
             .collect();
@@ -81,7 +91,11 @@ impl KeyCaps {
         let mut job = egui::text::LayoutJob::simple(
             text.to_owned(),
             egui::FontId::proportional(tokens::CAPTION),
-            Color32::from_gray(220),
+            crate::theme_ui::color(
+                ui.ctx(),
+                crate::theme_ui::Role::Text,
+                Color32::from_gray(220),
+            ),
             (max_width - 2.0 * Self::PAD.x).max(0.0),
         );
         job.wrap.max_rows = 1;
@@ -105,14 +119,29 @@ impl KeyCaps {
             painter.rect(
                 rect,
                 tokens::XS as u8,
-                Color32::from_white_alpha(12),
-                egui::Stroke::new(1.0, Color32::from_white_alpha(55)),
+                crate::theme_ui::color(
+                    ui.ctx(),
+                    crate::theme_ui::Role::Raised,
+                    Color32::from_white_alpha(12),
+                ),
+                egui::Stroke::new(
+                    1.0,
+                    crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::Border,
+                        Color32::from_white_alpha(55),
+                    ),
+                ),
                 egui::StrokeKind::Inside,
             );
             painter.galley(
                 rect.center() - galley.size() / 2.0,
                 galley.clone(),
-                Color32::from_gray(220),
+                crate::theme_ui::color(
+                    ui.ctx(),
+                    crate::theme_ui::Role::Text,
+                    Color32::from_gray(220),
+                ),
             );
             x += size.x + Self::GAP;
         }
@@ -133,7 +162,15 @@ pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
     ui.painter().rect_filled(
         rect,
         9.0,
-        Color32::from_gray(if open || response.hovered() { 100 } else { 78 }),
+        crate::theme_ui::color(
+            ui.ctx(),
+            if open || response.hovered() {
+                crate::theme_ui::Role::Selection
+            } else {
+                crate::theme_ui::Role::Raised
+            },
+            Color32::from_gray(if open || response.hovered() { 100 } else { 78 }),
+        ),
     );
     ui.scope_builder(
         egui::UiBuilder::new()

@@ -22,7 +22,11 @@ pub(super) struct SettingsSection;
 impl SettingsSection {
     pub fn show(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
         egui::Frame::new()
-            .fill(Color32::from_gray(79))
+            .fill(crate::theme_ui::color(
+                ui.ctx(),
+                crate::theme_ui::Role::Raised,
+                Color32::from_gray(79),
+            ))
             .corner_radius(tokens::SECTION_RADIUS)
             .inner_margin(tokens::LG as i8)
             .show(ui, |ui| {

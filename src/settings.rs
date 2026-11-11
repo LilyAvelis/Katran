@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
     pub pods_tile_size: u16,
     pub sort: crate::sorting::SortSpec,
@@ -35,6 +36,7 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
+            theme: Default::default(),
             overlay_hotkey: String::new(),
             pods_tile_size: 96,
             sort: Default::default(),

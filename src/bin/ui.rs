@@ -31,6 +31,7 @@ mod text_preview_ui;
 mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
+mod theme_ui;
 mod updates_ui;
 mod workspace_ui;
 use base64::Engine;
@@ -222,6 +223,10 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
 impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        if self.api.is_some() {
+            let settings=self.call(Command::GetSettings);
+            if let Ok(theme)=serde_json::from_value(settings["theme"].clone()){theme_ui::apply(&ctx,&theme);}
+        }
         self.resident_close_requested(&ctx);
         self.overlay_escape(&ctx);
         input_log::record(&ctx, self.logger.as_ref());
@@ -452,8 +457,9 @@ impl Shelf {
         }
         self.state = self.call(Command::Interaction);
         let _header = egui::Panel::top("header")
-            .frame(egui::Frame::new().inner_margin(12))
+            .frame(egui::Frame::new().fill(theme_ui::color(&ctx,theme_ui::Role::Background,Color32::TRANSPARENT)).inner_margin(12))
             .show(root, |ui| {
+                theme_ui::decorate(ui,ui.max_rect());
                 ui.horizontal(|ui| {
                     let (rect, r) = ui.allocate_exact_size(
                         egui::vec2((ui.available_width() - 42.0).max(20.0), 26.0),
@@ -530,7 +536,7 @@ impl Shelf {
             .exact_size(84.0)
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(54, 54, 58))
+                    .fill(theme_ui::color(&ctx,theme_ui::Role::Raised,Color32::from_rgb(54,54,58)))
                     .inner_margin(10),
             )
             .show(root, |ui| {
@@ -1876,6 +1882,20 @@ mod tests {
         assert_eq!(app.message,"existing result");
     }
     #[test]
+    fn experimental_theme_keeps_shell_geometry_and_standard_returns() {
+        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
+        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
+        for n in 0..4 {app.call(Command::IngestBytes{name:format!("image{n}.png"),bytes:vec![n],source:"test".into()});}
+        app.refresh();
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        let standard=visible_landmarks(&mut app,&ctx);
+        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true}});
+        let blue=visible_landmarks(&mut app,&ctx);
+        assert_eq!(blue,standard,"theme must not move the existing controls");
+        app.call(Command::SetTheme{theme:Default::default()});
+        assert_eq!(visible_landmarks(&mut app,&ctx),standard);
+    }
+    #[test]
     fn table_copy_status_reports_partial_formats_and_item_failure() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
@@ -1905,6 +1925,7 @@ mod tests {
             ..Default::default()
         };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
         let positions = ["Katran ·", "Захват на паузе", "image3.png"]
             .iter()
             .map(|needle| {

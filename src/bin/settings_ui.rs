@@ -82,7 +82,27 @@ fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.links_enabled = current.links_enabled;
     draft.tables_enabled = current.tables_enabled;
     draft.pods_enabled = current.pods_enabled;
+    draft.theme = current.theme.clone();
     draft.sort = current.sort;
+}
+fn apply_theme(
+    api: &mut Service,
+    draft: &mut Option<Settings>,
+    theme: katran::theme::ThemePreferences,
+) -> Result<(), String> {
+    let response = call(api, Command::SetTheme { theme });
+    if response["ok"] != true {
+        return Err(response["error"]["message"]
+            .as_str()
+            .unwrap_or("Не удалось применить тему")
+            .into());
+    }
+    let current = serde_json::from_value(response["result"]["current"].clone())
+        .map_err(|_| "Не удалось прочитать применённую тему".to_string())?;
+    if let Some(draft) = draft.as_mut() {
+        draft.theme = current;
+    }
+    Ok(())
 }
 impl State {
     pub fn set_overlay_status(&mut self, status: String) {
@@ -144,6 +164,7 @@ impl State {
         let mut close = false;
         let mut tabs_changed = false;
         let mut global_intent = None;
+        let mut theme_intent = None;
         let root_ctx = ctx.clone();
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title("Katran Settings").with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
    let updates_ctx=ctx.clone();
@@ -153,15 +174,19 @@ impl State {
    if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx)&& super::shortcuts_ui::apply(api,editor,intent){self.editor=None;}
    let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
    if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape; }
-   egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_gray(69))).show(ctx,|ui| {
-    egui::Panel::left("settings-sidebar").exact_size(215.0).resizable(false).frame(egui::Frame::new().fill(Color32::from_gray(65)).inner_margin(16)).show(ui,|ui|{
+   let surface=super::theme_ui::color(ctx,super::theme_ui::Role::Surface,Color32::from_gray(69));
+   let background=super::theme_ui::color(ctx,super::theme_ui::Role::Background,Color32::from_gray(65));
+   egui::CentralPanel::default().frame(egui::Frame::new().fill(surface)).show(ctx,|ui| {
+    egui::Panel::left("settings-sidebar").exact_size(215.0).resizable(false).frame(egui::Frame::new().fill(background).inner_margin(16)).show(ui,|ui|{
+     super::theme_ui::decorate(ui,ui.max_rect());
      ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;self.global_editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;self.global_editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL);});
     });
-    egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_gray(69)).inner_margin(24)).show(ui,|ui|{
+    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
+     super::theme_ui::decorate(ui,ui.max_rect());
      egui::ScrollArea::vertical().show(ui,|ui|{
       if self.section==0 {
        ui.heading("Основные");ui.add_space(16.0);
@@ -239,6 +264,32 @@ impl State {
        }
       } else if self.section==3 {
        self.updates.show(ui,api,&updates_ctx);
+      } else if self.section==4 {
+       ui.heading("Темы");ui.add_space(8.0);
+       ui.label("Тема применяется сразу. Стандартный вид остаётся доступен.");ui.add_space(16.0);
+       let response=call(api,Command::Themes);
+       if response["ok"]==true {
+        if let Ok(mut theme)=serde_json::from_value::<katran::theme::ThemePreferences>(response["result"]["current"].clone()) {
+         SettingsSection::show(ui,|ui|{
+          SettingsRow::show(ui,"Стандартная","Привычный внешний вид Katran.",|ui|{
+           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::Standard,"Выбрать").changed(){theme_intent=Some(theme.clone());}
+          });
+          SettingsRow::show(ui,"Синяя","Экспериментальная тема с голубыми акцентами.",|ui|{
+           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::BlueExperimental,"Выбрать").changed(){theme_intent=Some(theme.clone());}
+          });
+          if theme.preset==katran::theme::Preset::BlueExperimental {
+           SettingsRow::show(ui,"Цвет акцента","Выберите свой цвет или верните исходный.",|ui|{
+            let mut accent=theme.accent.unwrap_or([75,139,210]);
+            if ui.color_edit_button_srgb(&mut accent).changed(){theme.accent=Some(accent);theme_intent=Some(theme.clone());}
+            if ui.button("Сбросить цвет").clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
+           });
+           SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
+            if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
+           });
+          }
+         });
+        } else {ui.label("Не удалось прочитать текущую тему.");}
+       } else {ui.label(response["error"]["message"].as_str().unwrap_or("Не удалось загрузить темы"));}
       } else {
        ui.heading("Горячие клавиши");ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text("Поиск команды…").desired_width(ui.available_width())).changed(){self.editor=None;}
@@ -267,6 +318,13 @@ impl State {
     });
    });
   });
+        if let Some(theme) = theme_intent {
+            self.error = match apply_theme(api, &mut self.draft, theme) {
+                Ok(()) => String::new(),
+                Err(error) => error,
+            };
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
         if let Some(intent) = global_intent
             && let Some(editor) = self.global_editor.as_mut()
             && apply_global_hotkey(api, editor, intent, &mut self.draft)
@@ -324,6 +382,48 @@ mod tests {
         assert_eq!(draft.sort, current.sort);
         assert_eq!(draft.gallery_columns, 7);
         assert!(draft.capture_on_start);
+    }
+
+    #[test]
+    fn theme_applies_immediately_without_saving_unrelated_draft_fields() {
+        use katran::theme::{Preset, ThemePreferences};
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 1_000_000).unwrap();
+        let saved: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        let mut draft = Some(Settings {
+            gallery_columns: 7,
+            ..saved.clone()
+        });
+        let blue = ThemePreferences {
+            preset: Preset::BlueExperimental,
+            accent: Some([40, 100, 220]),
+            decoration: false,
+        };
+        apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
+        let current: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        assert_eq!(current.theme, blue);
+        assert_eq!(current.gallery_columns, saved.gallery_columns);
+        assert_eq!(draft.as_ref().unwrap().gallery_columns, 7);
+        assert_eq!(draft.as_ref().unwrap().theme, blue);
+        let mut stale = Settings {
+            gallery_columns: 9,
+            ..saved
+        };
+        merge_tab_settings(&mut stale, &current);
+        assert_eq!(stale.theme, blue);
+        assert_eq!(stale.gallery_columns, 9);
+        call(&mut api, Command::SetSettings { settings: stale });
+        assert_eq!(
+            call(&mut api, Command::Themes)["result"]["current"]["preset"],
+            "blue_experimental"
+        );
+        apply_theme(&mut api, &mut draft, ThemePreferences::default()).unwrap();
+        assert_eq!(
+            call(&mut api, Command::Themes)["result"]["current"]["preset"],
+            "standard"
+        );
     }
 
     #[test]
@@ -440,7 +540,10 @@ mod tests {
             assert!(ui.ctx().input(|i| i.events.is_empty()));
         });
         output.textures_delta.clear();
-        let mut state = State {overlay_retry:true,..Default::default()};
+        let mut state = State {
+            overlay_retry: true,
+            ..Default::default()
+        };
         assert!(state.take_overlay_retry());
         assert!(!state.take_overlay_retry());
     }

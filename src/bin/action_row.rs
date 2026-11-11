@@ -11,8 +11,15 @@ pub(super) struct ActionPresentation<'a> {
 pub(super) struct ActionRow<'a>(ActionPresentation<'a>, Option<egui::TextureId>);
 pub(super) fn popup_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::popup(&ctx.style_of(egui::Theme::Dark))
-        .fill(Color32::from_rgb(69, 69, 74))
-        .stroke(egui::Stroke::new(1.0, Color32::from_gray(118)))
+        .fill(crate::theme_ui::color(
+            ctx,
+            crate::theme_ui::Role::Surface,
+            Color32::from_rgb(69, 69, 74),
+        ))
+        .stroke(egui::Stroke::new(
+            1.0,
+            crate::theme_ui::color(ctx, crate::theme_ui::Role::Border, Color32::from_gray(118)),
+        ))
         .corner_radius(12)
         .inner_margin(12)
 }
@@ -74,8 +81,15 @@ impl<'a> ActionRow<'a> {
         );
         let regions = Self::regions(row, caps.size.x);
         if selected || response.hovered() {
-            ui.painter()
-                .rect_filled(row, 7.0, Color32::from_rgb(100, 100, 108));
+            ui.painter().rect_filled(
+                row,
+                7.0,
+                crate::theme_ui::color(
+                    ui.ctx(),
+                    crate::theme_ui::Role::Selection,
+                    Color32::from_rgb(100, 100, 108),
+                ),
+            );
         }
         if let Some(texture) = self.1 {
             egui::Image::new((texture, egui::vec2(16.0, 16.0))).paint_at(ui, regions.icon);

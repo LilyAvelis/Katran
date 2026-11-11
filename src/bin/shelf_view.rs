@@ -72,7 +72,7 @@ impl Shelf {
     ) {
         self.images.begin_frame();
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(12))
+            .frame(egui::Frame::new().fill(theme_ui::color(ctx,theme_ui::Role::Background,Color32::TRANSPARENT)).inner_margin(12))
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
@@ -262,13 +262,13 @@ impl Shelf {
                                     ui.painter().rect_filled(
                                         rect,
                                         8.0,
-                                        Color32::from_gray(if selected { 74 } else { 46 }),
+                                        theme_ui::color(ctx,if selected {theme_ui::Role::Selection}else{theme_ui::Role::Surface},Color32::from_gray(if selected {74}else{46})),
                                     );
                                     if cursor {
                                         ui.painter().rect_stroke(
                                             rect,
                                             8.0,
-                                            egui::Stroke::new(1.5, Color32::from_gray(180)),
+                                            egui::Stroke::new(1.5, theme_ui::color(ctx,theme_ui::Role::Accent,Color32::from_gray(180))),
                                             egui::StrokeKind::Inside,
                                         );
                                     }
@@ -293,7 +293,7 @@ impl Shelf {
                                         ui.painter_at(zones.origin).rect_filled(
                                             zones.origin,
                                             4.0,
-                                            Color32::from_gray(55),
+                                            theme_ui::color(ctx,theme_ui::Role::Raised,Color32::from_gray(55)),
                                         );
                                         gallery_card::text(
                                             ui,

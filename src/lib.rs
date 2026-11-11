@@ -81,6 +81,7 @@ mod pod_metadata;
 pub mod overlay;
 pub mod overlay_windows;
 pub mod tray;
+pub mod theme;
 mod overlay_service;
 pub mod emoji_render;
 
@@ -410,6 +411,8 @@ impl Service {
             ));
         }
         match command {
+            Command::Themes => Ok(theme::catalogue(&self.settings.theme)),
+            Command::SetTheme {theme} => {let mut settings=self.settings.clone();settings.theme=theme;self.dispatch(Command::SetSettings{settings})?;Ok(theme::catalogue(&self.settings.theme))},
             Command::WindowVisibility => Ok(serde_json::json!({"visible":self.window_visible})),
             Command::SetWindowVisibility { visible } => {self.window_visible=visible;if !visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":visible}))},
             Command::ToggleWindowVisibility => {self.window_visible = !self.window_visible;if !self.window_visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":self.window_visible}))},
