@@ -10,6 +10,7 @@ mod glass_lab;
 mod images;
 mod info_bar;
 mod input_log;
+mod launch_args;
 mod markdown_ui;
 mod native_drag_ui;
 mod navigation_input;
@@ -158,6 +159,7 @@ struct Shelf {
     instance: Option<single_instance::Primary>,
     activation_rx: Option<mpsc::Receiver<()>>,
     activation_pending: bool,
+    launch_root: Option<PathBuf>,
     native_drag: Option<String>,
     navigation_input: navigation_input::State,
     overlay_ui: overlay_ui::State,
@@ -232,7 +234,76 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
         SelectionMode::Replace
     }
 }
+
+#[cfg(test)]
+mod folder_launch_tests {
+    use super::*;
+    #[test]
+    fn external_folder_request_uses_existing_dispatcher_and_preserves_profile() {
+        let profile = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let folder = external.path().join("папка & выбранная");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("untouched.txt"), b"synthetic").unwrap();
+        let mut app = crate::tests::test_shelf(profile.path());
+        app.launch_root = Some(profile.path().to_owned());
+        app.actions = true;
+        katran::folder_launch::enqueue(profile.path(), &folder).unwrap();
+        app.consume_launch_folders();
+        assert_eq!(app.state["tab"], "folder");
+        assert_eq!(
+            PathBuf::from(app.state["folder_path"].as_str().unwrap()),
+            folder.canonicalize().unwrap()
+        );
+        assert!(!app.actions);
+        assert!(
+            katran::folder_launch::take(profile.path())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            std::fs::read(folder.join("untouched.txt")).unwrap(),
+            b"synthetic"
+        );
+        let vanished = external.path().join("vanished");
+        std::fs::create_dir(&vanished).unwrap();
+        katran::folder_launch::enqueue(profile.path(), &vanished).unwrap();
+        std::fs::remove_dir(&vanished).unwrap();
+        app.consume_launch_folders();
+        assert_eq!(
+            PathBuf::from(app.state["folder_path"].as_str().unwrap()),
+            folder.canonicalize().unwrap()
+        );
+        assert!(!app.message.is_empty());
+        assert!(profile.path().join("index.sqlite3").exists());
+        assert!(!folder.join("index.sqlite3").exists());
+    }
+}
 impl Shelf {
+    fn consume_launch_folders(&mut self) {
+        let Some(root) = self.launch_root.clone() else {
+            return;
+        };
+        match katran::folder_launch::take(&root) {
+            Ok(requests) => {
+                for request in requests {
+                    match request {
+                        Ok(path) => {
+                            let result = self.call(Command::ChooseFolder { path });
+                            if !result.is_null() {
+                                self.state = result;
+                                self.actions = false;
+                                self.workspace.open = false;
+                                self.refresh();
+                            }
+                        }
+                        Err(error) => self.message = error,
+                    }
+                }
+            }
+            Err(error) => self.message = format!("Не удалось принять папку: {error}"),
+        }
+    }
     /// Shared input ownership includes overlays before any early command handler.
     fn modal_owns_input(&self) -> bool {
         self.sorting_input.is_open()
@@ -968,6 +1039,7 @@ impl eframe::App for Shelf {
         }
         if self.activation_pending {
             if self.api.is_some() {
+                self.consume_launch_folders();
                 let reply = self.call(Command::ActivateWindow);
                 if reply["activation_requested"] == true {
                     self.call(Command::SetWindowVisibility { visible: true });
@@ -1050,15 +1122,26 @@ fn main() -> eframe::Result {
     app_identity::initialize();
     let optical_demo =
         std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--optical-demo"));
+    let launch = if optical_demo {
+        launch_args::Arguments::default()
+    } else {
+        launch_args::parse(std::env::args_os().skip(1))
+            .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?
+    };
     let root = if optical_demo {
         PathBuf::from("runtime/optical-demo-data")
     } else {
-        std::env::args_os()
-            .nth(1)
-            .map(PathBuf::from)
+        launch
+            .profile
             .unwrap_or_else(|| PathBuf::from("katran-data"))
     };
     let new_optical_demo = optical_demo && !root.join("settings.json").exists();
+    if let Some(folder) = &launch.folder {
+        std::fs::create_dir_all(&root)
+            .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+        katran::folder_launch::enqueue(&root, folder)
+            .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+    }
     let Some(instance) = single_instance::acquire(&root)
         .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?
     else {
@@ -1116,7 +1199,8 @@ fn main() -> eframe::Result {
         clipboard_events: Default::default(),
         instance: Some(instance),
         activation_rx: None,
-        activation_pending: false,
+        activation_pending: launch.folder.is_some(),
+        launch_root: Some(root.clone()),
         native_drag: None,
         navigation_input: navigation_input::State::default(),
         overlay_ui: overlay_ui::State::default(),
@@ -1309,6 +1393,7 @@ mod tests {
             instance: None,
             activation_rx: None,
             activation_pending: false,
+            launch_root: None,
             native_drag: None,
             navigation_input: navigation_input::State::default(),
             overlay_ui: overlay_ui::State::default(),

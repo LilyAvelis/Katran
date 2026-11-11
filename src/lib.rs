@@ -22,6 +22,7 @@ pub mod file_visual;
 mod folder_commit;
 mod folder_delete;
 mod folder_import;
+pub mod folder_launch;
 pub mod folder_transfer;
 pub mod folder_watch;
 pub mod interaction;

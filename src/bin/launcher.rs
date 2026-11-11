@@ -6,6 +6,7 @@ use std::{
     process::Command,
 };
 mod app_registration;
+mod launch_args;
 mod launcher_layout;
 
 fn target(runtime: &Path) -> io::Result<PathBuf> {
@@ -37,15 +38,18 @@ fn run() -> io::Result<()> {
         std::fs::create_dir_all(&programs)?;
         return app_registration::write_link(&root, &programs.join("Katran.lnk"));
     }
+    let args = launch_args::parse(std::env::args_os().skip(1))?;
     let data = launcher_layout::data(
         &root,
-        std::env::args_os().nth(1).map(PathBuf::from),
+        args.profile,
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
     )?;
-    Command::new(target(&runtime)?)
-        .arg(data)
-        .current_dir(root)
-        .spawn()?;
+    let mut command = Command::new(target(&runtime)?);
+    command.arg(data);
+    if let Some(folder) = args.folder {
+        command.arg("--open-folder").arg(folder);
+    }
+    command.current_dir(root).spawn()?;
     Ok(())
 }
 fn main() {

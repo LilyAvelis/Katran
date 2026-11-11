@@ -81,7 +81,7 @@ impl Shelf {
         self.workspace.focus = true;
         self.workspace_reload(ctx);
     }
-    fn workspace_close(&mut self) {
+    pub(super) fn workspace_close(&mut self) {
         self.workspace_cancel();
         self.workspace.open = false;
     }
