@@ -10,7 +10,7 @@ pub fn icon(id: &str) -> Lucide {
         "images" => Lucide::Image,
         "screenshots" => Lucide::Camera,
         "downloads" => Lucide::Download,
-        "tab_toggle" => Lucide::ArrowLeftRight,
+        "tab_toggle" | "tab_previous" | "tab_next" => Lucide::ArrowLeftRight,
         "cleanup" => Lucide::Trash2,
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,
         "copy" => Lucide::Copy,

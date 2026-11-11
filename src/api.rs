@@ -166,6 +166,9 @@ pub enum Command {
     SelectTabPosition {
         position: u8,
     },
+    NavigateTab {
+        delta: i8,
+    },
     MoveTab {
         tab: crate::interaction::ShelfTab,
         index: usize,

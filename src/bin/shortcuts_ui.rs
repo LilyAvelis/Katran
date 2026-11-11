@@ -235,7 +235,13 @@ fn chord(key: Key, m: egui::Modifiers) -> String {
     if m.mac_cmd {
         p.push("Super");
     }
-    p.push(key.name());
+    p.push(match key {
+        Key::ArrowLeft => "ArrowLeft",
+        Key::ArrowRight => "ArrowRight",
+        Key::ArrowUp => "ArrowUp",
+        Key::ArrowDown => "ArrowDown",
+        _ => key.name(),
+    });
     p.join(" ")
 }
 pub fn take_assignment_key(ctx: &egui::Context) -> bool {

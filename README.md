@@ -223,3 +223,5 @@ retention is still future work. Use one window/service writer per data directory
 
 Afio UI/components and clipboard conventions are reused under the retained
 [MIT notice](AFIO-LICENSE), without a runtime dependency on Afio.
+
+Local 2.5 navigation: Ctrl+Shift+Left/Right moves between visible categories in saved order and exits pinned, including at the ends. It never enters Folder; use Tab for Folder. Tab is routed before widget focus traversal when returning from another application; search editing and dialogs retain their own keyboard focus.

@@ -400,6 +400,22 @@ pub const DEFS: &[Definition] = &[
         in_palette: false,
     },
     Definition {
+        id: "tab_previous",
+        label: "Предыдущая категория",
+        default_binding: "Ctrl Shift ArrowLeft",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
+        id: "tab_next",
+        label: "Следующая категория",
+        default_binding: "Ctrl Shift ArrowRight",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
         id: "tab_toggle",
         label: "All / предыдущий таб",
         default_binding: "Tab",
@@ -529,6 +545,8 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "density_more" => Dispatch::Command(Command::AdjustDensity { delta: 1 }),
         "density_less" => Dispatch::Command(Command::AdjustDensity { delta: -1 }),
         "tab_toggle" => Dispatch::Command(Command::ToggleTab),
+        "tab_previous" => Dispatch::Command(Command::NavigateTab { delta: -1 }),
+        "tab_next" => Dispatch::Command(Command::NavigateTab { delta: 1 }),
         "all" => Dispatch::Command(Command::SetTab {
             tab: crate::interaction::ShelfTab::All,
         }),

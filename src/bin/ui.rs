@@ -12,6 +12,7 @@ mod input_log;
 mod info_bar;
 mod markdown_ui;
 mod native_drag_ui;
+mod navigation_input;
 mod open_apps_ui;
 mod palette;
 mod pinned_ui;
@@ -146,6 +147,7 @@ struct Shelf {
     activation_rx: Option<mpsc::Receiver<()>>,
     activation_pending: bool,
     native_drag: Option<String>,
+    navigation_input: navigation_input::State,
     native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
     pending_delete: Vec<i64>,
@@ -282,7 +284,7 @@ impl Shelf {
                         s.id.starts_with("tab_position_")
                             || matches!(
                                 s.id.as_str(),
-                                "all" | "images" | "screenshots" | "downloads" | "text" | "links" | "tables"
+                                "all" | "images" | "screenshots" | "downloads" | "text" | "links" | "tables" | "tab_previous" | "tab_next"
                             )
                     })
                     .cloned()
@@ -787,6 +789,12 @@ impl eframe::App for Shelf {
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
         self.perform_native_drag(ctx, input);
+        let modal = self.shortcut_editor.is_some() || self.actions || self.open_apps.open
+            || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save
+            || !self.pending_delete.is_empty() || self.state["settings_open"] == true;
+        if self.navigation_input.intercept(ctx, input, modal) {
+            self.pending_tab_action = Some("tab_toggle".into());
+        }
     }
     fn ui(&mut self, root: &mut egui::Ui, _: &mut eframe::Frame) {
         self.render(root);
@@ -821,6 +829,7 @@ fn main() -> eframe::Result {
         activation_rx: None,
         activation_pending: false,
         native_drag: None,
+            navigation_input: navigation_input::State::default(),
         native_window: 0,
         logger,
         pending_delete: Vec::new(),
@@ -988,6 +997,7 @@ mod tests {
             activation_rx: None,
             activation_pending: false,
             native_drag: None,
+            navigation_input: navigation_input::State::default(),
             native_window: 77,
             logger: None,
             pending_delete: Vec::new(),
@@ -1541,6 +1551,55 @@ mod tests {
         assert_eq!(std::fs::read(&outputs[0]).unwrap(), b"synthetic bytes");
         assert!(app.message.contains("перемещено"));
         assert!(app.call(Command::Get { id }).is_null());
+    }
+    #[test]
+    fn tab_after_window_refocus_ignores_stale_widget_focus() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.state = app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        fn dispatch(app: &mut Shelf, ctx: &egui::Context, mut input: egui::RawInput) {
+            eframe::App::raw_input_hook(app, ctx, &mut input);
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+        }
+        dispatch(&mut app, &ctx, egui::RawInput::default());
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("some-button")));
+        dispatch(&mut app, &ctx, egui::RawInput { focused:false, events:vec![egui::Event::WindowFocused(false)], ..Default::default() });
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        dispatch(&mut app, &ctx, egui::RawInput { focused:true, events:vec![egui::Event::WindowFocused(true)], ..Default::default() });
+        let input = egui::RawInput { events:vec![egui::Event::Key { key:egui::Key::Tab, physical_key:None, pressed:true, repeat:false, modifiers:egui::Modifiers::NONE }], ..Default::default() };
+        dispatch(&mut app, &ctx, input);
+        assert_eq!(app.call(Command::Interaction)["tab"], "folder");
+    }
+    #[test]
+    fn refocus_preserves_deliberate_search_and_modal_tab_input() {
+        let root = tempfile::tempdir().unwrap(); let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        let mut first=egui::RawInput::default(); eframe::App::raw_input_hook(&mut app,&ctx,&mut first);
+        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
+        let mut loss=egui::RawInput{focused:false,..Default::default()}; eframe::App::raw_input_hook(&mut app,&ctx,&mut loss);
+        ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("shelf-search")));
+        let mut gain=egui::RawInput{focused:true,..Default::default()}; eframe::App::raw_input_hook(&mut app,&ctx,&mut gain);
+        assert!(ctx.memory(|m|m.has_focus(egui::Id::new("shelf-search"))));
+        let tab=||egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}],..Default::default()};
+        let mut local=tab(); eframe::App::raw_input_hook(&mut app,&ctx,&mut local); assert_eq!(local.events.len(),1); assert!(app.pending_tab_action.is_none());
+        ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("shelf-search"))); app.actions=true;
+        let mut modal=tab(); eframe::App::raw_input_hook(&mut app,&ctx,&mut modal); assert_eq!(modal.events.len(),1); assert!(app.pending_tab_action.is_none());
+    }
+    #[test]
+    fn category_arrows_leave_pinned_even_at_boundary() {
+        let root=tempfile::tempdir().unwrap(); let mut app=test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.state=app.call(Command::SelectTabPosition{position:1});
+        assert_eq!(app.state["pinned_only"],true);
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        frame(&mut app,&ctx,egui::Key::ArrowRight,egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"],"screenshots");assert_eq!(app.state["pinned_only"],false);
+        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
+        app.state=app.call(Command::SelectTabPosition{position:1});
+        frame(&mut app,&ctx,egui::Key::ArrowLeft,egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"],"images");assert_eq!(app.state["pinned_only"],false);
     }
     #[test]
     fn repeated_tab_and_positional_shortcuts_follow_api_order() {

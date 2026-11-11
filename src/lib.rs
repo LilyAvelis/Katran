@@ -501,6 +501,7 @@ impl Service {
                 self.interaction.select_position(tab);
                 Ok(serde_json::json!(self.interaction))
             },
+            Command::NavigateTab { delta } => self.navigate_tab(delta),
             Command::MoveTab { tab,index } => {
                 let mut settings=self.settings.clone();
                 let visible=settings.visible_tabs();

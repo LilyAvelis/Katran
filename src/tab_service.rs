@@ -15,6 +15,21 @@ pub fn label(tab: ShelfTab) -> &'static str {
 }
 
 impl Service {
+    pub(crate) fn navigate_tab(&mut self, delta: i8) -> Result<Value> {
+        if !matches!(delta, -1 | 1) {
+            return Err(ApiError::new("invalid_tab_direction", "Tab direction must be -1 or 1"));
+        }
+        let visible = self.settings.visible_tabs();
+        if self.interaction.tab == ShelfTab::All || visible.is_empty() {
+            return Ok(json!(self.interaction));
+        }
+        if let Some(index) = visible.iter().position(|tab| *tab == self.interaction.tab) {
+            let target = (index as isize + isize::from(delta)).clamp(0, visible.len() as isize - 1) as usize;
+            self.interaction.set_tab(visible[target]);
+        }
+        Ok(json!(self.interaction))
+    }
+
     pub(crate) fn action_available(&self, id: &str) -> bool {
         match id {
             "add_to_katran" => self.interaction.tab==ShelfTab::All,

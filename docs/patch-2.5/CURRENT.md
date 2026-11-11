@@ -67,3 +67,8 @@ Final packaging checks source hashes, commit, toolchain, lockfile, features/prof
 5. Afio application integration, recursive folder browsing, content editors and cloud/account features stay out of scope.
 
 Next: run the latest isolated preview, collect short owner feedback, then continue the existing sessions. Do not automatically install, publish, push or reset the branch.
+
+## Owner feedback: refocus and category arrows
+Tab now routes in raw_input_hook before egui begin_pass can queue widget focus traversal. Deliberate search focus and modal Tab navigation remain local; unrelated stale focus is surrendered on window return. Afiocira photo-gui/main.rs consume_plain_tab confirms the same queued-egui-traversal cause.
+NavigateTab API and tab_previous/tab_next actions implement Ctrl+Shift+ArrowLeft/ArrowRight: visible saved category order, clamped boundaries, no Folder entry, exit pinned/tag view even at a boundary. Folder is unaffected. Digits and tab clicks retain repeated-selection pinned behavior; arrows do not enter pinned. GUI chord encoding explicitly maps egui arrow names to the API canonical Arrow names.
+Verification: category_navigation, shortcuts_contract, palette_tab_visibility passed; full UI suite 83/83 passed, including focus loss/return, deliberate search/modal ownership, pinned boundaries and existing double-digit behavior. Owner performs native Windows acceptance. Folder-return product decision and redesign remain deferred.
