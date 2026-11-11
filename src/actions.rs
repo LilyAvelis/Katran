@@ -13,12 +13,54 @@ pub struct Definition {
     pub in_palette: bool,
 }
 pub const DEFS: &[Definition] = &[
-    Definition {id:"quit",label:"Выйти из Katran",default_binding:"",rebindable:true,group:"Приложение",in_palette:true},
-    Definition {id:"paste_previous",label:"Вставить в предыдущее окно",default_binding:"Alt Enter",rebindable:true,group:"Передача",in_palette:true},
-    Definition {id:"pods",label:"Таб: Pods",default_binding:"",rebindable:true,group:"Вид",in_palette:false},
-    Definition {id:"toggle_pods",label:"Включить / отключить Pods",default_binding:"",rebindable:true,group:"Вкладки",in_palette:false},
-    Definition {id:"transfer_selection",label:"Перенести между полкой и Folder",default_binding:"Shift Tab",rebindable:true,group:"Передача",in_palette:true},
-    Definition {id:"add_to_katran",label:"Добавить в Катран",default_binding:"Ctrl Shift C",rebindable:true,group:"Передача",in_palette:true},
+    Definition {
+        id: "quit",
+        label: "Выйти из Katran",
+        default_binding: "",
+        rebindable: true,
+        group: "Приложение",
+        in_palette: true,
+    },
+    Definition {
+        id: "paste_previous",
+        label: "Вставить в предыдущее окно",
+        default_binding: "Enter",
+        rebindable: true,
+        group: "Передача",
+        in_palette: true,
+    },
+    Definition {
+        id: "pods",
+        label: "Таб: Pods",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
+        id: "toggle_pods",
+        label: "Включить / отключить Pods",
+        default_binding: "",
+        rebindable: true,
+        group: "Вкладки",
+        in_palette: false,
+    },
+    Definition {
+        id: "transfer_selection",
+        label: "Перенести между полкой и Folder",
+        default_binding: "Shift Tab",
+        rebindable: true,
+        group: "Передача",
+        in_palette: true,
+    },
+    Definition {
+        id: "add_to_katran",
+        label: "Добавить в Катран",
+        default_binding: "Ctrl Shift C",
+        rebindable: true,
+        group: "Передача",
+        in_palette: true,
+    },
     Definition {
         id: "tables",
         label: "Таб: Tables",
@@ -278,7 +320,7 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "open",
         label: "Открыть приложением по умолчанию",
-        default_binding: "Enter",
+        default_binding: "Alt Enter",
         rebindable: true,
         group: "Файл",
         in_palette: true,
@@ -520,7 +562,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
     }
     Some(match id {
         "transfer_selection" => Dispatch::Command(Command::TransferSelection),
-        "add_to_katran" => Dispatch::Command(Command::AddFolderFiles {ids:selected()}),
+        "add_to_katran" => Dispatch::Command(Command::AddFolderFiles { ids: selected() }),
         "tables" => Dispatch::Command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Tables,
         }),
@@ -549,8 +591,12 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "density_more" => Dispatch::Command(Command::AdjustDensity { delta: 1 }),
         "density_less" => Dispatch::Command(Command::AdjustDensity { delta: -1 }),
         "tab_toggle" => Dispatch::Command(Command::ToggleTab),
-        "pods" => Dispatch::Command(Command::SetTab { tab: crate::interaction::ShelfTab::Pods }),
-        "toggle_pods" => Dispatch::Command(Command::ToggleTabEnabled { tab: crate::interaction::ShelfTab::Pods }),
+        "pods" => Dispatch::Command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Pods,
+        }),
+        "toggle_pods" => Dispatch::Command(Command::ToggleTabEnabled {
+            tab: crate::interaction::ShelfTab::Pods,
+        }),
         "paste_previous" => Dispatch::Intent(serde_json::json!({"paste_previous":true})),
         "quit" => Dispatch::Intent(serde_json::json!({"quit":true})),
         "tab_previous" => Dispatch::Command(Command::NavigateTab { delta: -1 }),

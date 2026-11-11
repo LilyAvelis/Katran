@@ -25,9 +25,19 @@ impl ShortcutError {
         }
     }
 }
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Shortcuts {
+    #[serde(default)]
+    version: u32,
     overrides: BTreeMap<String, Option<String>>,
+}
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            overrides: BTreeMap::new(),
+        }
+    }
 }
 use crate::actions::DEFS as DEFAULTS;
 /// Canonical, UI-independent representation; rejects modifiers without a main key.
@@ -152,7 +162,38 @@ impl Shortcuts {
                 *binding = normalize(binding)?;
             }
         }
+        if value.version == 0 {
+            value.migrate_enter_bindings();
+            value.version = 1;
+        }
         Ok(value)
+    }
+    fn migrate_enter_bindings(&mut self) {
+        if self
+            .overrides
+            .get("paste_previous")
+            .and_then(Option::as_deref)
+            .is_some_and(|binding| matches!(binding, "Comma" | "Alt Enter"))
+        {
+            self.overrides.remove("paste_previous");
+        }
+        if self.overrides.get("open").and_then(Option::as_deref) == Some("Enter") {
+            self.overrides.remove("open");
+        }
+        // Explicit assignments, including earlier replacements, belong to their
+        // user. Never introduce a conflicting new default over those bindings.
+        for (id, chord) in [("paste_previous", "Enter"), ("open", "Alt Enter")] {
+            if !self.overrides.contains_key(id)
+                && self.overrides.iter().any(|(other, value)| {
+                    other != id
+                        && value
+                            .as_deref()
+                            .is_some_and(|binding| binding.split(" / ").any(|part| part == chord))
+                })
+            {
+                self.overrides.insert(id.into(), None);
+            }
+        }
     }
     pub fn binding(&self, id: &str) -> String {
         self.overrides
