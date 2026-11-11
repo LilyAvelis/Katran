@@ -250,6 +250,28 @@ impl Shelf {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
+            if let Some(font_id) = settings["emoji_font"].as_str()
+                && self.pods_ui.font_selection() != Some(font_id)
+            {
+                let font_id = font_id.to_owned();
+                let resolved = self.call(Command::ResolveEmojiFont {
+                    id: font_id.clone(),
+                });
+                let available = resolved["available"] == true;
+                let path = if available {
+                    resolved["path"].as_str().map(PathBuf::from)
+                } else {
+                    None
+                };
+                let error = (!available).then(|| {
+                    let label = resolved["label"].as_str().unwrap_or(&font_id);
+                    format!("Шрифт эмодзи {label} недоступен; используется системный.")
+                });
+                if let Some(error) = &error {
+                    self.message = error.clone();
+                }
+                self.pods_ui.configure_font(font_id, path, error);
+            }
             if let Ok(theme) =
                 serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone())
             {

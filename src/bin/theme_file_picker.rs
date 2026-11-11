@@ -13,18 +13,18 @@ fn start_worker(
         .spawn(move || {
             let _ = sender.send(worker());
         })
-        .map_err(|error| format!("Не удалось открыть выбор изображения: {error}"))?;
+        .map_err(|error| format!("Не удалось открыть выбор файла: {error}"))?;
     Ok(receiver)
 }
 
 /// Opens only on a user action. No file is read or copied by this adapter.
 #[cfg(windows)]
 pub(super) fn start_pick_image() -> Result<Receiver<PickResult>, String> {
-    start_worker(pick_on_sta)
+    start_worker(|| pick_on_sta(false))
 }
 
 #[cfg(windows)]
-fn pick_on_sta() -> Result<Option<PathBuf>, String> {
+fn pick_on_sta(font: bool) -> Result<Option<PathBuf>, String> {
     use std::os::windows::ffi::OsStringExt;
     use windows::{
         Win32::{
@@ -55,14 +55,21 @@ fn pick_on_sta() -> Result<Option<PathBuf>, String> {
         let dialog: IFileOpenDialog =
             unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
                 .map_err(|error| format!("Не удалось создать диалог: {error}"))?;
-        let filters = [COMDLG_FILTERSPEC {
-            pszName: w!("Изображения (PNG, JPG, WEBP, GIF, BMP)"),
-            pszSpec: w!("*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp"),
-        }];
+        let filters = if font {
+            [COMDLG_FILTERSPEC {
+                pszName: w!("Шрифты (TTF, TTC, OTF)"),
+                pszSpec: w!("*.ttf;*.ttc;*.otf"),
+            }]
+        } else {
+            [COMDLG_FILTERSPEC {
+                pszName: w!("Изображения (PNG, JPG, WEBP, GIF, BMP)"),
+                pszSpec: w!("*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp"),
+            }]
+        };
         unsafe {
             dialog
                 .SetFileTypes(&filters)
-                .map_err(|error| format!("Не удалось задать фильтр изображений: {error}"))?;
+                .map_err(|error| format!("Не удалось задать фильтр файлов: {error}"))?;
             let options = dialog
                 .GetOptions()
                 .map_err(|error| format!("Не удалось настроить диалог: {error}"))?;
@@ -74,22 +81,31 @@ fn pick_on_sta() -> Result<Option<PathBuf>, String> {
                 if error.code().0 as u32 == 0x800704c7 {
                     return Ok(None);
                 }
-                return Err(format!("Не удалось выбрать изображение: {error}"));
+                return Err(format!("Не удалось выбрать файл: {error}"));
             }
             let item = dialog
                 .GetResult()
                 .map_err(|error| format!("Не удалось получить файл: {error}"))?;
             let name = item
                 .GetDisplayName(SIGDN_FILESYSPATH)
-                .map_err(|error| format!("Не удалось получить путь изображения: {error}"))?;
+                .map_err(|error| format!("Не удалось получить путь файла: {error}"))?;
             if name.0.is_null() {
-                return Err("Не удалось получить путь изображения".into());
+                return Err("Не удалось получить путь файла".into());
             }
             let path = PathBuf::from(std::ffi::OsString::from_wide(name.as_wide()));
             CoTaskMemFree(Some(name.0.cast()));
             Ok(Some(path))
         }
     })()
+}
+
+#[cfg(windows)]
+pub(super) fn start_pick_font() -> Result<Receiver<PickResult>, String> {
+    start_worker(|| pick_on_sta(true))
+}
+#[cfg(not(windows))]
+pub(super) fn start_pick_font() -> Result<Receiver<PickResult>, String> {
+    Err("Выбор шрифта доступен только в Windows".into())
 }
 
 #[cfg(not(windows))]

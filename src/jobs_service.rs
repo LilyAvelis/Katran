@@ -33,6 +33,7 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
+    EmojiFont(emoji_fonts::PreparedFont),
     ThemeBackground {
         prepared: theme_backgrounds::PreparedBackground,
         event: Option<Event>,
@@ -205,7 +206,7 @@ impl Service {
     pub(crate) fn begin_job(&mut self, mut command: Command) -> Result<Value> {
         if let Command::RunAction { id } = &command {
             match actions::resolve(id, &self.interaction, self.capture_enabled) {
-                Some(actions::Dispatch::Command(resolved)) => command = resolved,
+                Some(actions::Dispatch::Command(resolved)) => command = *resolved,
                 Some(actions::Dispatch::Intent(value)) => return self.ready_value_job(value),
                 None => return Err(ApiError::new("unknown_action", "Unknown action")),
             }
@@ -245,6 +246,14 @@ impl Service {
             };
         }
         let id = match command {
+            Command::ImportEmojiFont { path } => {
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = emoji_fonts::prepare(&path)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::EmojiFont(prepared))
+                })?
+            }
             Command::ImportThemeBackground { path } => {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
@@ -830,6 +839,7 @@ impl Service {
                     let result=theme_backgrounds::commit(&self.root,prepared)?;
                     if activate {self.activate_background(result)}else{Ok(result)}
                 },
+                PreparedWork::EmojiFont(font)=> {self.jobs.authorize_claimed_effect(ready)?; emoji_fonts::commit(&self.root,font)},
                 PreparedWork::Value(value)=>Ok(value),
                 PreparedWork::UpdateChecked(status)=>self.accept_update_check(status),
                 PreparedWork::UpdateReady{..}=>Err(ApiError::new("invalid_job_phase","Update preparation must be authorized before effect")),

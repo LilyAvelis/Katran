@@ -550,13 +550,17 @@ pub const DEFS: &[Definition] = &[
         in_palette: false,
     },
 ];
+// Keep the command payload indirect as preferences grow; intent-only actions stay small.
 pub enum Dispatch {
-    Command(Command),
+    Command(Box<Command>),
     Intent(serde_json::Value),
+}
+fn command(value: Command) -> Dispatch {
+    Dispatch::Command(Box::new(value))
 }
 pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch> {
     if let Some((mode, reverse)) = crate::sorting::action_sort(id) {
-        return Some(Dispatch::Command(Command::SetSort {
+        return Some(command(Command::SetSort {
             mode,
             reverse,
             seed: None,
@@ -574,70 +578,70 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         .and_then(|p| p.parse::<u8>().ok())
         .filter(|p| (1..=9).contains(p))
     {
-        return Some(Dispatch::Command(Command::SelectTabPosition { position }));
+        return Some(command(Command::SelectTabPosition { position }));
     }
     Some(match id {
-        "transfer_selection" => Dispatch::Command(Command::TransferSelection),
-        "add_to_katran" => Dispatch::Command(Command::AddFolderFiles { ids: selected() }),
-        "tables" => Dispatch::Command(Command::SetTab {
+        "transfer_selection" => command(Command::TransferSelection),
+        "add_to_katran" => command(Command::AddFolderFiles { ids: selected() }),
+        "tables" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Tables,
         }),
-        "toggle_tables" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_tables" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Tables,
         }),
-        "links" => Dispatch::Command(Command::SetTab {
+        "links" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Links,
         }),
-        "toggle_links" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_links" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Links,
         }),
-        "text" => Dispatch::Command(Command::SetTab {
+        "text" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Text,
         }),
-        "toggle_text" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_text" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Text,
         }),
-        "copy_text" => Dispatch::Command(Command::CopySelectedText),
-        "quicklook" => Dispatch::Command(Command::PreviewExternal {
+        "copy_text" => command(Command::CopySelectedText),
+        "quicklook" => command(Command::PreviewExternal {
             id: state
                 .cursor
                 .or_else(|| state.selected.first().copied())
                 .unwrap_or(0),
         }),
-        "density_more" => Dispatch::Command(Command::AdjustDensity { delta: 1 }),
-        "density_less" => Dispatch::Command(Command::AdjustDensity { delta: -1 }),
-        "tab_toggle" => Dispatch::Command(Command::ToggleTab),
-        "pods" => Dispatch::Command(Command::SetTab {
+        "density_more" => command(Command::AdjustDensity { delta: 1 }),
+        "density_less" => command(Command::AdjustDensity { delta: -1 }),
+        "tab_toggle" => command(Command::ToggleTab),
+        "pods" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Pods,
         }),
-        "toggle_pods" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_pods" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Pods,
         }),
         "paste_previous" => Dispatch::Intent(serde_json::json!({"paste_previous":true})),
         "quit" => Dispatch::Intent(serde_json::json!({"quit":true})),
-        "tab_previous" => Dispatch::Command(Command::NavigateTab { delta: -1 }),
-        "tab_next" => Dispatch::Command(Command::NavigateTab { delta: 1 }),
-        "all" => Dispatch::Command(Command::SetTab {
+        "tab_previous" => command(Command::NavigateTab { delta: -1 }),
+        "tab_next" => command(Command::NavigateTab { delta: 1 }),
+        "all" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::All,
         }),
-        "images" => Dispatch::Command(Command::SetTab {
+        "images" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Images,
         }),
-        "downloads" => Dispatch::Command(Command::SetTab {
+        "downloads" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Downloads,
         }),
-        "screenshots" => Dispatch::Command(Command::SetTab {
+        "screenshots" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Screenshots,
         }),
-        "preview" => Dispatch::Command(Command::TogglePreview),
-        "cleanup" => Dispatch::Command(Command::MaintainCache),
-        "open_with" => Dispatch::Command(Command::ListOpenApps {
+        "preview" => command(Command::TogglePreview),
+        "cleanup" => command(Command::MaintainCache),
+        "open_with" => command(Command::ListOpenApps {
             id: state
                 .cursor
                 .or_else(|| state.selected.first().copied())
                 .unwrap_or(0),
         }),
-        "open" | "reveal" => Dispatch::Command(Command::OpenFile {
+        "open" | "reveal" => command(Command::OpenFile {
             id: state
                 .cursor
                 .or_else(|| state.selected.first().copied())
@@ -648,33 +652,33 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
                 _ => crate::open_file::Operation::Open,
             },
         }),
-        "tabs_settings" => Dispatch::Command(Command::ShowTabSettings),
-        "toggle_images" => Dispatch::Command(Command::ToggleTabEnabled {
+        "tabs_settings" => command(Command::ShowTabSettings),
+        "toggle_images" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Images,
         }),
-        "toggle_screenshots" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_screenshots" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Screenshots,
         }),
-        "toggle_downloads" => Dispatch::Command(Command::ToggleTabEnabled {
+        "toggle_downloads" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Downloads,
         }),
-        "copy" => Dispatch::Command(Command::CopySelectedObjects),
-        "delete" => Dispatch::Command(Command::DeleteSelection {
+        "copy" => command(Command::CopySelectedObjects),
+        "delete" => command(Command::DeleteSelection {
             ids: selected(),
             confirmed: false,
         }),
         "save" => {
             Dispatch::Intent(serde_json::json!({"intent":"choose_destination","ids":selected()}))
         }
-        "gallery" => Dispatch::Command(Command::SetView {
+        "gallery" => command(Command::SetView {
             view: View::Gallery,
         }),
-        "list" => Dispatch::Command(Command::SetView { view: View::List }),
-        "capture" => Dispatch::Command(Command::SetCaptureEnabled { enabled: !capture }),
-        "refresh" => Dispatch::Command(Command::List { limit: 1000 }),
-        "transfer_copy" => Dispatch::Command(Command::CopySelection),
-        "use_as_background" => Dispatch::Command(Command::UseSelectedImageAsBackground),
-        "settings" => Dispatch::Command(Command::ShowSettings),
+        "list" => command(Command::SetView { view: View::List }),
+        "capture" => command(Command::SetCaptureEnabled { enabled: !capture }),
+        "refresh" => command(Command::List { limit: 1000 }),
+        "transfer_copy" => command(Command::CopySelection),
+        "use_as_background" => command(Command::UseSelectedImageAsBackground),
+        "settings" => command(Command::ShowSettings),
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),
         _ => return None,
     })

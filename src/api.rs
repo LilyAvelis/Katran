@@ -352,6 +352,13 @@ pub enum Command {
         #[serde(default)]
         reset: bool,
     },
+    EmojiFonts,
+    ResolveEmojiFont {
+        id: String,
+    },
+    ImportEmojiFont {
+        path: PathBuf,
+    },
     GetSettings,
     SetSettings {
         settings: settings::Settings,

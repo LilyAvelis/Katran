@@ -11,6 +11,15 @@ const MAX_WIDTH: u32 = 1024;
 const MAX_HEIGHT: u32 = 256;
 
 pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
+    render_with_font(text, size, None)
+}
+
+/// Render with a private local font collection when a file is supplied.
+pub fn render_with_font(
+    text: &str,
+    size: f32,
+    font_file: Option<&std::path::Path>,
+) -> Result<Rendered, String> {
     if text.is_empty()
         || text.encode_utf16().count() > MAX_UNITS
         || text.chars().any(char::is_control)
@@ -24,7 +33,7 @@ pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
     {
         let mut current = size;
         loop {
-            match render_with_flags(text, current) {
+            match render_with_flags(text, current, font_file) {
                 Err(error)
                     if error == "Rendered text exceeds maximum bitmap dimensions"
                         && current > 2.0 =>
@@ -37,8 +46,13 @@ pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
     }
     #[cfg(not(windows))]
     {
-        platform::render(text, size)
+        platform::render(text, size, font_file)
     }
+}
+
+/// Validate a private font and return its first family name.
+pub fn probe_font(path: &std::path::Path) -> Result<String, String> {
+    platform::probe_font(path)
 }
 
 #[cfg(windows)]
@@ -76,7 +90,12 @@ fn render_flag(svg: &str, size: f32) -> Result<Rendered, String> {
     })
 }
 #[cfg(windows)]
-fn render_with_flags(text: &str, size: f32) -> Result<Rendered, String> {
+fn render_with_flags(
+    text: &str,
+    size: f32,
+    font_file: Option<&std::path::Path>,
+) -> Result<Rendered, String> {
+    let mut rendered_text = false;
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut parts = Vec::new();
     let mut run = 0;
@@ -88,7 +107,8 @@ fn render_with_flags(text: &str, size: f32) -> Result<Rendered, String> {
             let key = format!("{:x}-{:x}", a as u32, b as u32);
             if let Some(svg) = flags::flag_svg(&key) {
                 if run < start {
-                    parts.push(platform::render(&text[run..start], size)?);
+                    parts.push(platform::render(&text[run..start], size, font_file)?);
+                    rendered_text = true;
                 }
                 parts.push(render_flag(svg, size)?);
                 i += 2;
@@ -99,10 +119,15 @@ fn render_with_flags(text: &str, size: f32) -> Result<Rendered, String> {
         i += 1;
     }
     if parts.is_empty() {
-        return platform::render(text, size);
+        return platform::render(text, size, font_file);
     }
     if run < text.len() {
-        parts.push(platform::render(&text[run..], size)?);
+        parts.push(platform::render(&text[run..], size, font_file)?);
+        rendered_text = true;
+    }
+    // Even an all-flags string must reject an invalid requested font.
+    if !rendered_text && font_file.is_some() {
+        platform::render(" ", size, font_file)?;
     }
     let width = parts
         .iter()
@@ -133,7 +158,10 @@ fn render_with_flags(text: &str, size: f32) -> Result<Rendered, String> {
 #[cfg(not(windows))]
 mod platform {
     use super::Rendered;
-    pub fn render(_: &str, _: f32) -> Result<Rendered, String> {
+    pub fn probe_font(_: &std::path::Path) -> Result<String, String> {
+        Err("Native color text rendering requires Windows".into())
+    }
+    pub fn render(_: &str, _: f32, _: Option<&std::path::Path>) -> Result<Rendered, String> {
         Err("Native color text rendering requires Windows".into())
     }
 }
@@ -157,7 +185,8 @@ mod platform {
                     self, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_MEASURING_MODE_NATURAL, DWRITE_TEXT_METRICS,
-                    DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory,
+                    DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory, IDWriteFactory3, IDWriteFactory5,
+                    IDWriteFontCollection,
                 },
                 Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
                 Imaging::{
@@ -170,7 +199,7 @@ mod platform {
                 CoUninitialize,
             },
         },
-        core::w,
+        core::{Interface, PCWSTR, w},
     };
     struct Com(bool);
     impl Drop for Com {
@@ -186,7 +215,79 @@ mod platform {
         format!("Windows color text renderer: {e}")
     }
 
-    pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
+    fn private_collection(
+        factory: &IDWriteFactory,
+        path: &std::path::Path,
+    ) -> Result<(Vec<u16>, Option<IDWriteFontCollection>), String> {
+        use std::os::windows::ffi::OsStrExt;
+        let metadata =
+            std::fs::metadata(path).map_err(|e| format!("Emoji font unavailable: {e}"))?;
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 384 * 1024 * 1024 {
+            return Err("Emoji font must be a nonempty file up to 384 MiB".into());
+        }
+        let path =
+            std::fs::canonicalize(path).map_err(|e| format!("Emoji font unavailable: {e}"))?;
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        if name[..name.len() - 1].contains(&0) {
+            return Err("Invalid emoji font path".into());
+        }
+        unsafe {
+            let f5: IDWriteFactory5 = factory.cast().map_err(err)?;
+            let f3: IDWriteFactory3 = factory.cast().map_err(err)?;
+            let file = factory
+                .CreateFontFileReference(PCWSTR(name.as_ptr()), None)
+                .map_err(err)?;
+            let builder = f5.CreateFontSetBuilder().map_err(err)?;
+            builder.AddFontFile(&file).map_err(err)?;
+            let set = builder.CreateFontSet().map_err(err)?;
+            let collection = f3.CreateFontCollectionFromFontSet(&set).map_err(err)?;
+            let base: IDWriteFontCollection = collection.cast().map_err(err)?;
+            if base.GetFontFamilyCount() == 0 {
+                return Err("Emoji font has no family".into());
+            }
+            let names = base
+                .GetFontFamily(0)
+                .map_err(err)?
+                .GetFamilyNames()
+                .map_err(err)?;
+            let mut index = 0;
+            let mut exists = windows::core::BOOL(0);
+            names
+                .FindLocaleName(w!("en-us"), &mut index, &mut exists)
+                .map_err(err)?;
+            if !exists.as_bool() {
+                index = 0;
+            }
+            let len = names.GetStringLength(index).map_err(err)? as usize;
+            if len == 0 || len > 1024 {
+                return Err("Invalid emoji font family name".into());
+            }
+            let mut family = vec![0; len + 1];
+            names.GetString(index, &mut family).map_err(err)?;
+            Ok((family, Some(base)))
+        }
+    }
+
+    pub fn probe_font(path: &std::path::Path) -> Result<String, String> {
+        let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if initialized.is_err() && initialized.0 != 0x80010106u32 as i32 {
+            return Err(format!("COM initialization failed: {initialized:?}"));
+        }
+        let _com = Com(initialized.is_ok());
+        unsafe {
+            let factory: IDWriteFactory =
+                DirectWrite::DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).map_err(err)?;
+            let (family, _) = private_collection(&factory, path)?;
+            String::from_utf16(&family[..family.len() - 1])
+                .map_err(|_| "Invalid emoji font family name".into())
+        }
+    }
+
+    pub fn render(
+        text: &str,
+        size: f32,
+        font_file: Option<&std::path::Path>,
+    ) -> Result<Rendered, String> {
         // Each caller uses its existing COM apartment or initializes one for this call.
         let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if initialized.is_err() && initialized.0 != 0x80010106u32 as i32 {
@@ -196,10 +297,18 @@ mod platform {
         unsafe {
             let dwrite: IDWriteFactory =
                 DirectWrite::DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).map_err(err)?;
+            let (family, collection) = if let Some(path) = font_file {
+                private_collection(&dwrite, path)?
+            } else {
+                (
+                    "Segoe UI Emoji".encode_utf16().chain(Some(0)).collect(),
+                    None,
+                )
+            };
             let format = dwrite
                 .CreateTextFormat(
-                    w!("Segoe UI Emoji"),
-                    None,
+                    PCWSTR(family.as_ptr()),
+                    collection.as_ref(),
                     DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL,
                     DWRITE_FONT_STRETCH_NORMAL,

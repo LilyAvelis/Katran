@@ -7,6 +7,9 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 pub struct State {
     picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
     background_job: Option<katran::domain_jobs::JobId>,
+    font_picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
+    font_job: Option<katran::domain_jobs::JobId>,
+    emoji_fonts: Option<serde_json::Value>,
     custom_backgrounds: Option<serde_json::Value>,
     restart_confirmation: bool,
     restart_requested: bool,
@@ -169,7 +172,10 @@ fn apply_theme(
 }
 impl State {
     pub(super) fn background_busy(&self) -> bool {
-        self.picker.is_some() || self.background_job.is_some()
+        self.picker.is_some()
+            || self.background_job.is_some()
+            || self.font_picker.is_some()
+            || self.font_job.is_some()
     }
     pub(super) fn take_restart_requested(&mut self) -> bool {
         std::mem::take(&mut self.restart_requested)
@@ -257,8 +263,79 @@ impl State {
             }
         }
     }
+    fn tick_font(&mut self, api: &mut Service, ctx: &egui::Context) {
+        if let Some(picker) = &self.font_picker {
+            match picker.try_recv() {
+                Ok(result) => {
+                    self.font_picker = None;
+                    match result {
+                        Ok(Some(path)) => {
+                            let response = call(
+                                api,
+                                Command::BeginJob {
+                                    command: Box::new(Command::ImportEmojiFont { path }),
+                                },
+                            );
+                            self.font_job = response["result"]["job_id"]
+                                .as_u64()
+                                .map(katran::domain_jobs::JobId);
+                            if response["ok"] != true || self.font_job.is_none() {
+                                self.error = response["error"]["message"]
+                                    .as_str()
+                                    .unwrap_or("Не удалось начать импорт шрифта")
+                                    .into();
+                            } else {
+                                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => self.error = error,
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.font_picker = None;
+                    self.error = "Диалог выбора шрифта завершился без результата".into();
+                }
+            }
+        }
+        if let Some(job_id) = self.font_job {
+            let response = call(api, Command::PollJob { job_id });
+            let status = &response["result"];
+            match status["state"].as_str() {
+                Some("queued" | "running" | "ready") => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Some("succeeded") => {
+                    self.font_job = None;
+                    if let Some(id) = status["result"]["id"].as_str() {
+                        if let Some(draft) = self.draft.as_mut() {
+                            draft.emoji_font = id.to_owned();
+                        }
+                        self.emoji_fonts = None;
+                        self.error =
+                            "Шрифт добавлен. Сохраните настройки, чтобы применить его.".into();
+                    } else {
+                        self.error = "Импорт шрифта не вернул идентификатор".into();
+                    }
+                    ctx.request_repaint();
+                }
+                _ => {
+                    self.font_job = None;
+                    self.error = status["error"]["message"]
+                        .as_str()
+                        .or_else(|| response["error"]["message"].as_str())
+                        .unwrap_or("Импорт шрифта отменён или не выполнен")
+                        .into();
+                }
+            }
+        }
+    }
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
         self.tick_background(api, ctx);
+        self.tick_font(api, ctx);
         self.updates.tick(api, ctx);
         let interaction = call(api, Command::Interaction);
         let open = interaction["result"]["settings_open"] == true;
@@ -269,6 +346,7 @@ impl State {
             self.confirm_history = false;
             self.draft = None;
             self.custom_backgrounds = None;
+            self.emoji_fonts = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
@@ -359,6 +437,17 @@ impl State {
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.global_editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
+         let font_list=self.emoji_fonts.get_or_insert_with(||call(api,Command::EmojiFonts)).clone();
+         let entries=font_list["result"]["fonts"].as_array();
+         let selected_font=entries.and_then(|items|items.iter().find(|item|item["id"].as_str()==Some(draft.emoji_font.as_str())));
+         let font_label=selected_font.and_then(|item|item["label"].as_str()).unwrap_or("Шрифт недоступен");
+         let font_available=selected_font.is_some_and(|item|item["available"]==true);
+         SettingsRow::show(ui,"Шрифт эмодзи",if font_available {"Применяется после сохранения настроек."} else {"Шрифт недоступен; используется системный."},|ui|{
+          egui::ComboBox::from_id_salt("emoji-font-picker").width(180.0).selected_text(font_label).show_ui(ui,|ui|{
+           for item in entries.into_iter().flatten(){if let Some(id)=item["id"].as_str(){let label=item["label"].as_str().unwrap_or(id);let display=if item["available"]==true {label.to_owned()} else {format!("{label} · недоступен")};ui.selectable_value(&mut draft.emoji_font,id.to_owned(),display);}}
+          });
+          if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
+         });
          SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});

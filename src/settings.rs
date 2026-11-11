@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
+    pub emoji_font: String,
     pub sort_notifications: bool,
     pub pods_tile_size: u16,
     pub sort: crate::sorting::SortSpec,
@@ -39,6 +40,7 @@ impl Settings {
         Self {
             theme: Default::default(),
             overlay_hotkey: String::new(),
+            emoji_font: "apple".into(),
             sort_notifications: true,
             pods_tile_size: 96,
             sort: Default::default(),
@@ -77,6 +79,9 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if !crate::emoji_fonts::valid_id(&self.emoji_font) {
+            return Err("Неизвестный шрифт эмодзи".into());
+        }
         if self.theme.optical_strength > 100 {
             return Err("Сила оптического стекла: от 0 до 100".into());
         }

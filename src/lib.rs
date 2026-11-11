@@ -76,6 +76,7 @@ pub mod storage;
 pub mod table_view;
 pub mod updater;
 pub use api::*;
+pub mod emoji_fonts;
 pub mod emoji_render;
 pub mod overlay;
 mod overlay_service;
@@ -723,8 +724,15 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 .set(&self.root, &id, binding, replace, reset)
                 .map(|items| serde_json::json!(items))
                 .map_err(|e| ApiError::new(&e.code, e.message)),
+            Command::EmojiFonts => emoji_fonts::catalogue(&self.root, &self.settings.emoji_font),
+            Command::ResolveEmojiFont { id } => emoji_fonts::resolve(&self.root, &id),
+            Command::ImportEmojiFont { path } => emoji_fonts::commit(&self.root, emoji_fonts::prepare(&path)?),
             Command::GetSettings => Ok(serde_json::json!(self.settings)),
             Command::SetSettings { settings } => {
+                if settings.emoji_font != "apple" && settings.emoji_font != "system" {
+                    let font = emoji_fonts::resolve(&self.root, &settings.emoji_font)?;
+                    if font["available"] != true { return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен")); }
+                }
                 if let Some(id)=&settings.theme.custom_background {theme_backgrounds::get(&self.root,id)?;}
                 settings
                     .validate(self.usage()?)
@@ -789,7 +797,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 Ok(serde_json::json!(self.interaction))
             }
             Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.in_palette && self.action_available(d.id)).map(|d|serde_json::json!({"id":d.id,"label":self.action_label(d.id,d.label),"group":d.group,"shortcut":self.shortcuts.binding(d.id)})).collect())),
-            Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
+            Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(*command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
             Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
             Command::PreviewFile{id,max_edge}=>file_visual::render(&self.root,&self.get(id)?,max_edge),
             Command::SetCaptureEnabled { enabled } => {
