@@ -69,7 +69,7 @@ enum Message {
 // the expected cycle boundary, blend from the last frame into four new frames.
 #[cfg(feature = "egui")]
 struct SeamSmoother {
-    first: Option<Vec<u8>>,
+    first: Option<Arc<Vec<u8>>>,
     previous: Vec<u8>,
     anchor: Vec<u8>,
     since_start: u32,
@@ -93,10 +93,10 @@ impl SeamSmoother {
     }
     fn apply(&mut self, frame: &mut [u8]) {
         if self.first.is_none() {
-            self.first = Some(frame.to_vec());
+            self.first = Some(Arc::new(frame.to_vec()));
         } else if self.since_start >= self.earliest_repeat
             && self.since_start <= self.latest_repeat
-            && self.first.as_deref() == Some(frame)
+            && self.first.as_deref().map(Vec::as_slice) == Some(frame)
         {
             self.anchor.clone_from(&self.previous);
             self.blend_step = 1;
@@ -164,9 +164,15 @@ pub struct State {
     error: Option<String>,
     size: [usize; 2],
     next_frame: u64,
+    first_frame: Option<Arc<Vec<u8>>>,
+    frame_serial: u64,
 }
 #[cfg(feature = "egui")]
 impl State {
+    /// Changes only after a decoded frame has been accepted for presentation.
+    pub fn frame_serial(&self) -> u64 {
+        self.frame_serial
+    }
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
@@ -191,6 +197,7 @@ impl State {
             if !same_video {
                 self.texture = None;
                 self.next_frame = 0;
+                self.first_frame = None;
             }
             self.error = None;
             self.source = source;
@@ -219,6 +226,7 @@ impl State {
                     w,
                     h,
                     self.next_frame,
+                    self.first_frame.clone(),
                     ctx.clone(),
                     command_factory,
                 ));
@@ -228,6 +236,10 @@ impl State {
             loop {
                 match worker.rx.try_recv() {
                     Ok(Message::Frame { pixels, index }) => {
+                        if index == 0 && self.first_frame.is_none() {
+                            self.first_frame = Some(Arc::new(pixels.clone()));
+                        }
+                        self.frame_serial = self.frame_serial.wrapping_add(1);
                         self.next_frame =
                             (index + 1) % estimated_cycle_frames(self.source.as_ref().unwrap());
                         let image = ColorImage::from_rgba_unmultiplied(self.size, &pixels);
@@ -285,6 +297,7 @@ fn start(
     w: usize,
     h: usize,
     resume_frame: u64,
+    first_frame: Option<Arc<Vec<u8>>>,
     ctx: egui::Context,
     command_factory: impl FnOnce() -> Result<Command, String> + Send + 'static,
 ) -> Worker {
@@ -380,6 +393,10 @@ fn start(
         }
         let frame_len = w * h * 4;
         let mut smoother = seam_smoother(&source, policy);
+        if let (Some(smoother), Some(first)) = (smoother.as_mut(), first_frame) {
+            smoother.first = Some(first);
+            smoother.since_start = resume_frame as u32;
+        }
         let interval = Duration::from_nanos(1_000_000_000 / 24);
         let mut next = Instant::now();
         let mut frame_index = resume_frame;
@@ -476,6 +493,37 @@ mod tests {
         let mut f = [60, 60, 60, 255];
         s.apply(&mut f);
         assert_eq!(f, [60, 60, 60, 255]);
+    }
+    #[test]
+    fn resume_smooths_at_original_cycle_boundary() {
+        let mut s = SeamSmoother::new(1000);
+        s.first = Some(Arc::new(vec![20, 20, 20, 255]));
+        s.since_start = 20;
+        for _ in 20..24 {
+            let mut f = [100, 100, 100, 255];
+            s.apply(&mut f);
+            assert_eq!(f, [100, 100, 100, 255]);
+        }
+        let mut first = [20, 20, 20, 255];
+        s.apply(&mut first);
+        assert_eq!(first, [84, 84, 84, 255]);
+    }
+    #[test]
+    fn changing_video_discards_saved_first_frame() {
+        let ctx = egui::Context::default();
+        let mut state = State {
+            first_frame: Some(Arc::new(vec![1])),
+            ..State::default()
+        };
+        let src = VideoSource {
+            path: PathBuf::from("other.mp4"),
+            width: 2,
+            height: 2,
+            duration_ms: 1000,
+            smooth_loop: true,
+        };
+        state.tick(&ctx, Some(src), false, || unreachable!());
+        assert!(state.first_frame.is_none());
     }
     #[test]
     fn disabled_smoothing_leaves_frames_unchanged() {

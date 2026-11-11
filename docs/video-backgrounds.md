@@ -3,6 +3,9 @@
 The Blue theme accepts a profile-local video instead of lily/static artwork.
 Select a saved video or import one in Settings → Themes. A single selected video
 in Downloads offers **Сделать видеофоном** in Actions.
+The same action is available for one selected video in Folder. Folder's session
+revision is checked before and after preparing a managed copy, and the original
+is retained. A Files shelf is not required to apply this type-specific action.
 The domain validates the selected content revision, creates a managed copy and
 activates the theme. Sources are never modified. Image and video backgrounds
 are mutually exclusive; switching to a picture or a lily stops the video.

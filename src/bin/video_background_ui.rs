@@ -6,6 +6,9 @@ use eframe::egui::{self, TextureHandle};
 pub struct State(avilon_media::State);
 
 impl State {
+    pub fn frame_serial(&self) -> u64 {
+        self.0.frame_serial()
+    }
     pub fn error(&self) -> Option<&str> {
         self.0.error()
     }

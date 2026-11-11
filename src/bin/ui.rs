@@ -29,6 +29,7 @@ mod single_instance;
 mod sorting_input;
 mod sorting_ui;
 mod source_jobs;
+mod summon_animation;
 mod tab_bar;
 mod table_preview_ui;
 mod text_preview_ui;
@@ -1104,6 +1105,7 @@ impl Shelf {
 }
 impl eframe::App for Shelf {
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.overlay_ui.animation.cancel(self.native_window);
         if let Some(gl) = gl {
             optical_gpu::destroy(gl);
         }
@@ -1122,6 +1124,13 @@ impl eframe::App for Shelf {
         self.tray_tick(ctx);
         self.overlay_tick(ctx);
         self.video_background_tick(ctx);
+        if self
+            .overlay_ui
+            .animation
+            .tick(self.native_window, self.video_background.frame_serial())
+        {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
         self.finish_job();
         self.preview_warmup_tick();
         if self.api.is_some() {

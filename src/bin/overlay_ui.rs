@@ -2,6 +2,7 @@
 use super::*;
 #[derive(Default)]
 pub(super) struct State {
+    pub(super) animation: summon_animation::State,
     configured: Option<String>,
     #[cfg(windows)]
     listener: Option<katran::overlay_windows::HotkeyListener>,
@@ -30,6 +31,9 @@ impl Shelf {
         }
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        if !visible {
+            self.overlay_ui.animation.cancel(self.native_window);
+        }
         self.call(Command::SetWindowVisibility { visible });
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(visible));
         if visible {
@@ -184,6 +188,11 @@ impl Shelf {
                             area,
                         ) {
                             Ok(()) => {
+                                self.overlay_ui.animation.start(
+                                    self.native_window,
+                                    self.video_background.frame_serial(),
+                                    self.video_background_source.is_some(),
+                                );
                                 self.overlay_ui.summoned = true;
                                 self.message.clear();
                                 if let Some(log) = &self.logger {
@@ -249,6 +258,7 @@ impl Shelf {
                         );
                     }
                     self.overlay_ui.summoned = false;
+                    self.overlay_ui.animation.cancel(self.native_window);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                     self.call(Command::SetWindowVisibility { visible: false });
                 }

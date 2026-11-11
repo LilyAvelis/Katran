@@ -4,6 +4,7 @@ pub mod optical_gpu;
 pub mod optics;
 pub mod settings_layout;
 pub mod theme;
+pub mod transition;
 
 use egui::{self, Color32};
 
