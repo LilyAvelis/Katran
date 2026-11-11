@@ -13,6 +13,8 @@ mod info_bar;
 mod markdown_ui;
 mod native_drag_ui;
 mod navigation_input;
+mod overlay_ui;
+mod pods_ui;
 mod open_apps_ui;
 mod palette;
 mod pinned_ui;
@@ -148,6 +150,8 @@ struct Shelf {
     activation_pending: bool,
     native_drag: Option<String>,
     navigation_input: navigation_input::State,
+    overlay_ui: overlay_ui::State,
+    pods_ui: pods_ui::State,
     native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
     pending_delete: Vec<i64>,
@@ -217,6 +221,7 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
 impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        self.overlay_escape(&ctx);
         input_log::record(&ctx, self.logger.as_ref());
         if self.api.is_some() && !self.info.is_open() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
         if self.api.is_none()
@@ -284,7 +289,7 @@ impl Shelf {
                         s.id.starts_with("tab_position_")
                             || matches!(
                                 s.id.as_str(),
-                                "all" | "images" | "screenshots" | "downloads" | "text" | "links" | "tables" | "tab_previous" | "tab_next"
+                                "all" | "images" | "screenshots" | "downloads" | "text" | "links" | "tables" | "pods" | "tab_previous" | "tab_next"
                             )
                     })
                     .cloned()
@@ -463,7 +468,7 @@ impl Shelf {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
                     if ui.button("×").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        self.close_or_hide(&ctx);
                     }
                 });
                 let search = ui.add(
@@ -496,7 +501,7 @@ impl Shelf {
                         })
                     });
                     self.text_preview
-                        .set_enabled(text_enabled || link_enabled || markdown_preview);
+                        .set_enabled(text_enabled || link_enabled || markdown_preview || tabs["tabs"].as_array().is_some_and(|tabs|tabs.iter().any(|tab|tab["tab"]=="pods"&&tab["enabled"]==true)));
                     let tables_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
                         tabs.iter()
                             .any(|tab| tab["tab"] == "tables" && tab["enabled"] == true)
@@ -751,6 +756,7 @@ impl Shelf {
 }
 impl eframe::App for Shelf {
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.overlay_tick(ctx);
         self.finish_job();
         self.preview_warmup_tick();
         if self.api.is_some() {
@@ -829,6 +835,8 @@ fn main() -> eframe::Result {
         activation_pending: false,
         native_drag: None,
             navigation_input: navigation_input::State::default(),
+            overlay_ui: overlay_ui::State::default(),
+            pods_ui: pods_ui::State::default(),
         native_window: 0,
         logger,
         pending_delete: Vec::new(),
@@ -997,6 +1005,8 @@ mod tests {
             activation_pending: false,
             native_drag: None,
             navigation_input: navigation_input::State::default(),
+            overlay_ui: overlay_ui::State::default(),
+            pods_ui: pods_ui::State::default(),
             native_window: 77,
             logger: None,
             pending_delete: Vec::new(),

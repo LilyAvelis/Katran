@@ -31,6 +31,7 @@ fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.text_enabled = current.text_enabled;
     draft.links_enabled = current.links_enabled;
     draft.tables_enabled = current.tables_enabled;
+    draft.pods_enabled = current.pods_enabled;
     draft.sort = current.sort;
 }
 impl State {
@@ -100,6 +101,7 @@ impl State {
        ui.heading("Основные");ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
         SettingsSection::show(ui,|ui|{
+         SettingsRow::show(ui,"Вызов Katran поверх окна","Например Alt R. Это сочетание может конфликтовать с Raycast; пустое поле отключает вызов.",|ui|{ui.add(egui::TextEdit::singleline(&mut draft.overlay_hotkey).hint_text("Не назначена").desired_width(145.0));});
          SettingsRow::show(ui,"Захват при запуске","По умолчанию выключен. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});

@@ -24,6 +24,9 @@ pub fn icon(id: &str) -> Lucide {
         "toggle_images" | "toggle_screenshots" | "toggle_downloads" | "toggle_text"
         | "toggle_links" | "toggle_tables" => Lucide::Eye,
         "tables" => Lucide::Table,
+        "pods" | "toggle_pods" => Lucide::PanelsTopLeft,
+        "paste_previous" => Lucide::ClipboardPaste,
+        "quit" => Lucide::ExternalLink,
         "links" => Lucide::Link,
         "text" => Lucide::FileText,
         "copy_text" => Lucide::Copy,

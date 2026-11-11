@@ -119,6 +119,7 @@ impl Service {
             self.record_clipboard_publication(sequence);
             self.capture_events.cancel();
             result["text_copied"] = json!(true);
+            result["clipboard_sequence"] = json!(sequence);
             result.as_object_mut().unwrap().remove("text");
         } else {
             result["text_copied"] = json!(false);

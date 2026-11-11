@@ -189,6 +189,8 @@ impl Service {
                             .tab_enabled(crate::interaction::ShelfTab::Links),
                         self.settings
                             .tab_enabled(crate::interaction::ShelfTab::Tables),
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Pods),
                     ),
                     &self.owned_table_tokens.iter().cloned().collect::<Vec<_>>(),
                 );

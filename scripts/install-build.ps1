@@ -1,5 +1,6 @@
 function Get-KatranSources([string]$Root) {
     $files = @((Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File).FullName) + @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/branding') -Recurse -File).FullName) + @('Cargo.toml','Cargo.lock','build.rs','scripts/build-working.ps1','scripts/install-build.ps1' | ForEach-Object { Join-Path $Root $_ })
+    if (Test-Path -LiteralPath (Join-Path $Root 'assets/emoji-flags')) { $files += @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/emoji-flags') -Recurse -File).FullName) }
     return @($files | Sort-Object | ForEach-Object { [ordered]@{ path = $_.Substring($Root.Length + 1); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
 }
 function Invoke-KatranInstall {
@@ -25,6 +26,10 @@ function Invoke-KatranInstall {
     try {
         New-Item -ItemType Directory -Path $stage | Out-Null
         Copy-Item -LiteralPath $built -Destination (Join-Path $stage 'katran-ui.exe')
+        if (Test-Path -LiteralPath (Join-Path $Root 'assets/emoji-flags/LICENSE-GRAPHICS')) {
+            Copy-Item -LiteralPath (Join-Path $Root 'assets/emoji-flags/LICENSE-GRAPHICS') -Destination (Join-Path $stage 'LICENSE-EMOJI-FLAGS.txt')
+            Copy-Item -LiteralPath (Join-Path $Root 'assets/emoji-flags/ATTRIBUTION.md') -Destination (Join-Path $stage 'ATTRIBUTION-EMOJI-FLAGS.md')
+        }
         if ((Get-FileHash -LiteralPath (Join-Path $stage 'katran-ui.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw 'Copied executable hash mismatch' }
         $manifest = [ordered]@{ profile = 'release'; version = $version; update_format = 1; minimum_launcher_protocol = 1; capture_backend = 'windows-events'; shell_visual_protocol = 1; executable_sha256 = $hash; sources = $before }
         $manifestJson = ConvertTo-Json -InputObject $manifest -Depth 5

@@ -30,6 +30,7 @@ pub fn show(
                 ShelfTab::Text => ("Text", "text"),
                 ShelfTab::Links => ("Links", "links"),
                 ShelfTab::Tables => ("Tables", "tables"),
+                ShelfTab::Pods => ("Pods", "pods"),
             };
             let response = ui.add_enabled(
                 enabled,

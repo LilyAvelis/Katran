@@ -62,7 +62,11 @@ impl Shelf {
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
-                        if event["kind"] == "table_fragment" { if let Some(api) = self.api.as_mut() { self.table_preview.show(ui,event,api); } } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) || katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or(""))) {
+                        if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
+                            let (canvas, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), (ui.available_height()-30.0).max(32.0)), egui::Sense::hover());
+                            self.pods_ui.paint(ui, event, canvas);
+                            ui.weak("Space — назад · ← → — листать");
+                        } else if event["kind"] == "table_fragment" { if let Some(api) = self.api.as_mut() { self.table_preview.show(ui,event,api); } } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) || katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or(""))) {
                             self.text_preview.show(ui, event);
                         } else {
                         let width = ui.available_width();
@@ -222,7 +226,7 @@ impl Shelf {
                                     }
                                     if gallery {
                                         let zones = gallery_card::geometry(rect);
-                                        if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
+                                        if self.state["tab"] == "pods" { self.pods_ui.paint(ui,event,zones.image); } else if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
                                         let title = if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
                                         gallery_card::text(
                                             ui,
@@ -254,7 +258,7 @@ impl Shelf {
                                             rect.min + Vec2::splat(10.0),
                                             Vec2::new((image_height * 1.4667).min(176.0), image_height),
                                         );
-                                        if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, image); } else { self.images.paint_at(ui, event, image, 320); }
+                                        if self.state["tab"] == "pods" { self.pods_ui.paint(ui,event,image); } else if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, image); } else { self.images.paint_at(ui, event, image, 320); }
                                         let left = image.right() + 16.0;
                                         let width = (rect.right() - left - 10.0).max(1.0);
                                         let origin: katran::origin::Origin =

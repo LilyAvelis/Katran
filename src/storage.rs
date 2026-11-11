@@ -78,6 +78,7 @@ fn process_has_exited(_pid: u32) -> bool {
 pub fn initialize(db: &Connection, root: &Path) -> Result<()> {
     crate::catalogue_schema::check_version(db)?;
     crate::sorting::register_sql(db)?;
+    crate::pods::register_sql(db)?;
     db.create_scalar_function(
         "katran_contains",
         2,
@@ -219,6 +220,9 @@ impl PreparedBlob {
     }
     pub(crate) fn is_text(&self) -> bool {
         self.text.is_some()
+    }
+    pub(crate) fn is_pod(&self) -> bool {
+        !self.link && !self.table && self.text.as_deref().is_some_and(crate::pods::is_pod)
     }
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -455,6 +459,25 @@ pub(crate) fn commit_prepared_bytes(
         }
     }
     prepared.interest.publish(prepared.verified_stamp.clone());
+    // A single durable event represents an exact Pods value. Resolve under the
+    // writer lock, after validating/publishing bytes, so concurrent prepared
+    // jobs cannot manufacture duplicate events. Preserve existing metadata,
+    // pin, original timestamps and content revision.
+    if let Some(content) = prepared.text.as_deref()
+        && !prepared.link
+        && !prepared.table
+        && crate::pods::is_pod(content)
+    {
+        use rusqlite::OptionalExtension;
+        let existing: Option<i64> = tx.query_row(
+            "SELECT e.id FROM events e JOIN text_fragments t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1",
+            params![prepared.hash, content], |row| row.get(0),
+        ).optional()?;
+        if let Some(id) = existing {
+            tx.commit()?;
+            return Ok(id);
+        }
+    }
     let encoded = path
         .to_str()
         .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
@@ -464,7 +487,10 @@ pub(crate) fn commit_prepared_bytes(
     )?;
     tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![crate::now_ms(),prepared.source,prepared.name,encoded,prepared.size,prepared.hash,serde_json::to_string(&prepared.origin).map_err(|error|ApiError::new("invalid_argument",error))?])?;
     let id = tx.last_insert_rowid();
-    tx.execute("UPDATE events SET modified_at_ms=detected_at_ms WHERE id=?1",[id])?;
+    tx.execute(
+        "UPDATE events SET modified_at_ms=detected_at_ms WHERE id=?1",
+        [id],
+    )?;
     if let Some(content) = &prepared.text {
         let preview: String = content.chars().take(512).collect();
         let content_table = if prepared.table {

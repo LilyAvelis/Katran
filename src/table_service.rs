@@ -216,6 +216,7 @@ impl Service {
                 }
             }
             self.record_clipboard_publication(receipt.sequence);
+            prepared.result["clipboard_sequence"] = json!(receipt.sequence);
             self.capture_events.cancel();
             prepared.result["table_copied"] = json!(receipt.html_written && receipt.text_written);
             prepared.result["atomic"] = json!(receipt.html_written && receipt.text_written);

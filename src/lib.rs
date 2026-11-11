@@ -76,9 +76,17 @@ pub mod storage;
 pub mod table_view;
 pub mod updater;
 pub use api::*;
+pub mod pods;
+pub mod overlay;
+pub mod overlay_windows;
+mod overlay_service;
+pub mod emoji_render;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    overlay_session: overlay::Session,
+    overlay_host: Box<dyn overlay::Host + Send>,
+    overlay_copy: Option<(domain_jobs::JobId, u64)>,
     clipboard_files: Box<dyn clipboard_files::Source>,
     transfer_sequence: Option<u32>,
     transfer_intent: Option<(Vec<SelectionRef>,bool)>,
@@ -222,6 +230,9 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            overlay_session: Default::default(),
+            overlay_host: Box::new(overlay_windows::WindowsHost),
+            overlay_copy: None,
             clipboard_files: Box::new(clipboard_files::Native),
             transfer_sequence: None,
             transfer_intent: None,
@@ -279,7 +290,11 @@ impl Service {
             root.join("index.sqlite3"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
+        pods::register_sql(&db)?;
         Ok(Self {
+            overlay_session: Default::default(),
+            overlay_host: Box::new(overlay_windows::WindowsHost),
+            overlay_copy: None,
             clipboard_files: Box::new(clipboard_files::Native),
             transfer_sequence: None,
             transfer_intent: None,
@@ -390,6 +405,9 @@ impl Service {
             ));
         }
         match command {
+            Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
+            Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
+            Command::CompletePastePrevious { owner_window } => self.complete_paste_previous(owner_window),
             Command::PreviewPath {path,revision,max_edge,image_only} => preview_snapshot::preview_file(&path,&revision,max_edge,image_only,&self.root),
             Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
             Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
@@ -458,7 +476,7 @@ impl Service {
             Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
             Command::CommitScreenshotMatches { .. } => Err(ApiError::new("untrusted_worker_result","Pixel identity must be verified by the domain worker")),
             Command::IngestText {text,source} => {
-                self.check_text_enabled()?;
+                if pods::is_pod(&text) {self.check_pods_enabled()?;} else {self.check_text_enabled()?;}
                 validate_source(&source)?;
                 let prepared=text_fragments::prepare(&self.root,self.quota,&text,&source,&self.ingest_origin,&self.reference_paths()?)?;
                 let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?;
@@ -682,7 +700,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
                 if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
                 let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder || self.settings.hidden_tabs!=settings.hidden_tabs;
-                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) {self.capture_events.cancel();}
+                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) || self.settings.tab_enabled(interaction::ShelfTab::Pods)!=settings.tab_enabled(interaction::ShelfTab::Pods) {self.capture_events.cancel();}
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
                 self.interaction.sort = self.settings.sort.normalized();

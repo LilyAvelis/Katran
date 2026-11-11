@@ -1,0 +1,1 @@
+Regional flag graphics: Twemoji, by Twitter, Inc. and contributors, community-maintained by jdecked. Graphics licensed under CC BY 4.0; see LICENSE-GRAPHICS. Source: https://github.com/jdecked/twemoji/tree/v17.0.2/assets/svg . Unmodified SVG subset. Archive v17.0.2 SHA-256: 3be4944db98517127099c00ad0abd2469a78f797c4f30cd40570b1ffd8d898e4.

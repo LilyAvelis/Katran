@@ -11,6 +11,8 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
+        pods_enabled: false,
+        overlay_hotkey: String::new(),
         sort: Default::default(),
         quota_bytes: 200,
         gallery_columns: 4,

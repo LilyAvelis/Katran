@@ -11,20 +11,25 @@ pub fn label(tab: ShelfTab) -> &'static str {
         ShelfTab::Text => "Text",
         ShelfTab::Links => "Links",
         ShelfTab::Tables => "Tables",
+        ShelfTab::Pods => "Pods",
     }
 }
 
 impl Service {
     pub(crate) fn navigate_tab(&mut self, delta: i8) -> Result<Value> {
         if !matches!(delta, -1 | 1) {
-            return Err(ApiError::new("invalid_tab_direction", "Tab direction must be -1 or 1"));
+            return Err(ApiError::new(
+                "invalid_tab_direction",
+                "Tab direction must be -1 or 1",
+            ));
         }
         let visible = self.settings.visible_tabs();
         if self.interaction.tab == ShelfTab::All || visible.is_empty() {
             return Ok(json!(self.interaction));
         }
         if let Some(index) = visible.iter().position(|tab| *tab == self.interaction.tab) {
-            let target = (index as isize + isize::from(delta)).clamp(0, visible.len() as isize - 1) as usize;
+            let target =
+                (index as isize + isize::from(delta)).clamp(0, visible.len() as isize - 1) as usize;
             self.interaction.set_tab(visible[target]);
         }
         Ok(json!(self.interaction))
@@ -32,13 +37,14 @@ impl Service {
 
     pub(crate) fn action_available(&self, id: &str) -> bool {
         match id {
-            "add_to_katran" => self.interaction.tab==ShelfTab::All,
+            "add_to_katran" => self.interaction.tab == ShelfTab::All,
             "images" => self.settings.tab_enabled(ShelfTab::Images),
             "screenshots" => self.settings.tab_enabled(ShelfTab::Screenshots),
             "downloads" => self.settings.tab_enabled(ShelfTab::Downloads),
             "text" => self.settings.tab_enabled(ShelfTab::Text),
             "links" => self.settings.tab_enabled(ShelfTab::Links),
             "tables" => self.settings.tab_enabled(ShelfTab::Tables),
+            "pods" => self.settings.tab_enabled(ShelfTab::Pods),
             _ => true,
         }
     }
@@ -51,6 +57,7 @@ impl Service {
             "toggle_text" => Some(ShelfTab::Text),
             "toggle_links" => Some(ShelfTab::Links),
             "toggle_tables" => Some(ShelfTab::Tables),
+            "toggle_pods" => Some(ShelfTab::Pods),
             _ => None,
         };
         if let Some(tab) = tab {
@@ -109,6 +116,9 @@ impl Service {
         if tab == ShelfTab::Links {
             settings.links_enabled = enabled;
         }
+        if tab == ShelfTab::Pods {
+            settings.pods_enabled = enabled;
+        }
         self.dispatch(Command::SetSettings { settings })?;
         Ok(self.tabs())
     }
@@ -166,6 +176,15 @@ impl Service {
             return Err(ApiError::new(
                 "tab_disabled",
                 "Text is disabled; enable its eye in Settings → Tabs",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn check_pods_enabled(&self) -> Result<()> {
+        if !self.settings.tab_enabled(ShelfTab::Pods) {
+            return Err(ApiError::new(
+                "tab_disabled",
+                "Pods is disabled; enable its eye in Settings → Tabs",
             ));
         }
         Ok(())

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    pub overlay_hotkey: String,
     pub sort: crate::sorting::SortSpec,
     #[serde(
         default = "crate::tab_layout::default_order",
@@ -14,6 +15,7 @@ pub struct Settings {
     pub text_enabled: bool,
     pub links_enabled: bool,
     pub tables_enabled: bool,
+    pub pods_enabled: bool,
     pub gallery_columns: u8,
     pub stream_rows: u8,
     pub quota_bytes: u64,
@@ -32,6 +34,7 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
+            overlay_hotkey: String::new(),
             sort: Default::default(),
             quota_bytes: quota,
             gallery_columns: 4,
@@ -41,6 +44,7 @@ impl Settings {
             text_enabled: false,
             links_enabled: false,
             tables_enabled: false,
+            pods_enabled: false,
             sharex_folder: None,
             downloads_enabled: true,
             downloads_folder: None,
@@ -56,7 +60,8 @@ impl Settings {
                 && (tab != ShelfTab::Downloads || self.downloads_enabled)
                 && (tab != ShelfTab::Text || self.text_enabled)
                 && (tab != ShelfTab::Links || self.links_enabled)
-                && (tab != ShelfTab::Tables || self.tables_enabled))
+                && (tab != ShelfTab::Tables || self.tables_enabled)
+                && (tab != ShelfTab::Pods || self.pods_enabled))
     }
     pub fn visible_tabs(&self) -> Vec<crate::interaction::ShelfTab> {
         self.tab_order
@@ -66,6 +71,9 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if !self.overlay_hotkey.trim().is_empty() {
+            crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error|error.message)?;
+        }
         crate::tab_layout::validate_order(&self.tab_order)?;
         crate::tab_layout::validate_visible(&self.hidden_tabs)?;
         if !(1..=12).contains(&self.gallery_columns) || !(1..=12).contains(&self.stream_rows) {

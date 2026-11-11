@@ -84,6 +84,11 @@ def main():
                                  cwd=args.root, check=True, capture_output=True, text=True, encoding="utf-8")
         metadata = json.loads(process.stdout)
     text = collect(metadata, Path(__file__).resolve().parent / "license-texts")
+    flag_notices = args.root / "assets" / "emoji-flags"
+    if flag_notices.is_dir():
+        text += "\n" + "=" * 72 + "\nTwemoji regional flag graphics\n"
+        for filename in ("ATTRIBUTION.md", "LICENSE-GRAPHICS"):
+            text += "\n" + filename + "\n" + (flag_notices / filename).read_text(encoding="utf-8") + "\n"
     with args.output.open("x", encoding="utf-8", newline="\n") as output:
         output.write(text)
     print(f"Wrote dependency notices for {len(metadata['packages']) - len(metadata.get('workspace_members', []))} packages")

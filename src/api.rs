@@ -19,6 +19,9 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    SummonOverlay { owner_window: u64 },
+    BeginPastePrevious { owner_window: u64 },
+    CompletePastePrevious { owner_window: u64 },
     PreviewPath {path: PathBuf, revision: String, max_edge: u32, #[serde(default)] image_only: bool},
     ReadDocumentPath {path: PathBuf, revision: String},
     StageTransfer {items: Vec<SelectionRef>, #[serde(default)] cut: bool},

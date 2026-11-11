@@ -207,7 +207,8 @@ fn legacy_saved_tab_order_appends_disabled_text_and_shared_content_is_reclaimed(
             "screenshots",
             "text",
             "links",
-            "tables"
+            "tables",
+            "pods"
         ])
     );
     assert_eq!(settings["links_enabled"], false);

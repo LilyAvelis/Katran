@@ -205,8 +205,10 @@ impl Service {
                 None => return Err(ApiError::new("unknown_action", "Unknown action")),
             }
         }
-        if let Command::DeleteSelection {ids,..}=&command && ids.iter().any(|id|*id<0) {
-            let value=self.dispatch(command)?;
+        if let Command::DeleteSelection { ids, .. } = &command
+            && ids.iter().any(|id| *id < 0)
+        {
+            let value = self.dispatch(command)?;
             return self.ready_value_job(value);
         }
         if matches!(command, Command::CopySelectedText) {
@@ -235,12 +237,15 @@ impl Service {
             };
         }
         let id = match command {
-            Command::SearchFolders {query,limit} => self.jobs.submit(Lane::Discovery, move |cancel| {
-                cancel.check()?;
-                let value=everything::search_folders(&query,limit as usize).map_err(|e|ApiError::new(&e.code,e.message))?;
-                cancel.check()?;
-                Ok(PreparedWork::Value(json!(value)))
-            })?,
+            Command::SearchFolders { query, limit } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    cancel.check()?;
+                    let value = everything::search_folders(&query, limit as usize)
+                        .map_err(|e| ApiError::new(&e.code, e.message))?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Value(json!(value)))
+                })?
+            }
             Command::CheckUpdates => {
                 let updater = self.updater.clone();
                 self.jobs.submit(Lane::Update, move |cancel| {
@@ -390,7 +395,11 @@ impl Service {
                 })?
             }
             Command::IngestText { text, source } => {
-                self.check_text_enabled()?;
+                if crate::pods::is_pod(&text) {
+                    self.check_pods_enabled()?;
+                } else {
+                    self.check_text_enabled()?;
+                }
                 validate_source(&source)?;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -482,6 +491,7 @@ impl Service {
                         let links_enabled = self.settings.tab_enabled(interaction::ShelfTab::Links);
                         let tables_enabled =
                             self.settings.tab_enabled(interaction::ShelfTab::Tables);
+                        let pods_enabled = self.settings.tab_enabled(interaction::ShelfTab::Pods);
                         let references = self.reference_paths()?;
                         let owned_table_tokens: Vec<_> =
                             self.owned_table_tokens.iter().cloned().collect();
@@ -494,7 +504,13 @@ impl Service {
                                     &root,
                                     quota,
                                     &references,
-                                    (images_enabled, text_enabled, links_enabled, tables_enabled),
+                                    (
+                                        images_enabled,
+                                        text_enabled,
+                                        links_enabled,
+                                        tables_enabled,
+                                        pods_enabled,
+                                    ),
                                     &owned_table_tokens,
                                 ),
                             })
@@ -510,6 +526,7 @@ impl Service {
                 let text_enabled = self.settings.tab_enabled(interaction::ShelfTab::Text);
                 let links_enabled = self.settings.tab_enabled(interaction::ShelfTab::Links);
                 let tables_enabled = self.settings.tab_enabled(interaction::ShelfTab::Tables);
+                let pods_enabled = self.settings.tab_enabled(interaction::ShelfTab::Pods);
                 let sequence = self.clipboard_sequence;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -523,7 +540,13 @@ impl Service {
                             &root,
                             quota,
                             &references,
-                            (images_enabled, text_enabled, links_enabled, tables_enabled),
+                            (
+                                images_enabled,
+                                text_enabled,
+                                links_enabled,
+                                tables_enabled,
+                                pods_enabled,
+                            ),
                             &owned_table_tokens,
                         ),
                     ))
@@ -535,15 +558,24 @@ impl Service {
             })?,
             Command::OpenFile { id, operation } => {
                 let event = self.get(id)?;
-                let pinned_launcher=if id>0 && operation==open_file::Operation::Open {self.pinned_app_launcher(&event)?}else{None};
+                let pinned_launcher = if id > 0 && operation == open_file::Operation::Open {
+                    self.pinned_app_launcher(&event)?
+                } else {
+                    None
+                };
                 let launcher = std::sync::Arc::clone(&self.file_launcher);
                 let root = self.root.clone();
                 let quota = self.quota;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
-                    if let Some(mut pinned_launcher)=pinned_launcher {
-                        pinned_launcher.cancellation=Some(cancel);
-                        return Ok(PreparedWork::Value(pinned_open::execute_pinned(&event,&pinned_launcher,&root,quota)?));
+                    if let Some(mut pinned_launcher) = pinned_launcher {
+                        pinned_launcher.cancellation = Some(cancel);
+                        return Ok(PreparedWork::Value(pinned_open::execute_pinned(
+                            &event,
+                            &pinned_launcher,
+                            &root,
+                            quota,
+                        )?));
                     }
                     let launcher = FencedFileLauncher {
                         launcher,
@@ -769,14 +801,14 @@ impl Service {
                 PreparedWork::AppList{event,apps}=>self.commit_open_apps(event,apps),
                 PreparedWork::DeleteDeleted(deleted)=>self.finish_delete(deleted),
                 PreparedWork::DeletePrepared(_)=>Err(ApiError::new("invalid_job_phase","Delete preparation must be authorized before effect")),
-                PreparedWork::Blob(prepared)=> { if prepared.is_table(){self.check_tables_enabled()?;}else if prepared.is_link(){self.check_links_enabled()?;}else if prepared.is_text(){self.check_text_enabled()?;}else{self.check_ingest_enabled(prepared.name())?;} let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(json!(self.get(id)?)) }
+                PreparedWork::Blob(prepared)=> { if prepared.is_table(){self.check_tables_enabled()?;}else if prepared.is_link(){self.check_links_enabled()?;}else if prepared.is_pod(){self.check_pods_enabled()?;}else if prepared.is_text(){self.check_text_enabled()?;}else{self.check_ingest_enabled(prepared.name())?;} let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(json!(self.get(id)?)) }
                 PreparedWork::Capture{ticket,snapshot}=>self.complete_capture(ticket,snapshot),
                 PreparedWork::LegacyCapture(snapshot)=>snapshot.and_then(|snapshot|self.commit_capture_snapshot(snapshot,capture::sequence_number())),
                 PreparedWork::Reference(prepared)=>self.commit_prepared_reference(prepared),
                 PreparedWork::Copy{events,plan,mut sink}=> {
                     self.validate_job_events(&events)?;
                     let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;self.record_clipboard_publication(receipt.sequence);
-                    Ok(json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}))
+                    Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings}))
                 }
                 PreparedWork::Drag{events,prepared}=> {self.validate_job_events(&events)?;self.commit_drag_preparation(prepared)}
             });

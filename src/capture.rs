@@ -67,6 +67,7 @@ pub(crate) fn prepare_snapshot(
     text_enabled: bool,
     links_enabled: bool,
     tables_enabled: bool,
+    pods_enabled: bool,
     owned_table_tokens: &[String],
 ) -> Result<CaptureSnapshot> {
     #[cfg(windows)]
@@ -114,7 +115,11 @@ pub(crate) fn prepare_snapshot(
             }));
         }
         if !images_enabled {
-            return read_text_snapshot(sequence, origin, text_enabled || links_enabled);
+            return read_text_snapshot(
+                sequence,
+                origin,
+                text_enabled || links_enabled || pods_enabled,
+            );
         }
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| ApiError::new("clipboard_error", e))?;
@@ -148,7 +153,11 @@ pub(crate) fn prepare_snapshot(
             }
             Err(arboard::Error::ContentNotAvailable) => {
                 drop(clipboard);
-                read_text_snapshot(sequence, origin, text_enabled || links_enabled)
+                read_text_snapshot(
+                    sequence,
+                    origin,
+                    text_enabled || links_enabled || pods_enabled,
+                )
             }
             Err(error) => Err(ApiError::new("clipboard_error", error)),
         }
@@ -161,6 +170,7 @@ pub(crate) fn prepare_snapshot(
             text_enabled,
             links_enabled,
             tables_enabled,
+            pods_enabled,
             owned_table_tokens,
         );
         Err(ApiError::new(
@@ -341,10 +351,10 @@ pub(crate) fn prepare_snapshot_for_ingest(
     root: &std::path::Path,
     quota: u64,
     references: &[PathBuf],
-    features: (bool, bool, bool, bool),
+    features: (bool, bool, bool, bool, bool),
     owned_table_tokens: &[String],
 ) -> Result<CaptureSnapshot> {
-    let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
+    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled) = features;
     prepare_owned_snapshot_features(
         prepare_snapshot(
             last_sequence,
@@ -352,12 +362,19 @@ pub(crate) fn prepare_snapshot_for_ingest(
             text_enabled,
             links_enabled,
             tables_enabled,
+            pods_enabled,
             owned_table_tokens,
         )?,
         root,
         quota,
         references,
-        (images_enabled, text_enabled, links_enabled, tables_enabled),
+        (
+            images_enabled,
+            text_enabled,
+            links_enabled,
+            tables_enabled,
+            pods_enabled,
+        ),
     )
 }
 fn prepare_owned_snapshot_features(
@@ -365,9 +382,9 @@ fn prepare_owned_snapshot_features(
     root: &std::path::Path,
     quota: u64,
     references: &[PathBuf],
-    features: (bool, bool, bool, bool),
+    features: (bool, bool, bool, bool, bool),
 ) -> Result<CaptureSnapshot> {
-    let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
+    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled) = features;
     snapshot.payload = match snapshot.payload {
         CapturePayload::HtmlTable { origin, html } => {
             if tables_enabled {
@@ -416,7 +433,10 @@ fn prepare_owned_snapshot_features(
                 CapturePayload::Unsupported
             }
         }
-        CapturePayload::Text { origin, text } if text_enabled => {
+        CapturePayload::Text { origin, text }
+            if (crate::pods::is_pod(&text) && pods_enabled)
+                || (!crate::pods::is_pod(&text) && text_enabled) =>
+        {
             CapturePayload::PreparedText(crate::text_fragments::prepare(
                 root,
                 quota,
@@ -471,6 +491,8 @@ impl Service {
                     .tab_enabled(crate::interaction::ShelfTab::Links),
                 self.settings
                     .tab_enabled(crate::interaction::ShelfTab::Tables),
+                self.settings
+                    .tab_enabled(crate::interaction::ShelfTab::Pods),
             ),
             &self.owned_table_tokens.iter().cloned().collect::<Vec<_>>(),
         )?;
@@ -569,10 +591,12 @@ impl Service {
                 json!({"captured":1,"event":self.get(id)?})
             }
             CapturePayload::PreparedText(prepared) => {
-                if !self
-                    .settings
-                    .tab_enabled(crate::interaction::ShelfTab::Text)
-                {
+                let tab = if prepared.is_pod() {
+                    crate::interaction::ShelfTab::Pods
+                } else {
+                    crate::interaction::ShelfTab::Text
+                };
+                if !self.settings.tab_enabled(tab) {
                     self.clipboard_sequence = sequence;
                     return Ok(json!({"captured":0,"state":"text_disabled"}));
                 }
@@ -613,13 +637,48 @@ fn prepare_owned_snapshot(
         root,
         quota,
         references,
-        (images, text, links, false),
+        (images, text, links, false, false),
     )
 }
 
 #[cfg(test)]
 mod text_tests {
     use super::*;
+    #[test]
+    fn pods_capture_is_independent_of_text_and_never_leaks_when_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = Service::open(temp.path(), 4096).unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        service.capture_enabled = true;
+        service.settings.text_enabled = true;
+        let make = |pods| {
+            prepare_owned_snapshot_features(
+                CaptureSnapshot {
+                    sequence: 42,
+                    payload: CapturePayload::Text {
+                        origin: Origin::default(),
+                        text: "🐄".into(),
+                    },
+                },
+                &root,
+                4096,
+                &[],
+                (true, true, false, false, pods),
+            )
+            .unwrap()
+        };
+        assert!(matches!(make(false).payload, CapturePayload::Unsupported));
+        let prepared = make(true);
+        assert_eq!(
+            service.commit_capture_snapshot(prepared, 42).unwrap()["captured"],
+            0
+        );
+        service.settings.pods_enabled = true;
+        let saved = service.commit_capture_snapshot(make(true), 42).unwrap();
+        assert_eq!(saved["captured"], 1);
+        let again = service.commit_capture_snapshot(make(true), 42).unwrap();
+        assert_eq!(saved["event"]["id"], again["event"]["id"]);
+    }
     fn raw(text: &str) -> Vec<u8> {
         text.encode_utf16()
             .chain(Some(0))
@@ -776,7 +835,7 @@ mod table_capture_tests {
                 &prepared_root,
                 10000,
                 &[],
-                (true, true, true, enabled),
+                (true, true, true, enabled, false),
             )
         };
         assert_eq!(
@@ -814,7 +873,7 @@ mod table_capture_tests {
             &prepared_root,
             10000,
             &[],
-            (true, true, true, true),
+            (true, true, true, true, false),
         );
         assert!(matches!(invalid,Err(e)if e.code=="unsupported_table"));
         let ordinary = prepare_owned_snapshot_features(
@@ -828,7 +887,7 @@ mod table_capture_tests {
             &prepared_root,
             10000,
             &[],
-            (true, true, true, true),
+            (true, true, true, true, false),
         )
         .unwrap();
         assert_eq!(
@@ -927,7 +986,7 @@ mod table_capture_tests {
                     &api.root,
                     10000,
                     &[],
-                    (true, true, true, true),
+                    (true, true, true, true, false),
                 )
                 .unwrap();
                 let result = api.commit_capture_snapshot(snapshot, sequence).unwrap();
