@@ -18,6 +18,9 @@ impl Service {
         }
         let root = configuration.root.canonicalize()?;
         let path = item.path.canonicalize()?;
+        if path.parent().is_some_and(|parent|folder_watch::is_recovery_dir(&root,parent)) {
+            return Err(ApiError::new("reserved_recovery_path","Recovery staging is not source content"));
+        }
         if root != item.root || !path.starts_with(&root) || path.starts_with(&self.root) {
             return Err(ApiError::new(
                 "unsafe_source",
@@ -62,7 +65,7 @@ impl Service {
             source_id: configuration.source_id,
             generation: configuration.generation,
             mode: match configuration.source_id {
-                SourceId::Sharex => OriginalDeleteMode::Permanent,
+                SourceId::Sharex => OriginalDeleteMode::Recycle,
                 SourceId::Downloads => OriginalDeleteMode::Recycle,
             },
         };

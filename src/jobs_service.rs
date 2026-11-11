@@ -205,6 +205,10 @@ impl Service {
                 None => return Err(ApiError::new("unknown_action", "Unknown action")),
             }
         }
+        if let Command::DeleteSelection {ids,..}=&command && ids.iter().any(|id|*id<0) {
+            let value=self.dispatch(command)?;
+            return self.ready_value_job(value);
+        }
         if matches!(command, Command::CopySelectedText) {
             command = Command::CopyText {
                 items: self.selected_refs()?,
@@ -531,11 +535,16 @@ impl Service {
             })?,
             Command::OpenFile { id, operation } => {
                 let event = self.get(id)?;
+                let pinned_launcher=if id>0 && operation==open_file::Operation::Open {self.pinned_app_launcher(&event)?}else{None};
                 let launcher = std::sync::Arc::clone(&self.file_launcher);
                 let root = self.root.clone();
                 let quota = self.quota;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
+                    if let Some(mut pinned_launcher)=pinned_launcher {
+                        pinned_launcher.cancellation=Some(cancel);
+                        return Ok(PreparedWork::Value(pinned_open::execute_pinned(&event,&pinned_launcher,&root,quota)?));
+                    }
                     let launcher = FencedFileLauncher {
                         launcher,
                         cancellation: cancel,
@@ -766,7 +775,7 @@ impl Service {
                 PreparedWork::Reference(prepared)=>self.commit_prepared_reference(prepared),
                 PreparedWork::Copy{events,plan,mut sink}=> {
                     self.validate_job_events(&events)?;
-                    let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;self.clipboard_sequence=receipt.sequence;
+                    let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;self.record_clipboard_publication(receipt.sequence);
                     Ok(json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}))
                 }
                 PreparedWork::Drag{events,prepared}=> {self.validate_job_events(&events)?;self.commit_drag_preparation(prepared)}

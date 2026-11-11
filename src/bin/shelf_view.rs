@@ -223,7 +223,7 @@ impl Shelf {
                                     if gallery {
                                         let zones = gallery_card::geometry(rect);
                                         if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
-                                        let title = if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
+                                        let title = if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
                                         gallery_card::text(
                                             ui,
                                             zones.name,
@@ -261,7 +261,7 @@ impl Shelf {
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
                                         let lines = [
-                                            if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() },
+                                            if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() },
                                             criterion.clone().unwrap_or_else(||event["source"].as_str().unwrap_or("").to_owned()),
                                             origin
                                                 .label()
@@ -297,6 +297,7 @@ impl Shelf {
                                             );
                                         }
                                     }
+                                    if event["properties"]["pinned"] == true { ui.painter().text(rect.right_top() + egui::vec2(-8.0, 8.0), egui::Align2::RIGHT_TOP, "•", egui::FontId::proportional(22.0), Color32::from_rgb(224,188,127)); }
                                     let origin: katran::origin::Origin =
                                         serde_json::from_value(event["origin"].clone())
                                             .unwrap_or_default();

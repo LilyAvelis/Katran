@@ -14,6 +14,7 @@ pub fn icon(id: &str) -> Lucide {
         "cleanup" => Lucide::Trash2,
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,
         "copy" => Lucide::Copy,
+        "add_to_katran" => Lucide::ClipboardPaste,
         "delete" => Lucide::Trash2,
         "open" => Lucide::ExternalLink,
         "reveal" => Lucide::FolderOpen,

@@ -17,6 +17,7 @@ pub fn label(tab: ShelfTab) -> &'static str {
 impl Service {
     pub(crate) fn action_available(&self, id: &str) -> bool {
         match id {
+            "add_to_katran" => self.interaction.tab==ShelfTab::All,
             "images" => self.settings.tab_enabled(ShelfTab::Images),
             "screenshots" => self.settings.tab_enabled(ShelfTab::Screenshots),
             "downloads" => self.settings.tab_enabled(ShelfTab::Downloads),

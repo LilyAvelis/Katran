@@ -346,6 +346,16 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id=="add_to_katran" {
+            let result=self.call(Command::RunAction{id});
+            self.actions=false;
+            if let Some(items)=result["items"].as_array() {
+                let failed=items.iter().filter(|item|item["ok"]!=true).count();
+                self.message=format!("Добавлено в Катран: {}. Ошибок: {failed}. {}",items.len()-failed,item_failures(&result["items"]));
+            }
+            self.refresh();
+            return;
+        }
         if id == "open_with" {
             self.open_apps_request(ctx);
             return;

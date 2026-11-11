@@ -309,12 +309,33 @@ pub fn prepare_with_budget(
             if !event.path.is_file() {
                 return Err("File unavailable".into());
             }
+            let folder_file =
+                event.id < 0 && event.source == "work_folder" && event.storage == "reference";
+            let folder_digest = if folder_file {
+                if std::fs::metadata(&event.path)
+                    .map_err(|e| e.to_string())?
+                    .len()
+                    > quota - used
+                {
+                    return Err("Export quota exceeded".into());
+                }
+                if !event.revision.starts_with("file:") {
+                    return Err("source_changed: folder file has no metadata revision".into());
+                }
+                crate::open_file::validate(event)
+                    .map_err(|e| format!("source_changed: {}", e.message))?;
+                Some(bounded_content_digest(&event.path, quota - used)?)
+            } else {
+                None
+            };
             let expected = if event.storage == "cached" {
                 event
                     .path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .filter(|n| n.len() == 64 && n.bytes().all(|b| b.is_ascii_hexdigit()))
+            } else if folder_file {
+                folder_digest.as_deref()
             } else {
                 Some(event.revision.strip_prefix("ref:").ok_or(
                     "source_changed: reference has no verified content identity; ingest it again",
@@ -332,11 +353,7 @@ pub fn prepare_with_budget(
                 })
                 .collect();
             let name = name.trim_end_matches([' ', '.']);
-            let destination = directory.join(format!(
-                "{index}-{}",
-                if name.is_empty() { "file" } else { name }
-            ));
-            attempted_path = Some(destination.clone());
+            let name = if name.is_empty() { "file" } else { name };
             // Independent bytes: a hard link would let paste recipients mutate
             // the content-addressed blob. Bound the actual read, not event.size.
             let source = std::fs::File::open(&event.path).map_err(|e| e.to_string())?;
@@ -345,11 +362,43 @@ pub fn prepare_with_budget(
             if length > remaining {
                 return Err("Export quota exceeded".into());
             }
-            let mut output = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&destination)
-                .map_err(|e| e.to_string())?;
+            let base = if folder_file {
+                name.to_owned()
+            } else {
+                format!("{index}-{name}")
+            };
+            let (destination, mut output) = {
+                let path = Path::new(&base);
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+                let ext = path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|s| format!(".{s}"))
+                    .unwrap_or_default();
+                let mut found = None;
+                for suffix in 0..10_000 {
+                    let filename = if suffix == 0 {
+                        base.clone()
+                    } else {
+                        format!("{stem} ({suffix}){ext}")
+                    };
+                    let candidate = directory.join(filename);
+                    match std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&candidate)
+                    {
+                        Ok(file) => {
+                            found = Some((candidate, file));
+                            break;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                        Err(error) => return Err(error.to_string()),
+                    }
+                }
+                found.ok_or("No available snapshot filename")?
+            };
+            attempted_path = Some(destination.clone());
             let copied = std::io::copy(&mut source.take(remaining.saturating_add(1)), &mut output)
                 .map_err(|e| e.to_string())?;
             if copied > remaining {
@@ -364,6 +413,10 @@ pub fn prepare_with_budget(
                 } else {
                     "source_changed: reference content differs from the shelf identity; ingest it again".into()
                 });
+            }
+            if folder_file {
+                crate::open_file::validate(event)
+                    .map_err(|e| format!("source_changed: {}", e.message))?;
             }
             used += copied;
             destination.canonicalize().map_err(|e| e.to_string())
@@ -395,6 +448,28 @@ fn content_digest(path: &Path) -> Result<String, String> {
         let count = input.read(&mut bytes).map_err(|e| e.to_string())?;
         if count == 0 {
             break;
+        }
+        hash.update(&bytes[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+fn bounded_content_digest(path: &Path, limit: u64) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut input = std::fs::File::open(path)
+        .map_err(|e| e.to_string())?
+        .take(limit.saturating_add(1));
+    let mut hash = Sha256::new();
+    let mut total = 0u64;
+    let mut bytes = [0u8; 65536];
+    loop {
+        let count = input.read(&mut bytes).map_err(|e| e.to_string())?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > limit {
+            return Err("Export quota exceeded".into());
         }
         hash.update(&bytes[..count]);
     }

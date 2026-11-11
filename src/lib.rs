@@ -5,6 +5,9 @@ mod catalogue_query;
 mod catalogue_schema;
 mod classification_runtime;
 pub mod clipboard_listener;
+pub mod clipboard_files;
+mod paste_service;
+mod pinned_open;
 pub mod copy_out;
 mod delete_jobs;
 mod delete_selection;
@@ -13,12 +16,15 @@ pub mod density;
 pub mod diagnostics;
 pub mod domain_jobs;
 pub mod downloads;
+pub mod safe_recycle;
 pub mod everything;
 pub mod folder_transfer;
 pub mod pinned;
 pub mod work_folder;
 mod workspace_service;
 mod transfer_service;
+mod folder_import;
+mod folder_delete;
 pub mod drag_out;
 mod drag_session;
 pub mod file_types;
@@ -73,6 +79,8 @@ pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    clipboard_files: Box<dyn clipboard_files::Source>,
+    transfer_sequence: Option<u32>,
     transfer_intent: Option<(Vec<SelectionRef>,bool)>,
     work_folder: work_folder::State,
     updater: updater::Updater,
@@ -214,6 +222,8 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            clipboard_files: Box::new(clipboard_files::Native),
+            transfer_sequence: None,
             transfer_intent: None,
             work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
@@ -229,7 +239,7 @@ impl Service {
             text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 text_fragments::NativeClipboard,
             ))),
-            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::RecycleOnlyTrash))),
             jobs: Default::default(),
             classification: Default::default(),
             source_runtime: Default::default(),
@@ -270,6 +280,8 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            clipboard_files: Box::new(clipboard_files::Native),
+            transfer_sequence: None,
             transfer_intent: None,
             work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
@@ -285,7 +297,7 @@ impl Service {
             text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 text_fragments::NativeClipboard,
             ))),
-            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::NativeTrash))),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::RecycleOnlyTrash))),
             jobs: Default::default(),
             classification: Default::default(),
             source_runtime: Default::default(),
@@ -382,11 +394,14 @@ impl Service {
             Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
             Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
             Command::PasteToFolder => self.paste_to_folder(),
+            Command::PasteFilesToFolder {paths} => self.paste_files_to_folder(paths),
+            Command::PasteClipboardToFolder => self.paste_clipboard_to_folder(),
             Command::AddFolderFiles {ids} => self.import_from_folder(ids),
             Command::ChooseFolder { path } => self.choose_folder(path),
             Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
             Command::SearchFolders {query,limit} => everything::search_folders(&query,limit as usize).map(|v|serde_json::json!(v)).map_err(|e|ApiError::new(&e.code,e.message)),
             Command::FolderHistory {query} => self.folder_entries(false,&query),
+            Command::FolderRecovery => {let path=self.work_folder.current().ok_or_else(||ApiError::new("folder_not_selected","Choose a folder first"))?;safe_recycle::list_recovery(path)},
             Command::FavoriteFolders {query} => self.folder_entries(true,&query),
             Command::ToggleFavoriteFolder => {
                 let path=self.work_folder.current().ok_or_else(||ApiError::new("no_folder","Choose a working folder first"))?;
@@ -397,7 +412,7 @@ impl Service {
             },
             Command::TogglePins {ids} => self.toggle_pins(ids),
             Command::GetPinnedProperties {id} => Ok(serde_json::json!({"properties":pinned::properties(&self.db,id)?,"tags":pinned::tags(&self.db,id)?})),
-            Command::SetPinnedProperties {id,display_name,opener} => Ok(serde_json::json!(pinned::set_properties(&self.db,id,display_name,opener)?)),
+            Command::SetPinnedProperties {id,display_name,opener} => {self.validate_pinned_opener(id,&opener)?;let value=pinned::set_properties(&self.db,id,display_name,opener)?;self.interaction.view_generation=self.interaction.view_generation.wrapping_add(1);Ok(serde_json::json!(value))},
             Command::SetPinnedTags {id,tags} => {let value=pinned::set_tags(&self.db,id,&tags)?;self.interaction.view_generation=self.interaction.view_generation.wrapping_add(1);Ok(serde_json::json!({"tags":value}))},
             Command::PinnedTags => self.pinned_tags(),
             Command::FilterPinnedTag {tag} => {
@@ -476,6 +491,7 @@ impl Service {
             },
             Command::OpenFile { id, operation } => {
                 let event=self.get(id)?;
+                if id>0 && operation==open_file::Operation::Open && self.pinned_app_launcher(&event)?.is_some() {return self.open_pinned_default(&event);}
                 let launcher=self.file_launcher.lock().map_err(|_|ApiError::new("open_busy","File launcher lock poisoned"))?;
                 if event.kind==EventKind::LinkFragment && operation==open_file::Operation::Open { open_file::execute_link(&event,launcher.as_ref()) } else { open_file::execute_with_cache(&event,operation,launcher.as_ref(),&self.root,self.quota) }
             },
@@ -597,7 +613,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 plan.protect_references(&references.into_iter().map(PathBuf::from).collect::<Vec<_>>()).map_err(|e|ApiError::new("copy_error",e))?;
                 let receipt = copy_out::commit(&plan, &mut copy_out::NativeClipboard)
                     .map_err(|e| ApiError::new("clipboard_error", e))?;
-                self.clipboard_sequence = receipt.sequence;
+                self.record_clipboard_publication(receipt.sequence);
                 Ok(
                     serde_json::json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}),
                 )
@@ -624,7 +640,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.ingest_origin = origin::Origin::default();
                 result
             }
-            Command::DeleteSelection { ids, confirmed } => self.delete_selection(ids, confirmed),
+            Command::DeleteSelection { ids, confirmed } => if ids.iter().any(|id|*id<0) {self.delete_folder_selection(ids,confirmed)}else{self.delete_selection(ids, confirmed)},
             Command::DeleteEvents { ids, confirmed } => {
                 let result =
                     delete_shelf::delete_events(&mut self.db, &self.root, &ids, confirmed)?;

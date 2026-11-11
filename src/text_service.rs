@@ -111,11 +111,12 @@ impl Service {
                     "Windows text Clipboard cannot represent embedded NUL; save TXT instead",
                 ));
             }
-            self.clipboard_sequence = self
+            let sequence = self
                 .text_clipboard
                 .lock()
                 .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
                 .write(text)?;
+            self.record_clipboard_publication(sequence);
             self.capture_events.cancel();
             result["text_copied"] = json!(true);
             result.as_object_mut().unwrap().remove("text");

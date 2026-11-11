@@ -12,6 +12,22 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+/// Recovery staging is reserved for Katran and is never source content.
+/// Check only directory components beneath the configured root; unrelated
+/// hidden names and ordinary files with similar names are unaffected.
+pub(crate) fn is_recovery_dir(root: &std::path::Path, directory: &std::path::Path) -> bool {
+    directory.strip_prefix(root).ok().is_some_and(|relative| {
+        relative.components().any(|component| {
+            let name = component.as_os_str().to_string_lossy();
+            if cfg!(windows) {
+                name.to_ascii_lowercase().starts_with(".katran-recovery-")
+            } else {
+                name.starts_with(".katran-recovery-")
+            }
+        })
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FolderSource {
@@ -287,7 +303,12 @@ impl Root {
                         Err(error) => self.queue_error(error.message),
                     }
                     // Newly settled files overtake initial historical discovery.
-                    self.pending.retain(|path| path.is_file());
+                    self.pending.retain(|path| {
+                        path.is_file()
+                            && path
+                                .parent()
+                                .is_some_and(|parent| !is_recovery_dir(&self.root, parent))
+                    });
                     let existing: std::collections::HashSet<_> =
                         self.pending.iter().cloned().collect();
                     for path in paths.into_iter().rev() {
@@ -363,7 +384,10 @@ impl Root {
                 let entry = entry?;
                 let kind = entry.file_type()?;
                 if kind.is_dir() {
-                    directories.push(entry.path());
+                    let path = entry.path();
+                    if !is_recovery_dir(&self.root, &path) {
+                        directories.push(path);
+                    }
                 } else if kind.is_file() {
                     paths.push(entry.path());
                 }
@@ -375,8 +399,23 @@ impl Root {
         use sha2::{Digest, Sha256};
         use std::io::Read;
         let kind = fs::symlink_metadata(&path)?;
+        if path
+            .parent()
+            .is_some_and(|parent| is_recovery_dir(&self.root, parent))
+        {
+            return Err(ApiError::new(
+                "invalid_path",
+                "Recovery staging is not source content",
+            ));
+        }
         let path = fs::canonicalize(&path)?;
-        if kind.file_type().is_symlink() || !path.starts_with(&self.root) || !kind.is_file() {
+        if kind.file_type().is_symlink()
+            || !path.starts_with(&self.root)
+            || !kind.is_file()
+            || path
+                .parent()
+                .is_some_and(|parent| is_recovery_dir(&self.root, parent))
+        {
             return Err(ApiError::new(
                 "invalid_path",
                 "Candidate escaped configured folder",
@@ -412,6 +451,40 @@ impl Root {
             modified: after.modified()?,
             content_hash,
         })
+    }
+}
+
+#[cfg(test)]
+mod recovery_scan_tests {
+    use super::*;
+    #[test]
+    fn snapshot_and_candidate_reject_reserved_recovery_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let hidden = root.join(".katran-recovery-synthetic").join("data");
+        fs::create_dir_all(&hidden).unwrap();
+        let recovery = hidden.join("original.png");
+        let normal = root.join("normal.png");
+        fs::write(&recovery, b"synthetic staged").unwrap();
+        fs::write(&normal, b"synthetic normal").unwrap();
+        let state = Root {
+            source: FolderSource::Sharex,
+            root: root.clone(),
+            native: None,
+            failed: false,
+            shots: SharexScanner::default(),
+            downloads: DownloadsScanner::default(),
+            due: None,
+            settling: false,
+            pending: VecDeque::new(),
+            outgoing: VecDeque::new(),
+        };
+        let stop = AtomicBool::new(false);
+        assert_eq!(state.snapshot(&stop).unwrap(), vec![normal]);
+        assert_eq!(
+            state.prepare(recovery, &stop).unwrap_err().code,
+            "invalid_path"
+        );
     }
 }
 

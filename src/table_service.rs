@@ -215,7 +215,7 @@ impl Service {
                     self.owned_table_tokens.pop_front();
                 }
             }
-            self.clipboard_sequence = receipt.sequence;
+            self.record_clipboard_publication(receipt.sequence);
             self.capture_events.cancel();
             prepared.result["table_copied"] = json!(receipt.html_written && receipt.text_written);
             prepared.result["atomic"] = json!(receipt.html_written && receipt.text_written);

@@ -47,7 +47,7 @@ impl SharexScanner {
                 "ShareX root must be a directory",
             ));
         }
-        let mut pending = vec![root];
+        let mut pending = vec![root.clone()];
         let mut entries = 0;
         let mut current = HashMap::new();
         let mut ready = Vec::new();
@@ -67,7 +67,9 @@ impl SharexScanner {
                 };
                 let path = entry.path();
                 if kind.is_dir() {
-                    pending.push(path);
+                    if !crate::folder_watch::is_recovery_dir(&root, &path) {
+                        pending.push(path);
+                    }
                 } else if kind.is_file() && supported(&path) {
                     let Some(revision) = readable_revision(&path) else {
                         continue;

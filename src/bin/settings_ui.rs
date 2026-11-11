@@ -6,6 +6,7 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 #[derive(Default)]
 pub struct State {
     updates: super::updates_ui::State,
+    confirm_history: bool,
     query: String,
     section: usize,
     requested_section: Option<usize>,
@@ -38,6 +39,7 @@ impl State {
         let interaction = call(api, Command::Interaction);
         let open = interaction["result"]["settings_open"] == true;
         if !open {
+            self.confirm_history = false;
             self.draft = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
@@ -82,7 +84,8 @@ impl State {
    super::input_log::record(ctx,logger.as_ref());
    let recording=self.editor.is_some();
    if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx)&& super::shortcuts_ui::apply(api,editor,intent){self.editor=None;}
-   close=ctx.input(|i|i.viewport().close_requested())||(!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)));
+   let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
+   if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape; }
    egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::from_gray(69))).show(ctx,|ui| {
     egui::Panel::left("settings-sidebar").exact_size(215.0).resizable(false).frame(egui::Frame::new().fill(Color32::from_gray(65)).inner_margin(16)).show(ui,|ui|{
      ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
@@ -109,6 +112,19 @@ impl State {
          });
          let mut mib=draft.quota_bytes as f64/(1024.0*1024.0);
          SettingsRow::show(ui,"Квота кэша · МиБ","Снижение ниже текущего объёма отклоняется. Исходники не удаляются.",|ui|{if ui.add(egui::DragValue::new(&mut mib).range(1.0..=1048576.0)).changed(){draft.quota_bytes=(mib*1024.0*1024.0)as u64;}});
+        });
+       }
+       ui.add_space(16.0);
+       if ui.button("Очистить историю Folder").clicked() {
+        let r=call(api,Command::ClearFolderHistory{confirmed:false});
+        if r["result"]["confirmation_required"]==true {self.confirm_history=true;} else if r["ok"]==false {self.error=r["error"]["message"].as_str().unwrap_or("Ошибка").into();}
+       }
+       if self.confirm_history {
+        ui.label(RichText::new("Действительно удалить историю?").strong());
+        ui.label("Избранные папки и файлы сохранятся.");
+        ui.horizontal(|ui|{
+         if ui.button("Удалить историю").clicked(){let r=call(api,Command::ClearFolderHistory{confirmed:true});self.confirm_history=false;self.error=if r["result"]["cleared"]==true {"История очищена".into()} else {r["error"]["message"].as_str().unwrap_or("Ошибка").into()};}
+         if ui.button("Отмена").clicked(){self.confirm_history=false;}
         });
        }
        ui.add_space(16.0);

@@ -1,11 +1,7 @@
 //! Private three-phase original deletion: prepare, authorize, effect and shelf receipt.
-//! Windows permanent deletion targets the pinned verified handle. Shell recycling
-//! accepts a pathname, so it cannot promise an atomic file-identity transaction;
-//! the worker rechecks containment/content immediately before that native call.
-use crate::{
-    source_policy::{DeletePolicy, OriginalDeleteMode, SourceId},
-    *,
-};
+//! Originals use handle-bound staging and recycle-only effect; failures retain
+//! the shelf event and expose any recovery location to the caller.
+use crate::{source_policy::DeletePolicy, *};
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
@@ -43,7 +39,6 @@ struct PreparedItem {
 enum Original {
     Shelf,
     Missing,
-    Permanent(crate::delete_selection::LockedOriginal),
     Recycle {
         locked: crate::delete_selection::LockedOriginal,
         root: PathBuf,
@@ -56,6 +51,7 @@ pub(crate) struct DeletedBatch {
 struct DeletedItem {
     missing: bool,
     removed: bool,
+    recycle: Option<crate::safe_recycle::RecycleReceipt>,
 }
 impl Service {
     pub(crate) fn begin_delete_selection(
@@ -72,29 +68,14 @@ impl Service {
             ));
         }
         let events: Vec<_> = ids.iter().map(|id| (*id, self.get(*id))).collect();
-        let permanent = events.iter().any(|(_, event)| {
-            event.as_ref().is_ok_and(|event| {
-                matches!(
-                    event.delete_policy,
-                    DeletePolicy::LiveOriginal {
-                        mode: OriginalDeleteMode::Permanent,
-                        ..
-                    }
-                )
-            })
-        });
+        // Old ShareX policies may still say Permanent; execution never does.
+        let permanent = false;
         let recycle = events.iter().any(|(_, event)| {
-            event.as_ref().is_ok_and(|event| {
-                matches!(
-                    event.delete_policy,
-                    DeletePolicy::LiveOriginal {
-                        mode: OriginalDeleteMode::Recycle,
-                        ..
-                    }
-                )
-            })
+            event
+                .as_ref()
+                .is_ok_and(|event| matches!(event.delete_policy, DeletePolicy::LiveOriginal { .. }))
         });
-        if !permanent && !recycle {
+        if !recycle {
             return Ok(DeleteStart::Immediate(
                 self.dispatch(Command::DeleteEvents { ids, confirmed })?,
             ));
@@ -148,6 +129,12 @@ impl Service {
         for (id, result) in deleted.items {
             match result {
                 Ok(receipt) => {
+                    if let Some(ref recycle) = receipt.recycle
+                        && !recycle.recycled
+                    {
+                        items.push(json!({"ok":false,"id":id,"skipped_pinned":false,"original_removed":receipt.removed,"recovery_path":recycle.recovery_path,"error":{"code":"recycle_failed","message":recycle.error},"recycle":recycle}));
+                        continue;
+                    }
                     let exists: bool = self.db.query_row(
                         "SELECT EXISTS(SELECT 1 FROM events WHERE id=?1)",
                         [id],
@@ -162,9 +149,9 @@ impl Service {
                         Ok(json!({"deleted":0}))
                     };
                     match shelf {
-                        Ok(shelf) if exists && shelf["deleted"].as_u64() == Some(0) => items.push(json!({"ok":false,"id":id,"skipped_pinned":true,"original_removed":receipt.removed,"shelf":shelf})),
-                        Ok(shelf)=> {count+=1;items.push(json!({"ok":true,"id":id,"skipped_pinned":false,"original_missing":receipt.missing,"original_removed":receipt.removed,"shelf_missing":!exists,"shelf":shelf}));}
-                        Err(error)=>items.push(json!({"ok":false,"id":id,"original_removed":receipt.removed,"error":error})),
+                        Ok(shelf) if exists && shelf["deleted"].as_u64() == Some(0) => items.push(json!({"ok":false,"id":id,"skipped_pinned":true,"original_removed":receipt.removed,"recycle":receipt.recycle,"shelf":shelf})),
+                        Ok(shelf)=> {count+=1;items.push(json!({"ok":true,"id":id,"skipped_pinned":false,"original_missing":receipt.missing,"original_removed":receipt.removed,"recycle":receipt.recycle,"shelf_missing":!exists,"shelf":shelf}));}
+                        Err(error)=>items.push(json!({"ok":false,"id":id,"original_removed":receipt.removed,"recycle":receipt.recycle,"error":error})),
                     }
                 }
                 Err(error) => {
@@ -250,24 +237,13 @@ fn prepare_input(input: Input) -> Result<PreparedItem> {
         )
     })?;
     let locked = crate::delete_selection::prepare_locked_original(&path, &root, expected)?;
-    let original = match event.delete_policy {
-        DeletePolicy::LiveOriginal {
-            source_id: SourceId::Sharex,
-            mode: OriginalDeleteMode::Permanent,
-            ..
-        } => Original::Permanent(locked),
-        DeletePolicy::LiveOriginal {
-            source_id: SourceId::Downloads,
-            mode: OriginalDeleteMode::Recycle,
-            ..
-        } => Original::Recycle { locked, root },
-        _ => {
-            return Err(ApiError::new(
-                "unsafe_source",
-                "Unsupported original deletion policy",
-            ));
-        }
-    };
+    if !matches!(event.delete_policy, DeletePolicy::LiveOriginal { .. }) {
+        return Err(ApiError::new(
+            "unsafe_source",
+            "Unsupported original deletion policy",
+        ));
+    }
+    let original = Original::Recycle { locked, root };
     Ok(PreparedItem { event, original })
 }
 pub(crate) fn prepare(request: DeleteRequest) -> PreparedDelete {
@@ -290,24 +266,34 @@ pub(crate) fn apply(
         .into_iter()
         .map(|(id, result)| {
             let result = result.and_then(|item| {
-                let (missing, removed) = match item.original {
-                    Original::Shelf => (false, false),
-                    Original::Missing => (true, false),
-                    Original::Permanent(locked) => {
-                        crate::delete_selection::dispose_locked_original(locked)?;
-                        (false, true)
-                    }
+                let (missing, removed, recycle) = match item.original {
+                    Original::Shelf => (false, false, None),
+                    Original::Missing => (true, false, None),
                     Original::Recycle { locked, root } => {
-                        drop(locked);
                         let trash = trash.lock().map_err(|_| {
                             ApiError::new("recycle_failed", "Trash adapter lock poisoned")
                         })?;
-                        let missing =
-                            downloads::recycle_original(&item.event, &root, trash.as_ref())?;
-                        (missing, !missing)
+                        let hash = item.event.revision.strip_prefix("ref:").ok_or_else(|| {
+                            ApiError::new(
+                                "stale_selection",
+                                "Original has no recorded content identity",
+                            )
+                        })?;
+                        let receipt = crate::safe_recycle::recycle_locked(
+                            locked,
+                            &item.event.path,
+                            &root,
+                            hash,
+                            trash.as_ref(),
+                        )?;
+                        (false, receipt.original_removed, Some(receipt))
                     }
                 };
-                Ok(DeletedItem { missing, removed })
+                Ok(DeletedItem {
+                    missing,
+                    removed,
+                    recycle,
+                })
             });
             (id, result)
         })

@@ -36,7 +36,7 @@ impl DownloadsScanner {
                 "Downloads root must be a directory",
             ));
         }
-        let mut pending = vec![root];
+        let mut pending = vec![root.clone()];
         let mut entries = 0;
         let mut current = HashMap::new();
         let mut ready = Vec::new();
@@ -56,7 +56,9 @@ impl DownloadsScanner {
                 };
                 let path = entry.path();
                 if kind.is_dir() {
-                    pending.push(path);
+                    if !crate::folder_watch::is_recovery_dir(&root, &path) {
+                        pending.push(path);
+                    }
                 } else if kind.is_file() && supported(&path) {
                     let Some(revision) = readable_revision(&path) else {
                         continue;
@@ -144,6 +146,125 @@ pub trait Trash: Send {
     fn recycle(&self, path: &Path) -> Result<()>;
 }
 pub struct NativeTrash;
+
+/// Explicit recycle operation for controlled staging. Unlike `NativeTrash`'s
+/// legacy general delete operation this never calls IFileOperation::DeleteItem.
+pub struct RecycleOnlyTrash;
+#[cfg(windows)]
+impl Trash for RecycleOnlyTrash {
+    fn recycle(&self, path: &Path) -> Result<()> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows::{
+            Win32::{
+                System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+                UI::Shell::*,
+            },
+            core::PCWSTR,
+        };
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetDriveTypeW, GetVolumeInformationW, GetVolumePathNameW,
+        };
+        let canonical = path.canonicalize()?;
+        let mut wide: Vec<u16> = canonical.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let mut volume = [0u16; 32768];
+        if unsafe { GetVolumePathNameW(wide.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) }
+            == 0
+        {
+            return Err(ApiError::new(
+                "recycle_unavailable",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        if unsafe { GetDriveTypeW(volume.as_ptr()) } != 3 {
+            return Err(ApiError::new(
+                "recycle_unavailable",
+                "Recycle requires a fixed local NTFS volume",
+            ));
+        }
+        let mut fs_name = [0u16; 256];
+        if unsafe {
+            GetVolumeInformationW(
+                volume.as_ptr(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                fs_name.as_mut_ptr(),
+                fs_name.len() as u32,
+            )
+        } == 0
+        {
+            return Err(ApiError::new(
+                "recycle_unavailable",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let len = fs_name
+            .iter()
+            .position(|c| *c == 0)
+            .unwrap_or(fs_name.len());
+        if !String::from_utf16_lossy(&fs_name[..len]).eq_ignore_ascii_case("NTFS") {
+            return Err(ApiError::new(
+                "recycle_unavailable",
+                "Recycle requires a fixed local NTFS volume",
+            ));
+        }
+        // Shell cannot parse canonical extended paths for all supported names.
+        let mut shell_units: Vec<u16> = canonical.as_os_str().encode_wide().collect();
+        let unc: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+        let extended: Vec<u16> = r"\\?\".encode_utf16().collect();
+        if shell_units.starts_with(&unc) {
+            shell_units.splice(..unc.len(), [b'\\' as u16, b'\\' as u16]);
+        } else if shell_units.starts_with(&extended)
+            && shell_units.get(extended.len() + 1) == Some(&(b':' as u16))
+        {
+            shell_units.drain(..extended.len());
+        }
+        let shell_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&shell_units));
+        let mut shell_wide: Vec<u16> = shell_path.as_os_str().encode_wide().collect();
+        shell_wide.push(0);
+        if shell_path.canonicalize()? != canonical {
+            return Err(ApiError::new(
+                "unsafe_source",
+                "Shell path differs from staged file",
+            ));
+        }
+        unsafe {
+            let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            if initialized.is_err() && initialized.0 != 0x80010106u32 as i32 {
+                return Err(ApiError::new(
+                    "recycle_unavailable",
+                    initialized.to_string(),
+                ));
+            }
+            let result = (|| -> windows::core::Result<()> {
+                let item: IShellItem =
+                    SHCreateItemFromParsingName(PCWSTR(shell_wide.as_ptr()), None)?;
+                let parent = item.GetParent()?;
+                let transfer: ITransferSource = parent.BindToHandler(None, &BHID_Transfer)?;
+                let bin: IShellItem =
+                    SHGetKnownFolderItem(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)?;
+                let _recycled_item = transfer.RecycleItem(&item, &bin, 0)?;
+                Ok(())
+            })();
+            if initialized.is_ok() {
+                CoUninitialize();
+            }
+            result.map_err(|e| ApiError::new("recycle_failed", e.to_string()))
+        }
+    }
+}
+#[cfg(not(windows))]
+impl Trash for RecycleOnlyTrash {
+    fn recycle(&self, _: &Path) -> Result<()> {
+        Err(ApiError::new(
+            "unsupported_platform",
+            "Recycle requires Windows",
+        ))
+    }
+}
 #[cfg(windows)]
 impl Trash for NativeTrash {
     fn recycle(&self, path: &Path) -> Result<()> {

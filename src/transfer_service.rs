@@ -7,6 +7,7 @@ impl Service {
     pub(crate) fn stage_transfer(&mut self, items: Vec<SelectionRef>, cut: bool) -> Result<Value> {
         // A rejected replacement must not leave an older, surprising cut armed.
         self.transfer_intent = None;
+        self.transfer_sequence = None;
         if items.is_empty() || items.len() > 1000 {
             return Err(ApiError::new(
                 "invalid_argument",
@@ -29,10 +30,14 @@ impl Service {
         }
         let count = items.len();
         self.transfer_intent = Some((items, cut));
+        if cut { self.transfer_sequence=Some(self.clipboard_files.sequence()); }
         Ok(json!({"staged":count,"cut":cut}))
     }
 
     pub(crate) fn paste_to_folder(&mut self) -> Result<Value> {
+        if self.transfer_intent.is_none() || self.transfer_sequence.is_some_and(|sequence|sequence!=self.clipboard_files.sequence()) {
+            return self.paste_clipboard_to_folder();
+        }
         let destination = self
             .work_folder
             .current()
@@ -161,13 +166,10 @@ impl Service {
             let result = (|| {
                 let event = self.get(id)?;
                 crate::open_file::validate(&event)?;
-                self.dispatch(Command::IngestPath {
-                    path: event.path,
-                    source: "manual".into(),
-                })
+                self.import_folder_event(event)
             })();
             match result {
-                Ok(event) => results.push(json!({"id":id,"ok":true,"event":event})),
+                Ok(event) => results.push(json!({"id":id,"ok":event["failed"].as_u64().unwrap_or(0)==0,"event":event})),
                 Err(e) => results.push(json!({"id":id,"ok":false,"error":e})),
             }
         }

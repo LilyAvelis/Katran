@@ -24,6 +24,117 @@ pub(crate) struct LockedOriginal {
     #[cfg(not(windows))]
     path: PathBuf,
 }
+
+/// Windows volume/file identity captured from the opened handle, not the pathname.
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct LockedIdentity {
+    pub volume: u32,
+    pub index: u64,
+}
+
+#[cfg(windows)]
+pub(crate) fn locked_identity(original: &LockedOriginal) -> Result<LockedIdentity> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileInformationByHandle(original.file.as_raw_handle(), &mut info) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    if info.dwFileAttributes & (0x10 | 0x400) != 0 {
+        return Err(ApiError::new(
+            "unsafe_source",
+            "Source is a directory or reparse point",
+        ));
+    }
+    Ok(LockedIdentity {
+        volume: info.dwVolumeSerialNumber,
+        index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn locked_path(original: &LockedOriginal) -> Result<PathBuf> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+    let mut name = vec![0u16; 32768];
+    let count = unsafe {
+        GetFinalPathNameByHandleW(
+            original.file.as_raw_handle(),
+            name.as_mut_ptr(),
+            name.len() as u32,
+            0,
+        )
+    } as usize;
+    if count == 0 || count >= name.len() {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(PathBuf::from(
+        String::from_utf16(&name[..count]).map_err(|e| ApiError::new("unsafe_source", e))?,
+    ))
+}
+
+/// Rename the already validated handle without replacement. The caller must
+/// validate and secure the destination parent on the same volume. The handle is
+/// retained on both success and failure, allowing safe recovery decisions.
+#[cfg(windows)]
+pub(crate) fn rename_locked_original(
+    original: &mut LockedOriginal,
+    destination: &Path,
+) -> Result<()> {
+    use std::os::windows::{ffi::OsStrExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_RENAME_INFO, FileRenameInfo, SetFileInformationByHandle,
+    };
+    if !destination.is_absolute() {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Rename destination must be absolute",
+        ));
+    }
+    let mut name: Vec<u16> = destination.as_os_str().encode_wide().collect();
+    if name.contains(&0) {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Rename destination contains NUL",
+        ));
+    }
+    let name_bytes = name
+        .len()
+        .checked_mul(2)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| ApiError::new("invalid_argument", "Rename path too long"))?;
+    name.push(0);
+    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let size = offset
+        .checked_add(name.len() * 2)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| ApiError::new("invalid_argument", "Rename buffer too large"))?;
+    let mut storage = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*info).Anonymous.ReplaceIfExists = false;
+        (*info).RootDirectory = std::ptr::null_mut();
+        (*info).FileNameLength = name_bytes;
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr(),
+            storage.as_mut_ptr().cast::<u8>().add(offset).cast::<u16>(),
+            name.len(),
+        );
+        if SetFileInformationByHandle(
+            original.file.as_raw_handle(),
+            FileRenameInfo,
+            info.cast(),
+            size,
+        ) == 0
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
+    Ok(())
+}
 /// Retain the same deny-write/deny-replacement handle through authorization.
 pub(crate) fn prepare_locked_original(
     path: &Path,
@@ -163,5 +274,28 @@ mod tests {
         .unwrap();
         assert!(!path.exists());
         assert_eq!(fs::read(replacement).unwrap(), b"preserve replacement");
+    }
+
+    #[test]
+    fn handle_rename_preserves_identity_and_never_replaces_a_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let source = root.join("source 🐄.txt");
+        let staged = root.join("staged 🐄.txt");
+        let occupied = root.join("occupied.txt");
+        fs::write(&source, b"synthetic original").unwrap();
+        fs::write(&occupied, b"do not replace").unwrap();
+        let hash = preview::content_hash(&source).unwrap();
+        let mut handle = prepare_locked_original(&source, &root, &hash).unwrap();
+        let identity = locked_identity(&handle).unwrap();
+        assert!(rename_locked_original(&mut handle, &occupied).is_err());
+        assert_eq!(fs::read(&occupied).unwrap(), b"do not replace");
+        rename_locked_original(&mut handle, &staged).unwrap();
+        assert_eq!(locked_identity(&handle).unwrap(), identity);
+        assert!(!source.exists());
+        assert!(fs::write(&staged, b"replace").is_err());
+        rename_locked_original(&mut handle, &source).unwrap();
+        drop(handle);
+        assert_eq!(fs::read(&source).unwrap(), b"synthetic original");
     }
 }

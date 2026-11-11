@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 7;
+pub(crate) const VERSION: i64 = 8;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -142,6 +142,7 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
       CREATE INDEX IF NOT EXISTS folder_history_recent ON folder_history(opened_at_ms DESC,path_key);
       CREATE TABLE IF NOT EXISTS folder_favorites(path_key TEXT PRIMARY KEY,path TEXT NOT NULL,added_at_ms INTEGER NOT NULL);
       PRAGMA user_version=7;")?;
+    tx.execute_batch("UPDATE events SET delete_policy_json=json_set(delete_policy_json,'$.mode','recycle') WHERE json_extract(delete_policy_json,'$.kind')='live_original'; UPDATE events SET modified_at_ms=detected_at_ms WHERE blob_hash IS NOT NULL AND modified_at_ms IS NULL; PRAGMA user_version=8;")?;
     tx.commit()?;
     Ok(())
 }

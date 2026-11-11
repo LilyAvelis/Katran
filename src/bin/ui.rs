@@ -13,6 +13,7 @@ mod markdown_ui;
 mod native_drag_ui;
 mod open_apps_ui;
 mod palette;
+mod pinned_ui;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;
@@ -153,6 +154,7 @@ struct Shelf {
     settings_ui: settings_ui::State,
     open_apps: open_apps_ui::State,
     workspace: workspace_ui::State,
+    pinned_ui: pinned_ui::State,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
@@ -212,7 +214,7 @@ impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         input_log::record(&ctx, self.logger.as_ref());
-        if self.api.is_some() { self.workspace_input(&ctx); self.workspace_tick(&ctx); }
+        if self.api.is_some() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
         if self.api.is_none()
             && self.job.is_some()
             && self.shortcut_editor.is_none()
@@ -220,6 +222,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -242,6 +245,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -290,6 +294,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -366,6 +371,7 @@ impl Shelf {
             }
             if self.shortcut_editor.is_none()
                 && !self.workspace.open
+            && !self.pinned_ui.open
                 && !self.save
                 && self.state["settings_open"] != true
                 && self.pending_delete.is_empty()
@@ -388,6 +394,7 @@ impl Shelf {
         }
         if self.api.is_some() {
             if !self.open_apps.open && !self.workspace.open
+            && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
             {
                 self.actions = !self.actions;
@@ -398,6 +405,7 @@ impl Shelf {
             if self.shortcut_editor.is_none()
                 && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {
@@ -453,6 +461,19 @@ impl Shelf {
                     let text = self.state["folder_path"].as_str().unwrap_or("Выберите папку · Ctrl Shift K");
                     ui.label(RichText::new(text).size(12.0).color(Color32::from_gray(185))).on_hover_text(text);
                     ui.weak("Ctrl Shift K · выбрать папку   Ctrl V · вставить   Ctrl Shift C · добавить в Катран   Ctrl . · избранное");
+                    if self.workspace.recovery_root.as_deref() != self.state["folder_path"].as_str() { self.workspace.recovery = None; self.workspace.recovery_root = self.state["folder_path"].as_str().map(str::to_owned); }
+                    if ui.button("Восстановление файлов").clicked() {
+                        if self.workspace.recovery.is_some() { self.workspace.recovery = None; }
+                        else { let result = self.call(Command::FolderRecovery); if let Some(items) = result["items"].as_array() { self.workspace.recovery = Some(items.clone()); } }
+                    }
+                    if let Some(items) = &self.workspace.recovery {
+                        if items.is_empty() { ui.weak("Записей восстановления нет"); }
+                        for item in items {
+                            let path = item["recovery_path"].as_str().or_else(||item["journal_path"].as_str()).unwrap_or("Путь недоступен");
+                            let error = item["error"]["message"].as_str().or_else(||item["error"].as_str()).unwrap_or("");
+                            ui.label(format!("{} · {}", path, error)).on_hover_text(path);
+                        }
+                    }
                 }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
@@ -573,6 +594,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -648,6 +670,7 @@ impl Shelf {
         self.shelf_view(root, &ctx, &visible, gallery, columns);
         if self.api.is_some() {
             self.workspace_panel(&ctx);
+            self.pinned_panel(&ctx);
             self.palette(&ctx);
             self.open_apps_panel(&ctx);
         }
@@ -664,10 +687,10 @@ impl Shelf {
         if self.api.is_some() && !self.pending_delete.is_empty() {
             let result=egui::Modal::new(egui::Id::new("delete-confirmation")).show(&ctx,|ui| {
                 if self.pending_delete_originals {
-                    ui.heading(if self.pending_delete_recycle && !self.pending_delete_permanent { "Переместить файлы Downloads в корзину?" } else { "Удалить оригиналы с диска?" });
+                    ui.heading(if self.pending_delete_recycle && !self.pending_delete_permanent { "Переместить файлы в корзину?" } else { "Удалить оригиналы с диска?" });
                     ui.label(format!("Выбрано объектов: {}.", self.pending_delete.len()));
                     if self.pending_delete_permanent { ui.label("Оригиналы снимков ShareX будут удалены безвозвратно, без корзины."); }
-                    if self.pending_delete_recycle { ui.label("Файлы Downloads будут перемещены в корзину Windows."); }
+                    if self.pending_delete_recycle { ui.label("Выбранные оригиналы будут перемещены в корзину Windows."); }
                     ui.label("Остальные выбранные объекты будут убраны с полки.");
                 } else {
                     ui.heading(format!("Убрать с полки {} объектов?",self.pending_delete.len()));
@@ -723,6 +746,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.pinned_ui.open
             && !self.save
             && self.shortcut_editor.is_none()
             && self.pending_delete.is_empty()
@@ -818,6 +842,7 @@ fn main() -> eframe::Result {
         settings_ui: settings_ui::State::default(),
         open_apps: open_apps_ui::State::default(),
         workspace: workspace_ui::State::default(),
+            pinned_ui: pinned_ui::State::default(),
         shortcut_editor: None,
         api: Some(api),
         job: None,
@@ -983,6 +1008,7 @@ mod tests {
             settings_ui: settings_ui::State::default(),
             open_apps: open_apps_ui::State::default(),
             workspace: workspace_ui::State::default(),
+            pinned_ui: pinned_ui::State::default(),
             shortcut_editor: None,
             api: Some(api),
             job: None,
@@ -1439,6 +1465,24 @@ mod tests {
         assert_eq!(actions, vec![Some("copy".into()), None]);
     }
     #[test]
+    fn pinned_tag_picker_filters_and_does_not_leak_navigation() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let id = app.call(Command::IngestBytes { name: "pin.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::TogglePins { ids: vec![id] });
+        app.call(Command::SetPinnedTags { id, tags: vec!["Work".into()] });
+        app.state = app.call(Command::SelectTabPosition { position: 1 });
+        app.refresh();
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL);
+        assert!(app.pinned_ui.open);
+        frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(!app.pinned_ui.open);
+        assert_eq!(app.call(Command::Interaction)["tag_filter"], "work");
+        assert!(app.call(Command::Interaction)["preview"].is_null());
+    }
+    #[test]
     fn folder_modal_history_and_keyboard_do_not_leak() {
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
@@ -1622,6 +1666,19 @@ mod tests {
         let original = shots.path().join("synthetic.png");
         image::RgbaImage::new(2, 2).save(&original).unwrap();
         let mut app = test_shelf(root.path());
+        struct SyntheticTrash { root: PathBuf, count: std::sync::Arc<std::sync::atomic::AtomicUsize> }
+        impl katran::downloads::Trash for SyntheticTrash {
+            fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+                let resolved = path.canonicalize()?;
+                assert!(resolved.starts_with(&self.root));
+                assert!(resolved.components().any(|c| c.as_os_str().to_string_lossy().starts_with(".katran-recovery-")));
+                self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::fs::remove_file(resolved)?;
+                Ok(())
+            }
+        }
+        let recycled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        app.api.as_mut().unwrap().set_trash(Box::new(SyntheticTrash { root: shots.path().canonicalize().unwrap(), count: recycled.clone() }));
         app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Screenshots });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
@@ -1685,7 +1742,7 @@ mod tests {
             output
                 .shapes
                 .iter()
-                .any(|shape| contains(&shape.shape, "безвозвратно, без корзины"))
+                .any(|shape| contains(&shape.shape, "перемещены в корзину Windows"))
         );
         output.textures_delta.clear();
         assert!(original.is_file());
@@ -1694,6 +1751,7 @@ mod tests {
         assert!(app.pending_delete.is_empty());
         assert!(!original.exists());
         assert!(!second.exists());
+        assert_eq!(recycled.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(app.events.is_empty());
         // Partial and complete per-item failures must remain visible to the owner.
         app.action_result(serde_json::json!({"deleted":1,"original_files":true,"items":[{"ok":true,"id":1},{"ok":false,"id":2,"error":{"message":"source changed"}}]}));

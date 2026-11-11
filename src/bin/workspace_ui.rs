@@ -25,6 +25,8 @@ pub(super) struct State {
     error: Option<String>,
     opened_frame: u64,
     pub last_refresh: Option<Instant>,
+    pub recovery: Option<Vec<Value>>,
+    pub recovery_root: Option<String>,
 }
 impl Shelf {
     fn workspace_cancel(&mut self) {
