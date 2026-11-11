@@ -24,6 +24,28 @@ pub(crate) fn prepare_owned(
     quota: u64,
     references: &[PathBuf],
 ) -> Result<DragPreparation> {
+    let mut pod_count = 0usize;
+    let mut ordinary_text = false;
+    let mut unreadable = false;
+    if events
+        .iter()
+        .all(|event| event.kind == crate::EventKind::TextFragment)
+    {
+        for event in events {
+            match crate::text_fragments::read_text_event(event) {
+                Ok(text) if crate::pods::is_pod(&text) => pod_count += 1,
+                Ok(_) => ordinary_text = true,
+                Err(_) => unreadable = true,
+            }
+        }
+    }
+    if pod_count > 0 && !ordinary_text && unreadable {
+        return Err(ApiError::new(
+            "drag_error",
+            "Cannot group a Pods selection with unreadable or changed items",
+        ));
+    }
+    let all_pods = !events.is_empty() && pod_count == events.len();
     let mut plan = copy_out::prepare_with_budget(&root.join("drag-cache"), events, quota)
         .map_err(|e| ApiError::new("drag_error", e))?;
     if events
@@ -31,6 +53,9 @@ pub(crate) fn prepare_owned(
         .all(|event| event.kind == crate::EventKind::LinkFragment)
     {
         plan.group_links(quota)
+            .map_err(|e| ApiError::new("drag_error", e))?;
+    } else if all_pods {
+        plan.group_pods(quota)
             .map_err(|e| ApiError::new("drag_error", e))?;
     }
     plan.protect_references(references)

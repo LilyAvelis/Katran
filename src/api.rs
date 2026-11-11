@@ -19,6 +19,8 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    DescribePod { id: i64 },
+    SummonCapturedOverlay { owner_window: u64, capture: crate::overlay::SummonReceipt },
     SummonOverlay { owner_window: u64 },
     BeginPastePrevious { owner_window: u64 },
     CompletePastePrevious { owner_window: u64 },

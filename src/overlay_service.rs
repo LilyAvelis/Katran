@@ -5,6 +5,20 @@ fn overlay_error(error: crate::overlay::OverlayError) -> ApiError {
     ApiError::new(&error.code, error.message)
 }
 impl Service {
+    pub(crate) fn summon_captured_overlay(
+        &mut self,
+        owner: u64,
+        capture: crate::overlay::SummonReceipt,
+    ) -> Result<Value> {
+        if self.overlay_copy.is_some() {
+            return Err(ApiError::new("paste_busy", "Вставка ещё выполняется"));
+        }
+        self.overlay_session
+            .adopt(self.overlay_host.as_mut(), owner, capture)
+            .map(serde_json::to_value)
+            .map_err(overlay_error)?
+            .map_err(|error| ApiError::new("overlay_error", error))
+    }
     pub fn set_overlay_host(&mut self, host: Box<dyn crate::overlay::Host + Send>) {
         self.overlay_host = host;
         self.overlay_session.clear();

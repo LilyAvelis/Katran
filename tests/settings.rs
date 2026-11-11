@@ -12,6 +12,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
         pods_enabled: false,
+        pods_tile_size: 96,
         overlay_hotkey: String::new(),
         sort: Default::default(),
         quota_bytes: 200,

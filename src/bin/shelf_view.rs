@@ -63,8 +63,34 @@ impl Shelf {
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
                         if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
-                            let (canvas, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), (ui.available_height()-30.0).max(32.0)), egui::Sense::hover());
-                            self.pods_ui.paint(ui, event, canvas);
+                            let revision = event["revision"].as_str().unwrap_or("");
+                            if self.api.is_some() && self.pods_ui.description_needed(id, revision) {
+                                let description = self.call(Command::DescribePod { id });
+                                self.pods_ui.set_description(id, revision, description);
+                            }
+                            let description = self.pods_ui.description().cloned().unwrap_or(Value::Null);
+                            let mut full_event = event.clone();
+                            if let Some(text) = description["text"].as_str() { full_event["text_preview"] = Value::String(text.to_owned()); }
+                            let width = ui.available_width();
+                            let height = (ui.available_height()-30.0).max(32.0);
+                            ui.horizontal_top(|ui| {
+                                let canvas_width = (width * 0.58).max(1.0);
+                                let (canvas, _) = ui.allocate_exact_size(egui::vec2(canvas_width, height), egui::Sense::hover());
+                                self.pods_ui.paint(ui, &full_event, canvas);
+                                egui::ScrollArea::vertical().id_salt("pods-metadata").max_height(height).show(ui, |ui| {
+                                    ui.set_max_width((width-canvas_width-12.0).max(1.0));
+                                    ui.heading(description["name"].as_str().unwrap_or("Pods"));
+                                    if description.is_null() { ui.label("Метаданные недоступны"); }
+                                    else {
+                                        ui.label(format!("UTF-8: {} байт · UTF-16: {}", description["utf8_bytes"], description["utf16_units"]));
+                                        if let Some(points)=description["codepoints"].as_array() { for point in points {
+                                            ui.label(format!("{} · {}",point["codepoint"].as_str().unwrap_or(""),point["name"].as_str().unwrap_or("")));
+                                            ui.weak(point["utf8"].as_str().unwrap_or(""));
+                                        }}
+                                        if description["metadata_truncated"]==true { ui.weak("Показана часть метаданных"); }
+                                    }
+                                });
+                            });
                             ui.weak("Space — назад · ← → — листать");
                         } else if event["kind"] == "table_fragment" { if let Some(api) = self.api.as_mut() { self.table_preview.show(ui,event,api); } } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) || katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or(""))) {
                             self.text_preview.show(ui, event);
@@ -166,14 +192,17 @@ impl Shelf {
                     }
                     let gap = gallery_card::GAP;
                     ui.spacing_mut().item_spacing = Vec2::splat(gap);
-                    let cell_width = if gallery {
+                    let pods = self.state["tab"] == "pods";
+                    let cell_width = if pods {
+                        f32::from(self.pods_tile_size).min(((ui.available_width() - 16.0 - gap * (columns - 1) as f32) / columns as f32).max(1.0))
+                    } else if gallery {
                         ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
                             / columns as f32)
                             .max(1.0)
                     } else {
                         (ui.available_width() - 16.0).max(80.0)
                     };
-                    let height = if gallery { cell_width + 54.0 } else {
+                    let height = if pods { cell_width } else if gallery { cell_width + 54.0 } else {
                         stream_row_height(ui.available_height(), self.stream_rows, gap)
                     };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
@@ -211,6 +240,8 @@ impl Shelf {
                                         egui::vec2(cell_width, height),
                                         egui::Sense::click_and_drag(),
                                     );
+                                    #[cfg(test)]
+                                    if pods { ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-pod-tile-rect"), rect)); }
                                     ui.painter().rect_filled(
                                         rect,
                                         8.0,
@@ -224,7 +255,9 @@ impl Shelf {
                                             egui::StrokeKind::Inside,
                                         );
                                     }
-                                    if gallery {
+                                    if pods {
+                                        self.pods_ui.paint(ui,event,rect.shrink(6.0));
+                                    } else if gallery {
                                         let zones = gallery_card::geometry(rect);
                                         if self.state["tab"] == "pods" { self.pods_ui.paint(ui,event,zones.image); } else if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
                                         let title = if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
@@ -347,6 +380,38 @@ mod tests {
     use super::*;
     use katran::preview_view::{Point, Size};
 
+    #[test]
+    fn pods_tiles_are_square_without_text_plaques() {
+        let root=tempfile::tempdir().unwrap();
+        let mut app=super::super::tests::test_shelf(root.path());
+        app.state=serde_json::json!({"tab":"pods","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
+        let event=serde_json::json!({"id":1,"kind":"text_fragment","name":"SENTINEL TITLE","text_preview":"🐄","origin":{"source_app":"SENTINEL ORIGIN"},"source":"SENTINEL SOURCE","properties":{"pinned":false},"revision":"r1"});
+        let ctx=egui::Context::default();
+        let mut output=ctx.run_ui(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(960.0,680.0))),..Default::default()},|ui|app.shelf_view(ui,&ctx,std::slice::from_ref(&event),true,9));
+        fn has_sentinel(shape:&egui::Shape)->bool { match shape {egui::Shape::Text(t)=>t.galley.text().contains("SENTINEL"),egui::Shape::Vec(shapes)=>shapes.iter().any(has_sentinel),_=>false} }
+        let labelled=output.shapes.iter().any(|s|has_sentinel(&s.shape));
+        output.textures_delta.clear();
+        let tile=ctx.data(|data|data.get_temp::<egui::Rect>(egui::Id::new("test-pod-tile-rect"))).expect("Pods tile allocated");
+        assert!(!labelled,"tile must not paint title or origin");
+        assert_eq!(tile.width(),tile.height());
+        assert!(tile.width()<=96.0);
+    }
+    #[test]
+    fn pods_preview_loads_full_description_through_dispatcher() {
+        let root=tempfile::tempdir().unwrap();let mut app=super::super::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled{tab:katran::interaction::ShelfTab::Pods,enabled:true});
+        let event=app.call(Command::IngestText{text:"🐄".into(),source:"test".into()});
+        let id=event["id"].as_i64().unwrap();
+        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Pods});
+        app.call(Command::SetVisible{ids:vec![id]});app.call(Command::Select{id,mode:SelectionMode::Replace});
+        app.state=app.call(Command::TogglePreview);
+        let ctx=egui::Context::default();
+        let mut output=ctx.run_ui(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(960.0,680.0))),..Default::default()},|ui|app.shelf_view(ui,&ctx,std::slice::from_ref(&event),true,9));
+        output.textures_delta.clear();
+        let value=app.pods_ui.description().expect("description requested");
+        assert_eq!(value["text"],"🐄");assert_eq!(value["codepoints"][0]["codepoint"],"U+1F404");
+        assert!(value["name"].as_str().is_some_and(|name|!name.is_empty()));
+    }
     #[test]
     fn preview_primary_drag_only_exports_at_fitted_scale() {
         assert_eq!(preview_drag(1.0), PreviewDrag::Export);

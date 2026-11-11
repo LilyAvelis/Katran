@@ -28,6 +28,7 @@ fn friendly_path(path: &str) -> String {
 impl Shelf {
     pub(super) fn info_bar(&mut self, ui: &mut egui::Ui) {
         let folder = self.state["tab"] == "folder";
+        let pods = self.state["tab"] == "pods";
         let path = self.state["folder_path"]
             .as_str()
             .map(friendly_path)
@@ -39,8 +40,16 @@ impl Shelf {
             self.message.clone()
         };
         let width = ui.available_width();
-        let available =
-            (width - ui.spacing().item_spacing.x * if folder { 3.0 } else { 2.0 }).max(0.0);
+        let available = (width
+            - ui.spacing().item_spacing.x
+                * if folder {
+                    3.0
+                } else if pods {
+                    1.0
+                } else {
+                    2.0
+                })
+        .max(0.0);
         let widths = if folder {
             [
                 available * 0.30,
@@ -48,6 +57,8 @@ impl Shelf {
                 available * 0.28,
                 available * 0.20,
             ]
+        } else if pods {
+            [available * 0.32, 0.0, available * 0.68, 0.0]
         } else {
             [available * 0.25, available * 0.30, available * 0.45, 0.0]
         };
@@ -75,6 +86,9 @@ impl Shelf {
             .into_iter()
             .enumerate()
             {
+                if pods && page == Page::Sort {
+                    continue;
+                }
                 if ui
                     .add_sized(
                         [widths[index], 24.0],

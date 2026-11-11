@@ -228,9 +228,10 @@ impl Service {
             } else if self.selection_is_links(&items)? {
                 Command::CopyLinks { items }
             } else if self.selection_is_text(&items)? {
+                let separator=if self.selection_is_pods(&items)? {""} else {"\n\n"}.into();
                 Command::CopyText {
                     items,
-                    separator: "\n\n".into(),
+                    separator,
                 }
             } else {
                 Command::CopyEventsChecked { items }

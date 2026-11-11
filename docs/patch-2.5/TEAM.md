@@ -56,3 +56,5 @@ Version 2.5.0 is not accepted. See `HANDOFF.md` for gates and
 Read this file, source scope and relevant handoff. Use followup_task with the existing canonical session when available. A saved row does not preserve an executing process. If runtime session is unavailable, explicitly record replacement with the same persona and transfer its handoff.
 
 Pods/summon followup: reused Nemi (Pods storage/classifier/capture), Mira (native hotkey/foreground/paste adapter) and Fenna (color renderer/Pods UI/settings). Polly integrated dispatcher and copy receipt orchestration. No new agents, no native desktop tests, no release/push for this followup.
+
+Ergonomics followup reused Fenna (Pods grid/preview), Nemi (Pods transfer + hotkey recorder), Walter Senior Sol/low (explicitly requested deeper summon diagnosis). Lead integrated API metadata, independent density and captured-target adoption. No Astra, new sessions, native desktop checks or release.

@@ -27,5 +27,7 @@ Copy-Item $exe (Join-Path $dest 'katran-ui.exe')
 Copy-Item assets/everything/es.exe,assets/everything/LICENSE,assets/everything/NOTICE.txt,AFIO-LICENSE $dest
 Copy-Item assets/emoji-flags/LICENSE-GRAPHICS (Join-Path $dest 'LICENSE-EMOJI-FLAGS.txt')
 Copy-Item assets/emoji-flags/ATTRIBUTION.md (Join-Path $dest 'ATTRIBUTION-EMOJI-FLAGS.md')
+Copy-Item assets/unicode/LICENSE.txt (Join-Path $dest 'LICENSE-UNICODE.txt')
+Copy-Item assets/unicode/SOURCE.md (Join-Path $dest 'UNICODE-SOURCES.md')
 [ordered]@{ kind='unaccepted preview'; executable_sha256=$sha; build_inputs=$before; es_sha256=(Get-FileHash assets/everything/es.exe).Hash; note='Snapshot before and after build; build invocation must be performed as documented.' } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $dest 'build-manifest.json') -Encoding UTF8
 Write-Output "Preview: $dest"

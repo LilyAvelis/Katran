@@ -77,6 +77,7 @@ pub mod table_view;
 pub mod updater;
 pub use api::*;
 pub mod pods;
+mod pod_metadata;
 pub mod overlay;
 pub mod overlay_windows;
 mod overlay_service;
@@ -405,6 +406,8 @@ impl Service {
             ));
         }
         match command {
+            Command::DescribePod { id } => self.describe_pod(id),
+            Command::SummonCapturedOverlay { owner_window, capture } => self.summon_captured_overlay(owner_window,capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
             Command::CompletePastePrevious { owner_window } => self.complete_paste_previous(owner_window),
@@ -466,10 +469,12 @@ impl Service {
             }
             Command::AdjustDensity { delta } => {
                 let mut settings = self.settings.clone();
-                match self.interaction.view {
+                if self.interaction.tab==interaction::ShelfTab::Pods {
+                    settings.pods_tile_size=(i32::from(settings.pods_tile_size)-i32::from(delta)*12).clamp(48,192) as u16;
+                } else {match self.interaction.view {
                     interaction::View::Gallery => settings.gallery_columns=density::adjust_density(settings.gallery_columns,delta),
                     interaction::View::List => settings.stream_rows=density::adjust_density(settings.stream_rows,delta),
-                }
+                }}
                 self.dispatch(Command::SetSettings{settings})
             },
             Command::CommitFolderCandidates { .. } => Err(ApiError::new("untrusted_worker_result","Prepared source results are accepted only from the domain supervisor")),
@@ -495,7 +500,7 @@ impl Service {
             Command::MergeText {items,separator}=>self.merge_text(&items,&separator),
             Command::CopyText {items,separator}=>self.copy_text(&items,&separator),
             Command::CopySelectedObjects=>{let items=self.selected_refs()?;self.dispatch(Command::CopySmart{items})},
-            Command::CopySmart{items}=>{if self.selection_is_tables(&items)?{self.copy_tables(items)}else if self.selection_is_links(&items)?{self.copy_links(&items)}else if self.selection_is_text(&items)?{self.copy_text(&items,"\n\n")}else{self.dispatch(Command::CopyEventsChecked{items})}},
+            Command::CopySmart{items}=>{if self.selection_is_tables(&items)?{self.copy_tables(items)}else if self.selection_is_links(&items)?{self.copy_links(&items)}else if self.selection_is_text(&items)?{self.copy_text(&items,if self.selection_is_pods(&items)? {""} else {"\n\n"})}else{self.dispatch(Command::CopyEventsChecked{items})}},
             Command::CopySelectedText=>{let items=self.selected_refs()?;self.copy_text(&items,"\n\n")},
             Command::ListOpenApps {id} => self.list_open_apps(id),
             Command::OpenWithApp {token,app_id} => self.open_with_app(&token,app_id),

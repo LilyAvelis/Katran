@@ -1,7 +1,7 @@
 //! Native Windows host and thread-owned global hotkey. No Clipboard handling.
 #[cfg(windows)]
 mod native {
-    use crate::overlay::{Host, Hotkey, OverlayError, Result, Target, WorkArea};
+    use crate::overlay::{Host, Hotkey, OverlayError, Result, SummonReceipt, Target, WorkArea};
     use std::{
         sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
         thread::{self, JoinHandle},
@@ -201,7 +201,8 @@ mod native {
                 "Window ownership or previous target changed",
             ));
         }
-        if host.foreground()? != previous.hwnd {
+        let foreground = host.foreground()?;
+        if foreground != previous.hwnd && foreground != own_window {
             return Err(fail(
                 "foreground_changed",
                 "Previous application lost foreground",
@@ -216,7 +217,10 @@ mod native {
                 let manager: IVirtualDesktopManager =
                     CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_INPROC_SERVER)?;
                 let desktop = manager.GetWindowDesktopId(hwnd(previous.hwnd))?;
-                manager.MoveWindowToDesktop(hwnd(own_window), &desktop)
+                if manager.GetWindowDesktopId(hwnd(own_window))? != desktop {
+                    manager.MoveWindowToDesktop(hwnd(own_window), &desktop)?;
+                }
+                Ok(())
             })();
             if initialized.is_ok() {
                 CoUninitialize();
@@ -274,7 +278,7 @@ mod native {
 
     /// Registration and unregistering happen on the same dedicated message thread.
     pub struct HotkeyListener {
-        receiver: Receiver<()>,
+        receiver: Receiver<Result<SummonReceipt>>,
         thread_id: u32,
         worker: Option<JoinHandle<()>>,
     }
@@ -312,9 +316,14 @@ mod native {
             }
         }
         pub fn try_recv(&self) -> Result<bool> {
+            self.try_recv_capture()?.transpose().map(|item| item.is_some())
+        }
+        /// Outer errors indicate listener failure; inner errors belong to one
+        /// hotkey event and must not disable an otherwise registered listener.
+        pub fn try_recv_capture(&self) -> Result<Option<Result<SummonReceipt>>> {
             match self.receiver.try_recv() {
-                Ok(()) => Ok(true),
-                Err(TryRecvError::Empty) => Ok(false),
+                Ok(capture) => Ok(Some(capture)),
+                Err(TryRecvError::Empty) => Ok(None),
                 Err(TryRecvError::Disconnected) => {
                     Err(fail("hotkey_stopped", "Global hotkey listener stopped"))
                 }
@@ -323,7 +332,7 @@ mod native {
     }
     fn hotkey_loop(
         hotkey: Hotkey,
-        sender: SyncSender<()>,
+        sender: SyncSender<Result<SummonReceipt>>,
         ready: SyncSender<Result<u32>>,
         wake: impl Fn(),
     ) {
@@ -358,9 +367,23 @@ mod native {
             if status <= 0 {
                 break;
             }
-            if message.message == WM_HOTKEY && message.wParam.0 == 1 && sender.try_send(()).is_ok()
-            {
-                wake();
+            if message.message == WM_HOTKEY && message.wParam.0 == 1 {
+                let capture = (|| {
+                    let mut host = WindowsHost;
+                    let window = host.foreground()?;
+                    let previous = host.identity(window)?;
+                    if previous.pid == std::process::id() {
+                        return Err(fail("self_target", "Katran is already foreground"));
+                    }
+                    let work_area = host.work_area(window)?;
+                    if host.foreground()? != window || host.identity(window)? != previous {
+                        return Err(fail("foreground_changed", "Foreground changed during hotkey capture"));
+                    }
+                    Ok(SummonReceipt { previous, work_area })
+                })();
+                if sender.try_send(capture).is_ok() {
+                    wake();
+                }
             }
         }
         unsafe {

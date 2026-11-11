@@ -3,6 +3,14 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 
+pub(super) const GRID_GAP: f32 = 12.0;
+/// The same column count is used by painting and keyboard navigation.
+pub(super) fn columns(width: f32, tile_size: u16) -> usize {
+    ((width.max(0.0) + GRID_GAP) / (f32::from(tile_size.clamp(48, 192)) + GRID_GAP))
+        .floor()
+        .max(1.0) as usize
+}
+
 type Key = (String, u32);
 type RenderResult = Result<katran::emoji_render::Rendered, String>;
 struct Entry {
@@ -18,8 +26,22 @@ pub(super) struct State {
     cache: HashMap<Key, Entry>,
     failed: HashSet<Key>,
     clock: u64,
+    description_key: Option<(i64, String)>,
+    description: Option<Value>,
 }
 impl State {
+    pub(super) fn description_needed(&self, id: i64, revision: &str) -> bool {
+        self.description_key
+            .as_ref()
+            .is_none_or(|(old_id, old_revision)| *old_id != id || old_revision != revision)
+    }
+    pub(super) fn set_description(&mut self, id: i64, revision: &str, value: Value) {
+        self.description_key = Some((id, revision.to_owned()));
+        self.description = Some(value);
+    }
+    pub(super) fn description(&self) -> Option<&Value> {
+        self.description.as_ref()
+    }
     fn start(&mut self) {
         if self.sender.is_some() {
             return;
@@ -133,6 +155,13 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compact_grid_uses_requested_size_and_never_zero_columns() {
+        assert_eq!(columns(0.0, 96), 1);
+        assert_eq!(columns(960.0, 96), 9);
+        assert!(columns(960.0, 48) > columns(960.0, 96));
+        assert!(columns(960.0, 192) < columns(960.0, 96));
+    }
     #[test]
     fn pending_raster_does_not_paint_monochrome_text() {
         let (sender, _jobs) = mpsc::sync_channel(1);

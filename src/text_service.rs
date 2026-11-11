@@ -85,6 +85,33 @@ impl Service {
         }
         Ok(all)
     }
+    /// Checks recorded complete text, not its truncated display preview.
+    /// Copy publication independently revalidates the underlying revisions.
+    pub(crate) fn selection_is_pods(&self, items: &[SelectionRef]) -> Result<bool> {
+        if items.is_empty() || items.len() > 1000 {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Expected 1..1000 selected objects",
+            ));
+        }
+        for item in items {
+            let event = self.get(item.id)?;
+            if event.revision != item.revision {
+                return Err(ApiError::new("stale_selection", "Selected content changed"));
+            }
+            if event.kind != crate::EventKind::TextFragment {
+                return Ok(false);
+            }
+            let content: String = self.db.query_row(
+                "SELECT c.content FROM text_fragments t JOIN events e ON e.id=t.event_id JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=?1",
+                [item.id], |row| row.get(0),
+            )?;
+            if !crate::pods::is_pod(&content) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     pub(crate) fn copy_links(&mut self, items: &[SelectionRef]) -> Result<Value> {
         let snapshot = items
             .iter()

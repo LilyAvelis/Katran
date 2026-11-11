@@ -96,10 +96,25 @@ pub struct Plan {
 impl Plan {
     /// Replace a fully verified link-only snapshot batch with one owned UTF-8 file.
     pub(crate) fn group_links(&mut self, quota: u64) -> Result<(), String> {
+        self.group_text(quota, "links.txt", "\n", |text| {
+            crate::link_fragments::recognize(text).is_some()
+        })
+    }
+    /// Replace a fully verified Pods-only batch with one exact UTF-8 sequence.
+    pub(crate) fn group_pods(&mut self, quota: u64) -> Result<(), String> {
+        self.group_text(quota, "pods.txt", "", crate::pods::is_pod)
+    }
+    fn group_text(
+        &mut self,
+        quota: u64,
+        filename: &str,
+        separator: &str,
+        valid: impl Fn(&str) -> bool,
+    ) -> Result<(), String> {
         use std::io::Write;
         if !self.failures.is_empty() || self.paths.is_empty() {
             return Err(format!(
-                "Cannot group links: {}",
+                "Cannot group text: {}",
                 serde_json::to_string(&self.failures).unwrap_or_default()
             ));
         }
@@ -113,18 +128,18 @@ impl Plan {
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
             if bytes.len() > crate::text_fragments::MAX_TEXT_BYTES {
-                return Err("Link snapshot exceeds 1 MiB".into());
+                return Err("Text snapshot exceeds 1 MiB".into());
             }
             let url = String::from_utf8(bytes).map_err(|e| e.to_string())?;
-            if crate::link_fragments::recognize(&url).is_none() {
-                return Err("Invalid link snapshot".into());
+            if !valid(&url) {
+                return Err("Invalid grouped text snapshot".into());
             }
             total = total
                 .checked_add(url.len())
-                .and_then(|n| n.checked_add(usize::from(!urls.is_empty())))
-                .ok_or("Link export overflow")?;
+                .and_then(|n| n.checked_add(if urls.is_empty() { 0 } else { separator.len() }))
+                .ok_or("Text export overflow")?;
             if total > crate::text_fragments::MAX_MERGED_BYTES {
-                return Err("Link export exceeds 8 MiB".into());
+                return Err("Text export exceeds 8 MiB".into());
             }
             urls.push(url);
         }
@@ -153,13 +168,13 @@ impl Plan {
         if other_bytes.saturating_add(total as u64) > quota {
             return Err("Export quota exceeded".into());
         }
-        let destination = self.directory.join("links.txt");
+        let destination = self.directory.join(filename);
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&destination)
             .map_err(|e| e.to_string())?;
-        file.write_all(urls.join("\n").as_bytes())
+        file.write_all(urls.join(separator).as_bytes())
             .and_then(|_| file.sync_all())
             .map_err(|e| e.to_string())?;
         for path in &self.paths {

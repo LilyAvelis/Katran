@@ -177,6 +177,7 @@ struct Shelf {
     tab_order: Vec<katran::interaction::ShelfTab>,
     shortcuts: Vec<katran::shortcuts::ShortcutInfo>,
     gallery_columns: u8,
+    pods_tile_size: u16,
     stream_rows: u8,
     pending_density: Vec<String>,
     images: Images,
@@ -567,7 +568,7 @@ impl Shelf {
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
         });
-        let gallery = self.state["view"] == "gallery";
+        let gallery = self.state["view"] == "gallery" || self.state["tab"]=="pods";
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             self.gallery_columns = settings["gallery_columns"]
@@ -575,8 +576,9 @@ impl Shelf {
                 .unwrap_or(4)
                 .clamp(1, 12) as u8;
             self.stream_rows = settings["stream_rows"].as_u64().unwrap_or(3).clamp(1, 12) as u8;
+            self.pods_tile_size=settings["pods_tile_size"].as_u64().unwrap_or(96).clamp(48,192) as u16;
         }
-        let columns = if gallery {
+        let columns = if self.state["tab"]=="pods" {pods_ui::columns(root.available_width()-40.0,self.pods_tile_size)} else if gallery {
             effective_gallery_columns(root.available_width() - 40.0, self.gallery_columns)
         } else {
             1
@@ -862,6 +864,7 @@ fn main() -> eframe::Result {
         tab_order: katran::tab_layout::default_order(),
         shortcuts: Vec::new(),
         gallery_columns: 4,
+            pods_tile_size: 96,
         stream_rows: 3,
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
@@ -1032,6 +1035,7 @@ mod tests {
             tab_order: katran::tab_layout::default_order(),
             shortcuts: Vec::new(),
             gallery_columns: 4,
+            pods_tile_size: 96,
             stream_rows: 3,
             pending_density: Vec::new(),
             images: Images::new(root.into()),

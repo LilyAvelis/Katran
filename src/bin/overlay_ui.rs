@@ -7,6 +7,8 @@ pub(super) struct State {
     listener: Option<katran::overlay_windows::HotkeyListener>,
     pending: bool,
     summoned: bool,
+    registration_status: String,
+    recorder_suspended: bool,
 }
 impl Shelf {
     pub(super) fn close_or_hide(&mut self, ctx: &egui::Context) {
@@ -44,16 +46,32 @@ impl Shelf {
         if self.api.is_none() || self.native_window == 0 {
             return;
         }
+        if self.settings_ui.is_recording_overlay() {
+            #[cfg(windows)]
+            {
+                self.overlay_ui.listener = None;
+            }
+            self.overlay_ui.recorder_suspended = true;
+            self.settings_ui
+                .set_overlay_status("Нажмите новое сочетание клавиш".into());
+            return;
+        }
+        if self.overlay_ui.recorder_suspended {
+            self.overlay_ui.recorder_suspended = false;
+            self.overlay_ui.configured = None;
+        }
         let binding = self.call(Command::GetSettings)["overlay_hotkey"]
             .as_str()
             .unwrap_or("")
             .trim()
             .to_owned();
-        if self.overlay_ui.configured.as_deref() != Some(&binding) {
+        let retry = self.settings_ui.take_overlay_retry();
+        if retry || self.overlay_ui.configured.as_deref() != Some(&binding) {
             self.overlay_ui.configured = Some(binding.clone());
             #[cfg(windows)]
             {
                 self.overlay_ui.listener = None;
+                self.overlay_ui.registration_status = "Глобальная клавиша выключена".into();
                 if !binding.is_empty() {
                     let wake = ctx.clone();
                     match katran::overlay::Hotkey::parse(&binding).and_then(|key| {
@@ -61,12 +79,16 @@ impl Shelf {
                             wake.request_repaint()
                         })
                     }) {
-                        Ok(listener) => self.overlay_ui.listener = Some(listener),
+                        Ok(listener) => {
+                            self.overlay_ui.listener = Some(listener);
+                            self.overlay_ui.registration_status = format!("Активно: {binding}");
+                        }
                         Err(error) => {
                             self.message = format!(
                                 "Глобальная клавиша: {}. Возможно, сочетание занято другим приложением.",
                                 error.message
-                            )
+                            );
+                            self.overlay_ui.registration_status = self.message.clone();
                         }
                     }
                 }
@@ -74,10 +96,11 @@ impl Shelf {
         }
         #[cfg(windows)]
         if let Some(listener) = self.overlay_ui.listener.as_ref() {
-            match listener.try_recv() {
-                Ok(true) => {
-                    let reply = self.call(Command::SummonOverlay {
+            match listener.try_recv_capture() {
+                Ok(Some(Ok(capture))) => {
+                    let reply = self.call(Command::SummonCapturedOverlay {
                         owner_window: self.native_window,
+                        capture,
                     });
                     if let (Ok(target), Ok(area)) = (
                         serde_json::from_value(reply["previous"].clone()),
@@ -100,13 +123,19 @@ impl Shelf {
                         }
                     }
                 }
-                Ok(false) => {}
+                Ok(None) => {}
+                Ok(Some(Err(error))) => {
+                    self.message = format!("Вызов Katran: {}", error.message);
+                }
                 Err(error) => {
                     self.message = error.message;
+                    self.overlay_ui.registration_status = self.message.clone();
                     self.overlay_ui.listener = None;
                 }
             }
         }
+        self.settings_ui
+            .set_overlay_status(self.overlay_ui.registration_status.clone());
         if self.overlay_ui.pending {
             let reply = self.call(Command::CompletePastePrevious {
                 owner_window: self.native_window,

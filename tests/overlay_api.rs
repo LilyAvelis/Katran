@@ -113,7 +113,48 @@ fn copy_must_succeed_before_paste_and_session_is_single_use() {
             reply(&mut api, Command::BeginPastePrevious { owner_window: 8 })["ok"],
             false
         );
-        call(&mut api, Command::SummonOverlay { owner_window: 8 });
+        call(
+            &mut api,
+            Command::SummonCapturedOverlay {
+                owner_window: 8,
+                capture: katran::overlay::SummonReceipt {
+                    previous: Target {
+                        hwnd: 7,
+                        pid: 7,
+                        process_started: 7,
+                    },
+                    work_area: WorkArea {
+                        left: 0,
+                        top: 0,
+                        right: 1920,
+                        bottom: 1080,
+                    },
+                },
+            },
+        );
+        assert_eq!(
+            reply(
+                &mut api,
+                Command::SummonCapturedOverlay {
+                    owner_window: 8,
+                    capture: katran::overlay::SummonReceipt {
+                        previous: Target {
+                            hwnd: 8,
+                            pid: 8,
+                            process_started: 8
+                        },
+                        work_area: WorkArea {
+                            left: 0,
+                            top: 0,
+                            right: 1,
+                            bottom: 1
+                        }
+                    }
+                }
+            )["ok"],
+            false,
+            "self summon must not replace the previous external target"
+        );
         call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {

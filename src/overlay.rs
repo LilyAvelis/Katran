@@ -82,7 +82,7 @@ impl OverlayError {
     }
 }
 pub type Result<T> = std::result::Result<T, OverlayError>;
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SummonReceipt {
     pub previous: Target,
     pub work_area: WorkArea,
@@ -116,7 +116,6 @@ impl Session {
         host: &mut (impl Host + ?Sized),
         own_hwnd: u64,
     ) -> Result<SummonReceipt> {
-        self.previous = None;
         let own = host.identity(own_hwnd)?;
         let foreground = host.foreground()?;
         let target = host.identity(foreground)?;
@@ -132,6 +131,29 @@ impl Session {
             previous: target,
             work_area,
         })
+    }
+    /// Revalidate a hotkey-thread capture; never trust supplied monitor geometry.
+    pub fn adopt(
+        &mut self,
+        host: &mut (impl Host + ?Sized),
+        own_hwnd: u64,
+        capture: SummonReceipt,
+    ) -> Result<SummonReceipt> {
+        let own = host.identity(own_hwnd)?;
+        let target = capture.previous;
+        if target.hwnd == own_hwnd || target.pid == own.pid {
+            return Err(OverlayError::new("self_target", "Katran cannot be the previous application"));
+        }
+        if host.identity(target.hwnd)? != target {
+            return Err(OverlayError::new("target_changed", "Captured window or process changed"));
+        }
+        let foreground = host.foreground()?;
+        if foreground != target.hwnd && foreground != own_hwnd {
+            return Err(OverlayError::new("foreground_changed", "Captured application lost foreground"));
+        }
+        let work_area = host.work_area(target.hwnd)?;
+        self.previous = Some(target);
+        Ok(SummonReceipt { previous: target, work_area })
     }
     /// Call only after the dispatcher confirmed Clipboard publication.
     pub fn validate(&self, host: &mut (impl Host + ?Sized), own_hwnd: u64) -> Result<Target> {

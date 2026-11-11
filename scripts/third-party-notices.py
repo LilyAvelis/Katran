@@ -90,6 +90,9 @@ def main():
         for filename in ("ATTRIBUTION.md", "LICENSE-GRAPHICS"):
             text += "\n" + filename + "\n" + (flag_notices / filename).read_text(encoding="utf-8") + "\n"
     with args.output.open("x", encoding="utf-8", newline="\n") as output:
+        unicode_data = args.root / "assets" / "unicode"
+        if unicode_data.is_dir():
+            text += "\nUnicode character and emoji names\n" + (unicode_data / "SOURCE.md").read_text(encoding="utf-8") + "\n" + (unicode_data / "LICENSE.txt").read_text(encoding="utf-8")
         output.write(text)
     print(f"Wrote dependency notices for {len(metadata['packages']) - len(metadata.get('workspace_members', []))} packages")
 

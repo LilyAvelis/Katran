@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub overlay_hotkey: String,
+    pub pods_tile_size: u16,
     pub sort: crate::sorting::SortSpec,
     #[serde(
         default = "crate::tab_layout::default_order",
@@ -35,6 +36,7 @@ impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
             overlay_hotkey: String::new(),
+            pods_tile_size: 96,
             sort: Default::default(),
             quota_bytes: quota,
             gallery_columns: 4,
@@ -71,6 +73,7 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if !(48..=192).contains(&self.pods_tile_size) {return Err("Pods: размер плитки должен быть 48–192".into());}
         if !self.overlay_hotkey.trim().is_empty() {
             crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error|error.message)?;
         }
