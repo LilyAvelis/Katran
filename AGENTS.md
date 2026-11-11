@@ -73,6 +73,8 @@ personal files as part of tests or reconciliation.
 ## Katran 2.5 local implementation · 2026-11-11
 
 Work on `codex/katran-2.5` uses local Git checkpoints; no GitHub push is authorized.
+The owner subsequently authorized local integration: main was fast-forwarded to
+the verified UI/Shift+Tab feedback checkpoint c014984. GitHub remains unchanged.
 Folder replaces All and remains session-only. Pinned guards every destructive
 domain path, including Folder aliases. Managed Folder/Downloads/Screenshots
 deletions use recoverable handle-bound staging and recycle-only Windows calls;
