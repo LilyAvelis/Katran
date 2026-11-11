@@ -21,3 +21,5 @@ Verification: full serial regression followed by focused reruns of all eleven in
 Manual acceptance remains open: native Windows feel, real browser bookmark import and selected browser invocation. Raycast service-emoji filtering awaits reliable source evidence. Folder cut and external clipboard cut are unavailable; ordinary file copying is supported. See CURRENT.md for precise scope and limits.
 
 For a regression, choose an earlier checkpoint or preview explicitly. Do not use Git reset or replace the installed binary automatically; schema 8 rollback requires the recorded pre-migration backup and stopped writers.
+
+Owner requested ordinary-profile testing: installed the already verified c6964da9fb3a artifact into runtime/versions and switched runtime/current-version.txt from 62ac72c82f87. The unchanged runtime/Katran.exe launcher retains its original profile selection (portable katran-data; installed layout LOCALAPPDATA/Katran/data). No user data/settings copied or reset, no rebuild, no app launched. Previous pointer retained locally in runtime/previous-version-before-2.5.txt.
