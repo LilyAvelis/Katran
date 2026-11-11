@@ -211,7 +211,7 @@ fn action_defaults_expose_new_file_operations_and_keep_preview() {
     let actions = ok(&mut api, Command::Actions);
     let actions = actions.as_array().unwrap();
     for (id, binding) in [
-        ("open", "Enter"),
+        ("open", "Alt Enter"),
         ("reveal", "Ctrl Enter"),
         ("open_with", "Ctrl Shift Enter"),
         ("preview", "Space"),
