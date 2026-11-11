@@ -2,6 +2,16 @@
 
 Latest runnable artifact and verified product commit: [ARTIFACTS.md](ARTIFACTS.md).
 
+## Release handoff ·2026-11-11
+
+Owner accepted the latest local candidate and authorized public3.0 publication.
+The complete theme/P2/dual-transfer branch was fast-forwarded into main; tag
+`v3.0.0` records `20ca4e5e8324007fc30d662073dc9a455b3b7d5c`. The existing
+[release workflow](https://github.com/LilyAvelis/Katran/actions/runs/43038046543)
+owns checks/build/package/publish. Earlier pending-feedback sections below are
+historical. See [3.0 notes](../releases/3.0.0.md) and final publication evidence
+for the release outcome; do not use an old2.5 preview as the official3.0 binary.
+
 ## Latest local pre-3.0 candidate ·2026-11-11
 
 Owner accepted the blue/lily/custom-background appearance. Review fixes and the

@@ -2455,6 +2455,18 @@ mod tests {
         let png_path = png.path().join("sample.png");
         image::RgbaImage::new(2, 2).save(&png_path).unwrap();
         let mut app = test_shelf(root.path());
+        struct SyntheticTrash(PathBuf);
+        impl katran::downloads::Trash for SyntheticTrash {
+            fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+                let resolved = path.canonicalize()?;
+                assert!(resolved.starts_with(&self.0));
+                std::fs::remove_file(resolved)?;
+                Ok(())
+            }
+        }
+        app.api.as_mut().unwrap().set_trash(Box::new(SyntheticTrash(
+            folder.path().canonicalize().unwrap(),
+        )));
         app.api
             .as_mut()
             .unwrap()
@@ -2527,7 +2539,11 @@ mod tests {
         release_tab(&mut app, &ctx, egui::Modifiers::SHIFT);
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
         assert_eq!(app.state["tab"], "images", "{}", app.message);
-        assert!(folder.path().join("sample.png").exists());
+        assert!(
+            !folder.path().join("sample.png").exists(),
+            "Shift+Tab moves the Folder original after import: {}",
+            app.message
+        );
         assert!(
             app.events
                 .iter()

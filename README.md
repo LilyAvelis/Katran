@@ -16,11 +16,11 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 3.0.0
+## Current release · 3.0.1
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-reports **3.0.0** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
+reports **3.0.1** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
