@@ -742,6 +742,9 @@ impl State {
             if ui.checkbox(&mut video_enabled,"Включить").changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
            });
            if video_enabled {
+           SettingsRow::show(ui,"Сглаживать стык","Короткое смешивание кадров на границе кэшированного цикла.",|ui|{
+            if ui.checkbox(&mut theme.video_seam_smoothing,"Включить").changed(){theme_intent=Some(theme.clone());}
+           });
            ui.weak("Короткие ролики кэшируются до 512 МиБ; длинные воспроизводятся потоком.");
            SettingsRow::show(ui,"Файл видео","Выберите сохранённое видео или добавьте файл.",|ui|{
             let list=self.video_backgrounds.get_or_insert_with(||call(api,Command::VideoBackgrounds)).clone();

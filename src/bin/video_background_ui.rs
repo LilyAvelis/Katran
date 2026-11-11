@@ -19,6 +19,7 @@ pub struct VideoSource {
     pub width: u32,
     pub height: u32,
     pub duration_ms: u32,
+    pub smooth_loop: bool,
 }
 const CACHE_LIMIT: u64 = 512 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,68 @@ pub fn playback_policy(source: &VideoSource) -> PlaybackPolicy {
 enum Message {
     Frame(Vec<u8>),
     Error(String),
+}
+// Keep only the first and preceding RGBA frames. At a repeated first frame near
+// the expected cycle boundary, blend from the last frame into four new frames.
+struct SeamSmoother {
+    first: Option<Vec<u8>>,
+    previous: Vec<u8>,
+    anchor: Vec<u8>,
+    since_start: u32,
+    earliest_repeat: u32,
+    latest_repeat: u32,
+    blend_step: u32,
+}
+impl SeamSmoother {
+    fn new(duration_ms: u32) -> Self {
+        let expected = (u64::from(duration_ms) * 24).div_ceil(1000) as u32;
+        Self {
+            first: None,
+            previous: Vec::new(),
+            anchor: Vec::new(),
+            since_start: 0,
+            earliest_repeat: expected.saturating_sub(4).max(1),
+            latest_repeat: expected.saturating_add(4),
+            blend_step: 0,
+        }
+    }
+    fn apply(&mut self, frame: &mut [u8]) {
+        if self.first.is_none() {
+            self.first = Some(frame.to_vec());
+        } else if self.since_start >= self.earliest_repeat
+            && self.since_start <= self.latest_repeat
+            && self.first.as_deref() == Some(frame)
+        {
+            self.anchor.clone_from(&self.previous);
+            self.blend_step = 1;
+            self.since_start = 0;
+        }
+        // Preserve the unblended frame for the next boundary.
+        if self.since_start >= self.earliest_repeat.saturating_sub(1)
+            && self.since_start <= self.latest_repeat
+        {
+            self.previous.clear();
+            self.previous.extend_from_slice(frame);
+        }
+        if self.blend_step > 0 && self.anchor.len() == frame.len() {
+            let weight = self.blend_step;
+            for (new, old) in frame.iter_mut().zip(&self.anchor) {
+                *new = ((u32::from(*old) * (5 - weight) + u32::from(*new) * weight + 2) / 5) as u8;
+            }
+            self.blend_step += 1;
+            if self.blend_step > 4 {
+                self.blend_step = 0;
+            }
+        }
+        self.since_start = self.since_start.saturating_add(1);
+    }
+}
+fn seam_smoother(source: &VideoSource, policy: PlaybackPolicy) -> Option<SeamSmoother> {
+    if source.smooth_loop && matches!(policy, PlaybackPolicy::Cache { .. }) {
+        Some(SeamSmoother::new(source.duration_ms))
+    } else {
+        None
+    }
 }
 struct Worker {
     child: Arc<Mutex<Option<Child>>>,
@@ -102,7 +165,18 @@ impl State {
     ) -> Option<TextureHandle> {
         if self.source != source {
             self.worker = None;
-            self.texture = None;
+            let same_video = match (&self.source, &source) {
+                (Some(a), Some(b)) => {
+                    a.path == b.path
+                        && a.width == b.width
+                        && a.height == b.height
+                        && a.duration_ms == b.duration_ms
+                }
+                _ => false,
+            };
+            if !same_video {
+                self.texture = None;
+            }
             self.error = None;
             self.source = source;
         }
@@ -196,7 +270,7 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
                 format!("hwdownload,format=nv12,fps=24,scale={w}:{h}")
             }
         };
-        cmd.arg("-i").arg(source.path).args([
+        cmd.arg("-i").arg(&source.path).args([
             "-map",
             "0:v:0",
             "-an",
@@ -253,6 +327,7 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
             return;
         }
         let frame_len = w * h * 4;
+        let mut smoother = seam_smoother(&source, policy);
         let interval = Duration::from_nanos(1_000_000_000 / 24);
         let mut next = Instant::now();
         while !stop_flag.load(Ordering::SeqCst) {
@@ -268,6 +343,9 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
             let mut frame = vec![0; frame_len];
             if stdout.read_exact(&mut frame).is_err() {
                 break;
+            }
+            if let Some(smoother) = smoother.as_mut() {
+                smoother.apply(&mut frame);
             }
             next += interval;
             let now = Instant::now();
@@ -316,6 +394,77 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn seam_blends_first_four_repeated_frames_without_black_frame() {
+        let mut s = SeamSmoother::new(1000);
+        let mut first = [20, 20, 20, 255];
+        s.apply(&mut first);
+        for _ in 1..24 {
+            let mut f = [100, 100, 100, 255];
+            s.apply(&mut f);
+        }
+        let mut f = [20, 20, 20, 255];
+        s.apply(&mut f);
+        assert_eq!(f, [84, 84, 84, 255]);
+        let mut f = [30, 30, 30, 255];
+        s.apply(&mut f);
+        assert_eq!(f, [72, 72, 72, 255]);
+        let mut f = [40, 40, 40, 255];
+        s.apply(&mut f);
+        assert_eq!(f, [64, 64, 64, 255]);
+        let mut f = [50, 50, 50, 255];
+        s.apply(&mut f);
+        assert_eq!(f, [60, 60, 60, 255]);
+        let mut f = [60, 60, 60, 255];
+        s.apply(&mut f);
+        assert_eq!(f, [60, 60, 60, 255]);
+    }
+    #[test]
+    fn disabled_smoothing_leaves_frames_unchanged() {
+        let source = VideoSource {
+            path: PathBuf::new(),
+            width: 160,
+            height: 90,
+            duration_ms: 1000,
+            smooth_loop: false,
+        };
+        let mut smoother = seam_smoother(&source, playback_policy(&source));
+        assert!(smoother.is_none());
+        let original = vec![20, 80, 130, 255];
+        let mut frame = original.clone();
+        if let Some(s) = smoother.as_mut() {
+            s.apply(&mut frame);
+        }
+        assert_eq!(frame, original);
+    }
+    #[test]
+    fn smoothing_toggle_keeps_existing_texture() {
+        let ctx = egui::Context::default();
+        let src = VideoSource {
+            path: PathBuf::from("video.mp4"),
+            width: 160,
+            height: 90,
+            duration_ms: 1000,
+            smooth_loop: true,
+        };
+        let texture = ctx.load_texture(
+            "test-seam",
+            ColorImage::from_rgba_unmultiplied([1, 1], &[10, 20, 30, 255]),
+            TextureOptions::LINEAR,
+        );
+        let id = texture.id();
+        let mut state = State {
+            source: Some(src.clone()),
+            texture: Some(texture),
+            ..State::default()
+        };
+        let changed = VideoSource {
+            smooth_loop: false,
+            ..src
+        };
+        assert_eq!(state.tick(&ctx, Some(changed), false).unwrap().id(), id);
+    }
+
+    #[test]
     fn hardware_decoder_pause_kills_and_reaps() {
         if std::env::var_os("KATRAN_TEST_VIDEO_D3D11VA").is_none() {
             return;
@@ -349,6 +498,7 @@ mod tests {
             width: 160,
             height: 90,
             duration_ms: 2000,
+            smooth_loop: true,
         });
         assert!(matches!(
             playback_policy(src.as_ref().unwrap()),
@@ -450,6 +600,7 @@ mod tests {
             width: 1168,
             height: 784,
             duration_ms: 15042,
+            smooth_loop: true,
         };
         assert!(matches!(
             playback_policy(&src),

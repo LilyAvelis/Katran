@@ -83,10 +83,31 @@ RAM/decoding tradeoff; the limit describes cached frame payload, not total
 process memory. Cache and decoder are released on hide/minimize; resuming
 starts a fresh first pass. RGBA conversion and OpenGL upload still happen
 through CPU memory. Hardware decode is avoided on subsequent cached loops,
-not on initial playback. Visual source seams and repeating identical boundary
-frames are not rewritten or cross-faded.
+not on initial playback. Source files and cached frame content remain unchanged; optional presentation-time
+seam smoothing is described below.
 
 An explicit hardware test consumed110 frames from a48-frame synthetic source
 across multiple loops, kept one process ID, verified cadence and stopped/reaped
 the worker. Direct FFmpeg validation reported48 input frames decoded and110
 output frames. No post-change GPU utilization percentage is claimed.
+
+## Optional seam smoothing
+
+`ThemePreferences.video_seam_smoothing` defaults to true. In cached mode, the
+player recognizes the repeated first RGBA frame within a narrow window around
+the expected loop length and blends the first four frames with the previous
+cycle's final frame at20/40/60/80percent. This is a convex color blend, not a fade
+to black, and never changes the stored source. Disabling passes raw frames
+through. Streaming mode keeps its original presentation. Additional storage
+is bounded to three RGBA frames, not a second decoded movie cache. The previous
+frame is copied only near the expected boundary to avoid another full-frame
+copy on every tick. Changing smoothing preserves the current texture while
+the worker restarts; no loading placeholder is inserted.
+
+Diagnosis of the owner's clip found361frames at24fps and no inserted empty
+frame in two cached cycles. The cached loops matched byte-for-byte at a small
+analysis resolution. The measured mean-luminance step was1.438levels at the
+source seam; a four-frame blend prototype reduced the first step to0.146. This
+measures pixels, not end-to-end frame latency or subjective smoothness. Synthetic
+blend/pass-through/texture tests and an explicit D3D11VA multi-cycle worker test
+passed. Visual acceptance remains with the owner.

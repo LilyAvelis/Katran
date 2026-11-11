@@ -4,6 +4,24 @@ use katran::{
 };
 use serde_json::Value;
 #[test]
+fn video_seam_smoothing_defaults_on_and_persists_independently() {
+    let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert!(legacy.video_seam_smoothing);
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let theme = ThemePreferences {
+        video_seam_smoothing: false,
+        ..Default::default()
+    };
+    call(&mut api, Command::SetTheme { theme });
+    drop(api);
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["video_seam_smoothing"],
+        false
+    );
+}
+#[test]
 fn selection_color_is_independent_persistent_and_validated() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 10000).unwrap();

@@ -425,8 +425,15 @@ impl Shelf {
                 } else {
                     None
                 };
-                if self.video_background_id != wanted {
-                    if let Some(old) = &self.video_background_id {
+                if self.video_background_id != wanted
+                    || self
+                        .video_background_source
+                        .as_ref()
+                        .is_some_and(|source| source.smooth_loop != theme.video_seam_smoothing)
+                {
+                    if self.video_background_id != wanted
+                        && let Some(old) = &self.video_background_id
+                    {
                         theme_ui::set_video_texture(&ctx, old, None);
                     }
                     self.video_background_id = wanted.clone();
@@ -442,6 +449,7 @@ impl Shelf {
                                 path: PathBuf::from(path),
                                 width: u32::try_from(width).unwrap_or(0),
                                 height: u32::try_from(height).unwrap_or(0),
+                                smooth_loop: theme.video_seam_smoothing,
                                 duration_ms: video["duration"]
                                     .as_f64()
                                     .filter(|s| s.is_finite() && *s > 0.0 && *s <= 120.0)
