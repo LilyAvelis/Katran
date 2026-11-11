@@ -31,6 +31,7 @@ mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
 mod theme_ui;
+mod window_material;
 mod updates_ui;
 mod workspace_ui;
 use base64::Engine;
@@ -187,6 +188,7 @@ struct Shelf {
     next_cursor: Option<String>,
     sorting_input: sorting_input::State,
     pending_sort: Option<String>,
+    glass_active: bool,
     sort_notice: Option<(String, Instant)>,
     state: Value,
     query: String,
@@ -225,7 +227,15 @@ impl Shelf {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
             let settings=self.call(Command::GetSettings);
-            if let Ok(theme)=serde_json::from_value(settings["theme"].clone()){theme_ui::apply(&ctx,&theme);}
+            if let Ok(theme)=serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone()) {
+                if self.glass_active && (!theme.glass || theme.preset!=katran::theme::Preset::BlueExperimental) {
+                    let _=window_material::apply(self.native_window as isize,false);
+                    self.glass_active=false;
+                    ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),false));
+                    theme_ui::reset(&ctx);
+                }
+                theme_ui::apply(&ctx,&theme);
+            }
         }
         theme_ui::background(&ctx,ctx.content_rect());
         self.resident_close_requested(&ctx);
@@ -455,6 +465,10 @@ impl Shelf {
             .frame(egui::Frame::new().fill(theme_ui::color(&ctx,theme_ui::Role::Background,Color32::TRANSPARENT)).inner_margin(12))
             .show(root, |ui| {
                 theme_ui::decorate(ui,ui.max_rect());
+                if theme_ui::compact_header(&ctx) {
+                    let (_,drag)=ui.allocate_exact_size(egui::vec2(ui.available_width(),8.0),egui::Sense::drag());
+                    if drag.drag_started(){ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);}
+                } else {
                 ui.horizontal(|ui| {
                     let (rect, r) = ui.allocate_exact_size(
                         egui::vec2((ui.available_width() - 42.0).max(20.0), 26.0),
@@ -474,6 +488,7 @@ impl Shelf {
                         self.close_or_hide(&ctx);
                     }
                 });
+                }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .id(egui::Id::new("shelf-search"))
@@ -757,6 +772,9 @@ impl Shelf {
     }
 }
 impl eframe::App for Shelf {
+    fn clear_color(&self, _: &egui::Visuals) -> [f32;4] {
+        if self.glass_active {[0.0,0.0,0.0,0.0]} else {[0.035,0.055,0.085,1.0]}
+    }
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.tray_tick(ctx);
         self.overlay_tick(ctx);
@@ -876,6 +894,7 @@ fn main() -> eframe::Result {
         next_cursor: None,
         sorting_input: Default::default(),
         pending_sort: None,
+        glass_active: false,
         sort_notice: None,
         state: Value::Null,
         query: String::new(),
@@ -898,6 +917,8 @@ fn main() -> eframe::Result {
         command: Box::new(Command::EnsurePreviewBackend),
     });
     app.preview_warmup = warmup["job_id"].as_u64().map(katran::domain_jobs::JobId);
+    let theme:katran::theme::ThemePreferences=serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
+    let glass_start=theme.preset==katran::theme::Preset::BlueExperimental && theme.glass;
     eframe::run_native(
         "Katran",
         eframe::NativeOptions {
@@ -905,7 +926,8 @@ fn main() -> eframe::Result {
                 .with_icon(app_identity::window_icon())
                 .with_inner_size([940.0, 680.0])
                 .with_min_inner_size([640.0, 440.0])
-                .with_decorations(false),
+                .with_decorations(false)
+                .with_transparent(glass_start),
             ..Default::default()
         },
         Box::new(move |cc| {
@@ -923,6 +945,12 @@ fn main() -> eframe::Result {
                     && let RawWindowHandle::Win32(window) = handle.as_raw()
                 {
                     app.native_window = window.hwnd.get() as u64;
+                    if glass_start {
+                        match window_material::apply(app.native_window as isize,true) {
+                            Ok(()) => {app.glass_active=true;cc.egui_ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),true));},
+                            Err(error) => app.message=error,
+                        }
+                    }
                     if let Some(instance) = app.instance.as_mut() {
                         instance.bind(app.native_window)?;
                         let (tx, rx) = mpsc::channel();
@@ -1048,6 +1076,7 @@ mod tests {
             next_cursor: None,
             sorting_input: Default::default(),
             pending_sort: None,
+        glass_active: false,
         sort_notice: None,
             state: Value::Null,
             query: String::new(),
@@ -1886,7 +1915,7 @@ mod tests {
         app.refresh();
         let ctx=egui::Context::default();ui_style::install(&ctx);
         let standard=visible_landmarks(&mut app,&ctx);
-        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true,lily_background:None}});
+        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true,lily_background:None,glass:false,compact_header:false}});
         let blue=visible_landmarks(&mut app,&ctx);
         assert_eq!(blue,standard,"theme must not move the existing controls");
         app.call(Command::SetTheme{theme:Default::default()});
@@ -2002,6 +2031,17 @@ mod tests {
         frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
         assert!(app.message.is_empty(),"text editing must retain Shift+Tab");
         assert_eq!(app.call(Command::Interaction)["selected"],serde_json::json!([id]));
+    }
+    #[test]
+    fn compact_blue_header_removes_title_row_but_keeps_search_and_tabs() {
+        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());let ctx=egui::Context::default();ui_style::install(&ctx);
+        let mut out=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));out.textures_delta.clear();
+        let before=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect"))).unwrap();
+        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,..Default::default()}});
+        let mut out=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));out.textures_delta.clear();
+        let after=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect"))).unwrap();
+        assert!(after.height()<before.height());
+        assert!(ctx.memory(|m|m.focused()).is_none());
     }
     #[test]
     fn sort_notice_obeys_preference_and_expiry_without_focus() {

@@ -284,9 +284,15 @@ impl State {
             if ui.color_edit_button_srgb(&mut accent).changed(){theme.accent=Some(accent);theme_intent=Some(theme.clone());}
             if ui.button("Сбросить цвет").clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
            });
+           SettingsRow::show(ui,"Компактное окно","Убрать название и крестик. Перемещение — за узкую полосу над поиском.",|ui|{
+            if ui.checkbox(&mut theme.compact_header,"Без шапки").changed(){theme_intent=Some(theme.clone());}
+           });
+           SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
+            if ui.checkbox(&mut theme.glass,"Включить").changed(){if theme.glass{theme.lily_background=None;}theme_intent=Some(theme.clone());}
+           });
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_value(&mut theme.lily_background,None,"Сплошной").changed(){theme_intent=Some(theme.clone());}
-            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme_intent=Some(theme.clone());}}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.glass=false;theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
@@ -301,7 +307,7 @@ impl State {
        let shortcuts:Vec<katran::shortcuts::ShortcutInfo>=serde_json::from_value(call(api,Command::Shortcuts)["result"].clone()).unwrap_or_default();
        let mut edit=None;
        SettingsSection::show(ui,|ui|{
-        for shortcut in shortcuts.iter().filter(|s|s.label.to_lowercase().contains(&self.shortcut_filter.to_lowercase())) {
+        for shortcut in shortcuts.iter().filter(|s|!s.id.starts_with("sort_") && s.label.to_lowercase().contains(&self.shortcut_filter.to_lowercase())) {
          ui.push_id(&shortcut.id,|ui|{
           SettingsRow::show(ui,&shortcut.label,shortcut.binding.as_deref().unwrap_or("Не назначено"),|ui|{
            ui.add(super::action_icons::icon(&shortcut.id).size(16.0).image());
@@ -403,7 +409,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([40, 100, 220]),
-            decoration: false, lily_background:None,
+            decoration: false, lily_background:None,glass:false,compact_header:false,
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =

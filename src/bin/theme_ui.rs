@@ -20,6 +20,9 @@ fn current(ctx: &egui::Context) -> ThemePreferences {
     ctx.data(|data| data.get_temp::<ThemePreferences>(key()))
         .unwrap_or_default()
 }
+pub(super) fn compact_header(ctx:&egui::Context)->bool {
+    let theme=current(ctx);theme.preset==Preset::BlueExperimental && theme.compact_header
+}
 pub(super) fn reset(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<ThemePreferences>(key()));
 }
@@ -37,6 +40,7 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
         return legacy;
     }
     match role {
+        Role::Background if preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false) => Color32::from_rgba_unmultiplied(11,20,35,175),
         Role::Background if preference.lily_background.is_some() => Color32::TRANSPARENT,
         Role::Background => Color32::from_rgb(11, 20, 35),
         Role::Surface => Color32::from_rgb(16, 30, 50),
@@ -158,6 +162,23 @@ pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
 mod tests {
     use super::*;
     #[test]
+    fn glass_falls_back_opaque_until_native_activation_and_lily_texture_is_reused() {
+        let ctx=egui::Context::default();crate::ui_style::install(&ctx);
+        let theme=ThemePreferences{preset:Preset::BlueExperimental,glass:true,..Default::default()};
+        apply(&ctx,&theme);
+        assert_eq!(color(&ctx,Role::Background,Color32::BLACK).a(),255);
+        ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),true));
+        assert!(color(&ctx,Role::Background,Color32::BLACK).a()<255);
+        let theme=ThemePreferences{preset:Preset::BlueExperimental,lily_background:Some(1),..Default::default()};
+        apply(&ctx,&theme);
+        let rect=egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(940.0,680.0));
+        for _ in 0..2 {
+            let mut out=ctx.run_ui(egui::RawInput::default(),|ui|background(ui.ctx(),rect));
+            assert!(!out.shapes.is_empty());out.textures_delta.clear();
+        }
+        assert!(ctx.data(|d|d.get_temp::<egui::TextureHandle>(egui::Id::new(("lily-background",1u8)))).is_some());
+    }
+    #[test]
     fn decoration_is_opt_in_and_clipped_to_assigned_rectangle() {
         let ctx = egui::Context::default();
         crate::ui_style::install(&ctx);
@@ -171,7 +192,7 @@ mod tests {
             &ThemePreferences {
                 preset: Preset::BlueExperimental,
                 accent: None,
-                decoration: true, lily_background:None,
+                decoration: true, lily_background:None,glass:false,compact_header:false,
             },
         );
         let mut blue = ctx.run_ui(egui::RawInput::default(), |ui| decorate(ui, bounds));
@@ -192,7 +213,7 @@ mod tests {
         let first = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([220, 50, 80]),
-            decoration: false, lily_background:None,
+            decoration: false, lily_background:None,glass:false,compact_header:false,
         };
         apply(&ctx, &first);
         let blue = ctx.style_of(egui::Theme::Dark);
@@ -263,7 +284,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([18, 90, 180]),
-            decoration: true, lily_background:None,
+            decoration: true, lily_background:None,glass:false,compact_header:false,
         };
         apply(&ctx, &blue);
         assert_eq!(
