@@ -143,8 +143,13 @@ impl Service {
                 .lock()
                 .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
                 .write(text)?;
-            let ids=result["items"].as_array().into_iter().flatten().filter_map(|item|item["id"].as_i64()).collect::<Vec<_>>();
-            self.record_selection_publication(sequence,&ids);
+            let ids = result["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item["id"].as_i64())
+                .collect::<Vec<_>>();
+            self.record_selection_publication(sequence, &ids);
             self.capture_events.cancel();
             result["text_copied"] = json!(true);
             result["clipboard_sequence"] = json!(sequence);

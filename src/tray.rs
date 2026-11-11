@@ -114,7 +114,9 @@ mod native {
                     let signal = (lp.0 as u32) & 0xffff;
                     if let Some(event) = callback_event(signal) {
                         state.send(Ok(event));
-                    } else if signal == WM_CONTEXTMENU && let Err(error) = show_menu(window, state) {
+                    } else if signal == WM_CONTEXTMENU
+                        && let Err(error) = show_menu(window, state)
+                    {
                         state.send(Err(error));
                     }
                     return LRESULT(0);

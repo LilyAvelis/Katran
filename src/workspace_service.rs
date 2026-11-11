@@ -6,9 +6,13 @@ impl Service {
     pub(crate) fn choose_folder(&mut self, path: PathBuf) -> Result<Value> {
         // Folder clipboard exports are independent files. Their session IDs
         // expire on changing the working folder; paste those files normally.
-        if self.transfer_intent.as_ref().is_some_and(|(items,_)|items.iter().any(|item|item.id<0)) {
-            self.transfer_intent=None;
-            self.transfer_sequence=None;
+        if self
+            .transfer_intent
+            .as_ref()
+            .is_some_and(|(items, _)| items.iter().any(|item| item.id < 0))
+        {
+            self.transfer_intent = None;
+            self.transfer_sequence = None;
         }
         self.work_folder.choose(&path)?;
         let path = self.work_folder.current().unwrap().to_path_buf();

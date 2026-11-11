@@ -4,10 +4,8 @@ pub mod capture_events;
 mod catalogue_query;
 mod catalogue_schema;
 mod classification_runtime;
-pub mod clipboard_listener;
 pub mod clipboard_files;
-mod paste_service;
-mod pinned_open;
+pub mod clipboard_listener;
 pub mod copy_out;
 mod delete_jobs;
 mod delete_selection;
@@ -16,20 +14,15 @@ pub mod density;
 pub mod diagnostics;
 pub mod domain_jobs;
 pub mod downloads;
-pub mod safe_recycle;
-pub mod everything;
-pub mod folder_transfer;
-pub mod pinned;
-pub mod work_folder;
-mod workspace_service;
-mod transfer_service;
-mod folder_import;
-mod folder_delete;
 pub mod drag_out;
 mod drag_session;
+pub mod everything;
 pub mod file_types;
 pub mod file_visual;
 mod folder_commit;
+mod folder_delete;
+mod folder_import;
+pub mod folder_transfer;
 pub mod folder_watch;
 pub mod interaction;
 mod jobs_service;
@@ -37,6 +30,10 @@ pub mod link_fragments;
 pub mod markdown;
 pub mod open_file;
 pub mod origin;
+mod paste_service;
+pub mod pinned;
+mod pinned_open;
+pub mod safe_recycle;
 pub mod screenshot_identity;
 pub mod settings;
 pub mod sharex;
@@ -54,6 +51,9 @@ pub mod table_fragments;
 mod table_service;
 pub mod text_fragments;
 mod text_service;
+mod transfer_service;
+pub mod work_folder;
+mod workspace_service;
 use interaction::Interaction;
 use std::{
     fs::{self, OpenOptions},
@@ -76,16 +76,16 @@ pub mod storage;
 pub mod table_view;
 pub mod updater;
 pub use api::*;
-pub mod pods;
-mod pod_metadata;
+pub mod emoji_render;
 pub mod overlay;
+mod overlay_service;
 pub mod overlay_windows;
-pub mod tray;
+mod pod_metadata;
+pub mod pods;
 pub mod theme;
 pub mod theme_backgrounds;
 mod theme_service;
-mod overlay_service;
-pub mod emoji_render;
+pub mod tray;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
@@ -95,7 +95,7 @@ pub struct Service {
     overlay_copy: Option<(domain_jobs::JobId, u64)>,
     clipboard_files: Box<dyn clipboard_files::Source>,
     transfer_sequence: Option<u32>,
-    transfer_intent: Option<(Vec<SelectionRef>,bool)>,
+    transfer_intent: Option<(Vec<SelectionRef>, bool)>,
     work_folder: work_folder::State,
     updater: updater::Updater,
     checked_update: Option<updater::Release>,
@@ -257,7 +257,9 @@ impl Service {
             text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 text_fragments::NativeClipboard,
             ))),
-            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::RecycleOnlyTrash))),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                downloads::RecycleOnlyTrash,
+            ))),
             jobs: Default::default(),
             classification: Default::default(),
             source_runtime: Default::default(),
@@ -320,7 +322,9 @@ impl Service {
             text_clipboard: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 text_fragments::NativeClipboard,
             ))),
-            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(downloads::RecycleOnlyTrash))),
+            trash: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                downloads::RecycleOnlyTrash,
+            ))),
             jobs: Default::default(),
             classification: Default::default(),
             source_runtime: Default::default(),
@@ -898,7 +902,11 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
-        if id < 0 { self.work_folder.get(id) } else { storage::get_event(&self.db, id) }
+        if id < 0 {
+            self.work_folder.get(id)
+        } else {
+            storage::get_event(&self.db, id)
+        }
     }
 }
 fn now_ms() -> i64 {

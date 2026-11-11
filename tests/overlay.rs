@@ -157,17 +157,42 @@ fn captured_target_is_revalidated_and_self_summon_preserves_session() {
     let mut receipt = session.summon(&mut host, 8).unwrap();
     // Supplied monitor geometry is not authority.
     receipt.work_area.left = 9000;
-    assert_eq!(session.adopt(&mut host, 8, receipt.clone()).unwrap().work_area.left, -1920);
+    assert_eq!(
+        session
+            .adopt(&mut host, 8, receipt.clone())
+            .unwrap()
+            .work_area
+            .left,
+        -1920
+    );
     host.foreground = 8;
-    assert_eq!(session.summon(&mut host, 8).unwrap_err().code, "self_target");
+    assert_eq!(
+        session.summon(&mut host, 8).unwrap_err().code,
+        "self_target"
+    );
     assert_eq!(session.validate(&mut host, 8).unwrap(), host.target);
-    assert_eq!(session.adopt(&mut host, 8, receipt.clone()).unwrap().previous, host.target);
+    assert_eq!(
+        session
+            .adopt(&mut host, 8, receipt.clone())
+            .unwrap()
+            .previous,
+        host.target
+    );
     host.foreground = 99;
-    assert_eq!(session.adopt(&mut host, 8, receipt.clone()).unwrap_err().code, "foreground_changed");
+    assert_eq!(
+        session
+            .adopt(&mut host, 8, receipt.clone())
+            .unwrap_err()
+            .code,
+        "foreground_changed"
+    );
     assert_eq!(session.validate(&mut host, 8).unwrap(), host.target);
     host.foreground = 7;
     host.target.process_started += 1;
-    assert_eq!(session.adopt(&mut host, 8, receipt).unwrap_err().code, "target_changed");
+    assert_eq!(
+        session.adopt(&mut host, 8, receipt).unwrap_err().code,
+        "target_changed"
+    );
     assert_eq!(host.sent, 0);
 }
 

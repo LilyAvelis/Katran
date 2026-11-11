@@ -33,7 +33,11 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
-    ThemeBackground {prepared:theme_backgrounds::PreparedBackground,event:Option<Event>,activate:bool},
+    ThemeBackground {
+        prepared: theme_backgrounds::PreparedBackground,
+        event: Option<Event>,
+        activate: bool,
+    },
     UpdateInstalled(updater::InstalledUpdate),
     UpdateChecked(updater::UpdateStatus),
     UpdateReady {
@@ -229,27 +233,43 @@ impl Service {
             } else if self.selection_is_links(&items)? {
                 Command::CopyLinks { items }
             } else if self.selection_is_text(&items)? {
-                let separator=if self.selection_is_pods(&items)? {""} else {"\n\n"}.into();
-                Command::CopyText {
-                    items,
-                    separator,
+                let separator = if self.selection_is_pods(&items)? {
+                    ""
+                } else {
+                    "\n\n"
                 }
+                .into();
+                Command::CopyText { items, separator }
             } else {
                 Command::CopyEventsChecked { items }
             };
         }
         let id = match command {
-            Command::ImportThemeBackground {path} => self.jobs.submit(Lane::Foreground,move |cancel| {
-                cancel.check()?;let prepared=theme_backgrounds::prepare(&path)?;cancel.check()?;
-                Ok(PreparedWork::ThemeBackground{prepared,event:None,activate:false})
-            })?,
-            Command::UseSelectedImageAsBackground => {
-                let event=self.selected_background_image()?;
-                self.jobs.submit(Lane::Foreground,move |cancel| {
-                    cancel.check()?;let prepared=theme_backgrounds::prepare_event(&event)?;cancel.check()?;
-                    Ok(PreparedWork::ThemeBackground{prepared,event:Some(event),activate:true})
+            Command::ImportThemeBackground { path } => {
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = theme_backgrounds::prepare(&path)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::ThemeBackground {
+                        prepared,
+                        event: None,
+                        activate: false,
+                    })
                 })?
-            },
+            }
+            Command::UseSelectedImageAsBackground => {
+                let event = self.selected_background_image()?;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = theme_backgrounds::prepare_event(&event)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::ThemeBackground {
+                        prepared,
+                        event: Some(event),
+                        activate: true,
+                    })
+                })?
+            }
             Command::SearchFolders { query, limit } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     cancel.check()?;
@@ -475,7 +495,12 @@ impl Service {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
                     launcher.cancellation = Some(cancel);
-                    let mut result=crate::app_picker::execute_selected(&session.event,&launcher,&root,quota)?;
+                    let mut result = crate::app_picker::execute_selected(
+                        &session.event,
+                        &launcher,
+                        &root,
+                        quota,
+                    )?;
                     result["application_id"] = json!(launcher.app_id);
                     Ok(PreparedWork::Value(result))
                 })?

@@ -180,7 +180,12 @@ mod windows_tests {
             },
         );
         let alias_id = alias["id"].as_i64().unwrap();
-        call(&mut api, Command::TogglePins { ids: vec![alias_id] });
+        call(
+            &mut api,
+            Command::TogglePins {
+                ids: vec![alias_id],
+            },
+        );
         call(
             &mut api,
             Command::ChooseFolder {

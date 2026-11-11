@@ -194,7 +194,9 @@ mod tests {
         }
         let root = tempfile::tempdir().unwrap();
         let mut app = crate::tests::test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         let calls = Arc::new(AtomicUsize::new(0));
         app.api
             .as_mut()

@@ -123,7 +123,10 @@ fn owned_exports_use_arrival_time_and_external_file_copies_keep_source_time() {
     );
     assert_eq!(external_paste["items"][0]["status"], "copied");
     let copied = Path::new(external_paste["items"][0]["path"].as_str().unwrap());
-    assert_eq!(std::fs::read(&external).unwrap(), b"synthetic external file");
+    assert_eq!(
+        std::fs::read(&external).unwrap(),
+        b"synthetic external file"
+    );
     assert_eq!(modified_ms(&external), original_time_ms);
     assert_eq!(modified_ms(copied), original_time_ms);
 }

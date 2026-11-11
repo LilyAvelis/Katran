@@ -21,43 +21,107 @@ pub struct Request {
 pub enum Command {
     RestartApplication,
     UseSelectedImageAsBackground,
-    ImportThemeBackground { path: std::path::PathBuf },
+    ImportThemeBackground {
+        path: std::path::PathBuf,
+    },
     ListThemeBackgrounds,
-    GetThemeBackground { id: String },
+    GetThemeBackground {
+        id: String,
+    },
     Themes,
-    SetTheme { theme: crate::theme::ThemePreferences },
+    SetTheme {
+        theme: crate::theme::ThemePreferences,
+    },
     WindowVisibility,
-    SetWindowVisibility { visible: bool },
+    SetWindowVisibility {
+        visible: bool,
+    },
     ToggleWindowVisibility,
-    ToggleResidentOverlay { owner_window: u64, capture: Option<crate::overlay::SummonReceipt> },
-    DescribePod { id: i64 },
-    SummonCapturedOverlay { owner_window: u64, capture: crate::overlay::SummonReceipt },
-    SummonOverlay { owner_window: u64 },
-    BeginPastePrevious { owner_window: u64 },
-    CompletePastePrevious { owner_window: u64 },
-    PreviewPath {path: PathBuf, revision: String, max_edge: u32, #[serde(default)] image_only: bool},
-    ReadDocumentPath {path: PathBuf, revision: String},
-    StageTransfer {items: Vec<SelectionRef>, #[serde(default)] cut: bool},
+    ToggleResidentOverlay {
+        owner_window: u64,
+        capture: Option<crate::overlay::SummonReceipt>,
+    },
+    DescribePod {
+        id: i64,
+    },
+    SummonCapturedOverlay {
+        owner_window: u64,
+        capture: crate::overlay::SummonReceipt,
+    },
+    SummonOverlay {
+        owner_window: u64,
+    },
+    BeginPastePrevious {
+        owner_window: u64,
+    },
+    CompletePastePrevious {
+        owner_window: u64,
+    },
+    PreviewPath {
+        path: PathBuf,
+        revision: String,
+        max_edge: u32,
+        #[serde(default)]
+        image_only: bool,
+    },
+    ReadDocumentPath {
+        path: PathBuf,
+        revision: String,
+    },
+    StageTransfer {
+        items: Vec<SelectionRef>,
+        #[serde(default)]
+        cut: bool,
+    },
     TransferSelection,
     CopySelection,
     PasteToFolder,
-    PasteFilesToFolder {paths: Vec<PathBuf>},
+    PasteFilesToFolder {
+        paths: Vec<PathBuf>,
+    },
     PasteClipboardToFolder,
-    AddFolderFiles {ids: Vec<i64>},
-    ChooseFolder { path: PathBuf },
+    AddFolderFiles {
+        ids: Vec<i64>,
+    },
+    ChooseFolder {
+        path: PathBuf,
+    },
     CurrentFolder,
-    SearchFolders { query: String, limit: u32 },
-    FolderHistory { query: String },
-    FavoriteFolders { query: String },
+    SearchFolders {
+        query: String,
+        limit: u32,
+    },
+    FolderHistory {
+        query: String,
+    },
+    FavoriteFolders {
+        query: String,
+    },
     ToggleFavoriteFolder,
-    ClearFolderHistory { #[serde(default)] confirmed: bool },
+    ClearFolderHistory {
+        #[serde(default)]
+        confirmed: bool,
+    },
     FolderRecovery,
-    TogglePins { ids: Vec<i64> },
-    GetPinnedProperties { id: i64 },
-    SetPinnedProperties { id: i64, display_name: Option<String>, opener: Option<PathBuf> },
-    SetPinnedTags { id: i64, tags: Vec<String> },
+    TogglePins {
+        ids: Vec<i64>,
+    },
+    GetPinnedProperties {
+        id: i64,
+    },
+    SetPinnedProperties {
+        id: i64,
+        display_name: Option<String>,
+        opener: Option<PathBuf>,
+    },
+    SetPinnedTags {
+        id: i64,
+        tags: Vec<String>,
+    },
     PinnedTags,
-    FilterPinnedTag { tag: Option<String> },
+    FilterPinnedTag {
+        tag: Option<String>,
+    },
     GetUpdateStatus,
     CheckUpdates,
     InstallUpdate,

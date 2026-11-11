@@ -50,8 +50,9 @@ impl State {
         let (results, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             while let Ok((key, ctx)) = jobs.recv() {
-                let result = std::panic::catch_unwind(|| katran::emoji_render::render(&key.0, key.1 as f32))
-                    .unwrap_or_else(|_| Err("Color renderer panicked".into()));
+                let result =
+                    std::panic::catch_unwind(|| katran::emoji_render::render(&key.0, key.1 as f32))
+                        .unwrap_or_else(|_| Err("Color renderer panicked".into()));
                 if results.send((key, result)).is_err() {
                     break;
                 }
@@ -93,7 +94,8 @@ impl State {
                     if self.failed.len() >= 64 {
                         self.failed.clear();
                     }
-                    self.failed.insert(key, Instant::now() + Duration::from_secs(3));
+                    self.failed
+                        .insert(key, Instant::now() + Duration::from_secs(3));
                 }
             }
         }
@@ -114,16 +116,31 @@ impl State {
                     Color32::WHITE,
                 );
         } else {
-            let failed = self.failed.get(&key).is_some_and(|until| Instant::now() < *until);
+            let failed = self
+                .failed
+                .get(&key)
+                .is_some_and(|until| Instant::now() < *until);
             if failed {
                 let mut font_size = (size as f32 / ppp).min(rect.height() * 0.55);
-                let mut galley = ui.painter().layout_no_wrap(text.to_owned(), egui::FontId::proportional(font_size), Color32::WHITE);
-                let fit = (rect.width() / galley.size().x.max(1.0)).min(rect.height() / galley.size().y.max(1.0)).min(1.0);
+                let mut galley = ui.painter().layout_no_wrap(
+                    text.to_owned(),
+                    egui::FontId::proportional(font_size),
+                    Color32::WHITE,
+                );
+                let fit = (rect.width() / galley.size().x.max(1.0))
+                    .min(rect.height() / galley.size().y.max(1.0))
+                    .min(1.0);
                 if fit < 1.0 {
                     font_size *= fit;
-                    galley = ui.painter().layout_no_wrap(text.to_owned(), egui::FontId::proportional(font_size), Color32::WHITE);
+                    galley = ui.painter().layout_no_wrap(
+                        text.to_owned(),
+                        egui::FontId::proportional(font_size),
+                        Color32::WHITE,
+                    );
                 }
-                ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)).galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+                ui.painter()
+                    .with_clip_rect(ui.clip_rect().intersect(rect))
+                    .galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
                 ui.ctx().request_repaint_after(Duration::from_secs(3));
             }
             if !text.is_empty()
@@ -194,19 +211,33 @@ mod tests {
     fn transient_failure_expires_and_requeues() {
         let (sender, jobs) = mpsc::sync_channel(4);
         let (results, receiver) = mpsc::channel();
-        let mut state = State { sender: Some(sender), receiver: Some(receiver), ..Default::default() };
+        let mut state = State {
+            sender: Some(sender),
+            receiver: Some(receiver),
+            ..Default::default()
+        };
         let ctx = egui::Context::default();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 80.0));
         let event = serde_json::json!({"text_preview":"🤡⚰️💀🐄🦭"});
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| state.paint(ui, &event, rect));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            state.paint(ui, &event, rect)
+        });
         out.textures_delta.clear();
         let (key, _) = jobs.try_recv().unwrap();
-        results.send((key.clone(), Err("temporary".into()))).unwrap();
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| state.paint(ui, &event, rect));
+        results
+            .send((key.clone(), Err("temporary".into())))
+            .unwrap();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            state.paint(ui, &event, rect)
+        });
         out.textures_delta.clear();
         assert!(!state.pending.contains(&key));
-        state.failed.insert(key.clone(), Instant::now() - Duration::from_secs(1));
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| state.paint(ui, &event, rect));
+        state
+            .failed
+            .insert(key.clone(), Instant::now() - Duration::from_secs(1));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            state.paint(ui, &event, rect)
+        });
         out.textures_delta.clear();
         assert!(state.pending.contains(&key));
         assert_eq!(jobs.try_recv().unwrap().0, key);

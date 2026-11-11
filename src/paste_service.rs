@@ -7,18 +7,27 @@ impl Service {
     }
     pub(crate) fn record_clipboard_publication(&mut self, sequence: u32) {
         self.clipboard_sequence = sequence;
-        self.transfer_intent=None;
-        self.transfer_sequence=None;
+        self.transfer_intent = None;
+        self.transfer_sequence = None;
     }
     /// Only an exact, validated COPY snapshot may survive a publication.
     /// A new publication always disarms an earlier CUT, even for the same IDs.
-    pub(crate) fn record_selection_publication(&mut self,sequence:u32,ids:&[i64]) {
-        let copy=self.transfer_intent.take().filter(|(items,cut)| !*cut
-            && items.len()==ids.len()
-            && items.iter().zip(ids).all(|(item,id)|item.id==*id
-                && self.get(*id).is_ok_and(|event|event.revision==item.revision)));
+    pub(crate) fn record_selection_publication(&mut self, sequence: u32, ids: &[i64]) {
+        let copy = self.transfer_intent.take().filter(|(items, cut)| {
+            !*cut
+                && items.len() == ids.len()
+                && items.iter().zip(ids).all(|(item, id)| {
+                    item.id == *id
+                        && self
+                            .get(*id)
+                            .is_ok_and(|event| event.revision == item.revision)
+                })
+        });
         self.record_clipboard_publication(sequence);
-        if let Some(intent)=copy {self.transfer_intent=Some(intent);self.transfer_sequence=Some(sequence);}
+        if let Some(intent) = copy {
+            self.transfer_intent = Some(intent);
+            self.transfer_sequence = Some(sequence);
+        }
     }
 
     pub(crate) fn paste_files_to_folder(&self, paths: Vec<PathBuf>) -> Result<Value> {

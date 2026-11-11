@@ -220,7 +220,10 @@ mod native {
                 // asking for an own-window desktop ID during hidden-window
                 // transitions when no move is needed (Shell may report
                 // TYPE_E_ELEMENTNOTFOUND for that redundant lookup).
-                if !manager.IsWindowOnCurrentVirtualDesktop(hwnd(own_window))?.as_bool() {
+                if !manager
+                    .IsWindowOnCurrentVirtualDesktop(hwnd(own_window))?
+                    .as_bool()
+                {
                     let desktop = manager.GetWindowDesktopId(hwnd(previous.hwnd))?;
                     manager.MoveWindowToDesktop(hwnd(own_window), &desktop)?;
                 }
@@ -320,7 +323,9 @@ mod native {
             }
         }
         pub fn try_recv(&self) -> Result<bool> {
-            self.try_recv_capture()?.transpose().map(|item| item.is_some())
+            self.try_recv_capture()?
+                .transpose()
+                .map(|item| item.is_some())
         }
         /// Outer errors indicate listener failure; inner errors belong to one
         /// hotkey event and must not disable an otherwise registered listener.
@@ -381,9 +386,15 @@ mod native {
                     }
                     let work_area = host.work_area(window)?;
                     if host.foreground()? != window || host.identity(window)? != previous {
-                        return Err(fail("foreground_changed", "Foreground changed during hotkey capture"));
+                        return Err(fail(
+                            "foreground_changed",
+                            "Foreground changed during hotkey capture",
+                        ));
                     }
-                    Ok(SummonReceipt { previous, work_area })
+                    Ok(SummonReceipt {
+                        previous,
+                        work_area,
+                    })
                 })();
                 if sender.try_send(capture).is_ok() {
                     wake();

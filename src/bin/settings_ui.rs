@@ -110,8 +110,12 @@ fn apply_theme(
     Ok(())
 }
 impl State {
-    pub(super) fn background_busy(&self)->bool {self.picker.is_some() || self.background_job.is_some()}
-    pub(super) fn take_restart_requested(&mut self)->bool {std::mem::take(&mut self.restart_requested)}
+    pub(super) fn background_busy(&self) -> bool {
+        self.picker.is_some() || self.background_job.is_some()
+    }
+    pub(super) fn take_restart_requested(&mut self) -> bool {
+        std::mem::take(&mut self.restart_requested)
+    }
 
     pub fn set_overlay_status(&mut self, status: String) {
         self.overlay_status = status;
@@ -122,38 +126,81 @@ impl State {
     pub fn is_recording_overlay(&self) -> bool {
         self.global_editor.is_some()
     }
-    fn tick_background(&mut self,api:&mut Service,ctx:&egui::Context) {
-        if let Some(picker)=&self.picker {
+    fn tick_background(&mut self, api: &mut Service, ctx: &egui::Context) {
+        if let Some(picker) = &self.picker {
             match picker.try_recv() {
-                Ok(result)=>{self.picker=None;match result {
-                    Ok(Some(path))=>{let response=call(api,Command::BeginJob{command:Box::new(Command::ImportThemeBackground{path})});
-                        self.background_job=response["result"]["job_id"].as_u64().map(katran::domain_jobs::JobId);
-                        if response["ok"]!=true {self.error=response["error"]["message"].as_str().unwrap_or("Не удалось импортировать фон").into();}
-                    },Ok(None)=>{},Err(error)=>self.error=error,
-                }},
-                Err(std::sync::mpsc::TryRecvError::Empty)=>ctx.request_repaint_after(std::time::Duration::from_millis(50)),
-                Err(std::sync::mpsc::TryRecvError::Disconnected)=>{self.picker=None;self.error="Диалог выбора изображения завершился без результата".into();},
+                Ok(result) => {
+                    self.picker = None;
+                    match result {
+                        Ok(Some(path)) => {
+                            let response = call(
+                                api,
+                                Command::BeginJob {
+                                    command: Box::new(Command::ImportThemeBackground { path }),
+                                },
+                            );
+                            self.background_job = response["result"]["job_id"]
+                                .as_u64()
+                                .map(katran::domain_jobs::JobId);
+                            if response["ok"] != true {
+                                self.error = response["error"]["message"]
+                                    .as_str()
+                                    .unwrap_or("Не удалось импортировать фон")
+                                    .into();
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => self.error = error,
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.picker = None;
+                    self.error = "Диалог выбора изображения завершился без результата".into();
+                }
             }
         }
-        if let Some(job_id)=self.background_job {
-            let response=call(api,Command::PollJob{job_id});let status=&response["result"];
+        if let Some(job_id) = self.background_job {
+            let response = call(api, Command::PollJob { job_id });
+            let status = &response["result"];
             match status["state"].as_str() {
-                Some("queued"|"running"|"ready")=>ctx.request_repaint_after(std::time::Duration::from_millis(50)),
-                Some("succeeded")=>{self.background_job=None;ctx.request_repaint();
-                    if let Some(id)=status["result"]["id"].as_str(){
-                        let current=call(api,Command::Themes);
-                        if let Ok(mut theme)=serde_json::from_value::<katran::theme::ThemePreferences>(current["result"]["current"].clone()) {
-                            theme.custom_background=Some(id.to_owned());theme.lily_background=None;
-                            self.error=apply_theme(api,&mut self.draft,theme).err().unwrap_or_default();self.custom_backgrounds=None;
+                Some("queued" | "running" | "ready") => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Some("succeeded") => {
+                    self.background_job = None;
+                    ctx.request_repaint();
+                    if let Some(id) = status["result"]["id"].as_str() {
+                        let current = call(api, Command::Themes);
+                        if let Ok(mut theme) =
+                            serde_json::from_value::<katran::theme::ThemePreferences>(
+                                current["result"]["current"].clone(),
+                            )
+                        {
+                            theme.custom_background = Some(id.to_owned());
+                            theme.lily_background = None;
+                            self.error = apply_theme(api, &mut self.draft, theme)
+                                .err()
+                                .unwrap_or_default();
+                            self.custom_backgrounds = None;
                         }
                     }
-                },
-                _=>{self.background_job=None;self.error=status["error"]["message"].as_str().or_else(||response["error"]["message"].as_str()).unwrap_or("Импорт фона отменён или не выполнен").into();},
+                }
+                _ => {
+                    self.background_job = None;
+                    self.error = status["error"]["message"]
+                        .as_str()
+                        .or_else(|| response["error"]["message"].as_str())
+                        .unwrap_or("Импорт фона отменён или не выполнен")
+                        .into();
+                }
             }
         }
     }
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
-        self.tick_background(api,ctx);
+        self.tick_background(api, ctx);
         self.updates.tick(api, ctx);
         let interaction = call(api, Command::Interaction);
         let open = interaction["result"]["settings_open"] == true;
@@ -163,7 +210,7 @@ impl State {
             }
             self.confirm_history = false;
             self.draft = None;
-            self.custom_backgrounds=None;
+            self.custom_backgrounds = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
@@ -395,10 +442,17 @@ impl State {
    });
   });
         if let Some(theme) = theme_intent {
-            let previous=call(api,Command::Themes)["result"]["current"]["glass"].as_bool().unwrap_or(false);
-            let changed=previous!=theme.glass;
+            let previous = call(api, Command::Themes)["result"]["current"]["glass"]
+                .as_bool()
+                .unwrap_or(false);
+            let changed = previous != theme.glass;
             self.error = match apply_theme(api, &mut self.draft, theme) {
-                Ok(()) => {if changed {self.restart_confirmation=true;}String::new()},
+                Ok(()) => {
+                    if changed {
+                        self.restart_confirmation = true;
+                    }
+                    String::new()
+                }
                 Err(error) => error,
             };
             ctx.request_repaint_of(egui::ViewportId::ROOT);
@@ -413,7 +467,7 @@ impl State {
         if close {
             call(api, Command::CloseSettings);
             self.draft = None;
-            self.custom_backgrounds=None;
+            self.custom_backgrounds = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
@@ -432,22 +486,60 @@ mod tests {
 
     #[test]
     fn pending_native_picker_does_not_block_dispatcher_or_change_theme() {
-        let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
-        let (sender,receiver)=std::sync::mpsc::channel();let mut state=State{picker:Some(receiver),..Default::default()};let ctx=egui::Context::default();
-        let before=call(&mut api,Command::Themes);
-        state.tick_background(&mut api,&ctx);assert!(state.picker.is_some());
-        let result=call(&mut api,Command::IngestBytes{name:"capture.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});assert_eq!(result["ok"],true);
-        assert_eq!(call(&mut api,Command::Themes),before);
-        sender.send(Ok(None)).unwrap();state.tick_background(&mut api,&ctx);assert!(state.picker.is_none());
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut state = State {
+            picker: Some(receiver),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let before = call(&mut api, Command::Themes);
+        state.tick_background(&mut api, &ctx);
+        assert!(state.picker.is_some());
+        let result = call(
+            &mut api,
+            Command::IngestBytes {
+                name: "capture.png".into(),
+                bytes: vec![1, 2, 3],
+                source: "synthetic".into(),
+            },
+        );
+        assert_eq!(result["ok"], true);
+        assert_eq!(call(&mut api, Command::Themes), before);
+        sender.send(Ok(None)).unwrap();
+        state.tick_background(&mut api, &ctx);
+        assert!(state.picker.is_none());
     }
     #[test]
     fn ctrl_comma_closes_settings_and_is_consumed() {
-        let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
-        call(&mut api,Command::ShowSettings);
-        let ctx=egui::Context::default();ctx.set_embed_viewports(true);super::super::ui_style::install(&ctx);
-        let mut state=State::default();
-        let mut out=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Comma,physical_key:Some(egui::Key::Comma),pressed:true,repeat:false,modifiers:egui::Modifiers::CTRL}],..Default::default()},|ui|{state.show(ui.ctx(),&mut api);});
-        out.textures_delta.clear();assert_eq!(call(&mut api,Command::Interaction)["result"]["settings_open"],false);
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        call(&mut api, Command::ShowSettings);
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(true);
+        super::super::ui_style::install(&ctx);
+        let mut state = State::default();
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Comma,
+                    physical_key: Some(egui::Key::Comma),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                state.show(ui.ctx(), &mut api);
+            },
+        );
+        out.textures_delta.clear();
+        assert_eq!(
+            call(&mut api, Command::Interaction)["result"]["settings_open"],
+            false
+        );
     }
     #[test]
     fn general_draft_preserves_newer_tab_changes() {
@@ -496,7 +588,11 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([40, 100, 220]),
-            decoration: false, lily_background:None,custom_background:None,glass:false,compact_header:false,
+            decoration: false,
+            lily_background: None,
+            custom_background: None,
+            glass: false,
+            compact_header: false,
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =

@@ -155,22 +155,56 @@ pub(super) fn keycap(ui: &mut egui::Ui, text: &str) {
 }
 
 /// Flat, accessible segment in the shared bottom strip.
-pub(super) fn status_icon(ui: &mut egui::Ui, icon: egui_lucide::Lucide, label: &str) -> egui::Response {
+pub(super) fn status_icon(
+    ui: &mut egui::Ui,
+    icon: egui_lucide::Lucide,
+    label: &str,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     if response.hovered() || response.has_focus() {
-        ui.painter().rect_filled(rect, 4.0, crate::theme_ui::color(ui.ctx(), crate::theme_ui::Role::Selection, Color32::from_gray(78)));
+        ui.painter().rect_filled(
+            rect,
+            4.0,
+            crate::theme_ui::color(
+                ui.ctx(),
+                crate::theme_ui::Role::Selection,
+                Color32::from_gray(78),
+            ),
+        );
     }
-    icon.size(16.0).image().tint(ui.visuals().text_color()).paint_at(ui, egui::Rect::from_center_size(rect.center(), egui::vec2(16.0,16.0)));
+    icon.size(16.0)
+        .image()
+        .tint(ui.visuals().text_color())
+        .paint_at(
+            ui,
+            egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0)),
+        );
     response.on_hover_text(label)
 }
 
 pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(116.0, 28.0), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Действия · Ctrl+K"));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Действия · Ctrl+K")
+    });
     if open || response.hovered() || response.has_focus() {
-        ui.painter().rect_filled(rect, 4.0, crate::theme_ui::color(ui.ctx(), crate::theme_ui::Role::Selection, Color32::from_gray(78)));
+        ui.painter().rect_filled(
+            rect,
+            4.0,
+            crate::theme_ui::color(
+                ui.ctx(),
+                crate::theme_ui::Role::Selection,
+                Color32::from_gray(78),
+            ),
+        );
     }
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Actions  Ctrl K", egui::FontId::proportional(12.0), ui.visuals().text_color());
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "Actions  Ctrl K",
+        egui::FontId::proportional(12.0),
+        ui.visuals().text_color(),
+    );
     response.on_hover_text("Действия · Ctrl+K")
 }

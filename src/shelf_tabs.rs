@@ -9,7 +9,9 @@ impl Service {
         cursor: Option<&str>,
     ) -> Result<serde_json::Value> {
         if self.interaction.tab == crate::interaction::ShelfTab::All {
-            return self.work_folder.browse(query,limit,cursor,self.interaction.sort);
+            return self
+                .work_folder
+                .browse(query, limit, cursor, self.interaction.sort);
         }
         let (events, next) = crate::catalogue_query::query_sorted_slice(
             &self.db,
@@ -32,7 +34,9 @@ impl Service {
                     .tab_enabled(crate::interaction::ShelfTab::Tables),
             ),
         )?;
-        self.decorate_page(serde_json::json!({"events":events,"next_cursor":next,"sort":self.interaction.sort}))
+        self.decorate_page(
+            serde_json::json!({"events":events,"next_cursor":next,"sort":self.interaction.sort}),
+        )
     }
     pub(crate) fn browse_shelf(
         &self,
@@ -41,11 +45,18 @@ impl Service {
         after: Option<i64>,
     ) -> Result<serde_json::Value> {
         if self.interaction.tab == crate::interaction::ShelfTab::All {
-            if after.is_some() {return Err(crate::ApiError::new("invalid_cursor","Folder requires BrowseShelfSorted cursors"));}
-            return self.work_folder.browse(query,limit,None,self.interaction.sort);
+            if after.is_some() {
+                return Err(crate::ApiError::new(
+                    "invalid_cursor",
+                    "Folder requires BrowseShelfSorted cursors",
+                ));
+            }
+            return self
+                .work_folder
+                .browse(query, limit, None, self.interaction.sort);
         }
         if self.interaction.pinned_only {
-            return self.browse_shelf_sorted(query,limit,None);
+            return self.browse_shelf_sorted(query, limit, None);
         }
         let events = crate::catalogue_query::query_features(
             &self.db,

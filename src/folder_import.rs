@@ -78,10 +78,15 @@ impl Service {
                 source: "manual".into(),
             })?;
             // Arrival is new, but a copy/move must preserve the source's modified date.
-            if let Some(modified)=event.modified_at_ms {
-                let id=imported["id"].as_i64().ok_or_else(||ApiError::new("invalid_import","Missing imported image ID"))?;
-                self.db.execute("UPDATE events SET modified_at_ms=?1 WHERE id=?2",rusqlite::params![modified,id])?;
-                imported["modified_at_ms"]=json!(modified);
+            if let Some(modified) = event.modified_at_ms {
+                let id = imported["id"]
+                    .as_i64()
+                    .ok_or_else(|| ApiError::new("invalid_import", "Missing imported image ID"))?;
+                self.db.execute(
+                    "UPDATE events SET modified_at_ms=?1 WHERE id=?2",
+                    rusqlite::params![modified, id],
+                )?;
+                imported["modified_at_ms"] = json!(modified);
             }
             return Ok(
                 json!({"kind":"image","event":imported,"imported":1,"failed":0,"source_hash":source_hash}),

@@ -25,11 +25,20 @@ fn preview_command(id: i64, edge: u32) -> Command {
     }
 }
 fn work_path(event: &Value, id: i64) -> Option<Option<PathBuf>> {
-    if id < 0 { Some(Some(PathBuf::from(event["path"].as_str()?))) } else { Some(None) }
+    if id < 0 {
+        Some(Some(PathBuf::from(event["path"].as_str()?)))
+    } else {
+        Some(None)
+    }
 }
 fn work_command(key: &ImageKey, path: Option<PathBuf>) -> Command {
     match path {
-        Some(path) => Command::PreviewPath { path, revision: key.2.clone(), max_edge: key.1, image_only: key.1 > 512 },
+        Some(path) => Command::PreviewPath {
+            path,
+            revision: key.2.clone(),
+            max_edge: key.1,
+            image_only: key.1 > 512,
+        },
         None => preview_command(key.0, key.1),
     }
 }
@@ -80,7 +89,9 @@ impl Images {
             return;
         };
         let key = (id, edge, revision.to_owned());
-        let Some(path) = work_path(event, id) else { return; };
+        let Some(path) = work_path(event, id) else {
+            return;
+        };
         self.active.insert(key.clone());
         if self
             .textures
@@ -197,7 +208,9 @@ impl Images {
         }
         let (lock, _) = &*self.queue;
         let mut state = lock.lock().unwrap();
-        state.pending.retain(|(key, _, _)| self.active.contains(key));
+        state
+            .pending
+            .retain(|(key, _, _)| self.active.contains(key));
         // Requests removed before execution must be eligible if the user returns.
         self.requested.retain(|key| self.active.contains(key));
     }
@@ -258,7 +271,9 @@ impl Images {
             return;
         };
         let key = (id, edge, revision.to_owned());
-        let Some(path) = work_path(event, id) else { return; };
+        let Some(path) = work_path(event, id) else {
+            return;
+        };
         self.active.insert(key.clone());
         self.clock = self.clock.wrapping_add(1);
         let retry = self
@@ -273,7 +288,9 @@ impl Images {
             {
                 self.requested.remove(&old);
             }
-            state.pending.push_front((key.clone(), path, ui.ctx().clone()));
+            state
+                .pending
+                .push_front((key.clone(), path, ui.ctx().clone()));
             wake.notify_one();
         }
         if let Some(entry) = self.textures.get_mut(&key) {
@@ -389,10 +406,13 @@ mod tests {
 
     #[test]
     fn folder_preview_carries_path_revision_and_size() {
-        let event = serde_json::json!({"id": -1, "path": "folder/image.png", "revision": "file:abc"});
+        let event =
+            serde_json::json!({"id": -1, "path": "folder/image.png", "revision": "file:abc"});
         let path = work_path(&event, -1).unwrap();
         let key = (-1, 320, "file:abc".to_owned());
-        assert!(matches!(work_command(&key, path), Command::PreviewPath { path, revision, max_edge: 320, image_only: false } if path == std::path::Path::new("folder/image.png") && revision == "file:abc"));
+        assert!(
+            matches!(work_command(&key, path), Command::PreviewPath { path, revision, max_edge: 320, image_only: false } if path == std::path::Path::new("folder/image.png") && revision == "file:abc")
+        );
         assert!(work_path(&serde_json::json!({}), -1).is_none());
     }
 

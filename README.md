@@ -1,21 +1,13 @@
 # Katran
 
-> **Local Katran 2.5 preview is under development.** The accepted public
-> release remains Katran 2.0.0; 2.5 is not accepted or published. Its current
-> branch uses Folder in place of All and recycles managed originals, including
-> ShareX screenshots. See [Folder](docs/work-folder.md), [Pinned](docs/pinned.md),
-> and the [2.5 preview notes](docs/releases/2.5.0-preview.md). Build details:
-> [preview build procedure](docs/patch-2.5/BUILD.md).
+**Katran 3.0** is the owner-accepted Windows release candidate, with Folder,
+Pods, pinned objects, tray/global overlay, native paste and optional Blue themes,
+lily/custom backgrounds and Acrylic glass. Publication evidence is recorded in
+[3.0 release notes](docs/releases/3.0.0.md).
 
-Clipboard events are now the default after the owner's successful browser and
-filesystem checks. The accepted `experiment/clipboard-events` branch is merged
-into `main`. [Capture contract and verification](docs/clipboard-events-experiment.md).
-
-Independent, local Windows-first object shelf in Rust. **Katran 2.0.0** was
-accepted by the owner after Windows checks of text, Markdown, Links, table
-transfer between Google Sheets and Notion, sorting, and zoomable previews.
-API First: UI, capture, CLI and integrations use one Rust command dispatcher.
-[2.0 release notes](docs/releases/2.0.0.md).
+Independent, local Windows-first object shelf in Rust. API First: UI, capture,
+CLI and integrations use one Rust command dispatcher. Clipboard events are the
+default Windows capture backend; there is no silent polling fallback.
 
 Download the **portable ZIP** or **per-user setup EXE** from
 [GitHub Releases](https://github.com/LilyAvelis/Katran/releases).
@@ -24,11 +16,11 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 2.0.0
+## Current release · 3.0.0
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-must say **Katran · 2.0.0**. Existing data stays in `katran-data`.
+reports **3.0.0** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
 
 Prepare an updated build without overwriting a running executable:
 
@@ -53,8 +45,8 @@ an installer is unnecessary for its icon. [Artwork and build details](assets/bra
 The build also installs a per-user `Katran.lnk` Start Menu entry pointing to
 `runtime/Katran.exe`. This stable launcher follows the current-version pointer.
 Repeated launches request activation of the existing window for the same shelf
-root, including restoration from minimized state. In Raycast, assign its app
-hotkey under Settings → Applications and select Hotkey Action → Always Show.
+root, including restoration from minimized state. Assign Katran’s own global shortcut in Settings. The same shortcut shows or
+hides the tray-resident window over the current application.
 [Activation, registration and manual checks](docs/application-launch.md).
 
 [Tabs and ShareX setup, API and limits](docs/tabs-and-sharex.md) records the
@@ -64,11 +56,9 @@ documented with each feature.
 
 Accepted 2.0 contract: Images is the clipboard/manual image shelf; Screenshots
 and Downloads are live views of originals. Downloads uses the Windows Known
-Folder by default; Settings can disable it or override the root. In the local
-2.5 preview, All is replaced by Folder and managed originals in Downloads,
+Folder by default; Settings can disable it or override the root. In 3.0, All is replaced by Folder and managed originals in Downloads,
 Screenshots, and Folder use Windows recycling. Single deletion is immediate;
-groups confirm with Enter. This preview behavior is not part of the accepted
-public 2.0 release.
+groups confirm with Enter. These operations report per-item failures and protect pinned objects.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 

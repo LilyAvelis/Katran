@@ -7,16 +7,17 @@ mod app_identity;
 mod clipboard_events_ui;
 mod gallery_card;
 mod images;
-mod input_log;
 mod info_bar;
+mod input_log;
 mod markdown_ui;
 mod native_drag_ui;
 mod navigation_input;
-mod overlay_ui;
-mod pods_ui;
 mod open_apps_ui;
+mod overlay_ui;
 mod palette;
 mod pinned_ui;
+mod pods_ui;
+mod restart_ui;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;
@@ -27,14 +28,13 @@ mod source_jobs;
 mod tab_bar;
 mod table_preview_ui;
 mod text_preview_ui;
+mod theme_file_picker;
+mod theme_ui;
 mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
-mod theme_ui;
-mod window_material;
-mod restart_ui;
-mod theme_file_picker;
 mod updates_ui;
+mod window_material;
 mod workspace_ui;
 use base64::Engine;
 use eframe::egui::{self, Color32, RichText, Vec2};
@@ -78,7 +78,11 @@ fn item_failures(items: &Value) -> String {
                 .as_str()
                 .or_else(|| item["error"]["message"].as_str())
                 .unwrap_or("Ошибка");
-            if let Some(path)=item["recovery_path"].as_str() {format!("{name}: {error} · Файл сохранён: {path}")}else{format!("{name}: {error}")}
+            if let Some(path) = item["recovery_path"].as_str() {
+                format!("{name}: {error} · Файл сохранён: {path}")
+            } else {
+                format!("{name}: {error}")
+            }
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -227,43 +231,83 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
 }
 impl Shelf {
     /// Shared input ownership includes overlays before any early command handler.
-    fn modal_owns_input(&self)->bool {
-        self.sorting_input.is_open() || self.shortcut_editor.is_some() || self.actions || self.open_apps.open
-            || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save
-            || !self.pending_delete.is_empty() || self.state["settings_open"]==true
+    fn modal_owns_input(&self) -> bool {
+        self.sorting_input.is_open()
+            || self.shortcut_editor.is_some()
+            || self.actions
+            || self.open_apps.open
+            || self.workspace.open
+            || self.info.is_open()
+            || self.pinned_ui.open
+            || self.save
+            || !self.pending_delete.is_empty()
+            || self.state["settings_open"] == true
     }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
-            let settings=self.call(Command::GetSettings);
-            if let Ok(theme)=serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone()) {
-                if self.glass_active && (!theme.glass || theme.preset!=katran::theme::Preset::BlueExperimental) {
-                    let _=window_material::apply(self.native_window as isize,false);
-                    self.glass_active=false;
-                    ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),false));
+            let settings = self.call(Command::GetSettings);
+            if let Ok(theme) =
+                serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone())
+            {
+                if self.glass_active
+                    && (!theme.glass || theme.preset != katran::theme::Preset::BlueExperimental)
+                {
+                    let _ = window_material::apply(self.native_window as isize, false);
+                    self.glass_active = false;
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("native-glass-active"), false));
                     theme_ui::reset(&ctx);
                 }
-                if let Some(id)=&theme.custom_background && !theme_ui::custom_cached(&ctx,id) {
-                    let background=self.call(Command::GetThemeBackground{id:id.clone()});
-                    if let Some(path)=background["path"].as_str() && let Err(error)=theme_ui::load_custom(&ctx,id,std::path::Path::new(path)) {self.message=error;}
+                if let Some(id) = &theme.custom_background
+                    && !theme_ui::custom_cached(&ctx, id)
+                {
+                    let background = self.call(Command::GetThemeBackground { id: id.clone() });
+                    if let Some(path) = background["path"].as_str()
+                        && let Err(error) =
+                            theme_ui::load_custom(&ctx, id, std::path::Path::new(path))
+                    {
+                        self.message = error;
+                    }
                 }
-                theme_ui::apply(&ctx,&theme);
+                theme_ui::apply(&ctx, &theme);
             }
         }
-        theme_ui::background(&ctx,ctx.content_rect());
+        theme_ui::background(&ctx, ctx.content_rect());
         self.resident_close_requested(&ctx);
         input_log::record(&ctx, self.logger.as_ref());
-        if self.api.is_some(){self.state=self.call(Command::Interaction);}
-        let sort_allowed=self.shortcut_editor.is_none() && !self.actions && !self.open_apps.open
-            && !self.workspace.open && !self.info.is_open() && !self.pinned_ui.open && !self.save
-            && self.pending_delete.is_empty() && self.state["settings_open"]!=true && self.state["preview"].is_null()
-            && !ctx.memory(|m|m.has_focus(egui::Id::new("shelf-search")))
+        if self.api.is_some() {
+            self.state = self.call(Command::Interaction);
+        }
+        let sort_allowed = self.shortcut_editor.is_none()
+            && !self.actions
+            && !self.open_apps.open
+            && !self.workspace.open
+            && !self.info.is_open()
+            && !self.pinned_ui.open
+            && !self.save
+            && self.pending_delete.is_empty()
+            && self.state["settings_open"] != true
+            && self.state["preview"].is_null()
+            && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")))
             && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
             && !(self.api.is_none() && self.busy_text_editing);
-        if let Some(action)=self.sorting_input.take(&ctx,sort_allowed){self.pending_sort=Some(action);}
-        if !self.sorting_input.is_open(){self.overlay_escape(&ctx);}
+        if let Some(action) = self.sorting_input.take(&ctx, sort_allowed) {
+            self.pending_sort = Some(action);
+        }
+        if !self.sorting_input.is_open() {
+            self.overlay_escape(&ctx);
+        }
 
-        if self.api.is_some() && !self.info.is_open() { if !self.sorting_input.is_open(){self.pinned_input(&ctx);} self.pinned_tick(&ctx); if !self.pinned_ui.open && !self.sorting_input.is_open(){self.workspace_input(&ctx);} self.workspace_tick(&ctx); }
+        if self.api.is_some() && !self.info.is_open() {
+            if !self.sorting_input.is_open() {
+                self.pinned_input(&ctx);
+            }
+            self.pinned_tick(&ctx);
+            if !self.pinned_ui.open && !self.sorting_input.is_open() {
+                self.workspace_input(&ctx);
+            }
+            self.workspace_tick(&ctx);
+        }
         if self.api.is_none()
             && self.job.is_some()
             && self.shortcut_editor.is_none()
@@ -412,8 +456,8 @@ impl Shelf {
             }
             if self.shortcut_editor.is_none()
                 && !self.workspace.open
-            && !self.info.is_open()
-            && !self.pinned_ui.open
+                && !self.info.is_open()
+                && !self.pinned_ui.open
                 && !self.save
                 && self.pending_delete.is_empty()
             {
@@ -429,15 +473,18 @@ impl Shelf {
                     })
                     .cloned()
                     .collect();
-                if !self.sorting_input.is_open() && let Some(id) = shortcuts_ui::take_action(&ctx, &catalogue) {
+                if !self.sorting_input.is_open()
+                    && let Some(id) = shortcuts_ui::take_action(&ctx, &catalogue)
+                {
                     self.run(id, &ctx);
                 }
             }
         }
         if self.api.is_some() {
-            if !self.open_apps.open && !self.workspace.open
-            && !self.info.is_open()
-            && !self.pinned_ui.open
+            if !self.open_apps.open
+                && !self.workspace.open
+                && !self.info.is_open()
+                && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
             {
                 self.actions = !self.actions;
@@ -447,9 +494,9 @@ impl Shelf {
             }
             if self.shortcut_editor.is_none()
                 && !self.open_apps.open
-            && !self.workspace.open
-            && !self.info.is_open()
-            && !self.pinned_ui.open
+                && !self.workspace.open
+                && !self.info.is_open()
+                && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {
@@ -479,32 +526,45 @@ impl Shelf {
         }
         self.state = self.call(Command::Interaction);
         let _header = egui::Panel::top("header")
-            .frame(egui::Frame::new().fill(theme_ui::color(&ctx,theme_ui::Role::Background,Color32::TRANSPARENT)).inner_margin(12))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme_ui::color(
+                        &ctx,
+                        theme_ui::Role::Background,
+                        Color32::TRANSPARENT,
+                    ))
+                    .inner_margin(12),
+            )
             .show(root, |ui| {
-                theme_ui::decorate(ui,ui.max_rect());
+                theme_ui::decorate(ui, ui.max_rect());
                 if theme_ui::compact_header(&ctx) {
-                    let (_,drag)=ui.allocate_exact_size(egui::vec2(ui.available_width(),8.0),egui::Sense::drag());
-                    if drag.drag_started(){ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);}
-                } else {
-                ui.horizontal(|ui| {
-                    let (rect, r) = ui.allocate_exact_size(
-                        egui::vec2((ui.available_width() - 42.0).max(20.0), 26.0),
-                        egui::Sense::click_and_drag(),
+                    let (_, drag) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 8.0),
+                        egui::Sense::drag(),
                     );
-                    ui.painter().text(
-                        rect.left_center(),
-                        egui::Align2::LEFT_CENTER,
-                        BUILD_LABEL,
-                        egui::FontId::proportional(13.0),
-                        Color32::from_gray(180),
-                    );
-                    if r.drag_started() {
+                    if drag.drag_started() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
-                    if ui.button("×").clicked() {
-                        self.close_or_hide(&ctx);
-                    }
-                });
+                } else {
+                    ui.horizontal(|ui| {
+                        let (rect, r) = ui.allocate_exact_size(
+                            egui::vec2((ui.available_width() - 42.0).max(20.0), 26.0),
+                            egui::Sense::click_and_drag(),
+                        );
+                        ui.painter().text(
+                            rect.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            BUILD_LABEL,
+                            egui::FontId::proportional(13.0),
+                            Color32::from_gray(180),
+                        );
+                        if r.drag_started() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                        }
+                        if ui.button("×").clicked() {
+                            self.close_or_hide(&ctx);
+                        }
+                    });
                 }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
@@ -535,8 +595,15 @@ impl Shelf {
                                 })
                         })
                     });
-                    self.text_preview
-                        .set_enabled(text_enabled || link_enabled || markdown_preview || tabs["tabs"].as_array().is_some_and(|tabs|tabs.iter().any(|tab|tab["tab"]=="pods"&&tab["enabled"]==true)));
+                    self.text_preview.set_enabled(
+                        text_enabled
+                            || link_enabled
+                            || markdown_preview
+                            || tabs["tabs"].as_array().is_some_and(|tabs| {
+                                tabs.iter()
+                                    .any(|tab| tab["tab"] == "pods" && tab["enabled"] == true)
+                            }),
+                    );
                     let tables_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
                         tabs.iter()
                             .any(|tab| tab["tab"] == "tables" && tab["enabled"] == true)
@@ -558,37 +625,61 @@ impl Shelf {
                 }
             });
         #[cfg(test)]
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-header-rect"), _header.response.rect));
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new("test-header-rect"), _header.response.rect)
+        });
         let _footer = egui::Panel::bottom("footer")
             .exact_size(34.0)
-            .frame(egui::Frame::new()
-                .fill(theme_ui::footer_fill(&ctx, Color32::from_rgb(54,54,58)))
-                .inner_margin(egui::Margin::symmetric(8, 2)))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme_ui::footer_fill(&ctx, Color32::from_rgb(54, 54, 58)))
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
+            )
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
                     self.info_bar(ui);
                     let selected = self.state["selected"].as_array().map_or(0, Vec::len);
-                    if selected > 0 { ui.weak(format!("{selected} выбрано")); }
+                    if selected > 0 {
+                        ui.weak(format!("{selected} выбрано"));
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let response = ui_style::actions_button(ui, self.actions);
-                        ctx.data_mut(|data| data.insert_temp(egui::Id::new("actions-button-rect"), response.rect));
+                        ctx.data_mut(|data| {
+                            data.insert_temp(egui::Id::new("actions-button-rect"), response.rect)
+                        });
                         if response.clicked() {
                             self.actions = !self.actions;
                             self.focus_actions = self.actions;
                             self.action_query.clear();
                         }
-                        let sort = ui_style::status_icon(ui,egui_lucide::Lucide::ArrowUpDown,"Сортировка · запятая");
-                        ctx.data_mut(|d|d.insert_temp(egui::Id::new("sorting-button-rect"),sort.rect));
-                        if sort.clicked() {self.actions=false;self.sorting_input.open();}
-
+                        let sort = ui_style::status_icon(
+                            ui,
+                            egui_lucide::Lucide::ArrowUpDown,
+                            "Сортировка · запятая",
+                        );
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("sorting-button-rect"), sort.rect)
+                        });
+                        if sort.clicked() {
+                            self.actions = false;
+                            self.sorting_input.open();
+                        }
                     });
                 });
             });
         #[cfg(test)]
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-footer-rect"), _footer.response.rect));
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new("test-footer-rect"), _footer.response.rect)
+        });
         if self.state["tab"] == "folder" {
-            if self.state["folder_path"].is_null() { self.events.clear(); self.next_cursor = None; }
-            else if self.workspace.last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(1)) {
+            if self.state["folder_path"].is_null() {
+                self.events.clear();
+                self.next_cursor = None;
+            } else if self
+                .workspace
+                .last_refresh
+                .is_none_or(|last| last.elapsed() >= Duration::from_secs(1))
+            {
                 self.workspace.last_refresh = Some(Instant::now());
                 self.refresh();
             }
@@ -598,7 +689,7 @@ impl Shelf {
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
         });
-        let gallery = self.state["view"] == "gallery" || self.state["tab"]=="pods";
+        let gallery = self.state["view"] == "gallery" || self.state["tab"] == "pods";
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             self.gallery_columns = settings["gallery_columns"]
@@ -606,9 +697,14 @@ impl Shelf {
                 .unwrap_or(4)
                 .clamp(1, 12) as u8;
             self.stream_rows = settings["stream_rows"].as_u64().unwrap_or(3).clamp(1, 12) as u8;
-            self.pods_tile_size=settings["pods_tile_size"].as_u64().unwrap_or(96).clamp(48,192) as u16;
+            self.pods_tile_size = settings["pods_tile_size"]
+                .as_u64()
+                .unwrap_or(96)
+                .clamp(48, 192) as u16;
         }
-        let columns = if self.state["tab"]=="pods" {pods_ui::columns(root.available_width()-40.0,self.pods_tile_size)} else if gallery {
+        let columns = if self.state["tab"] == "pods" {
+            pods_ui::columns(root.available_width() - 40.0, self.pods_tile_size)
+        } else if gallery {
             effective_gallery_columns(root.available_width() - 40.0, self.gallery_columns)
         } else {
             1
@@ -709,11 +805,19 @@ impl Shelf {
             self.refresh();
             ctx.request_repaint();
         }
-        if self.api.is_some() && self.job.is_none() && self.capture_job.is_none()
-            && !self.overlay_ui.pending && !self.settings_ui.background_busy() && self.settings_ui.take_restart_requested() {
-            let result=self.call(Command::RestartApplication);
-            if result["restart_requested"]==true {
-                match restart_ui::spawn_successor(){Ok(())=>self.quit_application(&ctx),Err(error)=>self.message=error}
+        if self.api.is_some()
+            && self.job.is_none()
+            && self.capture_job.is_none()
+            && !self.overlay_ui.pending
+            && !self.settings_ui.background_busy()
+            && self.settings_ui.take_restart_requested()
+        {
+            let result = self.call(Command::RestartApplication);
+            if result["restart_requested"] == true {
+                match restart_ui::spawn_successor() {
+                    Ok(()) => self.quit_application(&ctx),
+                    Err(error) => self.message = error,
+                }
             }
         }
         if self.job.is_some() {
@@ -798,10 +902,14 @@ impl Shelf {
     }
 }
 impl eframe::App for Shelf {
-    fn clear_color(&self, _: &egui::Visuals) -> [f32;4] {
-        if self.glass_active {[0.0,0.0,0.0,0.0]}
-        else if self.transparent_viewport {Color32::from_rgb(12,12,12).to_normalized_gamma_f32()}
-        else {Color32::from_rgba_unmultiplied(12,12,12,180).to_normalized_gamma_f32()}
+    fn clear_color(&self, _: &egui::Visuals) -> [f32; 4] {
+        if self.glass_active {
+            [0.0, 0.0, 0.0, 0.0]
+        } else if self.transparent_viewport {
+            Color32::from_rgb(12, 12, 12).to_normalized_gamma_f32()
+        } else {
+            Color32::from_rgba_unmultiplied(12, 12, 12, 180).to_normalized_gamma_f32()
+        }
     }
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.tray_tick(ctx);
@@ -821,7 +929,7 @@ impl eframe::App for Shelf {
             if self.api.is_some() {
                 let reply = self.call(Command::ActivateWindow);
                 if reply["activation_requested"] == true {
-                    self.call(Command::SetWindowVisibility{visible:true});
+                    self.call(Command::SetWindowVisibility { visible: true });
                     let foreground = single_instance::show(self.native_window);
                     if let Some(log) = &self.logger {
                         log.record(
@@ -847,16 +955,34 @@ impl eframe::App for Shelf {
         let starts_sort=!self.modal_owns_input() && !ctx.egui_wants_keyboard_input() && input.events.iter().any(|e|matches!(e,
             egui::Event::Key{key,physical_key,pressed:true,modifiers,..}
                 if physical_key.unwrap_or(*key)==egui::Key::Comma && !modifiers.ctrl && !modifiers.alt && !modifiers.command));
-        let modal=self.modal_owns_input() || starts_sort;
-        let copying_bound=self.shortcuts.iter().any(|s|s.id=="transfer_copy" && s.binding.as_deref().is_some_and(|b|b.split(" / ").any(|b|b=="Ctrl Tab")));
-        let editing=ctx.memory(|m|m.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some());
+        let modal = self.modal_owns_input() || starts_sort;
+        let copying_bound = self.shortcuts.iter().any(|s| {
+            s.id == "transfer_copy"
+                && s.binding
+                    .as_deref()
+                    .is_some_and(|b| b.split(" / ").any(|b| b == "Ctrl Tab"))
+        });
+        let editing = ctx
+            .memory(|m| m.focused())
+            .is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
         if copying_bound && input.focused && !modal && !editing {
-            let mut copy=false;
-            input.events.retain(|e|match e {
-                egui::Event::Key{key:egui::Key::Tab,pressed:true,repeat,modifiers,..} if *modifiers==egui::Modifiers::CTRL=>{copy|=!*repeat;false},
-                _=>true,
+            let mut copy = false;
+            input.events.retain(|e| match e {
+                egui::Event::Key {
+                    key: egui::Key::Tab,
+                    pressed: true,
+                    repeat,
+                    modifiers,
+                    ..
+                } if *modifiers == egui::Modifiers::CTRL => {
+                    copy |= !*repeat;
+                    false
+                }
+                _ => true,
             });
-            if copy {self.pending_tab_action=Some("transfer_copy".into());}
+            if copy {
+                self.pending_tab_action = Some("transfer_copy".into());
+            }
         }
         if self.navigation_input.intercept(ctx, input, modal) {
             self.pending_tab_action = Some("tab_toggle".into());
@@ -867,7 +993,8 @@ impl eframe::App for Shelf {
     }
 }
 fn main() -> eframe::Result {
-    restart_ui::wait_for_predecessor().map_err(|error|eframe::Error::AppCreation(Box::new(std::io::Error::other(error))))?;
+    restart_ui::wait_for_predecessor()
+        .map_err(|error| eframe::Error::AppCreation(Box::new(std::io::Error::other(error))))?;
     if let Some(code) = katran::shell_visual_worker::run_if_requested() {
         std::process::exit(code);
     }
@@ -896,9 +1023,9 @@ fn main() -> eframe::Result {
         activation_rx: None,
         activation_pending: false,
         native_drag: None,
-            navigation_input: navigation_input::State::default(),
-            overlay_ui: overlay_ui::State::default(),
-            pods_ui: pods_ui::State::default(),
+        navigation_input: navigation_input::State::default(),
+        overlay_ui: overlay_ui::State::default(),
+        pods_ui: pods_ui::State::default(),
         native_window: 0,
         logger,
         pending_delete: Vec::new(),
@@ -908,8 +1035,8 @@ fn main() -> eframe::Result {
         settings_ui: settings_ui::State::default(),
         open_apps: open_apps_ui::State::default(),
         workspace: workspace_ui::State::default(),
-            info: info_bar::State::default(),
-            pinned_ui: pinned_ui::State::default(),
+        info: info_bar::State::default(),
+        pinned_ui: pinned_ui::State::default(),
         shortcut_editor: None,
         api: Some(api),
         job: None,
@@ -924,7 +1051,7 @@ fn main() -> eframe::Result {
         tab_order: katran::tab_layout::default_order(),
         shortcuts: Vec::new(),
         gallery_columns: 4,
-            pods_tile_size: 96,
+        pods_tile_size: 96,
         stream_rows: 3,
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
@@ -958,9 +1085,10 @@ fn main() -> eframe::Result {
         command: Box::new(Command::EnsurePreviewBackend),
     });
     app.preview_warmup = warmup["job_id"].as_u64().map(katran::domain_jobs::JobId);
-    let theme:katran::theme::ThemePreferences=serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
-    let glass_start=theme.preset==katran::theme::Preset::BlueExperimental && theme.glass;
-    app.transparent_viewport=glass_start;
+    let theme: katran::theme::ThemePreferences =
+        serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
+    let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
+    app.transparent_viewport = glass_start;
     eframe::run_native(
         "Katran",
         eframe::NativeOptions {
@@ -988,9 +1116,14 @@ fn main() -> eframe::Result {
                 {
                     app.native_window = window.hwnd.get() as u64;
                     if glass_start {
-                        match window_material::apply(app.native_window as isize,true) {
-                            Ok(()) => {app.glass_active=true;cc.egui_ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),true));},
-                            Err(error) => app.message=error,
+                        match window_material::apply(app.native_window as isize, true) {
+                            Ok(()) => {
+                                app.glass_active = true;
+                                cc.egui_ctx.data_mut(|d| {
+                                    d.insert_temp(egui::Id::new("native-glass-active"), true)
+                                });
+                            }
+                            Err(error) => app.message = error,
                         }
                     }
                     if let Some(instance) = app.instance.as_mut() {
@@ -1118,9 +1251,9 @@ mod tests {
             next_cursor: None,
             sorting_input: Default::default(),
             pending_sort: None,
-        glass_active: false,
-        transparent_viewport: false,
-        sort_notice: None,
+            glass_active: false,
+            transparent_viewport: false,
+            sort_notice: None,
             state: Value::Null,
             query: String::new(),
             loaded_query: String::new(),
@@ -1245,7 +1378,9 @@ mod tests {
         for palette in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+            app.call(Command::SetTab {
+                tab: katran::interaction::ShelfTab::Images,
+            });
             let event = app.call(Command::IngestBytes {
                 name: "selected.png".into(),
                 bytes: vec![1],
@@ -1308,7 +1443,9 @@ mod tests {
     fn escape_closes_overlays_and_preview_before_clearing_selection() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         let first = app.call(Command::IngestBytes {
             name: "first.png".into(),
             bytes: vec![1],
@@ -1503,11 +1640,22 @@ mod tests {
     fn tabs_shortcuts_and_hidden_selection_use_domain_api() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let id = app.call(Command::IngestBytes { name: "hidden.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "hidden.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
         app.refresh();
         app.call(Command::SetVisible { ids: vec![id] });
-        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
         // A worker may own the API when the selected item is temporarily unavailable.
@@ -1517,9 +1665,16 @@ mod tests {
         app.events.clear();
         app.copy_request(&ctx);
         assert_eq!(app.pending_copy_ids, Some(vec![id]));
-        tx.send((api, serde_json::json!({"ok":true,"result":{"captured":0}}), true)).unwrap();
+        tx.send((
+            api,
+            serde_json::json!({"ok":true,"result":{"captured":0}}),
+            true,
+        ))
+        .unwrap();
         app.finish_job();
-        assert!(matches!(app.take_queued_copy(), Some(Command::CopySmart { items }) if items.len()==1 && items[0].id==id));
+        assert!(
+            matches!(app.take_queued_copy(), Some(Command::CopySmart { items }) if items.len()==1 && items[0].id==id)
+        );
         frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
         assert_eq!(app.state["tab"], "screenshots");
         assert!(app.events.is_empty());
@@ -1542,15 +1697,30 @@ mod tests {
     fn copy_event_and_key_produce_one_shortcut_action() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        let shortcuts: Vec<katran::shortcuts::ShortcutInfo> = serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
+        let shortcuts: Vec<katran::shortcuts::ShortcutInfo> =
+            serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
         let ctx = egui::Context::default();
-        let input = egui::RawInput { events: vec![egui::Event::Copy, egui::Event::Key {
-            key: egui::Key::C, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL,
-        }], ..Default::default() };
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Copy,
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+            ],
+            ..Default::default()
+        };
         let mut actions = Vec::new();
         let mut output = ctx.run_ui(input, |_ui| {
-            actions.push(shortcuts_ui::take_action_with_editing(&ctx, &shortcuts, false));
-            actions.push(shortcuts_ui::take_action_with_editing(&ctx, &shortcuts, false));
+            actions.push(shortcuts_ui::take_action_with_editing(
+                &ctx, &shortcuts, false,
+            ));
+            actions.push(shortcuts_ui::take_action_with_editing(
+                &ctx, &shortcuts, false,
+            ));
         });
         output.textures_delta.clear();
         assert_eq!(actions, vec![Some("copy".into()), None]);
@@ -1559,13 +1729,25 @@ mod tests {
     fn pinned_tag_picker_filters_and_does_not_leak_navigation() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let id = app.call(Command::IngestBytes { name: "pin.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "pin.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
         app.call(Command::TogglePins { ids: vec![id] });
-        app.call(Command::SetPinnedTags { id, tags: vec!["Work".into()] });
+        app.call(Command::SetPinnedTags {
+            id,
+            tags: vec!["Work".into()],
+        });
         app.state = app.call(Command::SelectTabPosition { position: 1 });
         app.refresh();
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL);
         assert!(app.pinned_ui.open);
         frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
@@ -1578,11 +1760,20 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::ChooseFolder { path: folder.path().into() });
-        app.state = app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
-        frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        frame(
+            &mut app,
+            &ctx,
+            egui::Key::K,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
         assert!(app.workspace.open);
         frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
         assert_eq!(app.call(Command::Interaction)["tab"], "images");
@@ -1591,28 +1782,53 @@ mod tests {
         assert!(!app.workspace.open);
         let state = app.call(Command::Interaction);
         assert_eq!(state["tab"], "folder");
-        assert_eq!(state["folder_path"].as_str().map(PathBuf::from), Some(folder.path().canonicalize().unwrap()));
+        assert_eq!(
+            state["folder_path"].as_str().map(PathBuf::from),
+            Some(folder.path().canonicalize().unwrap())
+        );
     }
     #[test]
     fn repeated_digit_switches_pinned_without_retaining_selection() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let id = app.call(Command::IngestBytes { name: "pinned.png".into(), bytes: vec![1], source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "pinned.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
         app.call(Command::TogglePins { ids: vec![id] });
         app.refresh();
         app.call(Command::SetVisible { ids: vec![id] });
-        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
         assert_eq!(app.state["tab"], "images");
         assert_eq!(app.state["pinned_only"], true);
         assert!(app.state["selected"].as_array().unwrap().is_empty());
         assert!(app.events.iter().any(|item| item["id"] == id));
         // A second physical press follows key release; holding a key must not toggle repeatedly.
-        let mut released = ctx.run_ui(egui::RawInput { events: vec![egui::Event::Key {
-            key: egui::Key::Num1, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE,
-        }], ..Default::default() }, |ui| app.render(ui));
+        let mut released = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Num1,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
         released.textures_delta.clear();
         frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
         assert_eq!(app.state["pinned_only"], false);
@@ -1623,22 +1839,56 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::ChooseFolder { path: folder.path().into() });
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let id = app.call(Command::IngestBytes { name: "synthetic.png".into(), bytes: b"synthetic bytes".to_vec(), source: "test".into() })["id"].as_i64().unwrap();
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: b"synthetic bytes".to_vec(),
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
         app.refresh();
         app.call(Command::SetVisible { ids: vec![id] });
-        app.state = app.call(Command::Select { id, mode: SelectionMode::Replace });
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::X, egui::Modifiers::CTRL);
-        assert!(app.message.contains("Подготовлено к перемещению"), "cut was not staged: {} state: {}", app.message, app.state);
+        assert!(
+            app.message.contains("Подготовлено к перемещению"),
+            "cut was not staged: {} state: {}",
+            app.message,
+            app.state
+        );
         assert_eq!(app.call(Command::Get { id })["id"], id);
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
         assert_eq!(app.state["tab"], "folder");
         frame(&mut app, &ctx, egui::Key::V, egui::Modifiers::CTRL);
-        let outputs: Vec<_> = std::fs::read_dir(folder.path()).unwrap().map(|e| e.unwrap().path()).collect();
-        assert_eq!(outputs.len(), 1, "paste receipt: {}; state: {}; outputs: {:?}", app.message, app.state, outputs);
-        assert_eq!(outputs[0].file_name().unwrap(), "synthetic.png", "paste receipt: {}", app.message);
+        let outputs: Vec<_> = std::fs::read_dir(folder.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(
+            outputs.len(),
+            1,
+            "paste receipt: {}; state: {}; outputs: {:?}",
+            app.message,
+            app.state,
+            outputs
+        );
+        assert_eq!(
+            outputs[0].file_name().unwrap(),
+            "synthetic.png",
+            "paste receipt: {}",
+            app.message
+        );
         assert_eq!(std::fs::read(&outputs[0]).unwrap(), b"synthetic bytes");
         assert!(app.message.contains("перемещено"));
         assert!(app.call(Command::Get { id }).is_null());
@@ -1647,8 +1897,11 @@ mod tests {
     fn tab_after_window_refocus_ignores_stale_widget_focus() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.state = app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
         fn dispatch(app: &mut Shelf, ctx: &egui::Context, mut input: egui::RawInput) {
             eframe::App::raw_input_hook(app, ctx, &mut input);
             let mut output = ctx.run_ui(input, |ui| app.render(ui));
@@ -1656,41 +1909,111 @@ mod tests {
         }
         dispatch(&mut app, &ctx, egui::RawInput::default());
         ctx.memory_mut(|m| m.request_focus(egui::Id::new("some-button")));
-        dispatch(&mut app, &ctx, egui::RawInput { focused:false, events:vec![egui::Event::WindowFocused(false)], ..Default::default() });
+        dispatch(
+            &mut app,
+            &ctx,
+            egui::RawInput {
+                focused: false,
+                events: vec![egui::Event::WindowFocused(false)],
+                ..Default::default()
+            },
+        );
         ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
-        dispatch(&mut app, &ctx, egui::RawInput { focused:true, events:vec![egui::Event::WindowFocused(true)], ..Default::default() });
-        let input = egui::RawInput { events:vec![egui::Event::Key { key:egui::Key::Tab, physical_key:None, pressed:true, repeat:false, modifiers:egui::Modifiers::NONE }], ..Default::default() };
+        dispatch(
+            &mut app,
+            &ctx,
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::WindowFocused(true)],
+                ..Default::default()
+            },
+        );
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
         dispatch(&mut app, &ctx, input);
         assert_eq!(app.call(Command::Interaction)["tab"], "folder");
     }
     #[test]
     fn refocus_preserves_deliberate_search_and_modal_tab_input() {
-        let root = tempfile::tempdir().unwrap(); let mut app = test_shelf(root.path());
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
-        let mut first=egui::RawInput::default(); eframe::App::raw_input_hook(&mut app,&ctx,&mut first);
-        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
-        let mut loss=egui::RawInput{focused:false,..Default::default()}; eframe::App::raw_input_hook(&mut app,&ctx,&mut loss);
-        ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("shelf-search")));
-        let mut gain=egui::RawInput{focused:true,..Default::default()}; eframe::App::raw_input_hook(&mut app,&ctx,&mut gain);
-        assert!(ctx.memory(|m|m.has_focus(egui::Id::new("shelf-search"))));
-        let tab=||egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}],..Default::default()};
-        let mut local=tab(); eframe::App::raw_input_hook(&mut app,&ctx,&mut local); assert_eq!(local.events.len(),1); assert!(app.pending_tab_action.is_none());
-        ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("shelf-search"))); app.actions=true;
-        let mut modal=tab(); eframe::App::raw_input_hook(&mut app,&ctx,&mut modal); assert_eq!(modal.events.len(),1); assert!(app.pending_tab_action.is_none());
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let mut first = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut first);
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        let mut loss = egui::RawInput {
+            focused: false,
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut loss);
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("shelf-search")));
+        let mut gain = egui::RawInput {
+            focused: true,
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut gain);
+        assert!(ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search"))));
+        let tab = || egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut local = tab();
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut local);
+        assert_eq!(local.events.len(), 1);
+        assert!(app.pending_tab_action.is_none());
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("shelf-search")));
+        app.actions = true;
+        let mut modal = tab();
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut modal);
+        assert_eq!(modal.events.len(), 1);
+        assert!(app.pending_tab_action.is_none());
     }
     #[test]
     fn category_arrows_leave_pinned_even_at_boundary() {
-        let root=tempfile::tempdir().unwrap(); let mut app=test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        app.state=app.call(Command::SelectTabPosition{position:1});
-        assert_eq!(app.state["pinned_only"],true);
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        frame(&mut app,&ctx,egui::Key::ArrowRight,egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
-        assert_eq!(app.state["tab"],"screenshots");assert_eq!(app.state["pinned_only"],false);
-        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
-        app.state=app.call(Command::SelectTabPosition{position:1});
-        frame(&mut app,&ctx,egui::Key::ArrowLeft,egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
-        assert_eq!(app.state["tab"],"images");assert_eq!(app.state["pinned_only"],false);
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.state = app.call(Command::SelectTabPosition { position: 1 });
+        assert_eq!(app.state["pinned_only"], true);
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(
+            &mut app,
+            &ctx,
+            egui::Key::ArrowRight,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
+        assert_eq!(app.state["tab"], "screenshots");
+        assert_eq!(app.state["pinned_only"], false);
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.state = app.call(Command::SelectTabPosition { position: 1 });
+        frame(
+            &mut app,
+            &ctx,
+            egui::Key::ArrowLeft,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
+        assert_eq!(app.state["tab"], "images");
+        assert_eq!(app.state["pinned_only"], false);
     }
     #[test]
     fn repeated_tab_and_positional_shortcuts_follow_api_order() {
@@ -1777,7 +2100,9 @@ mod tests {
             .save(folder.join("synthetic.png"))
             .unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Screenshots });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Screenshots,
+        });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(folder);
@@ -1806,20 +2131,35 @@ mod tests {
         let original = shots.path().join("synthetic.png");
         image::RgbaImage::new(2, 2).save(&original).unwrap();
         let mut app = test_shelf(root.path());
-        struct SyntheticTrash { root: PathBuf, count: std::sync::Arc<std::sync::atomic::AtomicUsize> }
+        struct SyntheticTrash {
+            root: PathBuf,
+            count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
         impl katran::downloads::Trash for SyntheticTrash {
             fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
                 let resolved = path.canonicalize()?;
                 assert!(resolved.starts_with(&self.root));
-                assert!(resolved.components().any(|c| c.as_os_str().to_string_lossy().starts_with(".katran-recovery-")));
+                assert!(resolved.components().any(|c| {
+                    c.as_os_str()
+                        .to_string_lossy()
+                        .starts_with(".katran-recovery-")
+                }));
                 self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 std::fs::remove_file(resolved)?;
                 Ok(())
             }
         }
         let recycled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        app.api.as_mut().unwrap().set_trash(Box::new(SyntheticTrash { root: shots.path().canonicalize().unwrap(), count: recycled.clone() }));
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Screenshots });
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_trash(Box::new(SyntheticTrash {
+                root: shots.path().canonicalize().unwrap(),
+                count: recycled.clone(),
+            }));
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Screenshots,
+        });
         let mut settings: katran::settings::Settings =
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.sharex_folder = Some(shots.path().to_path_buf());
@@ -1914,55 +2254,129 @@ mod tests {
         struct Sink(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
         impl katran::text_fragments::ClipboardSink for Sink {
             fn write(&self, text: &str) -> katran::Result<u32> {
-                self.0.lock().unwrap().push(text.into()); Ok(42)
+                self.0.lock().unwrap().push(text.into());
+                Ok(42)
             }
         }
         struct Source;
         impl katran::clipboard_files::Source for Source {
-            fn sequence(&self) -> u32 { 41 }
-            fn files(&self) -> katran::Result<Vec<PathBuf>> { Ok(vec![]) }
+            fn sequence(&self) -> u32 {
+                41
+            }
+            fn files(&self) -> katran::Result<Vec<PathBuf>> {
+                Ok(vec![])
+            }
         }
-        let root=tempfile::tempdir().unwrap(); let mut app=test_shelf(root.path());
-        let writes=std::sync::Arc::new(std::sync::Mutex::new(vec!["synthetic ShareX screenshot".to_owned()]));
-        app.api.as_mut().unwrap().set_text_clipboard_sink(Box::new(Sink(writes.clone())));
-        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(Source));
-        app.call(Command::SetTabEnabled{tab:katran::interaction::ShelfTab::Text,enabled:true});
-        let id=app.call(Command::IngestText{text:"selected text".into(),source:"test".into()})["id"].as_i64().unwrap();
-        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Text});app.refresh();
-        app.call(Command::SetVisible{ids:vec![id]});
-        app.call(Command::Select{id,mode:SelectionMode::Replace});
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let writes = std::sync::Arc::new(std::sync::Mutex::new(vec![
+            "synthetic ShareX screenshot".to_owned(),
+        ]));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_text_clipboard_sink(Box::new(Sink(writes.clone())));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(Source));
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Text,
+            enabled: true,
+        });
+        let id = app.call(Command::IngestText {
+            text: "selected text".into(),
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Text,
+        });
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
         app.call(Command::ShowSettings);
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        frame(&mut app,&ctx,egui::Key::C,egui::Modifiers::CTRL);
-        assert_eq!(writes.lock().unwrap().last().unwrap(),"selected text", "message={} state={}",app.message,app.state);
-        assert_eq!(app.call(Command::Interaction)["settings_open"],true);
-        let count=writes.lock().unwrap().len();
-        let mut released=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::C,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::CTRL}],..Default::default()},|ui|app.render(ui));
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::C, egui::Modifiers::CTRL);
+        assert_eq!(
+            writes.lock().unwrap().last().unwrap(),
+            "selected text",
+            "message={} state={}",
+            app.message,
+            app.state
+        );
+        assert_eq!(app.call(Command::Interaction)["settings_open"], true);
+        let count = writes.lock().unwrap().len();
+        let mut released = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
         released.textures_delta.clear();
-        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
-        frame(&mut app,&ctx,egui::Key::C,egui::Modifiers::CTRL);
-        assert_eq!(writes.lock().unwrap().len(),count,"text editing must own copy");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        frame(&mut app, &ctx, egui::Key::C, egui::Modifiers::CTRL);
+        assert_eq!(
+            writes.lock().unwrap().len(),
+            count,
+            "text editing must own copy"
+        );
     }
     #[test]
     fn quicklook_ack_does_not_replace_status_with_a_notification() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        app.message="existing result".into();
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.message = "existing result".into();
         app.action_result(serde_json::json!({"backend":"quicklook","requested":true}));
-        assert_eq!(app.message,"existing result");
+        assert_eq!(app.message, "existing result");
     }
     #[test]
     fn experimental_theme_keeps_shell_geometry_and_standard_returns() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
-        for n in 0..4 {app.call(Command::IngestBytes{name:format!("image{n}.png"),bytes:vec![n],source:"test".into()});}
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        for n in 0..4 {
+            app.call(Command::IngestBytes {
+                name: format!("image{n}.png"),
+                bytes: vec![n],
+                source: "test".into(),
+            });
+        }
         app.refresh();
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        let standard=visible_landmarks(&mut app,&ctx);
-        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true,lily_background:None,custom_background:None,glass:false,compact_header:false}});
-        let blue=visible_landmarks(&mut app,&ctx);
-        assert_eq!(blue,standard,"theme must not move the existing controls");
-        app.call(Command::SetTheme{theme:Default::default()});
-        assert_eq!(visible_landmarks(&mut app,&ctx),standard);
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let standard = visible_landmarks(&mut app, &ctx);
+        app.call(Command::SetTheme {
+            theme: katran::theme::ThemePreferences {
+                preset: katran::theme::Preset::BlueExperimental,
+                accent: None,
+                decoration: true,
+                lily_background: None,
+                custom_background: None,
+                glass: false,
+                compact_header: false,
+            },
+        });
+        let blue = visible_landmarks(&mut app, &ctx);
+        assert_eq!(blue, standard, "theme must not move the existing controls");
+        app.call(Command::SetTheme {
+            theme: Default::default(),
+        });
+        assert_eq!(visible_landmarks(&mut app, &ctx), standard);
     }
     #[test]
     fn table_copy_status_reports_partial_formats_and_item_failure() {
@@ -2010,138 +2424,357 @@ mod tests {
     }
     struct NoTransferClipboard;
     impl katran::clipboard_files::Source for NoTransferClipboard {
-        fn sequence(&self) -> u32 { panic!("Shift+Tab must not read clipboard"); }
-        fn files(&self) -> katran::Result<Vec<PathBuf>> { panic!("Shift+Tab must not read clipboard"); }
+        fn sequence(&self) -> u32 {
+            panic!("Shift+Tab must not read clipboard");
+        }
+        fn files(&self) -> katran::Result<Vec<PathBuf>> {
+            panic!("Shift+Tab must not read clipboard");
+        }
     }
     #[test]
     fn shift_tab_transfers_and_imports_without_clipboard() {
         fn release_tab(app: &mut Shelf, ctx: &egui::Context, modifiers: egui::Modifiers) {
-            let mut output = ctx.run_ui(egui::RawInput { events: vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers }], ..Default::default() }, |ui| app.render(ui));
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
             output.textures_delta.clear();
         }
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
         let png = tempfile::tempdir().unwrap();
         let png_path = png.path().join("sample.png");
-        image::RgbaImage::new(2,2).save(&png_path).unwrap();
+        image::RgbaImage::new(2, 2).save(&png_path).unwrap();
         let mut app = test_shelf(root.path());
-        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
-        app.call(Command::ChooseFolder { path: folder.path().into() });
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let id=app.call(Command::IngestBytes { name:"sample.png".into(),bytes:std::fs::read(png_path).unwrap(),source:"synthetic".into() })["id"].as_i64().unwrap();
-        app.call(Command::TogglePins {ids:vec![id]});
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "sample.png".into(),
+            bytes: std::fs::read(png_path).unwrap(),
+            source: "synthetic".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::TogglePins { ids: vec![id] });
         app.refresh();
-        app.call(Command::SetVisible{ids:vec![id]});
-        app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"],"folder");
-        assert!(!folder.path().join("sample.png").exists(), "plain Tab must not transfer");
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "folder");
+        assert!(
+            !folder.path().join("sample.png").exists(),
+            "plain Tab must not transfer"
+        );
         release_tab(&mut app, &ctx, egui::Modifiers::NONE);
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"],"images");
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"], "images");
         release_tab(&mut app, &ctx, egui::Modifiers::NONE);
-        app.call(Command::SetVisible{ids:vec![id]});
-        app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
-        assert_eq!(app.state["tab"],"folder", "{}",app.message);
-        assert!(folder.path().join("sample.png").exists(), "{}",app.message);
-        assert_eq!(app.call(Command::Get{id})["id"],id, "pinned source stays");
-        let page=app.call(Command::BrowseShelfSorted{query:"".into(),limit:100,cursor:None});
-        let folder_id=page["events"].as_array().unwrap().iter().find(|v|v["name"]=="sample.png").unwrap()["id"].as_i64().unwrap();
-        app.call(Command::SetVisible{ids:vec![folder_id]});
-        app.state=app.call(Command::Select{id:folder_id,mode:SelectionMode::Replace});
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"], "folder", "{}", app.message);
+        assert!(folder.path().join("sample.png").exists(), "{}", app.message);
+        assert_eq!(
+            app.call(Command::Get { id })["id"],
+            id,
+            "pinned source stays"
+        );
+        let page = app.call(Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 100,
+            cursor: None,
+        });
+        let folder_id = page["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == "sample.png")
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::SetVisible {
+            ids: vec![folder_id],
+        });
+        app.state = app.call(Command::Select {
+            id: folder_id,
+            mode: SelectionMode::Replace,
+        });
         release_tab(&mut app, &ctx, egui::Modifiers::SHIFT);
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
-        assert_eq!(app.state["tab"],"images", "{}",app.message);
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"], "images", "{}", app.message);
         assert!(folder.path().join("sample.png").exists());
-        assert!(app.events.iter().any(|v|v["id"].as_i64().is_some_and(|n|n>0)));
+        assert!(
+            app.events
+                .iter()
+                .any(|v| v["id"].as_i64().is_some_and(|n| n > 0))
+        );
     }
     #[test]
     fn shift_tab_without_folder_preserves_selection_and_text_input() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
-        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
-        let id=app.call(Command::IngestBytes{name:"test.png".into(),bytes:vec![1],source:"synthetic".into()})["id"].as_i64().unwrap();
-        app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
-        assert_eq!(app.state["tab"],"images");assert_eq!(app.state["selected"],serde_json::json!([id]));
-        assert!(!app.message.is_empty(),"missing folder must be reported");
-        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
-        let mut released=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::SHIFT}],..Default::default()},|ui|app.render(ui));released.textures_delta.clear();
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "test.png".into(),
+            bytes: vec![1],
+            source: "synthetic".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"], "images");
+        assert_eq!(app.state["selected"], serde_json::json!([id]));
+        assert!(!app.message.is_empty(), "missing folder must be reported");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        let mut released = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        released.textures_delta.clear();
         app.message.clear();
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
-        assert!(app.message.is_empty(),"text editing must retain Shift+Tab");
-        assert_eq!(app.call(Command::Interaction)["selected"],serde_json::json!([id]));
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
+        assert!(app.message.is_empty(), "text editing must retain Shift+Tab");
+        assert_eq!(
+            app.call(Command::Interaction)["selected"],
+            serde_json::json!([id])
+        );
     }
     #[test]
     fn compact_blue_header_removes_title_row_but_keeps_search_and_tabs() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());let ctx=egui::Context::default();ui_style::install(&ctx);
-        let mut out=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));out.textures_delta.clear();
-        let before=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect"))).unwrap();
-        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,..Default::default()}});
-        let mut out=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));out.textures_delta.clear();
-        let after=ctx.data(|d|d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect"))).unwrap();
-        assert!(after.height()<before.height());
-        assert!(ctx.memory(|m|m.focused()).is_none());
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        out.textures_delta.clear();
+        let before = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect")))
+            .unwrap();
+        app.call(Command::SetTheme {
+            theme: katran::theme::ThemePreferences {
+                preset: katran::theme::Preset::BlueExperimental,
+                ..Default::default()
+            },
+        });
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        out.textures_delta.clear();
+        let after = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-header-rect")))
+            .unwrap();
+        assert!(after.height() < before.height());
+        assert!(ctx.memory(|m| m.focused()).is_none());
     }
     #[test]
     fn sort_modal_owns_tab_transfer_and_paste_keys_before_early_handlers() {
-        let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
-        app.call(Command::ChooseFolder{path:folder.path().into()});let e=app.call(Command::IngestBytes{name:"stay.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});let id=e["id"].as_i64().unwrap();
-        app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
-        let ctx=egui::Context::default();ui_style::install(&ctx);app.sorting_input.open();
-        let tab=app.state["tab"].clone();
-        let mut input=egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:Some(egui::Key::Tab),pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}],..Default::default()};
-        eframe::App::raw_input_hook(&mut app,&ctx,&mut input);assert!(app.pending_tab_action.is_none());
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
-        frame(&mut app,&ctx,egui::Key::V,egui::Modifiers::CTRL);
-        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::CTRL);
-        assert_eq!(app.state["tab"],tab);assert!(app.sorting_input.is_open());assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(),0);
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let e = app.call(Command::IngestBytes {
+            name: "stay.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        });
+        let id = e["id"].as_i64().unwrap();
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.sorting_input.open();
+        let tab = app.state["tab"].clone();
+        let mut input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: Some(egui::Key::Tab),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+        assert!(app.pending_tab_action.is_none());
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::SHIFT);
+        frame(&mut app, &ctx, egui::Key::V, egui::Modifiers::CTRL);
+        frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+        assert_eq!(app.state["tab"], tab);
+        assert!(app.sorting_input.is_open());
+        assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());
+        assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 0);
     }
     #[test]
     fn comma_and_tab_in_one_frame_open_sort_without_switching_context() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());let ctx=egui::Context::default();ui_style::install(&ctx);
-        let before=app.call(Command::Interaction)["tab"].clone();
-        let mut input=egui::RawInput{events:[egui::Key::Comma,egui::Key::Tab].into_iter().map(|key|egui::Event::Key{key,physical_key:Some(key),pressed:true,repeat:false,modifiers:egui::Modifiers::NONE}).collect(),..Default::default()};
-        eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
-        let mut output=ctx.run_ui(input,|ui|app.render(ui));output.textures_delta.clear();
-        assert_eq!(app.state["tab"],before);assert!(app.sorting_input.is_open());assert!(app.pending_tab_action.is_none());
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let before = app.call(Command::Interaction)["tab"].clone();
+        let mut input = egui::RawInput {
+            events: [egui::Key::Comma, egui::Key::Tab]
+                .into_iter()
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert_eq!(app.state["tab"], before);
+        assert!(app.sorting_input.is_open());
+        assert!(app.pending_tab_action.is_none());
     }
     #[test]
     fn ctrl_tab_copies_repeatedly_without_losing_selection_or_reading_clipboard() {
-        let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
-        app.call(Command::ChooseFolder{path:folder.path().into()});app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
-        let e=app.call(Command::IngestBytes{name:"copy.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});let id=e["id"].as_i64().unwrap();app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        let mut output=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));output.textures_delta.clear();
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let e = app.call(Command::IngestBytes {
+            name: "copy.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        });
+        let id = e["id"].as_i64().unwrap();
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
         for _ in 0..3 {
-            let key=|pressed|egui::Event::Key{key:egui::Key::Tab,physical_key:Some(egui::Key::Tab),pressed,repeat:false,modifiers:egui::Modifiers::CTRL};
-            let mut input=egui::RawInput{events:vec![key(true)],..Default::default()};eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
-            let mut output=ctx.run_ui(input,|ui|app.render(ui));output.textures_delta.clear();
-            let mut output=ctx.run_ui(egui::RawInput{events:vec![key(false)],..Default::default()},|ui|app.render(ui));output.textures_delta.clear();
-            assert_eq!(app.state["tab"],"images");assert_eq!(app.state["selected"][0],id);
+            let key = |pressed| egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: Some(egui::Key::Tab),
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            };
+            let mut input = egui::RawInput {
+                events: vec![key(true)],
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![key(false)],
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            output.textures_delta.clear();
+            assert_eq!(app.state["tab"], "images");
+            assert_eq!(app.state["selected"][0], id);
         }
-        assert_eq!(std::fs::read_dir(folder.path()).unwrap().filter_map(|entry|entry.ok()).filter(|entry|entry.path().is_file()).count(),3);
+        assert_eq!(
+            std::fs::read_dir(folder.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_file())
+                .count(),
+            3
+        );
         assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());
     }
     #[test]
     fn sort_notice_obeys_preference_and_expiry_without_focus() {
-        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
-        let ctx=egui::Context::default();ui_style::install(&ctx);
-        app.run("sort_arrival_reverse".into(),&ctx);
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.run("sort_arrival_reverse".into(), &ctx);
         assert!(app.sort_notice.is_some());
-        let mut output=ctx.run_ui(egui::RawInput::default(),|ui|app.sort_notice(ui.ctx()));output.textures_delta.clear();
-        assert!(ctx.memory(|m|m.focused()).is_none());
-        app.sort_notice=Some(("expired".into(),Instant::now()-Duration::from_secs(3)));
-        let mut output=ctx.run_ui(egui::RawInput::default(),|ui|app.sort_notice(ui.ctx()));output.textures_delta.clear();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.sort_notice(ui.ctx()));
+        output.textures_delta.clear();
+        assert!(ctx.memory(|m| m.focused()).is_none());
+        app.sort_notice = Some(("expired".into(), Instant::now() - Duration::from_secs(3)));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.sort_notice(ui.ctx()));
+        output.textures_delta.clear();
         assert!(app.sort_notice.is_none());
-        let mut settings:katran::settings::Settings=serde_json::from_value(app.call(Command::GetSettings)).unwrap();
-        settings.sort_notifications=false;app.call(Command::SetSettings{settings});
-        app.run("sort_arrival".into(),&ctx);assert!(app.sort_notice.is_none());
+        let mut settings: katran::settings::Settings =
+            serde_json::from_value(app.call(Command::GetSettings)).unwrap();
+        settings.sort_notifications = false;
+        app.call(Command::SetSettings { settings });
+        app.run("sort_arrival".into(), &ctx);
+        assert!(app.sort_notice.is_none());
     }
     #[test]
     fn actions_popup_tracks_actual_status_bar_trigger() {
@@ -2151,44 +2784,84 @@ mod tests {
         ui_style::install(&ctx);
         egui_extras::install_image_loaders(&ctx);
         app.actions = true;
-        for size in [egui::vec2(940.0,680.0), egui::vec2(620.0,480.0)] {
+        for size in [egui::vec2(940.0, 680.0), egui::vec2(620.0, 480.0)] {
             for _ in 0..3 {
-                let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO,size)), ..Default::default() }, |ui| app.render(ui));
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ui| app.render(ui),
+                );
                 output.textures_delta.clear();
             }
-            let trigger = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect"))).unwrap();
-            let popup = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-actions-popup-rect"))).unwrap();
-            assert!(popup.bottom() <= trigger.top() - 4.0, "{popup:?} must stay above {trigger:?}");
-            assert!((popup.right()-trigger.right()).abs() <= 2.0, "right edges: {popup:?} / {trigger:?}");
+            let trigger = ctx
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect")))
+                .unwrap();
+            let popup = ctx
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-actions-popup-rect")))
+                .unwrap();
+            assert!(
+                popup.bottom() <= trigger.top() - 4.0,
+                "{popup:?} must stay above {trigger:?}"
+            );
+            assert!(
+                (popup.right() - trigger.right()).abs() <= 2.0,
+                "right edges: {popup:?} / {trigger:?}"
+            );
         }
     }
     #[test]
     fn folder_header_keeps_category_geometry_with_long_status_and_recovery() {
         fn panel_sizes(app: &mut Shelf, ctx: &egui::Context, size: egui::Vec2) -> (f32, f32) {
-            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
             let mut output = ctx.run_ui(input, |ui| app.render(ui));
             output.textures_delta.clear();
-            let header = ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-header-rect")));
-            let footer = ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-footer-rect")));
-            (header.expect("header layout recorded").height(), footer.expect("footer layout recorded").height())
+            let header =
+                ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-header-rect")));
+            let footer =
+                ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-footer-rect")));
+            (
+                header.expect("header layout recorded").height(),
+                footer.expect("footer layout recorded").height(),
+            )
         }
         let root = tempfile::tempdir().unwrap();
         let parent = tempfile::tempdir().unwrap();
         let folder = parent.path().join("long-folder-name-".repeat(5));
         std::fs::create_dir(&folder).unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
-        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
         let normal = panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0));
         app.call(Command::ChooseFolder { path: folder });
         app.message = "ошибка с длинным путём ".repeat(50);
         app.workspace.recovery = Some((0..30).map(|i| serde_json::json!({"recovery_path":format!("long-recovery-path-{i}"),"error":{"message":"synthetic"}})).collect());
         let folder_sizes = panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0));
-        assert_eq!(normal, folder_sizes, "Folder details must not change panel heights");
-        assert!((30.0..=40.0).contains(&folder_sizes.1), "footer must stay compact: {:?}", folder_sizes);
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        assert_eq!(
+            normal, folder_sizes,
+            "Folder details must not change panel heights"
+        );
+        assert!(
+            (30.0..=40.0).contains(&folder_sizes.1),
+            "footer must stay compact: {:?}",
+            folder_sizes
+        );
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         app.call(Command::SelectTabPosition { position: 1 });
-        assert_eq!(normal, panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0)), "Pinned state must not change panel heights");
+        assert_eq!(
+            normal,
+            panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0)),
+            "Pinned state must not change panel heights"
+        );
     }
     #[test]
     fn reveal_rows_only_at_viewport_edges() {
@@ -2219,7 +2892,9 @@ mod tests {
     fn keyboard_gallery_range_preview_and_actions() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         // A stale visual selection must never start a native clipboard write.
         app.state = serde_json::json!({"selected": [999], "cursor": 999});
         app.run("copy".into(), &egui::Context::default());

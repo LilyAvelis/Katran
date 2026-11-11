@@ -272,9 +272,7 @@ pub fn take_action_with_editing(
                 modifiers,
                 physical_key,
                 ..
-            } if !editing
-                || (modifiers.ctrl && matches!(key, Key::K | Key::Comma)) =>
-            {
+            } if !editing || (modifiers.ctrl && matches!(key, Key::K | Key::Comma)) => {
                 let physical = physical_key.unwrap_or(*key);
                 let key = if modifiers.is_none()
                     && matches!(
@@ -318,16 +316,44 @@ mod tests {
     use super::*;
     #[test]
     fn enter_pastes_alt_enter_opens_and_text_fields_keep_both_keys() {
-        let ctx=egui::Context::default();let catalogue=katran::shortcuts::Shortcuts::default().catalogue();
-        for (editing,modifiers,expected) in [
-            (false,egui::Modifiers::NONE,Some("paste_previous")),
-            (false,egui::Modifiers::ALT,Some("open")),
-            (true,egui::Modifiers::NONE,None),(true,egui::Modifiers::ALT,None),
+        let ctx = egui::Context::default();
+        let catalogue = katran::shortcuts::Shortcuts::default().catalogue();
+        for (editing, modifiers, expected) in [
+            (false, egui::Modifiers::NONE, Some("paste_previous")),
+            (false, egui::Modifiers::ALT, Some("open")),
+            (true, egui::Modifiers::NONE, None),
+            (true, egui::Modifiers::ALT, None),
         ] {
-            let mut result=None;
-            let mut out=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:Key::Enter,physical_key:Some(Key::Enter),pressed:true,repeat:false,modifiers}],..Default::default()},|ui|result=take_action_with_editing(ui.ctx(),&catalogue,editing));
-            out.textures_delta.clear();assert_eq!(result.as_deref(),expected);
-            let mut out=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:Key::Enter,physical_key:Some(Key::Enter),pressed:false,repeat:false,modifiers}],..Default::default()},|_|{});out.textures_delta.clear();
+            let mut result = None;
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: Key::Enter,
+                        physical_key: Some(Key::Enter),
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| result = take_action_with_editing(ui.ctx(), &catalogue, editing),
+            );
+            out.textures_delta.clear();
+            assert_eq!(result.as_deref(), expected);
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: Key::Enter,
+                        physical_key: Some(Key::Enter),
+                        pressed: false,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            out.textures_delta.clear();
         }
     }
     #[test]

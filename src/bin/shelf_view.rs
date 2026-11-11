@@ -402,23 +402,41 @@ mod tests {
         for (width, height) in [(320.0, 360.0), (960.0, 680.0)] {
             let root = tempfile::tempdir().unwrap();
             let mut app = super::super::tests::test_shelf(root.path());
-            app.call(Command::SetTabEnabled { tab: katran::interaction::ShelfTab::Pods, enabled: true });
-            let event = app.call(Command::IngestText { text: "🐄".into(), source: "test".into() });
+            app.call(Command::SetTabEnabled {
+                tab: katran::interaction::ShelfTab::Pods,
+                enabled: true,
+            });
+            let event = app.call(Command::IngestText {
+                text: "🐄".into(),
+                source: "test".into(),
+            });
             let id = event["id"].as_i64().unwrap();
-            app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Pods });
+            app.call(Command::SetTab {
+                tab: katran::interaction::ShelfTab::Pods,
+            });
             app.call(Command::SetVisible { ids: vec![id] });
-            app.call(Command::Select { id, mode: SelectionMode::Replace });
+            app.call(Command::Select {
+                id,
+                mode: SelectionMode::Replace,
+            });
             app.state = app.call(Command::TogglePreview);
             let title = "UNICODE NAME ".repeat(4);
-            app.pods_ui.set_description(id, event["revision"].as_str().unwrap(), serde_json::json!({
-                "text": "🐄", "name": title, "utf8_bytes": 4, "utf16_units": 2,
-                "codepoints": [], "metadata_truncated": false
-            }));
+            app.pods_ui.set_description(
+                id,
+                event["revision"].as_str().unwrap(),
+                serde_json::json!({
+                    "text": "🐄", "name": title, "utf8_bytes": 4, "utf16_units": 2,
+                    "codepoints": [], "metadata_truncated": false
+                }),
+            );
             let ctx = egui::Context::default();
             let mut layout = None;
             let mut output = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, height),
+                    )),
                     ..Default::default()
                 },
                 |ui| {
@@ -431,61 +449,128 @@ mod tests {
             );
             output.textures_delta.clear();
             let layout = layout.expect("preview layout measured");
-            let canvas=ctx.data(|data|data.get_temp::<egui::Rect>(egui::Id::new("pod-preview-canvas"))).expect("actual canvas");
-            assert!((canvas.center().x-width/2.0).abs()<=2.0,"canvas must use the centered content width");
+            let canvas = ctx
+                .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("pod-preview-canvas")))
+                .expect("actual canvas");
+            assert!(
+                (canvas.center().x - width / 2.0).abs() <= 2.0,
+                "canvas must use the centered content width"
+            );
             assert!(layout.canvas.y <= 300.0);
             assert!(layout.metadata_height >= 0.0);
             fn find_text(shape: &egui::Shape, needle: &str) -> Option<egui::Rect> {
                 match shape {
-                    egui::Shape::Text(text) if text.galley.text().contains(needle) => Some(text.visual_bounding_rect()),
-                    egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find_text(shape, needle)),
+                    egui::Shape::Text(text) if text.galley.text().contains(needle) => {
+                        Some(text.visual_bounding_rect())
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        shapes.iter().find_map(|shape| find_text(shape, needle))
+                    }
                     _ => None,
                 }
             }
-            let title_rect = output.shapes.iter().find_map(|shape| find_text(&shape.shape, "UNICODE NAME"))
+            let title_rect = output
+                .shapes
+                .iter()
+                .find_map(|shape| find_text(&shape.shape, "UNICODE NAME"))
                 .expect("long metadata title should be painted");
-            let summary_rect = output.shapes.iter().find_map(|shape| find_text(&shape.shape, "UTF-8: 4 байт · UTF-16: 2"))
+            let summary_rect = output
+                .shapes
+                .iter()
+                .find_map(|shape| find_text(&shape.shape, "UTF-8: 4 байт · UTF-16: 2"))
                 .expect("UTF summary should be painted");
             let center_x = width / 2.0;
-            assert!((title_rect.center().x - center_x).abs() <= 2.0, "title should be centered at width {width}: {title_rect:?}");
-            assert!((summary_rect.center().x - center_x).abs() <= 2.0, "summary should be centered at width {width}: {summary_rect:?}");
-            assert!(title_rect.top() >= canvas.bottom(), "title must follow canvas at width {width}");
-            assert!(summary_rect.top() >= title_rect.bottom(), "summary must follow title at width {width}");
+            assert!(
+                (title_rect.center().x - center_x).abs() <= 2.0,
+                "title should be centered at width {width}: {title_rect:?}"
+            );
+            assert!(
+                (summary_rect.center().x - center_x).abs() <= 2.0,
+                "summary should be centered at width {width}: {summary_rect:?}"
+            );
+            assert!(
+                title_rect.top() >= canvas.bottom(),
+                "title must follow canvas at width {width}"
+            );
+            assert!(
+                summary_rect.top() >= title_rect.bottom(),
+                "summary must follow title at width {width}"
+            );
             output.textures_delta.clear();
         }
     }
 
     #[test]
     fn pods_tiles_are_square_without_text_plaques() {
-        let root=tempfile::tempdir().unwrap();
-        let mut app=super::super::tests::test_shelf(root.path());
-        app.state=serde_json::json!({"tab":"pods","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
-        let event=serde_json::json!({"id":1,"kind":"text_fragment","name":"SENTINEL TITLE","text_preview":"🐄","origin":{"source_app":"SENTINEL ORIGIN"},"source":"SENTINEL SOURCE","properties":{"pinned":false},"revision":"r1"});
-        let ctx=egui::Context::default();
-        let mut output=ctx.run_ui(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(960.0,680.0))),..Default::default()},|ui|app.shelf_view(ui,&ctx,std::slice::from_ref(&event),true,9));
-        fn has_sentinel(shape:&egui::Shape)->bool { match shape {egui::Shape::Text(t)=>t.galley.text().contains("SENTINEL"),egui::Shape::Vec(shapes)=>shapes.iter().any(has_sentinel),_=>false} }
-        let labelled=output.shapes.iter().any(|s|has_sentinel(&s.shape));
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"pods","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
+        let event = serde_json::json!({"id":1,"kind":"text_fragment","name":"SENTINEL TITLE","text_preview":"🐄","origin":{"source_app":"SENTINEL ORIGIN"},"source":"SENTINEL SOURCE","properties":{"pinned":false},"revision":"r1"});
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.shelf_view(ui, &ctx, std::slice::from_ref(&event), true, 9),
+        );
+        fn has_sentinel(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text().contains("SENTINEL"),
+                egui::Shape::Vec(shapes) => shapes.iter().any(has_sentinel),
+                _ => false,
+            }
+        }
+        let labelled = output.shapes.iter().any(|s| has_sentinel(&s.shape));
         output.textures_delta.clear();
-        let tile=ctx.data(|data|data.get_temp::<egui::Rect>(egui::Id::new("test-pod-tile-rect"))).expect("Pods tile allocated");
-        assert!(!labelled,"tile must not paint title or origin");
-        assert_eq!(tile.width(),tile.height());
-        assert!(tile.width()<=96.0);
+        let tile = ctx
+            .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-pod-tile-rect")))
+            .expect("Pods tile allocated");
+        assert!(!labelled, "tile must not paint title or origin");
+        assert_eq!(tile.width(), tile.height());
+        assert!(tile.width() <= 96.0);
     }
     #[test]
     fn pods_preview_loads_full_description_through_dispatcher() {
-        let root=tempfile::tempdir().unwrap();let mut app=super::super::tests::test_shelf(root.path());
-        app.call(Command::SetTabEnabled{tab:katran::interaction::ShelfTab::Pods,enabled:true});
-        let event=app.call(Command::IngestText{text:"🐄".into(),source:"test".into()});
-        let id=event["id"].as_i64().unwrap();
-        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Pods});
-        app.call(Command::SetVisible{ids:vec![id]});app.call(Command::Select{id,mode:SelectionMode::Replace});
-        app.state=app.call(Command::TogglePreview);
-        let ctx=egui::Context::default();
-        let mut output=ctx.run_ui(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(960.0,680.0))),..Default::default()},|ui|app.shelf_view(ui,&ctx,std::slice::from_ref(&event),true,9));
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        let event = app.call(Command::IngestText {
+            text: "🐄".into(),
+            source: "test".into(),
+        });
+        let id = event["id"].as_i64().unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Pods,
+        });
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        app.state = app.call(Command::TogglePreview);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.shelf_view(ui, &ctx, std::slice::from_ref(&event), true, 9),
+        );
         output.textures_delta.clear();
-        let value=app.pods_ui.description().expect("description requested");
-        assert_eq!(value["text"],"🐄");assert_eq!(value["codepoints"][0]["codepoint"],"U+1F404");
-        assert!(value["name"].as_str().is_some_and(|name|!name.is_empty()));
+        let value = app.pods_ui.description().expect("description requested");
+        assert_eq!(value["text"], "🐄");
+        assert_eq!(value["codepoints"][0]["codepoint"], "U+1F404");
+        assert!(value["name"].as_str().is_some_and(|name| !name.is_empty()));
     }
     #[test]
     fn preview_primary_drag_only_exports_at_fitted_scale() {
@@ -513,7 +598,9 @@ mod tests {
             for busy in [false, true] {
                 let root = tempfile::tempdir().unwrap();
                 let mut app = super::super::tests::test_shelf(root.path());
-                app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+                app.call(Command::SetTab {
+                    tab: katran::interaction::ShelfTab::Images,
+                });
                 app.call(Command::IngestBytes {
                     name: "synthetic.png".into(),
                     bytes: vec![1],

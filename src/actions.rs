@@ -13,8 +13,22 @@ pub struct Definition {
     pub in_palette: bool,
 }
 pub const DEFS: &[Definition] = &[
- Definition{id:"transfer_copy",label:"Копировать между полкой и Folder",default_binding:"Ctrl Tab",rebindable:true,group:"Передача",in_palette:true},
- Definition{id:"use_as_background",label:"Использовать как фон",default_binding:"",rebindable:true,group:"Изображение",in_palette:true},
+    Definition {
+        id: "transfer_copy",
+        label: "Копировать между полкой и Folder",
+        default_binding: "Ctrl Tab",
+        rebindable: true,
+        group: "Передача",
+        in_palette: true,
+    },
+    Definition {
+        id: "use_as_background",
+        label: "Использовать как фон",
+        default_binding: "",
+        rebindable: true,
+        group: "Изображение",
+        in_palette: true,
+    },
     Definition {
         id: "quit",
         label: "Выйти из Katran",
@@ -658,7 +672,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "list" => Dispatch::Command(Command::SetView { view: View::List }),
         "capture" => Dispatch::Command(Command::SetCaptureEnabled { enabled: !capture }),
         "refresh" => Dispatch::Command(Command::List { limit: 1000 }),
-        "transfer_copy"=>Dispatch::Command(Command::CopySelection),
+        "transfer_copy" => Dispatch::Command(Command::CopySelection),
         "use_as_background" => Dispatch::Command(Command::UseSelectedImageAsBackground),
         "settings" => Dispatch::Command(Command::ShowSettings),
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),

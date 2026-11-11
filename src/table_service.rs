@@ -216,9 +216,16 @@ impl Service {
                 }
             }
             if receipt.html_written && receipt.text_written {
-                let ids=prepared.result["items"].as_array().into_iter().flatten().filter_map(|item|item["id"].as_i64()).collect::<Vec<_>>();
-                self.record_selection_publication(receipt.sequence,&ids);
-            } else {self.record_clipboard_publication(receipt.sequence);}
+                let ids = prepared.result["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|item| item["id"].as_i64())
+                    .collect::<Vec<_>>();
+                self.record_selection_publication(receipt.sequence, &ids);
+            } else {
+                self.record_clipboard_publication(receipt.sequence);
+            }
             prepared.result["clipboard_sequence"] = json!(receipt.sequence);
             self.capture_events.cancel();
             prepared.result["table_copied"] = json!(receipt.html_written && receipt.text_written);

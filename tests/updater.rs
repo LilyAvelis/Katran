@@ -516,11 +516,22 @@ fn immutable_hash_directory_collision_is_rejected_and_future_format_compatible_m
 }
 
 #[test]
-fn legacy_three_file_update_has_working_embedded_helper_resolver_without_running_it(){
- let (root,updater,fake)=fixture();publish(&fake,"3.0.0",good_zip("3.0.0"),|_|{});
- let release=updater.check().unwrap().release.unwrap();let prepared=updater.prepare(&release).unwrap();let installed=updater.commit(prepared).unwrap();
- let exe=root.path().join("runtime/versions").join(installed.build_id).join("katran-ui.exe");
- assert!(!exe.with_file_name("es.exe").exists());let cache=tempfile::tempdir().unwrap();
- let helper=katran::everything::resolve_helper(&exe,cache.path()).unwrap();
- assert_eq!(fs::read(helper).unwrap().as_slice(),include_bytes!("../assets/everything/es.exe"));
+fn legacy_three_file_update_has_working_embedded_helper_resolver_without_running_it() {
+    let (root, updater, fake) = fixture();
+    publish(&fake, "3.0.0", good_zip("3.0.0"), |_| {});
+    let release = updater.check().unwrap().release.unwrap();
+    let prepared = updater.prepare(&release).unwrap();
+    let installed = updater.commit(prepared).unwrap();
+    let exe = root
+        .path()
+        .join("runtime/versions")
+        .join(installed.build_id)
+        .join("katran-ui.exe");
+    assert!(!exe.with_file_name("es.exe").exists());
+    let cache = tempfile::tempdir().unwrap();
+    let helper = katran::everything::resolve_helper(&exe, cache.path()).unwrap();
+    assert_eq!(
+        fs::read(helper).unwrap().as_slice(),
+        include_bytes!("../assets/everything/es.exe")
+    );
 }

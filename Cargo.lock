@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "katran"
-version = "2.5.0"
+version = "3.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",

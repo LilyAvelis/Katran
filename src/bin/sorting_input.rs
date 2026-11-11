@@ -4,18 +4,24 @@ use eframe::egui::{self, Key};
 #[derive(Default)]
 pub struct State {
     open: bool,
-    selected:usize,
-    scroll:bool,
+    selected: usize,
+    scroll: bool,
 }
 impl State {
     pub fn is_open(&self) -> bool {
         self.open
     }
     pub fn open(&mut self) {
-        self.open = true;self.selected=0;self.scroll=true;
+        self.open = true;
+        self.selected = 0;
+        self.scroll = true;
     }
-    pub fn selected(&self)->usize {self.selected}
-    pub fn take_scroll(&mut self)->bool {std::mem::take(&mut self.scroll)}
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+    pub fn take_scroll(&mut self) -> bool {
+        std::mem::take(&mut self.scroll)
+    }
     pub fn close(&mut self) {
         self.open = false;
     }
@@ -24,7 +30,11 @@ impl State {
             self.close();
             return None;
         }
-        let choices:Vec<_>=katran::actions::DEFS.iter().filter(|a|a.id.starts_with("sort_")).map(|a|a.id).collect();
+        let choices: Vec<_> = katran::actions::DEFS
+            .iter()
+            .filter(|a| a.id.starts_with("sort_"))
+            .map(|a| a.id)
+            .collect();
         ctx.input_mut(|input| {
             let mut action = None;
             let mut consume_text = false;
@@ -43,7 +53,9 @@ impl State {
                         && !modifiers.alt
                         && !modifiers.command
                         && !modifiers.mac_cmd;
-                    if *repeat && !matches!(physical,Key::ArrowDown|Key::ArrowUp){return !self.open && !consume_text;}
+                    if *repeat && !matches!(physical, Key::ArrowDown | Key::ArrowUp) {
+                        return !self.open && !consume_text;
+                    }
                     if !self.open {
                         if plain && physical == Key::Comma {
                             self.open();
@@ -53,12 +65,20 @@ impl State {
                         return true;
                     }
                     consume_text = true;
-                    if plain && matches!(physical,Key::ArrowDown|Key::ArrowUp) {
-                        if physical==Key::ArrowDown {self.selected=(self.selected+1)%choices.len();}
-                        else {self.selected=(self.selected+choices.len()-1)%choices.len();}
-                        self.scroll=true;return false;
+                    if plain && matches!(physical, Key::ArrowDown | Key::ArrowUp) {
+                        if physical == Key::ArrowDown {
+                            self.selected = (self.selected + 1) % choices.len();
+                        } else {
+                            self.selected = (self.selected + choices.len() - 1) % choices.len();
+                        }
+                        self.scroll = true;
+                        return false;
                     }
-                    if plain && physical==Key::Enter {action=Some(choices[self.selected].to_owned());self.close();return false;}
+                    if plain && physical == Key::Enter {
+                        action = Some(choices[self.selected].to_owned());
+                        self.close();
+                        return false;
+                    }
                     if plain && physical == Key::Escape {
                         self.close();
                         return false;
@@ -202,11 +222,33 @@ mod tests {
     }
     #[test]
     fn arrows_select_rows_and_enter_executes_the_highlighted_sort() {
-        let ctx=egui::Context::default();let mut state=State::default();state.open();
-        let choices:Vec<_>=katran::actions::DEFS.iter().filter(|a|a.id.starts_with("sort_")).map(|a|a.id).collect();
-        frame(&ctx,&mut state,vec![key(Key::ArrowDown,egui::Modifiers::NONE)],true);
-        assert_eq!(state.selected(),1);assert!(state.take_scroll());
-        assert_eq!(frame(&ctx,&mut state,vec![key(Key::Enter,egui::Modifiers::NONE)],true).0.as_deref(),Some(choices[1]));
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        state.open();
+        let choices: Vec<_> = katran::actions::DEFS
+            .iter()
+            .filter(|a| a.id.starts_with("sort_"))
+            .map(|a| a.id)
+            .collect();
+        frame(
+            &ctx,
+            &mut state,
+            vec![key(Key::ArrowDown, egui::Modifiers::NONE)],
+            true,
+        );
+        assert_eq!(state.selected(), 1);
+        assert!(state.take_scroll());
+        assert_eq!(
+            frame(
+                &ctx,
+                &mut state,
+                vec![key(Key::Enter, egui::Modifiers::NONE)],
+                true
+            )
+            .0
+            .as_deref(),
+            Some(choices[1])
+        );
     }
     #[test]
     fn opens_persists_and_selects_arrival_in_both_directions() {

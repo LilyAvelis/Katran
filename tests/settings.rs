@@ -12,7 +12,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
         theme: Default::default(),
-        sort_notifications:true,
+        sort_notifications: true,
         pods_enabled: false,
         pods_tile_size: 96,
         overlay_hotkey: String::new(),
@@ -71,11 +71,23 @@ fn settings_persist_validate_and_do_not_delete_cache() {
 fn capture_defaults_on_and_explicit_pause_preference_survives() {
     assert!(Settings::default().capture_on_start);
     let root = tempfile::tempdir().unwrap();
-    let mut api = Service::open(root.path(),100).unwrap();
-    assert_eq!(call(&mut api,Command::GetSettings)["result"]["capture_on_start"],true);
-    let settings = Settings { capture_on_start:false, ..Settings::default() };
-    assert_eq!(call(&mut api,Command::SetSettings {settings})["ok"],true);
+    let mut api = Service::open(root.path(), 100).unwrap();
+    assert_eq!(
+        call(&mut api, Command::GetSettings)["result"]["capture_on_start"],
+        true
+    );
+    let settings = Settings {
+        capture_on_start: false,
+        ..Settings::default()
+    };
+    assert_eq!(
+        call(&mut api, Command::SetSettings { settings })["ok"],
+        true
+    );
     drop(api);
-    let mut api = Service::open(root.path(),100).unwrap();
-    assert_eq!(call(&mut api,Command::GetSettings)["result"]["capture_on_start"],false);
+    let mut api = Service::open(root.path(), 100).unwrap();
+    assert_eq!(
+        call(&mut api, Command::GetSettings)["result"]["capture_on_start"],
+        false
+    );
 }
