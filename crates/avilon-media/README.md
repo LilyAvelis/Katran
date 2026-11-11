@@ -20,3 +20,7 @@ let texture = player.tick(&ctx, Some(source), true, || Ok(Command::new("ffmpeg")
 ```
 
 The player uses FFmpeg's Windows D3D11VA decoder and downloads NV12 frames for processing. Output is RGBA in CPU memory and uploaded to egui as a texture; this is not zero-copy. Video is scaled to fit 1280×720 and paced at 24 fps. A bounded 512 MiB estimated NV12 loop cache is used when possible; longer videos use streaming. Optional four-frame seam smoothing applies only to cached loops. Pausing stops the decoder and retains the last texture. Decoder errors are exposed through `State::error`; no fallback decoder is selected automatically. Source metadata must be supplied by the host (dimensions up to 3840×2160 and duration up to 120 seconds). The host must provide a compatible FFmpeg build and handle file permissions and user consent.
+
+## Resume after hiding
+
+The player retains the last texture and the next delivered frame position while inactive. On show it restarts decoding and trims output after the full source loop, preserving the complete cycle instead of looping only a sought tail. The frame offset is bounded by the duration-derived cycle estimate; inaccurate duration metadata can affect resume precision. Decoder startup latency remains, and a full application restart does not retain this in-memory state. No playback runs while hidden.

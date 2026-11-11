@@ -152,6 +152,17 @@ pub fn prepare(source: &Path) -> Result<PreparedVideo, String> {
     prepare_inner(source, None)
 }
 pub fn prepare_event(event: &crate::Event) -> Result<PreparedVideo, String> {
+    if event.id < 0 && event.revision.starts_with("file:") {
+        let unchanged = || crate::preview::revision(&event.path, None) == event.revision;
+        if !unchanged() {
+            return Err("Video changed since it was selected".into());
+        }
+        let prepared = prepare_inner(&event.path, None)?;
+        if !unchanged() {
+            return Err("Video changed since it was selected".into());
+        }
+        return Ok(prepared);
+    }
     let digest = event
         .revision
         .strip_prefix("ref:")

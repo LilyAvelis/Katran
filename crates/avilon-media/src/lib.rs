@@ -62,7 +62,7 @@ pub fn playback_policy(source: &VideoSource) -> PlaybackPolicy {
 }
 #[cfg(feature = "egui")]
 enum Message {
-    Frame(Vec<u8>),
+    Frame { pixels: Vec<u8>, index: u64 },
     Error(String),
 }
 // Keep only the first and preceding RGBA frames. At a repeated first frame near
@@ -163,6 +163,7 @@ pub struct State {
     texture: Option<TextureHandle>,
     error: Option<String>,
     size: [usize; 2],
+    next_frame: u64,
 }
 #[cfg(feature = "egui")]
 impl State {
@@ -189,6 +190,7 @@ impl State {
             };
             if !same_video {
                 self.texture = None;
+                self.next_frame = 0;
             }
             self.error = None;
             self.source = source;
@@ -212,13 +214,22 @@ impl State {
             } else {
                 let (w, h) = output_size(&src);
                 self.size = [w, h];
-                self.worker = Some(start(src, w, h, ctx.clone(), command_factory));
+                self.worker = Some(start(
+                    src,
+                    w,
+                    h,
+                    self.next_frame,
+                    ctx.clone(),
+                    command_factory,
+                ));
             }
         }
         if let Some(worker) = self.worker.as_ref() {
             loop {
                 match worker.rx.try_recv() {
-                    Ok(Message::Frame(pixels)) => {
+                    Ok(Message::Frame { pixels, index }) => {
+                        self.next_frame =
+                            (index + 1) % estimated_cycle_frames(self.source.as_ref().unwrap());
                         let image = ColorImage::from_rgba_unmultiplied(self.size, &pixels);
                         if let Some(t) = self.texture.as_mut() {
                             t.set(image, TextureOptions::LINEAR);
@@ -249,10 +260,31 @@ impl State {
     }
 }
 #[cfg(feature = "egui")]
+fn estimated_cycle_frames(source: &VideoSource) -> u64 {
+    (u64::from(source.duration_ms) * 24).div_ceil(1000).max(1)
+}
+// Trim after the complete source is looped: seeking before the loop would
+// turn the remaining tail into the entire cached cycle. The absolute frame
+// cursor is bounded by the estimated frame count from the supplied duration.
+// Container duration and actual frame count can differ, so resumption is approximate.
+#[cfg(feature = "egui")]
+fn video_filter(policy: PlaybackPolicy, w: usize, h: usize, resume_frame: u64) -> String {
+    let base = match policy {
+        PlaybackPolicy::Cache { frames, .. } => format!(
+            "hwdownload,format=nv12,fps=24,scale={w}:{h},format=nv12,loop=loop=-1:size={frames}:start=0"
+        ),
+        PlaybackPolicy::Streaming { .. } => {
+            format!("hwdownload,format=nv12,fps=24,scale={w}:{h}")
+        }
+    };
+    format!("{base},trim=start_frame={resume_frame},setpts=N/(24*TB)")
+}
+#[cfg(feature = "egui")]
 fn start(
     source: VideoSource,
     w: usize,
     h: usize,
+    resume_frame: u64,
     ctx: egui::Context,
     command_factory: impl FnOnce() -> Result<Command, String> + Send + 'static,
 ) -> Worker {
@@ -289,14 +321,7 @@ fn start(
         if matches!(policy, PlaybackPolicy::Streaming { .. }) {
             cmd.args(["-stream_loop", "-1"]);
         }
-        let filter = match policy {
-            PlaybackPolicy::Cache { frames, .. } => format!(
-                "hwdownload,format=nv12,fps=24,scale={w}:{h},format=nv12,loop=loop=-1:size={frames}:start=0,setpts=N/(24*TB)"
-            ),
-            PlaybackPolicy::Streaming { .. } => {
-                format!("hwdownload,format=nv12,fps=24,scale={w}:{h}")
-            }
-        };
+        let filter = video_filter(policy, w, h, resume_frame);
         cmd.arg("-i").arg(&source.path).args([
             "-map",
             "0:v:0",
@@ -357,6 +382,7 @@ fn start(
         let mut smoother = seam_smoother(&source, policy);
         let interval = Duration::from_nanos(1_000_000_000 / 24);
         let mut next = Instant::now();
+        let mut frame_index = resume_frame;
         while !stop_flag.load(Ordering::SeqCst) {
             while Instant::now() < next && !stop_flag.load(Ordering::SeqCst) {
                 thread::sleep(
@@ -379,7 +405,12 @@ fn start(
             if next <= now {
                 next = now + interval;
             }
-            match tx.try_send(Message::Frame(frame)) {
+            let index = frame_index;
+            frame_index = frame_index.saturating_add(1);
+            match tx.try_send(Message::Frame {
+                pixels: frame,
+                index,
+            }) {
                 Ok(()) => ctx.request_repaint(),
                 Err(mpsc::TrySendError::Full(_)) => {}
                 Err(mpsc::TrySendError::Disconnected(_)) => break,
@@ -569,7 +600,7 @@ mod tests {
         let mut decoded = false;
         while Instant::now() < deadline {
             match state.worker.as_ref().unwrap().rx.try_recv() {
-                Ok(Message::Frame(bytes)) => {
+                Ok(Message::Frame { pixels: bytes, .. }) => {
                     assert_eq!(bytes.len(), 160 * 90 * 4);
                     decoded = true;
                     break;
@@ -595,7 +626,7 @@ mod tests {
         let mut frames = 1;
         while frames < 110 && Instant::now() < deadline {
             match state.worker.as_ref().unwrap().rx.try_recv() {
-                Ok(Message::Frame(_)) => frames += 1,
+                Ok(Message::Frame { .. }) => frames += 1,
                 Ok(Message::Error(error)) => panic!("{error}"),
                 Err(TryRecvError::Disconnected) => panic!("decoder exited during loop"),
                 Err(TryRecvError::Empty) => thread::sleep(Duration::from_millis(5)),
@@ -619,15 +650,90 @@ mod tests {
                 .id(),
             pid
         );
+        state.next_frame = 20;
         let start = Instant::now();
-        state.tick(&ctx, src, false, || Ok(Command::new("ffmpeg")));
+        state.tick(&ctx, src.clone(), false, || Ok(Command::new("ffmpeg")));
         assert!(start.elapsed() < Duration::from_secs(1), "pause blocked UI");
         let deadline = Instant::now() + Duration::from_secs(5);
         while !finished.load(Ordering::SeqCst) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(finished.load(Ordering::SeqCst), "decoder was not reaped");
+        state.tick(&ctx, src, true, || Ok(Command::new("ffmpeg")));
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match state.worker.as_ref().unwrap().rx.try_recv() {
+                Ok(Message::Frame { index, .. }) => {
+                    assert_eq!(index, 20);
+                    break;
+                }
+                Ok(Message::Error(error)) => panic!("{error}"),
+                Err(TryRecvError::Disconnected) => panic!("resume decoder exited"),
+                Err(TryRecvError::Empty) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10))
+                }
+                Err(TryRecvError::Empty) => panic!("resumed decoder produced no frame"),
+            }
+        }
     }
+    #[test]
+    fn resume_uses_delivered_decoder_index_and_stops_when_inactive() {
+        let ctx = egui::Context::default();
+        let src = VideoSource {
+            path: PathBuf::from("synthetic.mp4"),
+            width: 2,
+            height: 2,
+            duration_ms: 1000,
+            smooth_loop: false,
+        };
+        let (tx, rx) = mpsc::sync_channel(1);
+        let stopped = Arc::new(AtomicBool::new(false));
+        let mut state = State {
+            source: Some(src.clone()),
+            size: [2, 2],
+            worker: Some(Worker {
+                child: Arc::new(Mutex::new(None)),
+                stopped: stopped.clone(),
+                rx,
+                finished: Arc::new(AtomicBool::new(false)),
+            }),
+            ..State::default()
+        };
+        // Index 43 represents frames already skipped when the queue was full.
+        tx.send(Message::Frame {
+            pixels: vec![255; 16],
+            index: 43,
+        })
+        .unwrap();
+        let texture = state
+            .tick(&ctx, Some(src.clone()), true, || unreachable!())
+            .unwrap();
+        assert_eq!(state.next_frame, 20);
+        let id = texture.id();
+        let paused = state
+            .tick(&ctx, Some(src), false, || unreachable!())
+            .unwrap();
+        assert_eq!(paused.id(), id);
+        assert!(state.worker.is_none());
+        assert!(stopped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn resume_trim_follows_loop_and_is_bounded_by_duration() {
+        let src = VideoSource {
+            path: PathBuf::new(),
+            width: 160,
+            height: 90,
+            duration_ms: 1000,
+            smooth_loop: true,
+        };
+        let filter = video_filter(playback_policy(&src), 160, 90, 19);
+        assert!(filter.find("loop=loop=-1").unwrap() < filter.find("trim=start_frame=19").unwrap());
+        assert_eq!(estimated_cycle_frames(&src), 24);
+        let stream = video_filter(PlaybackPolicy::Streaming { bytes: 0 }, 160, 90, 19);
+        assert!(stream.contains("trim=start_frame=19"));
+    }
+
     #[test]
     fn policy_enforces_cache_budget() {
         let src = VideoSource {

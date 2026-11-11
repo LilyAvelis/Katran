@@ -46,7 +46,7 @@ No whole-application GPU/CPU load percentage is claimed without measurement.
 
 Hiding the main window in the tray or minimizing stops and reaps this owned
 decoder process. The last displayed frame remains cached; showing starts a new
-loop from its beginning. Selecting another source drops the former texture and
+loop near its previous playback position. Selecting another source drops the former texture and
 worker. There is no poster extraction yet; before the first frame or on initial
 hardware failure, ordinary theme fallback remains available. A failed source
 can be cleared by choosing a static background.
@@ -85,7 +85,7 @@ The owner's clip now renders at1072×720. Including aligned rows and a small
 frame-count margin, estimated frame-cache payload is about417MiB. This is a
 RAM/decoding tradeoff; the limit describes cached frame payload, not total
 process memory. Cache and decoder are released on hide/minimize; resuming
-starts a fresh first pass. RGBA conversion and OpenGL upload still happen
+starts a fresh decoding pass. RGBA conversion and OpenGL upload still happen
 through CPU memory. Hardware decode is avoided on subsequent cached loops,
 not on initial playback. Source files and cached frame content remain unchanged; optional presentation-time
 seam smoothing is described below.

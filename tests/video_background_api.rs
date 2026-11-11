@@ -17,6 +17,80 @@ fn call(api: &mut Service, command: Command) -> Value {
     v["result"].clone()
 }
 #[test]
+fn folder_video_action_uses_original_without_importing_into_downloads() {
+    use std::process::Command as Process;
+    if Process::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let profile = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let source = folder.path().join("folder-background.mp4");
+    assert!(
+        Process::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=160x90:rate=24",
+                "-t",
+                "1",
+                "-c:v",
+                "libx264",
+                "-y"
+            ])
+            .arg(&source)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let original = std::fs::read(&source).unwrap();
+    let mut api = Service::open(profile.path(), 10_000_000).unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().to_owned(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    let id = page["events"][0]["id"].as_i64().unwrap();
+    assert!(id < 0);
+    call(&mut api, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut api,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    assert!(
+        call(&mut api, Command::Actions)
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == "use_as_video_background")
+    );
+    assert_eq!(
+        call(&mut api, Command::UseSelectedVideoAsBackground)["background_applied"],
+        true
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    // A stale Folder revision must not authorize preparation after a source change.
+    let mut event: katran::Event = serde_json::from_value(page["events"][0].clone()).unwrap();
+    std::fs::write(&source, b"changed synthetic source").unwrap();
+    assert!(katran::video_backgrounds::prepare_event(&event).is_err());
+    event.id = 42;
+    assert!(katran::video_backgrounds::prepare_event(&event).is_err());
+}
+#[test]
 fn downloads_action_imports_muted_copy_and_persists_video_theme() {
     use std::process::Command as Process;
     if Process::new("ffmpeg").arg("-version").output().is_err() {

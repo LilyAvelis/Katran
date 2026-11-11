@@ -35,7 +35,9 @@ impl Service {
             .unwrap_or("")
             .to_ascii_lowercase();
         if event.revision != items[0].revision
-            || !(event.revision.starts_with("ref:") || event.revision.starts_with("blob:"))
+            || !(event.revision.starts_with("ref:")
+                || event.revision.starts_with("blob:")
+                || (event.id < 0 && event.revision.starts_with("file:")))
             || !matches!(extension.as_str(), "mp4" | "m4v" | "mov" | "mkv" | "webm")
             || matches!(
                 event.kind,
