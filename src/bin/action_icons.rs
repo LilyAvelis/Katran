@@ -27,6 +27,7 @@ pub fn icon(id: &str) -> Lucide {
         "tables" => Lucide::Table,
         "pods" | "toggle_pods" => Lucide::PanelsTopLeft,
         "paste_previous" => Lucide::ClipboardPaste,
+        "restart" => Lucide::RefreshCw,
         "quit" => Lucide::ExternalLink,
         "links" => Lucide::Link,
         "text" => Lucide::FileText,

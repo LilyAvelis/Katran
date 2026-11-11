@@ -384,6 +384,12 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "restart" {
+            self.restart_pending = true;
+            self.actions = false;
+            ctx.request_repaint();
+            return;
+        }
         if id == "quit" {
             self.quit_application(ctx);
             return;

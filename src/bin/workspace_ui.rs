@@ -81,6 +81,19 @@ impl Shelf {
         self.workspace.focus = true;
         self.workspace_reload(ctx);
     }
+    /// Shared client for picker and Explorer launch; domain owns validation/history.
+    pub(super) fn open_working_folder(&mut self, path: PathBuf) -> bool {
+        let result = self.call(Command::ChooseFolder { path });
+        if result.is_null() {
+            return false;
+        }
+        self.query.clear();
+        self.state = result;
+        self.actions = false;
+        self.workspace_close();
+        self.refresh();
+        true
+    }
     pub(super) fn workspace_close(&mut self) {
         self.workspace_cancel();
         self.workspace.open = false;
@@ -390,12 +403,7 @@ impl Shelf {
             }
         }
         if let Some(path) = chosen {
-            let result = self.call(Command::ChooseFolder { path });
-            if !result.is_null() {
-                self.state = result;
-                self.workspace_close();
-                self.refresh();
-            } else {
+            if !self.open_working_folder(path) {
                 self.workspace.error = Some(self.message.clone());
             }
         } else if modal.should_close() {

@@ -72,3 +72,21 @@ backup с суффиксом `.katran-backup-<UTC>`. Повторная уста
 оставшихся lock/tmp/claim файлов нет. Ошибки отдельных запросов показываются
 в статусе и не отменяют корректные запросы. После обновления бинарника нужен
 один обычный полный выход через трей; предыдущая версия не знает этот протокол.
+
+## Follow-up: retained requests and shelf filters
+
+The initial launch receiver only drained on an explicit folder argument or a
+new activation event. Requests sent before an older process was replaced could
+remain queued after an ordinary restart. The primary now drains at every startup.
+Explorer and Ctrl+Shift+K both use `open_working_folder`: ChooseFolder validates
+the path and records history, then the client clears the previous shelf search
+and refreshes the live Folder listing. The folder-launch diagnostic records only
+received/opened/failed counts. A synthetic regression verifies visible files,
+cleared search, history and unchanged original data.
+
+Actions (Ctrl+K) now includes **Перезапустить Katran**. Restart waits for active
+operations, starts the current installed build from the version pointer with the
+same profile, and requests a real exit through the existing tray-aware shutdown.
+The successor waits for the old process to exit before acquiring its instance
+lock. Restart-only arguments are removed before ordinary launch parsing, and
+one-shot Explorer folder arguments are not replayed. No process is killed.

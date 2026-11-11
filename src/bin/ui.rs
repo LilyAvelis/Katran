@@ -160,6 +160,7 @@ struct Shelf {
     activation_rx: Option<mpsc::Receiver<()>>,
     activation_pending: bool,
     launch_root: Option<PathBuf>,
+    restart_pending: bool,
     native_drag: Option<String>,
     navigation_input: navigation_input::State,
     overlay_ui: overlay_ui::State,
@@ -239,6 +240,16 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
 mod folder_launch_tests {
     use super::*;
     #[test]
+    fn restart_action_queues_without_spawning_during_input_dispatch() {
+        let profile = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(profile.path());
+        app.actions = true;
+        app.run("restart".into(), &egui::Context::default());
+        assert!(app.restart_pending);
+        assert!(!app.actions);
+        assert!(app.api.is_some());
+    }
+    #[test]
     fn external_folder_request_uses_existing_dispatcher_and_preserves_profile() {
         let profile = tempfile::tempdir().unwrap();
         let external = tempfile::tempdir().unwrap();
@@ -248,6 +259,7 @@ mod folder_launch_tests {
         let mut app = crate::tests::test_shelf(profile.path());
         app.launch_root = Some(profile.path().to_owned());
         app.actions = true;
+        app.query = "stale search from another tab".into();
         katran::folder_launch::enqueue(profile.path(), &folder).unwrap();
         app.consume_launch_folders();
         assert_eq!(app.state["tab"], "folder");
@@ -256,6 +268,23 @@ mod folder_launch_tests {
             folder.canonicalize().unwrap()
         );
         assert!(!app.actions);
+        assert!(app.query.is_empty());
+        assert!(
+            app.events.iter().any(|e| e["name"] == "untouched.txt"),
+            "{:?}",
+            app.events
+        );
+        let history = app.call(Command::FolderHistory {
+            query: String::new(),
+        });
+        assert!(
+            history["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["path"].as_str().map(PathBuf::from)
+                    == Some(folder.canonicalize().unwrap()))
+        );
         assert!(
             katran::folder_launch::take(profile.path())
                 .unwrap()
@@ -286,19 +315,22 @@ impl Shelf {
         };
         match katran::folder_launch::take(&root) {
             Ok(requests) => {
+                let received = requests.len();
+                let mut opened = 0;
                 for request in requests {
                     match request {
                         Ok(path) => {
-                            let result = self.call(Command::ChooseFolder { path });
-                            if !result.is_null() {
-                                self.state = result;
-                                self.actions = false;
-                                self.workspace.open = false;
-                                self.refresh();
+                            if self.open_working_folder(path) {
+                                opened += 1;
                             }
                         }
                         Err(error) => self.message = error,
                     }
+                }
+                if received > 0
+                    && let Some(log) = &self.logger
+                {
+                    log.record("folder_launch",serde_json::json!({"received":received,"opened":opened,"failed":received-opened}));
                 }
             }
             Err(error) => self.message = format!("Не удалось принять папку: {error}"),
@@ -916,8 +948,9 @@ impl Shelf {
             && self.capture_job.is_none()
             && !self.overlay_ui.pending
             && !self.settings_ui.background_busy()
-            && self.settings_ui.take_restart_requested()
+            && (self.restart_pending || self.settings_ui.take_restart_requested())
         {
+            self.restart_pending = false;
             let result = self.call(Command::RestartApplication);
             if result["restart_requested"] == true {
                 match restart_ui::spawn_successor() {
@@ -1122,12 +1155,15 @@ fn main() -> eframe::Result {
     app_identity::initialize();
     let optical_demo =
         std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--optical-demo"));
-    let launch = if optical_demo {
-        launch_args::Arguments::default()
-    } else {
-        launch_args::parse(std::env::args_os().skip(1))
+    let launch =
+        if optical_demo {
+            launch_args::Arguments::default()
+        } else {
+            launch_args::parse(restart_ui::startup_args().map_err(|error| {
+                eframe::Error::AppCreation(Box::new(std::io::Error::other(error)))
+            })?)
             .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?
-    };
+        };
     let root = if optical_demo {
         PathBuf::from("runtime/optical-demo-data")
     } else {
@@ -1199,8 +1235,9 @@ fn main() -> eframe::Result {
         clipboard_events: Default::default(),
         instance: Some(instance),
         activation_rx: None,
-        activation_pending: launch.folder.is_some(),
+        activation_pending: true,
         launch_root: Some(root.clone()),
+        restart_pending: false,
         native_drag: None,
         navigation_input: navigation_input::State::default(),
         overlay_ui: overlay_ui::State::default(),
@@ -1394,6 +1431,7 @@ mod tests {
             activation_rx: None,
             activation_pending: false,
             launch_root: None,
+            restart_pending: false,
             native_drag: None,
             navigation_input: navigation_input::State::default(),
             overlay_ui: overlay_ui::State::default(),

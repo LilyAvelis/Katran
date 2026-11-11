@@ -1,7 +1,8 @@
 //! Explicit successor startup: never terminates or manipulates the predecessor.
 use std::{
     ffi::{OsStr, OsString},
-    path::PathBuf,
+    io::Read,
+    path::{Path, PathBuf},
 };
 
 const MARKER: &str = "--restart-after";
@@ -23,19 +24,86 @@ fn split_args(args: &[OsString]) -> Result<(Vec<OsString>, Option<u32>), String>
     Ok((args.to_vec(), None))
 }
 
-/// Start a new copy of this exact executable; caller closes the old instance
-/// only after this returns success. No shell is involved.
-pub(super) fn spawn_successor() -> Result<(), String> {
-    let executable: PathBuf = std::env::current_exe().map_err(|e| e.to_string())?;
-    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
-    let (mut args, _) = split_args(&args)?;
-    // Main uses the first argument as data root; keep its no-argument default
-    // from accidentally becoming the restart marker.
-    if args.is_empty() {
-        args.push(OsString::from("katran-data"));
+/// Arguments for normal launch parsing, with a validated trailing restart marker removed.
+pub(super) fn startup_args() -> Result<Vec<OsString>, String> {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    Ok(split_args(&args)?.0)
+}
+
+/// Resolve only the known runtime/versions/<id>/katran-ui.exe installation layout.
+fn successor_target(current: &Path) -> Result<PathBuf, String> {
+    let Some(version_dir) = current.parent() else {
+        return Ok(current.to_owned());
+    };
+    let Some(versions) = version_dir.parent() else {
+        return Ok(current.to_owned());
+    };
+    let Some(runtime) = versions.parent() else {
+        return Ok(current.to_owned());
+    };
+    if current.file_name() != Some(OsStr::new("katran-ui.exe"))
+        || versions.file_name() != Some(OsStr::new("versions"))
+        || runtime.file_name() != Some(OsStr::new("runtime"))
+    {
+        return Ok(current.to_owned());
     }
-    args.push(OsString::from(MARKER));
-    args.push(OsString::from(std::process::id().to_string()));
+    let mut pointer = String::new();
+    let file = std::fs::File::open(runtime.join("current-version.txt"))
+        .map_err(|e| format!("Не удалось прочитать текущую версию Katran: {e}"))?;
+    file.take(65)
+        .read_to_string(&mut pointer)
+        .map_err(|e| format!("Некорректная текущая версия Katran: {e}"))?;
+    let id = pointer.trim();
+    if pointer.len() > 64 || id.len() != 12 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Некорректный указатель текущей версии Katran".into());
+    }
+    let target = versions.join(id).join("katran-ui.exe");
+    if !target.is_file() {
+        return Err("Файл текущей версии Katran отсутствует".into());
+    }
+    Ok(target)
+}
+
+fn successor_args(args: &[OsString], pid: u32) -> Result<Vec<OsString>, String> {
+    if pid == 0 {
+        return Err("Некорректный PID перезапуска".into());
+    }
+    let (args, _) = split_args(args)?;
+    let flag = OsStr::new("--open-folder");
+    let profile = match args.as_slice() {
+        [] => None,
+        [profile] if !profile.to_string_lossy().starts_with("--") => Some(profile.clone()),
+        [arg, folder] if arg == flag && !folder.is_empty() => None,
+        [profile, arg, folder]
+            if !profile.to_string_lossy().starts_with("--")
+                && arg == flag
+                && !folder.is_empty() =>
+        {
+            Some(profile.clone())
+        }
+        _ => return Err("Некорректные аргументы запуска Katran".into()),
+    };
+    let profile = match profile {
+        Some(profile) => profile,
+        None => std::env::current_dir()
+            .map_err(|e| format!("Не удалось определить профиль: {e}"))?
+            .join("katran-data")
+            .into_os_string(),
+    };
+    Ok(vec![
+        profile,
+        OsString::from(MARKER),
+        OsString::from(pid.to_string()),
+    ])
+}
+
+/// Start the current installed version; caller closes the old instance only
+/// after this returns success. No shell is involved.
+pub(super) fn spawn_successor() -> Result<(), String> {
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    let executable = successor_target(&current)?;
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let args = successor_args(&args, std::process::id())?;
     let mut command = std::process::Command::new(executable);
     command.args(args);
     #[cfg(windows)]
@@ -119,5 +187,43 @@ mod tests {
         ] {
             assert!(split_args(&input).is_err());
         }
+    }
+    #[test]
+    fn successor_drops_folder_intent_and_stale_marker() {
+        assert_eq!(
+            successor_args(
+                &args(&["C:\\profile", "--open-folder", "C:\\folder", MARKER, "42"]),
+                75
+            )
+            .unwrap(),
+            args(&["C:\\profile", MARKER, "75"])
+        );
+        let implicit = successor_args(&args(&["--open-folder", "folder"]), 75).unwrap();
+        assert_eq!(
+            PathBuf::from(&implicit[0]),
+            std::env::current_dir().unwrap().join("katran-data")
+        );
+        assert_eq!(&implicit[1..], &args(&[MARKER, "75"]));
+    }
+    #[test]
+    fn installed_successor_uses_pointer_but_development_falls_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = temp.path().join("runtime");
+        let old = runtime.join("versions/012345abcdef/katran-ui.exe");
+        let new = runtime.join("versions/abcdef012345/katran-ui.exe");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(&new, b"new").unwrap();
+        std::fs::write(runtime.join("current-version.txt"), "abcdef012345\n").unwrap();
+        assert_eq!(successor_target(&old).unwrap(), new);
+        let dev = temp.path().join("target/debug/katran-ui.exe");
+        assert_eq!(successor_target(&dev).unwrap(), dev);
+        std::fs::write(runtime.join("current-version.txt"), "../../invalid").unwrap();
+        assert!(successor_target(&old).is_err());
+        std::fs::write(runtime.join("current-version.txt"), "aaaaaaaaaaaa").unwrap();
+        assert!(successor_target(&old).is_err());
+        std::fs::remove_file(runtime.join("current-version.txt")).unwrap();
+        assert!(successor_target(&old).is_err());
     }
 }

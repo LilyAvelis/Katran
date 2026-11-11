@@ -14,6 +14,14 @@ pub struct Definition {
 }
 pub const DEFS: &[Definition] = &[
     Definition {
+        id: "restart",
+        label: "Перезапустить Katran",
+        default_binding: "",
+        rebindable: true,
+        group: "Приложение",
+        in_palette: true,
+    },
+    Definition {
         id: "transfer_copy",
         label: "Копировать между полкой и Folder",
         default_binding: "Ctrl Tab",
@@ -618,6 +626,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
             tab: crate::interaction::ShelfTab::Pods,
         }),
         "paste_previous" => Dispatch::Intent(serde_json::json!({"paste_previous":true})),
+        "restart" => command(Command::RestartApplication),
         "quit" => Dispatch::Intent(serde_json::json!({"quit":true})),
         "tab_previous" => command(Command::NavigateTab { delta: -1 }),
         "tab_next" => command(Command::NavigateTab { delta: 1 }),
