@@ -134,3 +134,5 @@ older recipes that automatically assigned every module to a new Sol instance.
 Tests must not scan personal roots: Settings synchronizes source authority but
 starts no workers until EnsureSources/PollSources. Configure synthetic temporary
 roots before those commands. The owner performs actual Windows acceptance.
+
+Pods: src/pods.rs classifies content and supplies the SQL predicate; TextFragment IDs/storage/copy/pinned remain shared. src/emoji_render.rs renders bounded color RGBA in memory with native DirectWrite and bundled regional flags; src/bin/pods_ui.rs is the bounded presentation cache. Overlay: src/overlay.rs owns injectable target/session policy; overlay_windows.rs owns Win32 hotkeys/foreground/input; overlay_service.rs coordinates copy receipt before paste. UI remains a dispatcher client. See pods.md and overlay.md.

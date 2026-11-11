@@ -225,3 +225,5 @@ Afio UI/components and clipboard conventions are reused under the retained
 [MIT notice](AFIO-LICENSE), without a runtime dependency on Afio.
 
 Local 2.5 navigation: Ctrl+Shift+Left/Right moves between visible categories in saved order and exits pinned, including at the ends. It never enters Folder; use Tab for Folder. Tab is routed before widget focus traversal when returning from another application; search editing and dialogs retain their own keyboard focus.
+
+Optional Pods is the seventh category: enable it in Settings → Вкладки. Emoji and symbol-only captures are deduplicated, support pinned and render in color. [Classification, limits and graphics attribution](docs/pods.md). Settings → Основные can assign an independent global summon chord; Alt+Enter copies the selection and requests paste into the previous application. [Summon, residency, quit and Windows limits](docs/overlay.md). These are local pre-3.0 changes, not a published release.
