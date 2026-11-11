@@ -481,7 +481,7 @@ impl Shelf {
         }
         if matches!(
             id.as_str(),
-            "cleanup" | "delete" | "copy_text" | "use_as_background"
+            "cleanup" | "delete" | "copy_text" | "use_as_background" | "use_as_video_background"
         ) {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;

@@ -20,6 +20,14 @@ pub struct Request {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     RestartApplication,
+    VideoBackgrounds,
+    GetVideoBackground {
+        id: String,
+    },
+    ImportVideoBackground {
+        path: PathBuf,
+    },
+    UseSelectedVideoAsBackground,
     UseSelectedImageAsBackground,
     ImportThemeBackground {
         path: std::path::PathBuf,

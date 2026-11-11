@@ -88,6 +88,7 @@ pub mod theme;
 pub mod theme_backgrounds;
 mod theme_service;
 pub mod tray;
+pub mod video_backgrounds;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
@@ -420,6 +421,19 @@ impl Service {
         }
         match command {
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
+            Command::VideoBackgrounds => video_backgrounds::catalogue(&self.root).map(|items|serde_json::json!({"items":items})).map_err(|e|ApiError::new("video_background_error",e)),
+            Command::GetVideoBackground {id} => video_backgrounds::get(&self.root,&id).map_err(|e|ApiError::new("video_background_error",e)),
+            Command::ImportVideoBackground {path} => {
+                let prepared=video_backgrounds::prepare(&path).map_err(|e|ApiError::new("video_background_error",e))?;
+                video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))
+            },
+            Command::UseSelectedVideoAsBackground => {
+                let event=self.selected_background_video()?;
+                let prepared=video_backgrounds::prepare_event(&event).map_err(|e|ApiError::new("video_background_error",e))?;
+                self.validate_job_events(&[event])?;
+                let result=video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))?;
+                self.activate_video_background(result)
+            },
             Command::UseSelectedImageAsBackground => {
                 let event=self.selected_background_image()?;
                 let prepared=theme_backgrounds::prepare_event(&event)?;
@@ -735,6 +749,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                     if font["available"] != true { return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен")); }
                 }
                 if let Some(id)=&settings.theme.custom_background {theme_backgrounds::get(&self.root,id)?;}
+                if let Some(id)=&settings.theme.video_background {video_backgrounds::get(&self.root,id).map_err(|e|ApiError::new("video_background_error",e))?;}
                 settings
                     .validate(self.usage()?)
                     .map_err(|e| ApiError::new("invalid_settings", e))?;

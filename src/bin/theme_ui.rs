@@ -71,7 +71,9 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
             .unwrap_or(false);
     let base = match role {
         Role::Background
-            if (preference.lily_background.is_some() || preference.custom_background.is_some()) =>
+            if (preference.lily_background.is_some()
+                || preference.custom_background.is_some()
+                || preference.video_background.is_some()) =>
         {
             Color32::TRANSPARENT
         }
@@ -172,12 +174,42 @@ fn cover_uv(view: egui::Vec2, image: egui::Vec2) -> egui::Rect {
 pub(super) fn footer_fill(ctx: &egui::Context, legacy: Color32) -> Color32 {
     let theme = current(ctx);
     if theme.preset == Preset::BlueExperimental
-        && (theme.lily_background.is_some() || theme.custom_background.is_some())
+        && (theme.lily_background.is_some()
+            || theme.custom_background.is_some()
+            || theme.video_background.is_some())
     {
         Color32::TRANSPARENT
     } else {
         color(ctx, Role::Surface, legacy)
     }
+}
+fn video_key() -> egui::Id {
+    egui::Id::new("active-video-background")
+}
+/// Publish the latest worker frame, or clear it when video playback stops.
+pub(super) fn set_video_texture(
+    ctx: &egui::Context,
+    id: &str,
+    texture: Option<egui::TextureHandle>,
+) {
+    if texture.is_some() && current(ctx).video_background.as_deref() != Some(id) {
+        return;
+    }
+    ctx.data_mut(|data| {
+        if let Some(texture) = texture {
+            data.insert_temp(video_key(), (id.to_owned(), texture));
+        } else if data
+            .get_temp::<(String, egui::TextureHandle)>(video_key())
+            .is_some_and(|(cached, _)| cached == id)
+        {
+            data.remove::<(String, egui::TextureHandle)>(video_key());
+        }
+    });
+}
+fn video_texture(ctx: &egui::Context, id: &str) -> Option<egui::TextureHandle> {
+    ctx.data(|data| data.get_temp::<(String, egui::TextureHandle)>(video_key()))
+        .filter(|(cached, _)| cached == id)
+        .map(|(_, texture)| texture)
 }
 fn custom_key() -> egui::Id {
     egui::Id::new("active-custom-background")
@@ -242,6 +274,12 @@ pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
         && ctx
             .data(|d| d.get_temp::<bool>(egui::Id::new("native-glass-active")))
             .unwrap_or(false);
+    if let Some(id) = &theme.video_background {
+        if let Some(texture) = video_texture(ctx, id) {
+            paint_background(ctx, rect, &texture, glass);
+        }
+        return;
+    }
     if let Some(id) = &theme.custom_background {
         if let Some((cached, texture)) =
             ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(custom_key()))
@@ -285,7 +323,9 @@ pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
     let theme = current(ui.ctx());
     if theme.preset != Preset::BlueExperimental
         || !theme.decoration
-        || (theme.lily_background.is_some() || theme.custom_background.is_some())
+        || (theme.lily_background.is_some()
+            || theme.custom_background.is_some()
+            || theme.video_background.is_some())
         || rect.width() <= 0.0
         || rect.height() <= 0.0
     {
@@ -608,7 +648,9 @@ fn optical_shape_for(
     {
         return None;
     }
-    let texture = if let Some(id) = &theme.custom_background {
+    let texture = if let Some(id) = &theme.video_background {
+        video_texture(ctx, id)
+    } else if let Some(id) = &theme.custom_background {
         ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(custom_key()))
             .filter(|(cached, _)| cached == id)
             .map(|(_, t)| t)
@@ -656,6 +698,75 @@ pub(super) fn paint_selected_optical(ui: &egui::Ui, rect: egui::Rect, radius: f3
 #[cfg(test)]
 mod optical_tests {
     use super::*;
+    #[test]
+    fn video_frames_are_scoped_to_selected_id_and_feed_the_optical_background() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(180.0, 100.0));
+        apply(
+            &ctx,
+            &ThemePreferences {
+                preset: Preset::BlueExperimental,
+                video_background: Some("video-a".into()),
+                optical_strength: 50,
+                ..Default::default()
+            },
+        );
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("optical-gpu-ready"), true));
+        let frame = ctx.load_texture(
+            "video-test",
+            egui::ColorImage::filled([2, 2], Color32::RED),
+            egui::TextureOptions::LINEAR,
+        );
+        set_video_texture(&ctx, "video-a", Some(frame));
+        let mut rendered = false;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                assert_eq!(
+                    color(ui.ctx(), Role::Background, Color32::BLACK),
+                    Color32::TRANSPARENT
+                );
+                assert_eq!(footer_fill(ui.ctx(), Color32::BLACK), Color32::TRANSPARENT);
+                background(ui.ctx(), rect);
+                rendered = matches!(
+                    optical_shape(ui.ctx(), rect, 8.0),
+                    Some(egui::Shape::Callback(_))
+                );
+            },
+        );
+        output.textures_delta.clear();
+        assert!(rendered);
+        assert!(video_texture(&ctx, "video-a").is_some());
+        apply(
+            &ctx,
+            &ThemePreferences {
+                preset: Preset::BlueExperimental,
+                video_background: Some("video-b".into()),
+                optical_strength: 50,
+                ..Default::default()
+            },
+        );
+        let stale = ctx.load_texture(
+            "stale",
+            egui::ColorImage::filled([2, 2], Color32::BLUE),
+            egui::TextureOptions::LINEAR,
+        );
+        set_video_texture(&ctx, "video-a", Some(stale));
+        assert!(video_texture(&ctx, "video-b").is_none());
+        let current = ctx.load_texture(
+            "current",
+            egui::ColorImage::filled([2, 2], Color32::GREEN),
+            egui::TextureOptions::LINEAR,
+        );
+        set_video_texture(&ctx, "video-b", Some(current));
+        set_video_texture(&ctx, "video-a", None);
+        assert!(video_texture(&ctx, "video-b").is_some());
+        set_video_texture(&ctx, "video-b", None);
+        assert!(video_texture(&ctx, "video-b").is_none());
+    }
     #[test]
     fn optical_layer_requires_opt_in_source_and_gpu_host() {
         let ctx = egui::Context::default();

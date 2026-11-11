@@ -38,6 +38,7 @@ mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
 mod updates_ui;
+mod video_background_ui;
 mod window_material;
 mod workspace_ui;
 use base64::Engine;
@@ -165,6 +166,10 @@ struct Shelf {
     navigation_input: navigation_input::State,
     overlay_ui: overlay_ui::State,
     pods_ui: pods_ui::State,
+    video_background: video_background_ui::State,
+    video_background_id: Option<String>,
+    video_background_source: Option<video_background_ui::VideoSource>,
+    video_visible: bool,
     native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
     pending_delete: Vec<i64>,
@@ -336,6 +341,23 @@ impl Shelf {
             Err(error) => self.message = format!("Не удалось принять папку: {error}"),
         }
     }
+    fn video_background_tick(&mut self, ctx: &egui::Context) {
+        if self.api.is_some() {
+            self.video_visible = self.call(Command::WindowVisibility)["visible"] == true;
+        }
+        let active = self.video_visible && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        // Headless GUI tests never start a real media process; decoder tests opt in separately.
+        let active = active && !cfg!(test);
+        let texture = self
+            .video_background
+            .tick(ctx, self.video_background_source.clone(), active);
+        if let Some(id) = &self.video_background_id {
+            theme_ui::set_video_texture(ctx, id, texture);
+        }
+        if let Some(error) = self.video_background.error() {
+            self.message = format!("Видеофон: {error}");
+        }
+    }
     /// Shared input ownership includes overlays before any early command handler.
     fn modal_owns_input(&self) -> bool {
         self.sorting_input.is_open()
@@ -398,6 +420,33 @@ impl Shelf {
                     }
                 }
                 theme_ui::apply(&ctx, &theme);
+                let wanted = if theme.preset == katran::theme::Preset::BlueExperimental {
+                    theme.video_background.clone()
+                } else {
+                    None
+                };
+                if self.video_background_id != wanted {
+                    if let Some(old) = &self.video_background_id {
+                        theme_ui::set_video_texture(&ctx, old, None);
+                    }
+                    self.video_background_id = wanted.clone();
+                    self.video_background_source = None;
+                    if let Some(id) = wanted {
+                        let video = self.call(Command::GetVideoBackground { id });
+                        if let (Some(path), Some(width), Some(height)) = (
+                            video["path"].as_str(),
+                            video["width"].as_u64(),
+                            video["height"].as_u64(),
+                        ) {
+                            self.video_background_source = Some(video_background_ui::VideoSource {
+                                path: PathBuf::from(path),
+                                width: u32::try_from(width).unwrap_or(0),
+                                height: u32::try_from(height).unwrap_or(0),
+                            });
+                        }
+                    }
+                    ctx.request_repaint();
+                }
             }
         }
         theme_ui::background(&ctx, ctx.content_rect());
@@ -1059,6 +1108,7 @@ impl eframe::App for Shelf {
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.tray_tick(ctx);
         self.overlay_tick(ctx);
+        self.video_background_tick(ctx);
         self.finish_job();
         self.preview_warmup_tick();
         if self.api.is_some() {
@@ -1242,6 +1292,10 @@ fn main() -> eframe::Result {
         navigation_input: navigation_input::State::default(),
         overlay_ui: overlay_ui::State::default(),
         pods_ui: pods_ui::State::default(),
+        video_background: Default::default(),
+        video_background_id: None,
+        video_background_source: None,
+        video_visible: true,
         native_window: 0,
         logger,
         pending_delete: Vec::new(),
@@ -1436,6 +1490,10 @@ mod tests {
             navigation_input: navigation_input::State::default(),
             overlay_ui: overlay_ui::State::default(),
             pods_ui: pods_ui::State::default(),
+            video_background: Default::default(),
+            video_background_id: None,
+            video_background_source: None,
+            video_visible: true,
             native_window: 77,
             logger: None,
             pending_delete: Vec::new(),

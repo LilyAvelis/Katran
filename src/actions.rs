@@ -14,6 +14,14 @@ pub struct Definition {
 }
 pub const DEFS: &[Definition] = &[
     Definition {
+        id: "use_as_video_background",
+        label: "Сделать видеофоном",
+        default_binding: "",
+        rebindable: true,
+        group: "Видео",
+        in_palette: true,
+    },
+    Definition {
         id: "restart",
         label: "Перезапустить Katran",
         default_binding: "",
@@ -687,6 +695,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "refresh" => command(Command::List { limit: 1000 }),
         "transfer_copy" => command(Command::CopySelection),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
+        "use_as_video_background" => command(Command::UseSelectedVideoAsBackground),
         "settings" => command(Command::ShowSettings),
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),
         _ => return None,

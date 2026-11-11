@@ -20,11 +20,19 @@ fn start_worker(
 /// Opens only on a user action. No file is read or copied by this adapter.
 #[cfg(windows)]
 pub(super) fn start_pick_image() -> Result<Receiver<PickResult>, String> {
-    start_worker(|| pick_on_sta(false))
+    start_worker(|| pick_on_sta(PickKind::Image))
 }
 
 #[cfg(windows)]
-fn pick_on_sta(font: bool) -> Result<Option<PathBuf>, String> {
+#[derive(Clone, Copy)]
+enum PickKind {
+    Image,
+    Font,
+    Video,
+}
+
+#[cfg(windows)]
+fn pick_on_sta(kind: PickKind) -> Result<Option<PathBuf>, String> {
     use std::os::windows::ffi::OsStringExt;
     use windows::{
         Win32::{
@@ -55,16 +63,19 @@ fn pick_on_sta(font: bool) -> Result<Option<PathBuf>, String> {
         let dialog: IFileOpenDialog =
             unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
                 .map_err(|error| format!("Не удалось создать диалог: {error}"))?;
-        let filters = if font {
-            [COMDLG_FILTERSPEC {
+        let filters = match kind {
+            PickKind::Font => [COMDLG_FILTERSPEC {
                 pszName: w!("Шрифты (TTF, TTC, OTF)"),
                 pszSpec: w!("*.ttf;*.ttc;*.otf"),
-            }]
-        } else {
-            [COMDLG_FILTERSPEC {
+            }],
+            PickKind::Video => [COMDLG_FILTERSPEC {
+                pszName: w!("Видео (MP4, WEBM, MOV, MKV)"),
+                pszSpec: w!("*.mp4;*.webm;*.mov;*.mkv"),
+            }],
+            PickKind::Image => [COMDLG_FILTERSPEC {
                 pszName: w!("Изображения (PNG, JPG, WEBP, GIF, BMP)"),
                 pszSpec: w!("*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp"),
-            }]
+            }],
         };
         unsafe {
             dialog
@@ -101,11 +112,20 @@ fn pick_on_sta(font: bool) -> Result<Option<PathBuf>, String> {
 
 #[cfg(windows)]
 pub(super) fn start_pick_font() -> Result<Receiver<PickResult>, String> {
-    start_worker(|| pick_on_sta(true))
+    start_worker(|| pick_on_sta(PickKind::Font))
 }
 #[cfg(not(windows))]
 pub(super) fn start_pick_font() -> Result<Receiver<PickResult>, String> {
     Err("Выбор шрифта доступен только в Windows".into())
+}
+
+#[cfg(windows)]
+pub(super) fn start_pick_video() -> Result<Receiver<PickResult>, String> {
+    start_worker(|| pick_on_sta(PickKind::Video))
+}
+#[cfg(not(windows))]
+pub(super) fn start_pick_video() -> Result<Receiver<PickResult>, String> {
+    Err("Выбор видео доступен только в Windows".into())
 }
 
 #[cfg(not(windows))]

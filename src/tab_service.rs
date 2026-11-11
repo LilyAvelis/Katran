@@ -38,6 +38,7 @@ impl Service {
     pub(crate) fn action_available(&self, id: &str) -> bool {
         match id {
             "use_as_background" => self.selected_background_image().is_ok(),
+            "use_as_video_background" => self.selected_background_video().is_ok(),
             "add_to_katran" => self.interaction.tab == ShelfTab::All,
             "images" => self.settings.tab_enabled(ShelfTab::Images),
             "screenshots" => self.settings.tab_enabled(ShelfTab::Screenshots),

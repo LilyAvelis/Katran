@@ -99,8 +99,17 @@ impl Settings {
         {
             return Err("Оптические параметры: от 0 до 200".into());
         }
-        if self.theme.custom_background.is_some() && self.theme.lily_background.is_some() {
-            return Err("Выберите пресет или собственный фон".into());
+        if [
+            self.theme.custom_background.is_some(),
+            self.theme.lily_background.is_some(),
+            self.theme.video_background.is_some(),
+        ]
+        .into_iter()
+        .filter(|v| *v)
+        .count()
+            > 1
+        {
+            return Err("Выберите один фон: изображение, лилии или видео".into());
         }
         if self
             .theme

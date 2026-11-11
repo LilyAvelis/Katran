@@ -7,6 +7,9 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 pub struct State {
     picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
     background_job: Option<katran::domain_jobs::JobId>,
+    video_picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
+    video_job: Option<katran::domain_jobs::JobId>,
+    video_backgrounds: Option<serde_json::Value>,
     font_picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
     font_job: Option<katran::domain_jobs::JobId>,
     emoji_fonts: Option<serde_json::Value>,
@@ -266,6 +269,8 @@ impl State {
     pub(super) fn background_busy(&self) -> bool {
         self.picker.is_some()
             || self.background_job.is_some()
+            || self.video_picker.is_some()
+            || self.video_job.is_some()
             || self.font_picker.is_some()
             || self.font_job.is_some()
     }
@@ -337,6 +342,7 @@ impl State {
                         {
                             theme.custom_background = Some(id.to_owned());
                             theme.lily_background = None;
+                            theme.video_background = None;
                             self.error = apply_theme(api, &mut self.draft, theme)
                                 .err()
                                 .unwrap_or_default();
@@ -350,6 +356,86 @@ impl State {
                         .as_str()
                         .or_else(|| response["error"]["message"].as_str())
                         .unwrap_or("Импорт фона отменён или не выполнен")
+                        .into();
+                }
+            }
+        }
+    }
+    fn tick_video(&mut self, api: &mut Service, ctx: &egui::Context) {
+        if let Some(picker) = &self.video_picker {
+            match picker.try_recv() {
+                Ok(result) => {
+                    self.video_picker = None;
+                    match result {
+                        Ok(Some(path)) => {
+                            let response = call(
+                                api,
+                                Command::BeginJob {
+                                    command: Box::new(Command::ImportVideoBackground { path }),
+                                },
+                            );
+                            self.video_job = response["result"]["job_id"]
+                                .as_u64()
+                                .map(katran::domain_jobs::JobId);
+                            if response["ok"] != true || self.video_job.is_none() {
+                                self.error = response["error"]["message"]
+                                    .as_str()
+                                    .unwrap_or("Не удалось начать импорт видео")
+                                    .into();
+                            } else {
+                                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => self.error = error,
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.video_picker = None;
+                    self.error = "Диалог выбора видео завершился без результата".into();
+                }
+            }
+        }
+        if let Some(job_id) = self.video_job {
+            let response = call(api, Command::PollJob { job_id });
+            let status = &response["result"];
+            match status["state"].as_str() {
+                Some("queued" | "running" | "ready") => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50))
+                }
+                Some("succeeded") => {
+                    self.video_job = None;
+                    if let Some(id) = status["result"]["id"].as_str() {
+                        let current = call(api, Command::Themes);
+                        if let Ok(mut theme) =
+                            serde_json::from_value::<katran::theme::ThemePreferences>(
+                                current["result"]["current"].clone(),
+                            )
+                        {
+                            theme.video_background = Some(id.to_owned());
+                            theme.lily_background = None;
+                            theme.custom_background = None;
+                            self.error = apply_theme(api, &mut self.draft, theme)
+                                .err()
+                                .unwrap_or_default();
+                            self.video_backgrounds = None;
+                        } else {
+                            self.error = "Не удалось прочитать текущую тему".into();
+                        }
+                    } else {
+                        self.error = "Импорт видео не вернул идентификатор".into();
+                    }
+                    ctx.request_repaint();
+                }
+                _ => {
+                    self.video_job = None;
+                    self.error = status["error"]["message"]
+                        .as_str()
+                        .or_else(|| response["error"]["message"].as_str())
+                        .unwrap_or("Импорт видео отменён или не выполнен")
                         .into();
                 }
             }
@@ -427,6 +513,7 @@ impl State {
     }
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
         self.tick_background(api, ctx);
+        self.tick_video(api, ctx);
         self.tick_font(api, ctx);
         self.updates.tick(api, ctx);
         let interaction = call(api, Command::Interaction);
@@ -438,6 +525,7 @@ impl State {
             self.confirm_history = false;
             self.draft = None;
             self.custom_backgrounds = None;
+            self.video_backgrounds = None;
             self.emoji_fonts = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
@@ -538,7 +626,7 @@ impl State {
           egui::ComboBox::from_id_salt("emoji-font-picker").width(180.0).selected_text(font_label).show_ui(ui,|ui|{
            for item in entries.into_iter().flatten(){if let Some(id)=item["id"].as_str(){let label=item["label"].as_str().unwrap_or(id);let display=if item["available"]==true {label.to_owned()} else {format!("{label} · недоступен")};ui.selectable_value(&mut draft.emoji_font,id.to_owned(),display);}}
           });
-          if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
+          if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
          });
          SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
@@ -633,19 +721,31 @@ impl State {
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
-            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
-            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme_intent=Some(theme.clone());}}
+            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.video_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Собственные фоны","Копия сохраняется в Katran. Пресеты лилий остаются доступны.",|ui|{
             let list=self.custom_backgrounds.get_or_insert_with(||call(api,Command::ListThemeBackgrounds)).clone();
             egui::ComboBox::from_id_salt("custom-background-picker").width(180.0_f32.min(ui.available_width())).selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
              for item in list["result"]["backgrounds"].as_array().into_iter().flatten(){
-              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme_intent=Some(theme.clone());}
+              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}
              }
             });
             if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать файл…")).clicked(){
                 match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
+           });
+           SettingsRow::show(ui,"Видео на фоне","Управляемая копия; звук не воспроизводится.",|ui|{
+            let list=self.video_backgrounds.get_or_insert_with(||call(api,Command::VideoBackgrounds)).clone();
+            let selected=list["result"]["items"].as_array().and_then(|items|items.iter().find(|item|item["id"].as_str()==theme.video_background.as_deref())).and_then(|item|item["name"].as_str()).unwrap_or("Выбрать сохранённое");
+            ui.horizontal_wrapped(|ui|{
+             egui::ComboBox::from_id_salt("video-background-picker").truncate().width(180.0_f32.min(ui.available_width())).selected_text(selected).show_ui(ui,|ui|{
+              for item in list["result"]["items"].as_array().into_iter().flatten(){
+               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Видео")).clicked(){theme.video_background=Some(id.to_owned());theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
+              }
+             });
+             if ui.add_enabled(self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать видео…")).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
+            });
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}

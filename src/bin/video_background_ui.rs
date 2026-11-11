@@ -1,0 +1,337 @@
+//! One bounded streaming decoder. Frames are staged in CPU memory for egui upload.
+use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
+use std::{
+    io::Read,
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoSource {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+}
+enum Message {
+    Frame(Vec<u8>),
+    Error(String),
+}
+struct Worker {
+    child: Arc<Mutex<Option<Child>>>,
+    stopped: Arc<AtomicBool>,
+    rx: Receiver<Message>,
+    #[cfg(test)]
+    finished: Arc<AtomicBool>,
+}
+impl Worker {
+    fn stop(&mut self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        if let Ok(mut child) = self.child.lock()
+            && let Some(c) = child.as_mut()
+        {
+            let _ = c.kill();
+        }
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+#[derive(Default)]
+pub struct State {
+    source: Option<VideoSource>,
+    worker: Option<Worker>,
+    texture: Option<TextureHandle>,
+    error: Option<String>,
+    size: [usize; 2],
+}
+impl State {
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+    pub fn tick(
+        &mut self,
+        ctx: &egui::Context,
+        source: Option<VideoSource>,
+        active: bool,
+    ) -> Option<TextureHandle> {
+        if self.source != source {
+            self.worker = None;
+            self.texture = None;
+            self.error = None;
+            self.source = source;
+        }
+        if !active {
+            self.worker = None;
+            return self.texture.clone();
+        }
+        if self.worker.is_none()
+            && self.error.is_none()
+            && let Some(src) = self.source.clone()
+        {
+            if src.width == 0 || src.height == 0 || src.width > 3840 || src.height > 2160 {
+                self.error = Some("Invalid video dimensions".into());
+            } else {
+                let scale = (1280.0 / src.width as f64)
+                    .min(720.0 / src.height as f64)
+                    .min(1.0);
+                let w = ((src.width as f64 * scale).round() as usize).max(1);
+                let h = ((src.height as f64 * scale).round() as usize).max(1);
+                self.size = [w, h];
+                self.worker = Some(start(src, w, h, ctx.clone()));
+            }
+        }
+        if let Some(worker) = self.worker.as_ref() {
+            loop {
+                match worker.rx.try_recv() {
+                    Ok(Message::Frame(pixels)) => {
+                        let image = ColorImage::from_rgba_unmultiplied(self.size, &pixels);
+                        if let Some(t) = self.texture.as_mut() {
+                            t.set(image, TextureOptions::LINEAR);
+                        } else {
+                            self.texture = Some(ctx.load_texture(
+                                "video-background",
+                                image,
+                                TextureOptions::LINEAR,
+                            ));
+                        }
+                    }
+                    Ok(Message::Error(e)) => {
+                        self.error = Some(e);
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        self.error = Some("Video decoder stopped unexpectedly".into());
+                        break;
+                    }
+                }
+            }
+        }
+        if self.error.is_some() {
+            self.worker = None;
+        }
+        self.texture.clone()
+    }
+}
+fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker {
+    let (tx, rx) = mpsc::sync_channel(1);
+    let child = Arc::new(Mutex::new(None::<Child>));
+    let shared = child.clone();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop_flag = stopped.clone();
+    #[cfg(test)]
+    let finished = Arc::new(AtomicBool::new(false));
+    #[cfg(test)]
+    let finish_flag = finished.clone();
+    thread::spawn(move || {
+        #[cfg(test)]
+        let _finished = Finished(finish_flag);
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-hwaccel",
+            "d3d11va",
+            "-hwaccel_output_format",
+            "d3d11",
+            "-re",
+            "-stream_loop",
+            "-1",
+            "-i",
+        ])
+        .arg(source.path)
+        .args([
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-vf",
+            &format!("hwdownload,format=nv12,fps=24,scale={w}:{h}"),
+            "-pix_fmt",
+            "rgba",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let mut proc = match cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tx.try_send(Message::Error(format!("FFmpeg unavailable: {e}")));
+                ctx.request_repaint();
+                return;
+            }
+        };
+        let mut stdout = proc.stdout.take().unwrap();
+        // Check cancellation while holding the same lock used by stop().
+        let mut unpublished = Some(proc);
+        let published = if let Ok(mut slot) = shared.lock() {
+            if !stop_flag.load(Ordering::SeqCst) {
+                *slot = unpublished.take();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !published {
+            // The child was not published, so stop() cannot reach it.
+            // Its handle is killed and reaped after the lock is released.
+            if let Some(mut p) = unpublished {
+                let _ = p.kill();
+                let _ = p.wait();
+            }
+            return;
+        }
+        let frame_len = w * h * 4;
+        while !stop_flag.load(Ordering::SeqCst) {
+            let mut frame = vec![0; frame_len];
+            if stdout.read_exact(&mut frame).is_err() {
+                break;
+            }
+            match tx.try_send(Message::Frame(frame)) {
+                Ok(()) => ctx.request_repaint(),
+                Err(mpsc::TrySendError::Full(_)) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => break,
+            }
+        }
+        let owned = shared.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(mut p) = owned {
+            let _ = p.kill();
+            let _ = p.wait();
+        }
+        if !stop_flag.load(Ordering::SeqCst) {
+            let _ = tx.try_send(Message::Error(
+                "Hardware video decoding failed; check D3D11VA and FFmpeg".into(),
+            ));
+            ctx.request_repaint();
+        }
+    });
+    Worker {
+        child,
+        stopped,
+        rx,
+        #[cfg(test)]
+        finished,
+    }
+}
+
+#[cfg(test)]
+struct Finished(Arc<AtomicBool>);
+#[cfg(test)]
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn hardware_decoder_pause_kills_and_reaps() {
+        if std::env::var_os("KATRAN_TEST_VIDEO_D3D11VA").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("synthetic.mp4");
+        assert!(
+            Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=160x90:rate=24",
+                    "-t",
+                    "2",
+                    "-c:v",
+                    "libx264",
+                    "-y"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let mut state = State::default();
+        let ctx = egui::Context::default();
+        let src = Some(VideoSource {
+            path,
+            width: 160,
+            height: 90,
+        });
+        state.tick(&ctx, src.clone(), true);
+        let finished = state.worker.as_ref().unwrap().finished.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state
+            .worker
+            .as_ref()
+            .unwrap()
+            .child
+            .lock()
+            .unwrap()
+            .is_none()
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            state
+                .worker
+                .as_ref()
+                .unwrap()
+                .child
+                .lock()
+                .unwrap()
+                .is_some(),
+            "decoder did not start"
+        );
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut decoded = false;
+        while Instant::now() < deadline {
+            match state.worker.as_ref().unwrap().rx.try_recv() {
+                Ok(Message::Frame(bytes)) => {
+                    assert_eq!(bytes.len(), 160 * 90 * 4);
+                    decoded = true;
+                    break;
+                }
+                Ok(Message::Error(error)) => panic!("{error}"),
+                Err(TryRecvError::Disconnected) => panic!("decoder exited"),
+                Err(TryRecvError::Empty) => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        assert!(decoded, "hardware decoder did not produce a frame");
+        let start = Instant::now();
+        state.tick(&ctx, src, false);
+        assert!(start.elapsed() < Duration::from_secs(1), "pause blocked UI");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !finished.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(finished.load(Ordering::SeqCst), "decoder was not reaped");
+    }
+}

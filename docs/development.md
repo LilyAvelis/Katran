@@ -21,6 +21,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Clipboard Text capture / bounded native Unicode decoding | `src/capture.rs`, `src/capture_events.rs` |
 | Lazy text preview client | `src/bin/text_preview_ui.rs`, `src/bin/ui.rs` |
 | Arbitrary-file gallery/stream visuals / Windows Shell thumbnail and icon boundary | `src/file_visual.rs`, `tests/file_visual.rs`, `docs/file-visuals.md` |
+| Video background import / hardware streaming adapter | `src/video_backgrounds.rs`, `src/bin/video_background_ui.rs`, [contract](video-backgrounds.md) |
 | Emoji font preferences / profile-local imports / private DirectWrite rendering | `src/emoji_fonts.rs`, `src/emoji_render.rs`, `tests/emoji_fonts_api.rs`, [contract](emoji-fonts.md) |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
 | Clipboard signals / bounded retry API / hidden-window client (default backend) | `src/clipboard_listener.rs`, `src/capture_events.rs`, `src/bin/clipboard_events_ui.rs` |

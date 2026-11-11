@@ -33,6 +33,11 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
+    VideoBackground {
+        prepared: video_backgrounds::PreparedVideo,
+        event: Option<Event>,
+        activate: bool,
+    },
     EmojiFont(emoji_fonts::PreparedFont),
     ThemeBackground {
         prepared: theme_backgrounds::PreparedBackground,
@@ -153,7 +158,7 @@ impl Service {
         }
         Ok(events)
     }
-    fn validate_job_events(&self, events: &[Event]) -> Result<()> {
+    pub(crate) fn validate_job_events(&self, events: &[Event]) -> Result<()> {
         for event in events {
             let current = self.get(event.id).map_err(|_| {
                 ApiError::new("stale_selection", "Selected object no longer exists")
@@ -246,6 +251,33 @@ impl Service {
             };
         }
         let id = match command {
+            Command::ImportVideoBackground { path } => {
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = video_backgrounds::prepare(&path)
+                        .map_err(|e| ApiError::new("video_background_error", e))?;
+                    cancel.check()?;
+                    Ok(PreparedWork::VideoBackground {
+                        prepared,
+                        event: None,
+                        activate: false,
+                    })
+                })?
+            }
+            Command::UseSelectedVideoAsBackground => {
+                let event = self.selected_background_video()?;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = video_backgrounds::prepare_event(&event)
+                        .map_err(|e| ApiError::new("video_background_error", e))?;
+                    cancel.check()?;
+                    Ok(PreparedWork::VideoBackground {
+                        prepared,
+                        event: Some(event),
+                        activate: true,
+                    })
+                })?
+            }
             Command::ImportEmojiFont { path } => {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
@@ -838,6 +870,12 @@ impl Service {
                     self.jobs.authorize_claimed_effect(ready)?;
                     let result=theme_backgrounds::commit(&self.root,prepared)?;
                     if activate {self.activate_background(result)}else{Ok(result)}
+                },
+                PreparedWork::VideoBackground{prepared,event,activate}=>{
+                    if let Some(event)=event {self.validate_job_events(&[event])?;}
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let result=video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))?;
+                    if activate {self.activate_video_background(result)}else{Ok(result)}
                 },
                 PreparedWork::EmojiFont(font)=> {self.jobs.authorize_claimed_effect(ready)?; emoji_fonts::commit(&self.root,font)},
                 PreparedWork::Value(value)=>Ok(value),

@@ -23,6 +23,46 @@ impl Service {
         }
         Ok(event)
     }
+    pub(crate) fn selected_background_video(&self) -> Result<Event> {
+        let items = self.selected_refs()?;
+        if items.len() != 1 {
+            return Err(ApiError::new("invalid_selection", "Выберите одно видео"));
+        }
+        let event = self.get(items[0].id)?;
+        let extension = std::path::Path::new(&event.name)
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if event.revision != items[0].revision
+            || !(event.revision.starts_with("ref:") || event.revision.starts_with("blob:"))
+            || !matches!(extension.as_str(), "mp4" | "m4v" | "mov" | "mkv" | "webm")
+            || matches!(
+                event.kind,
+                EventKind::TextFragment | EventKind::LinkFragment | EventKind::TableFragment
+            )
+        {
+            return Err(ApiError::new("invalid_video", "Выберите видео"));
+        }
+        Ok(event)
+    }
+    pub(crate) fn activate_video_background(
+        &mut self,
+        mut result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let id = result["id"]
+            .as_str()
+            .ok_or_else(|| ApiError::new("invalid_video", "Missing video ID"))?
+            .to_owned();
+        let mut settings = self.settings.clone();
+        settings.theme.preset = theme::Preset::BlueExperimental;
+        settings.theme.video_background = Some(id);
+        settings.theme.custom_background = None;
+        settings.theme.lily_background = None;
+        self.dispatch(Command::SetSettings { settings })?;
+        result["background_applied"] = serde_json::json!(true);
+        Ok(result)
+    }
     pub(crate) fn activate_background(
         &mut self,
         mut result: serde_json::Value,
@@ -33,6 +73,7 @@ impl Service {
             .to_owned();
         let mut settings = self.settings.clone();
         settings.theme.preset = theme::Preset::BlueExperimental;
+        settings.theme.video_background = None;
         settings.theme.custom_background = Some(id);
         settings.theme.lily_background = None;
         self.dispatch(Command::SetSettings { settings })?;
