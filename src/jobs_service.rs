@@ -231,6 +231,12 @@ impl Service {
             };
         }
         let id = match command {
+            Command::SearchFolders {query,limit} => self.jobs.submit(Lane::Discovery, move |cancel| {
+                cancel.check()?;
+                let value=everything::search_folders(&query,limit as usize).map_err(|e|ApiError::new(&e.code,e.message))?;
+                cancel.check()?;
+                Ok(PreparedWork::Value(json!(value)))
+            })?,
             Command::CheckUpdates => {
                 let updater = self.updater.clone();
                 self.jobs.submit(Lane::Update, move |cancel| {

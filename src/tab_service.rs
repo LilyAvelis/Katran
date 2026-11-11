@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 pub fn label(tab: ShelfTab) -> &'static str {
     match tab {
-        ShelfTab::All => "All",
+        ShelfTab::All => "Folder",
         ShelfTab::Images => "Images",
         ShelfTab::Screenshots => "Screenshots",
         ShelfTab::Downloads => "Downloads",
@@ -74,7 +74,7 @@ impl Service {
 
     pub(crate) fn set_tab_enabled(&mut self, tab: ShelfTab, enabled: bool) -> Result<Value> {
         if tab == ShelfTab::All {
-            return Err(ApiError::new("fixed_tab", "All is always enabled"));
+            return Err(ApiError::new("fixed_tab", "Folder is always enabled"));
         }
         let mut settings = self.settings.clone();
         settings.hidden_tabs.retain(|t| *t != tab);

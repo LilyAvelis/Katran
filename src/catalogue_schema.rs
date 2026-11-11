@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 6;
+pub(crate) const VERSION: i64 = 7;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -134,6 +134,14 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
     }
     tx.execute_batch("CREATE TABLE IF NOT EXISTS link_fragments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,preview TEXT NOT NULL); PRAGMA user_version=5;")?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS table_contents(blob_hash TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,content TEXT NOT NULL); CREATE TABLE IF NOT EXISTS table_fragments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,preview TEXT NOT NULL); PRAGMA user_version=6;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS katran_properties(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN(0,1)),display_name TEXT,opener_path TEXT);
+      CREATE INDEX IF NOT EXISTS katran_properties_pinned ON katran_properties(pinned,event_id);
+      CREATE TABLE IF NOT EXISTS katran_tags(event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,tag_key TEXT NOT NULL,tag_display TEXT NOT NULL,PRIMARY KEY(event_id,tag_key));
+      CREATE INDEX IF NOT EXISTS katran_tags_lookup ON katran_tags(tag_key,event_id);
+      CREATE TABLE IF NOT EXISTS folder_history(path_key TEXT PRIMARY KEY,path TEXT NOT NULL,opened_at_ms INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS folder_history_recent ON folder_history(opened_at_ms DESC,path_key);
+      CREATE TABLE IF NOT EXISTS folder_favorites(path_key TEXT PRIMARY KEY,path TEXT NOT NULL,added_at_ms INTEGER NOT NULL);
+      PRAGMA user_version=7;")?;
     tx.commit()?;
     Ok(())
 }

@@ -106,6 +106,9 @@ impl Service {
         }
         let items=events.into_iter().map(|(id,result)| {
             let input=result.and_then(|event| {
+                if crate::delete_shelf::protected_by_pin(&self.db,id)? {
+                    return Err(ApiError::new("skipped_pinned","Pinned record or pinned file alias is protected"));
+                }
                 let root=if let DeletePolicy::LiveOriginal{source_id,generation,..}=event.delete_policy {
                     let root:String=self.db.query_row("SELECT root FROM source_configurations WHERE source_id=?1 AND generation=?2 AND enabled=1",params![source_id.as_str(),generation],|row|row.get(0)).map_err(|_|ApiError::new("stale_source_generation","Original source configuration changed"))?;Some(PathBuf::from(root))
                 } else {None};
@@ -125,6 +128,7 @@ impl Service {
         let items=prepared.items.into_iter().map(|(id,result)| {
             let result=result.and_then(|item| {
                 let current=self.get(id)?;
+                if crate::delete_shelf::protected_by_pin(&self.db,id)? {return Err(ApiError::new("skipped_pinned","Pinned record or pinned file alias is protected"));}
                 if current.revision!=item.event.revision || current.delete_policy!=item.event.delete_policy {return Err(ApiError::new("stale_selection","Delete selection or ownership changed during preparation"));}
                 if let DeletePolicy::LiveOriginal{source_id,generation,..}=current.delete_policy {
                     let current:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation WHERE p.source_id=?1 AND p.generation=?2 AND p.event_id=?3 AND c.enabled=1)",params![source_id.as_str(),generation,id],|row|row.get(0))?;
@@ -158,11 +162,17 @@ impl Service {
                         Ok(json!({"deleted":0}))
                     };
                     match shelf {
-                        Ok(shelf)=> {count+=1;items.push(json!({"ok":true,"id":id,"original_missing":receipt.missing,"original_removed":receipt.removed,"shelf_missing":!exists,"shelf":shelf}));}
+                        Ok(shelf) if exists && shelf["deleted"].as_u64() == Some(0) => items.push(json!({"ok":false,"id":id,"skipped_pinned":true,"original_removed":receipt.removed,"shelf":shelf})),
+                        Ok(shelf)=> {count+=1;items.push(json!({"ok":true,"id":id,"skipped_pinned":false,"original_missing":receipt.missing,"original_removed":receipt.removed,"shelf_missing":!exists,"shelf":shelf}));}
                         Err(error)=>items.push(json!({"ok":false,"id":id,"original_removed":receipt.removed,"error":error})),
                     }
                 }
-                Err(error) => items.push(json!({"ok":false,"id":id,"error":error})),
+                Err(error) => {
+                    let skipped_pinned = error.code == "skipped_pinned";
+                    items.push(
+                        json!({"ok":false,"id":id,"skipped_pinned":skipped_pinned,"error":error}),
+                    );
+                }
             }
         }
         Ok(
@@ -305,5 +315,44 @@ pub(crate) fn apply(
     DeletedBatch {
         meta: authorized.meta,
         items,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reauthorization_rechecks_pin_before_effect() {
+        let root = tempfile::tempdir().unwrap();
+        let mut service = Service::open(root.path(), 1024 * 1024).unwrap();
+        let event = service
+            .dispatch(Command::IngestBytes {
+                name: "synthetic.bin".into(),
+                bytes: b"synthetic".to_vec(),
+                source: "test".into(),
+            })
+            .unwrap();
+        let id = event["id"].as_i64().unwrap();
+        let input = Input {
+            event: service.get(id).unwrap(),
+            root: None,
+        };
+        let request = DeleteRequest {
+            meta: Meta {
+                ids: vec![id],
+                permanent: false,
+                recycle: false,
+            },
+            items: vec![(id, Ok(input))],
+        };
+        let prepared = prepare(request);
+        crate::pinned::toggle_pins(&service.db, &[id]).unwrap();
+        let authorized = service.authorize_delete(prepared);
+        let deleted = apply(authorized, Arc::clone(&service.trash));
+        let result = service.finish_delete(deleted).unwrap();
+        assert_eq!(result["deleted"], 0);
+        assert_eq!(result["items"][0]["skipped_pinned"], true);
+        assert!(service.get(id).is_ok());
     }
 }

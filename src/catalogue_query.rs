@@ -35,15 +35,12 @@ impl CursorKey {
 
 /// The SQL projection filters the entire source before keyset ordering/LIMIT.
 /// Only page rows are decoded; original paths are never accessed here.
-pub(crate) fn query_sorted(
-    db: &Connection,
-    tab: ShelfTab,
-    needle: &str,
-    limit: u32,
-    cursor: Option<&str>,
-    sort: crate::sorting::SortSpec,
-    features: (bool, bool, bool, bool),
-) -> Result<(Vec<Event>, Option<String>)> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn query_sorted_slice(
+    db: &Connection, tab: ShelfTab, needle: &str, limit: u32, cursor: Option<&str>,
+    sort: crate::sorting::SortSpec, pinned: bool, tag: Option<&str>, view_generation: u64,
+    features: (bool,bool,bool,bool),
+) -> Result<(Vec<Event>,Option<String>)> {
     let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
     use crate::sorting::SortMode;
     if !(1..=1000).contains(&limit) {
@@ -52,7 +49,7 @@ pub(crate) fn query_sorted(
     let sort = sort.normalized();
     let sources: String = db.query_row("SELECT COALESCE(group_concat(source_id||':'||generation||':'||enabled,';'),'') FROM (SELECT * FROM source_configurations ORDER BY source_id)", [], |r| r.get(0))?;
     let generation =
-        format!("{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}");
+        format!("{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{view_generation}");
     let after = cursor
         .map(|value| {
             if value.len() > 131072 {
@@ -87,13 +84,13 @@ pub(crate) fn query_sorted(
     if sort.mode == SortMode::Arrival {
         // Preserve the indexed UNION merge path for the default large-history
         // view. No outer computed-key sort/materialization is needed for IDs.
-        let mut sql = projection_sql(
+        let mut sql = slice_projection(pinned,tag,tab,projection_sql(
             tab,
             images_enabled,
             text_enabled,
             links_enabled,
             tables_enabled,
-        );
+        ));
         if sort.reverse {
             sql = sql
                 .replace("e.id <= ?4", "e.id >= ?4")
@@ -148,13 +145,13 @@ pub(crate) fn query_sorted(
         };
         return Ok((events, next));
     }
-    let projection = projection_sql(
+    let projection = slice_projection(pinned,tag,tab,projection_sql(
         tab,
         images_enabled,
         text_enabled,
         links_enabled,
         tables_enabled,
-    );
+    ));
     let projection = projection
         .trim()
         .strip_suffix("ORDER BY id DESC LIMIT ?6")
@@ -295,6 +292,28 @@ pub(crate) fn query_features(
             |row| storage::event_row_with_availability(row, row.get(10)?),
         )?
         .collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+fn slice_projection(pinned: bool, tag: Option<&str>, tab: ShelfTab, sql: String) -> String {
+    if !pinned { return sql; }
+    let category = match tab {
+        ShelfTab::All => "0".to_owned(),
+        ShelfTab::Screenshots => "e.source='sharex'".into(),
+        ShelfTab::Downloads => "e.source='downloads'".into(),
+        ShelfTab::Text => "EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id)".into(),
+        ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
+        ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
+        ShelfTab::Images => format!("{} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
+    };
+    // Literal quoting is restricted to this optional tag value; all search and
+    // cursor values remain bound parameters in the shared SQL pipeline.
+    let tag_filter=tag.map(|t|format!("AND EXISTS(SELECT 1 FROM katran_tags t WHERE t.event_id=e.id AND t.tag_key='{}')",t.replace('\'',"''"))).unwrap_or_default();
+    format!("SELECT e.id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,e.origin_json,e.reference_hash,e.delete_policy_json,
+      CASE WHEN json_extract(e.delete_policy_json,'$.kind')='live_original' THEN EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=e.id AND p.available=1) ELSE NULL END AS projected_available,
+      COALESCE((SELECT preview FROM text_fragments f WHERE f.event_id=e.id),(SELECT preview FROM link_fragments f WHERE f.event_id=e.id),(SELECT preview FROM table_fragments f WHERE f.event_id=e.id)) AS text_preview,
+      EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AS is_table,e.modified_at_ms
+      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND e.id <= ?4 {tag_filter}
+      AND (?1 OR ?2 OR ?3='' OR ?3!='') AND (?5='' OR katran_contains(e.name,?5) OR katran_contains(COALESCE(k.display_name,''),?5)) ORDER BY id DESC LIMIT ?6")
 }
 
 fn projection_sql(

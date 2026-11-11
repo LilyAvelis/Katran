@@ -13,6 +13,11 @@ pub mod density;
 pub mod diagnostics;
 pub mod domain_jobs;
 pub mod downloads;
+pub mod everything;
+pub mod folder_transfer;
+pub mod pinned;
+pub mod work_folder;
+mod workspace_service;
 pub mod drag_out;
 mod drag_session;
 pub mod file_types;
@@ -66,6 +71,7 @@ pub use api::*;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    work_folder: work_folder::State,
     updater: updater::Updater,
     checked_update: Option<updater::Release>,
     update_status: serde_json::Value,
@@ -205,6 +211,7 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
             update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
@@ -259,6 +266,7 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         Ok(Self {
+            work_folder: Default::default(),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
             update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
@@ -363,6 +371,30 @@ impl Service {
             ));
         }
         match command {
+            Command::ChooseFolder { path } => self.choose_folder(path),
+            Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
+            Command::SearchFolders {query,limit} => everything::search_folders(&query,limit as usize).map(|v|serde_json::json!(v)).map_err(|e|ApiError::new(&e.code,e.message)),
+            Command::FolderHistory {query} => self.folder_entries(false,&query),
+            Command::FavoriteFolders {query} => self.folder_entries(true,&query),
+            Command::ToggleFavoriteFolder => {
+                let path=self.work_folder.current().ok_or_else(||ApiError::new("no_folder","Choose a working folder first"))?;
+                Ok(serde_json::json!({"favorite":pinned::toggle_favorite(&self.db,path)?}))
+            },
+            Command::ClearFolderHistory {confirmed} => {
+                if !confirmed {Ok(serde_json::json!({"confirmation_required":true}))} else {pinned::clear_folder_history(&self.db)?;Ok(serde_json::json!({"cleared":true}))}
+            },
+            Command::TogglePins {ids} => self.toggle_pins(ids),
+            Command::GetPinnedProperties {id} => Ok(serde_json::json!({"properties":pinned::properties(&self.db,id)?,"tags":pinned::tags(&self.db,id)?})),
+            Command::SetPinnedProperties {id,display_name,opener} => Ok(serde_json::json!(pinned::set_properties(&self.db,id,display_name,opener)?)),
+            Command::SetPinnedTags {id,tags} => {let value=pinned::set_tags(&self.db,id,&tags)?;self.interaction.view_generation=self.interaction.view_generation.wrapping_add(1);Ok(serde_json::json!({"tags":value}))},
+            Command::PinnedTags => self.pinned_tags(),
+            Command::FilterPinnedTag {tag} => {
+                if self.interaction.tab==interaction::ShelfTab::All {return Err(ApiError::new("folder_has_no_tags","Folder has no tag filters"));}
+                let tag=tag.map(|t|t.trim().to_lowercase()).filter(|t|!t.is_empty());
+                let next=if self.interaction.tag_filter==tag {None}else{tag};
+                self.interaction.reset_context();self.interaction.pinned_only=true;self.interaction.tag_filter=next;
+                Ok(serde_json::json!(self.interaction))
+            },
             Command::GetUpdateStatus => Ok(self.update_status.clone()),
             Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
             Command::InstallUpdate => {
@@ -437,7 +469,8 @@ impl Service {
             },
             Command::SelectTabPosition { position } => {
                 let tab = tab_layout::tab_at_visible(&self.settings.visible_tabs(),position)?;
-                self.select_tab(tab)
+                self.interaction.select_position(tab);
+                Ok(serde_json::json!(self.interaction))
             },
             Command::MoveTab { tab,index } => {
                 let mut settings=self.settings.clone();
@@ -786,7 +819,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
-        storage::get_event(&self.db, id)
+        if id < 0 { self.work_folder.get(id) } else { storage::get_event(&self.db, id) }
     }
 }
 fn now_ms() -> i64 {

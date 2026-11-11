@@ -19,6 +19,19 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    ChooseFolder { path: PathBuf },
+    CurrentFolder,
+    SearchFolders { query: String, limit: u32 },
+    FolderHistory { query: String },
+    FavoriteFolders { query: String },
+    ToggleFavoriteFolder,
+    ClearFolderHistory { #[serde(default)] confirmed: bool },
+    TogglePins { ids: Vec<i64> },
+    GetPinnedProperties { id: i64 },
+    SetPinnedProperties { id: i64, display_name: Option<String>, opener: Option<PathBuf> },
+    SetPinnedTags { id: i64, tags: Vec<String> },
+    PinnedTags,
+    FilterPinnedTag { tag: Option<String> },
     GetUpdateStatus,
     CheckUpdates,
     InstallUpdate,

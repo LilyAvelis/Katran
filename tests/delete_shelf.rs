@@ -3,7 +3,7 @@ use rusqlite::Connection;
 
 fn fixture() -> Connection {
     let db = Connection::open_in_memory().unwrap();
-    db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE blobs(hash TEXT PRIMARY KEY); CREATE TABLE events(id INTEGER PRIMARY KEY, blob_hash TEXT REFERENCES blobs(hash),path TEXT NOT NULL DEFAULT ''); INSERT INTO blobs VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO events(id,blob_hash) VALUES(1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),(2,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),(3,NULL);").unwrap();
+    db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE blobs(hash TEXT PRIMARY KEY); CREATE TABLE events(id INTEGER PRIMARY KEY, blob_hash TEXT REFERENCES blobs(hash),path TEXT NOT NULL DEFAULT ''); CREATE TABLE katran_properties(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE, pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN(0,1)), display_name TEXT, opener_path TEXT); INSERT INTO blobs VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO events(id,blob_hash) VALUES(1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),(2,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),(3,NULL);").unwrap();
     db
 }
 fn count(db: &Connection) -> i64 {

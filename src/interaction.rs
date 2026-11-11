@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ShelfTab {
+    #[serde(rename = "folder", alias = "all")]
     All,
     #[default]
     Images,
@@ -30,6 +31,10 @@ pub enum SelectionMode {
 }
 #[derive(Default, Serialize)]
 pub struct Interaction {
+    pub pinned_only: bool,
+    pub tag_filter: Option<String>,
+    pub view_generation: u64,
+    pub folder_path: Option<std::path::PathBuf>,
     pub sort: crate::sorting::SortSpec,
     pub activation_serial: u64,
     pub settings_open: bool,
@@ -49,9 +54,32 @@ pub struct Interaction {
 }
 impl Interaction {
     pub fn set_tab(&mut self, tab: ShelfTab) {
+        if self.tab != tab || self.pinned_only || self.tag_filter.is_some() {
+            self.reset_context();
+        }
         self.tab = tab;
         if tab != ShelfTab::All {
             self.last_tab = tab;
+        }
+    }
+    pub fn reset_context(&mut self) {
+        self.pinned_only = false;
+        self.tag_filter = None;
+        self.view_generation = self.view_generation.wrapping_add(1);
+        self.visible.clear();
+        self.selected.clear();
+        self.cursor = None;
+        self.anchor = None;
+        self.range_order = false;
+        self.set_preview(None);
+    }
+    pub fn select_position(&mut self, tab: ShelfTab) {
+        if self.tab == tab && tab != ShelfTab::All {
+            let pinned = !self.pinned_only && self.tag_filter.is_none();
+            self.reset_context();
+            self.pinned_only = pinned;
+        } else {
+            self.set_tab(tab);
         }
     }
     pub fn toggle_tab(&mut self) {
