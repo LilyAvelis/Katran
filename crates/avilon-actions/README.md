@@ -1,4 +1,4 @@
-# garden-actions
+# avilon-actions
 
 Pure Rust shortcut normalization and assignment policy, extracted from Katran.
 Hosts supply action definitions, reserved-chord rules, override storage and all

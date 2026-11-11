@@ -1,4 +1,4 @@
-use garden_actions::{
+use avilon_actions::{
     Assignment, Conflict, Definition, Error, Overrides, binding, normalize, plan_set,
     validate_overrides,
 };
@@ -207,7 +207,7 @@ fn loading_normalizes_without_rejecting_conflicts_or_reserved_values() {
 
 #[test]
 fn malformed_catalogues_are_rejected_before_planning_or_loading() {
-    use garden_actions::validate_catalogue;
+    use avilon_actions::validate_catalogue;
     let def = |id, default_binding| Definition {
         id,
         label: "Action",

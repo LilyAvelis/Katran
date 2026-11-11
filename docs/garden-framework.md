@@ -1,12 +1,12 @@
-# Garden reusable components
+# Avilon — reusable desktop components
 
 Owner direction, 2026-11-11: begin extracting reusable solutions while the
 separately tagged Katran 3.0 release proceeds. Work is local on
 `codex/garden-framework`; it is not included in the release tags.
 
-## First component: garden-actions
+## First component: avilon-actions
 
-`crates/garden-actions` contains the shortcut policy extracted from Katran:
+`crates/avilon-actions` contains the shortcut policy extracted from Katran:
 normalization, host-provided action definitions, lookup, validation of saved
 overrides and immutable assignment planning with conflict replacement.
 It has no dependencies, filesystem access, egui, Windows APIs, SQLite or Katran
@@ -38,9 +38,9 @@ The crate starts at internal version 0.1.0, `publish = false`, MIT. No crates.io
 publication or new application release is authorized by this extraction.
 Owner-supplied lily artwork is not bundled into the library.
 
-## Second component: garden-egui
+## Second component: avilon-egui
 
-`crates/garden-egui` now owns ActionRow/ActionPresentation, primary-shortcut
+`crates/avilon-egui` now owns ActionRow/ActionPresentation, primary-shortcut
 presentation and measured KeyCaps. Katran's thin adapters supply its fonts,
 semantic colors and exact Standard fallbacks; popup styling remains in Katran.
 The shared rows are already used by Actions, Sort and Open With through that
@@ -53,8 +53,8 @@ Initially use local path dependencies; no external package registry is needed:
 
 ```toml
 [dependencies]
-garden-actions = { path = "../Katran/crates/garden-actions" }
-garden-egui = { path = "../Katran/crates/garden-egui" }
+avilon-actions = { path = "../Katran/crates/avilon-actions" }
+avilon-egui = { path = "../Katran/crates/avilon-egui" }
 ```
 
 Use only the first dependency if the application does not use egui. Supply a
@@ -63,21 +63,21 @@ before adopting it. For rows, construct `ActionStyle`/`KeyCapsStyle` from the
 application's own design tokens; never copy a Katran dispatcher into a widget.
 
 The console example is runnable with
-`cargo run --offline -p garden-actions --example shortcuts`. It does not open a
+`cargo run --offline -p avilon-actions --example shortcuts`. It does not open a
 window, register a hotkey or modify settings. Each crate carries its own MIT
 license; dependencies retain their own licenses. README usage and limitations
 are included beside each crate.
 
 ## Verification and checkpoints
 
-- `garden-actions`: six policy tests, two distinct catalogues and the neutral
+- `avilon-actions`: six policy tests, two distinct catalogues and the neutral
   example compiled; crate/all-target Clippy passed. Invalid or noncanonical host catalogues are
   rejected before assignment, preventing aliases from hiding conflicts.
 - Katran adapter: 23 targeted API tests and two original shortcut unit tests
   passed. The new storage-failure test confirms the planned binding does not
   become live when persistence fails. Walter's bounded comparison against
   `9fe7214` found no P1/P2 semantic changes in the policy extraction.
-- `garden-egui`: two headless layout tests cover narrow/wide rows, DPI scaling,
+- `avilon-egui`: two headless layout tests cover narrow/wide rows, DPI scaling,
   custom textures and ancestor scroll clipping. Physical-pixel image snapping
   uses the original half-pixel tolerance.
 - Katran after UI extraction: all 113 UI/headless tests passed, including the
@@ -105,3 +105,16 @@ revisions, pinned protection and recovery remain Katran domain behavior.
 See [source inventory and boundaries](reusable-library-map.md) and
 [UI design patterns](design-patterns.md). Verification results are recorded with
 the integration checkpoint, rather than inferred from this design document.
+
+## Name and Windows scope
+
+Owner chose **Avilon**, after [Авилон](https://app.notion.com/p/25c49fda329680469b76cd59f93cf990). Former working package names were garden-actions/garden-egui.
+
+Avilon is a shared SDK for applications that deliberately depend on it. Each
+application pins a library version and compiles its components. It does not
+automatically alter unrelated Windows applications. A shared source repository
+and versioned packages are the intended distribution boundary; no machine-wide
+DLL, service, registry change or automatic dependency update is installed.
+Future avilon-windows adapters can expose global hotkeys, tray, Everything and
+Open With without requiring a global daemon. A shared service is a separate
+option only if multiple applications need coordinated running state.

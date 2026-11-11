@@ -1,4 +1,4 @@
-# garden-egui
+# avilon-egui
 
 Small host-styled egui 0.36.2 presentation primitives extracted from Katran:
 `ActionRow`, `ActionPresentation`, and measured `KeyCaps`. They draw and return

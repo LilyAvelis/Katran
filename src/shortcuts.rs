@@ -42,12 +42,12 @@ impl Default for Shortcuts {
 use crate::actions::DEFS as DEFAULTS;
 /// Katran wire-compatible facade over the reusable pure policy crate.
 pub fn normalize(text: &str) -> Result<String, ShortcutError> {
-    garden_actions::normalize(text).map_err(Into::into)
+    avilon_actions::normalize(text).map_err(Into::into)
 }
-fn definitions() -> Vec<garden_actions::Definition<'static>> {
+fn definitions() -> Vec<avilon_actions::Definition<'static>> {
     DEFAULTS
         .iter()
-        .map(|d| garden_actions::Definition {
+        .map(|d| avilon_actions::Definition {
             id: d.id,
             label: d.label,
             default_binding: d.default_binding,
@@ -66,9 +66,9 @@ fn reserved(id: &str, chord: &str) -> bool {
         || (key.starts_with("Arrow") && !parts.contains(&"Ctrl") && !parts.contains(&"Alt"))
         || matches!(chord, "Ctrl Shift Comma" | "Ctrl Backspace")
 }
-impl From<garden_actions::Error> for ShortcutError {
-    fn from(error: garden_actions::Error) -> Self {
-        use garden_actions::Error;
+impl From<avilon_actions::Error> for ShortcutError {
+    fn from(error: avilon_actions::Error) -> Self {
+        use avilon_actions::Error;
         match error {
             Error::InvalidCatalogue { message } => Self::new("invalid_shortcuts", message),
             Error::UnknownAction { id } => Self::new("unknown_action", id),
@@ -104,10 +104,10 @@ impl Shortcuts {
             &fs::read(path).map_err(|e| ShortcutError::new("storage_error", e))?,
         )
         .map_err(|e| ShortcutError::new("invalid_shortcuts", e))?;
-        value.overrides = garden_actions::validate_overrides(&definitions(), &value.overrides)
+        value.overrides = avilon_actions::validate_overrides(&definitions(), &value.overrides)
             .map_err(|error| match error {
-                garden_actions::Error::UnknownAction { id }
-                | garden_actions::Error::ProtectedAction { id } => ShortcutError::new(
+                avilon_actions::Error::UnknownAction { id }
+                | avilon_actions::Error::ProtectedAction { id } => ShortcutError::new(
                     "invalid_shortcuts",
                     format!("Unknown or protected action: {id}"),
                 ),
@@ -147,7 +147,7 @@ impl Shortcuts {
         }
     }
     pub fn binding(&self, id: &str) -> String {
-        garden_actions::binding(&definitions(), &self.overrides, id).to_owned()
+        avilon_actions::binding(&definitions(), &self.overrides, id).to_owned()
     }
     pub fn catalogue(&self) -> Vec<ShortcutInfo> {
         DEFAULTS
@@ -171,11 +171,11 @@ impl Shortcuts {
         reset: bool,
     ) -> Result<Vec<ShortcutInfo>, ShortcutError> {
         let assignment = if reset {
-            garden_actions::Assignment::Reset
+            avilon_actions::Assignment::Reset
         } else {
-            garden_actions::Assignment::Set(binding.as_deref())
+            avilon_actions::Assignment::Set(binding.as_deref())
         };
-        let overrides = garden_actions::plan_set(
+        let overrides = avilon_actions::plan_set(
             &definitions(),
             &self.overrides,
             id,

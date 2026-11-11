@@ -5,7 +5,7 @@ try {
     foreach ($dir in @('scripts','src','assets','target')) { New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null }
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/prepare-preview.ps1') -Destination (Join-Path $root 'scripts/prepare-preview.ps1')
     foreach ($file in @('Cargo.toml','Cargo.lock','build.rs','src/lib.rs','assets/fixture')) { Set-Content -LiteralPath (Join-Path $root $file) -Value "synthetic-$file" }
-    foreach ($crate in @('garden-actions','garden-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null }
         foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs','src/target/private.rs','target/privatefile','Cargo.lock')) { Set-Content -LiteralPath (Join-Path $root "crates/$crate/$file") -Value "synthetic-$file" }
     }
@@ -21,7 +21,7 @@ function cargo { 'synthetic-cargo' }
     if ($LASTEXITCODE -ne 0) { throw 'Snapshot failed' }
     $snapshot = Get-Content -LiteralPath (Join-Path $root 'target/preview-inputs.json') -Raw | ConvertFrom-Json
     $paths = @($snapshot.inputs | ForEach-Object { $_.path.Replace('\','/') })
-    foreach ($crate in @('garden-actions','garden-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui')) {
         foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs')) {
             $path = "crates/$crate/$file"
             $entry = @($snapshot.inputs | Where-Object { $_.path.Replace('\','/') -eq $path })

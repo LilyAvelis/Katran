@@ -1,8 +1,8 @@
-use egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
-use egui_lucide::Lucide;
-use garden_egui::{
+use avilon_egui::{
     ActionPresentation, ActionRow, ActionStyle, KeyCaps, KeyCapsStyle, primary_shortcut,
 };
+use egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
+use egui_lucide::Lucide;
 
 fn style() -> ActionStyle {
     ActionStyle {

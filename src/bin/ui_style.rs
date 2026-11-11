@@ -47,8 +47,8 @@ pub(super) fn standard_style(ctx: &egui::Context) -> egui::Style {
 }
 
 /// Katran supplies theme tokens; the shared component owns measurement and paint.
-pub(super) fn keycaps_style(ui: &egui::Ui) -> garden_egui::KeyCapsStyle {
-    garden_egui::KeyCapsStyle {
+pub(super) fn keycaps_style(ui: &egui::Ui) -> avilon_egui::KeyCapsStyle {
+    avilon_egui::KeyCapsStyle {
         font: egui::FontId::proportional(tokens::CAPTION),
         text_color: crate::theme_ui::color(
             ui.ctx(),
@@ -72,12 +72,12 @@ pub(super) fn keycaps_style(ui: &egui::Ui) -> garden_egui::KeyCapsStyle {
     }
 }
 pub(super) struct KeyCaps {
-    inner: garden_egui::KeyCaps,
+    inner: avilon_egui::KeyCaps,
     pub size: egui::Vec2,
 }
 impl KeyCaps {
     pub fn measure(ui: &egui::Ui, text: &str) -> Self {
-        let inner = garden_egui::KeyCaps::measure(ui, text, &keycaps_style(ui));
+        let inner = avilon_egui::KeyCaps::measure(ui, text, &keycaps_style(ui));
         Self {
             size: inner.size,
             inner,
@@ -85,7 +85,7 @@ impl KeyCaps {
     }
     #[cfg(test)]
     pub fn measure_fitting(ui: &egui::Ui, text: &str, max_width: f32) -> Self {
-        let inner = garden_egui::KeyCaps::measure_fitting(ui, text, max_width, &keycaps_style(ui));
+        let inner = avilon_egui::KeyCaps::measure_fitting(ui, text, max_width, &keycaps_style(ui));
         Self {
             size: inner.size,
             inner,

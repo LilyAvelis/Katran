@@ -1,8 +1,8 @@
-//! Katran styling adapter for reusable, presentation-only Garden rows.
+//! Katran styling adapter for reusable, presentation-only Avilon rows.
 #[cfg(test)]
 use crate::ui_style::KeyCaps;
+pub(super) use avilon_egui::{ActionPresentation, primary_shortcut};
 use eframe::egui::{self, Color32};
-pub(super) use garden_egui::{ActionPresentation, primary_shortcut};
 pub(super) struct ActionRow<'a>(ActionPresentation<'a>, Option<egui::TextureId>);
 pub(super) fn popup_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::popup(&ctx.style_of(egui::Theme::Dark))
@@ -28,14 +28,14 @@ impl<'a> ActionRow<'a> {
     }
     #[cfg(test)]
     fn shortcut_budget(width: f32) -> f32 {
-        garden_egui::ActionRow::shortcut_budget(width)
+        avilon_egui::ActionRow::shortcut_budget(width)
     }
     #[cfg(test)]
-    fn regions(row: egui::Rect, key_width: f32) -> garden_egui::RowRegions {
-        garden_egui::ActionRow::regions(row, key_width)
+    fn regions(row: egui::Rect, key_width: f32) -> avilon_egui::RowRegions {
+        avilon_egui::ActionRow::regions(row, key_width)
     }
     pub fn show(self, ui: &mut egui::Ui, selected: bool) -> egui::Response {
-        let style = garden_egui::ActionStyle {
+        let style = avilon_egui::ActionStyle {
             label_font: egui::TextStyle::Body.resolve(ui.style()),
             label_color: ui.visuals().text_color(),
             selection_fill: crate::theme_ui::color(
@@ -45,7 +45,7 @@ impl<'a> ActionRow<'a> {
             ),
             keycaps: crate::ui_style::keycaps_style(ui),
         };
-        garden_egui::ActionRow::new(self.0, style)
+        avilon_egui::ActionRow::new(self.0, style)
             .with_texture(self.1)
             .show(ui, selected)
     }
