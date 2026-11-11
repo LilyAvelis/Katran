@@ -327,7 +327,6 @@ impl Shelf {
             self.message = "Копирование в очереди".into();
         } else if self.api.is_some() {
             if self.start_job(Command::CopySelectedObjects, false, ctx.clone()) {
-                self.message = "Копирование выполняется…".into();
                 self.actions = false;
             }
         } else if self.job.is_some() {
@@ -476,9 +475,6 @@ impl Shelf {
                 }
                 _ => {}
             }
-        }
-        if r["backend"] == "quicklook" && r["requested"] == true {
-            self.message = "Запрос просмотра передан в QuickLook".into();
         }
         if r["cancelled"] == true {
             self.message = "Перетаскивание отменено".into();

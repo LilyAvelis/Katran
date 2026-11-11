@@ -183,9 +183,7 @@ impl TablePreview {
         });
         ui.separator();
         match &self.content {
-            None => {
-                ui.label("Загрузка таблицы…");
-            }
+            None => {},
             Some(Err(message)) => {
                 ui.label(message);
             }

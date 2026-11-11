@@ -235,9 +235,7 @@ impl TextPreview {
                 Some(Err(message)) => {
                     ui.label(message);
                 }
-                None => {
-                    ui.label("Загрузка текста…");
-                }
+                None => {},
             });
         ui.weak(if is_link {
             "Space — назад · ← → — листать"

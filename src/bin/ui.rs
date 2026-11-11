@@ -346,7 +346,6 @@ impl Shelf {
             && let Some(command) = self.take_queued_copy()
         {
             self.start_job(command, false, ctx.clone());
-            self.message = "Копирование выполняется…".into();
         }
         let dropped = ctx.input(|i| {
             i.raw
@@ -382,7 +381,6 @@ impl Shelf {
             && !self.info.is_open()
             && !self.pinned_ui.open
                 && !self.save
-                && self.state["settings_open"] != true
                 && self.pending_delete.is_empty()
             {
                 self.shortcuts =
@@ -393,6 +391,7 @@ impl Shelf {
                     .filter(|s| {
                         (!self.actions || s.id == "settings")
                             && (!self.open_apps.open || s.id == "open_with")
+                            && (self.state["settings_open"] != true || s.id == "copy")
                     })
                     .cloned()
                     .collect();
@@ -1817,6 +1816,47 @@ mod tests {
             cleanup_message(&serde_json::json!({"cleanup_pending": ["blocked"]}))
                 .contains("blocked")
         );
+    }
+    #[test]
+    fn settings_window_does_not_block_main_window_copy() {
+        struct Sink(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+        impl katran::text_fragments::ClipboardSink for Sink {
+            fn write(&self, text: &str) -> katran::Result<u32> {
+                self.0.lock().unwrap().push(text.into()); Ok(42)
+            }
+        }
+        struct Source;
+        impl katran::clipboard_files::Source for Source {
+            fn sequence(&self) -> u32 { 41 }
+            fn files(&self) -> katran::Result<Vec<PathBuf>> { Ok(vec![]) }
+        }
+        let root=tempfile::tempdir().unwrap(); let mut app=test_shelf(root.path());
+        let writes=std::sync::Arc::new(std::sync::Mutex::new(vec!["synthetic ShareX screenshot".to_owned()]));
+        app.api.as_mut().unwrap().set_text_clipboard_sink(Box::new(Sink(writes.clone())));
+        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(Source));
+        app.call(Command::SetTabEnabled{tab:katran::interaction::ShelfTab::Text,enabled:true});
+        let id=app.call(Command::IngestText{text:"selected text".into(),source:"test".into()})["id"].as_i64().unwrap();
+        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Text});app.refresh();
+        app.call(Command::SetVisible{ids:vec![id]});
+        app.call(Command::Select{id,mode:SelectionMode::Replace});
+        app.call(Command::ShowSettings);
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        frame(&mut app,&ctx,egui::Key::C,egui::Modifiers::CTRL);
+        assert_eq!(writes.lock().unwrap().last().unwrap(),"selected text", "message={} state={}",app.message,app.state);
+        assert_eq!(app.call(Command::Interaction)["settings_open"],true);
+        let count=writes.lock().unwrap().len();
+        let mut released=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::C,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::CTRL}],..Default::default()},|ui|app.render(ui));
+        released.textures_delta.clear();
+        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
+        frame(&mut app,&ctx,egui::Key::C,egui::Modifiers::CTRL);
+        assert_eq!(writes.lock().unwrap().len(),count,"text editing must own copy");
+    }
+    #[test]
+    fn quicklook_ack_does_not_replace_status_with_a_notification() {
+        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
+        app.message="existing result".into();
+        app.action_result(serde_json::json!({"backend":"quicklook","requested":true}));
+        assert_eq!(app.message,"existing result");
     }
     #[test]
     fn table_copy_status_reports_partial_formats_and_item_failure() {

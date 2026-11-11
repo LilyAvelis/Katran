@@ -33,9 +33,7 @@ impl Shelf {
             .map(friendly_path)
             .unwrap_or_else(|| "Выбрать папку".to_owned());
         let sort = sorting_ui::confirmation(&self.state["sort"]);
-        let status = if self.job.is_some() {
-            "Выполняется операция…".to_owned()
-        } else if self.message.is_empty() {
+        let status = if self.message.is_empty() {
             "Готово".to_owned()
         } else {
             self.message.clone()
