@@ -193,7 +193,7 @@ impl TablePreview {
             }
             Some(Ok(content)) => {
                 egui::ScrollArea::both()
-                    .max_height((ui.available_height() - 28.0).max(40.0))
+                    .max_height(ui.available_height().max(40.0))
                     .show(ui, |ui| {
                         ui.label(RichText::new(&content.csv).monospace().size(14.0));
                         if content.truncated {
@@ -202,7 +202,6 @@ impl TablePreview {
                     });
             }
         }
-        ui.weak("Space — назад · ← → — листать · колесо — масштаб · тащить — переместить · Ctrl+← — Таблица · Ctrl+→ — CSV");
     }
 }
 impl Drop for TablePreview {
@@ -318,7 +317,7 @@ fn show_grid(ui: &mut egui::Ui, table: &Table, api: &mut Service) {
     let (canvas, response) = ui.allocate_exact_size(
         egui::vec2(
             ui.available_width().max(1.0),
-            (ui.available_height() - 28.0).max(40.0),
+            ui.available_height().max(40.0),
         ),
         egui::Sense::click_and_drag(),
     );

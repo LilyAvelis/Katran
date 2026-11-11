@@ -22,6 +22,10 @@ pub trait ClipboardSink: Send {
 pub struct NativeClipboard;
 #[path = "text_clipboard.rs"]
 mod text_clipboard;
+#[cfg(windows)]
+pub(crate) fn verified_text_paste_sequence(expected: u32) -> Option<u32> {
+    text_clipboard::verified_sequence(expected)
+}
 impl ClipboardSink for NativeClipboard {
     fn write(&self, text: &str) -> Result<u32> {
         text_clipboard::write(text)

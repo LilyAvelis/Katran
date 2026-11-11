@@ -19,6 +19,7 @@ mod overlay_ui;
 mod palette;
 mod pinned_ui;
 mod pods_ui;
+mod preview_hints;
 mod restart_ui;
 mod settings_ui;
 mod shelf_view;
@@ -644,6 +645,8 @@ impl Shelf {
                     if selected > 0 {
                         ui.weak(format!("{selected} выбрано"));
                     }
+                    let hint_left = ui.cursor().left();
+                    let mut hint_right = hint_left;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let response = ui_style::actions_button(ui, self.actions);
                         ctx.data_mut(|data| {
@@ -662,11 +665,19 @@ impl Shelf {
                         ctx.data_mut(|d| {
                             d.insert_temp(egui::Id::new("sorting-button-rect"), sort.rect)
                         });
+                        hint_right = sort.rect.left() - 8.0;
                         if sort.clicked() {
                             self.actions = false;
                             self.sorting_input.open();
                         }
                     });
+                    if let Some(hint) = preview_hints::text(&self.state, &self.events) {
+                        let region = egui::Rect::from_min_max(
+                            egui::pos2(hint_left, ui.max_rect().top()),
+                            egui::pos2(hint_right.max(hint_left), ui.max_rect().bottom()),
+                        );
+                        preview_hints::paint(ui, region, hint);
+                    }
                 });
             });
         #[cfg(test)]

@@ -121,10 +121,13 @@ impl Service {
             .ok_or_else(|| {
                 ApiError::new("copy_unverified", "Нет подтверждения публикации в буфер")
             })? as u32;
-        let receipt = self
+        let delivery = self
             .overlay_session
-            .paste(self.overlay_host.as_mut(), owner, sequence)
-            .map_err(overlay_error)?;
+            .paste(self.overlay_host.as_mut(), owner, sequence);
+        if let Some(logger) = self.logger() {
+            logger.record("paste_delivery",json!({"expected_clipboard_sequence":sequence,"observed_clipboard_sequence":crate::capture::sequence_number(),"ok":delivery.is_ok(),"error_code":delivery.as_ref().err().map(|e|e.code.as_str())}));
+        }
+        let receipt = delivery.map_err(overlay_error)?;
         Ok(json!({"state":"sent","receipt":receipt,"copy":result}))
     }
 }

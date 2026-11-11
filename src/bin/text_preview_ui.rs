@@ -225,7 +225,7 @@ impl TextPreview {
         }
         ui.separator();
         egui::ScrollArea::vertical()
-            .max_height((ui.available_height() - 28.0).max(40.0))
+            .max_height(ui.available_height().max(40.0))
             .show(ui, |ui| match &self.content {
                 Some(Ok(text)) => {
                     if self.rendered
@@ -245,11 +245,6 @@ impl TextPreview {
                 }
                 None => {}
             });
-        ui.weak(if is_link {
-            "Space — назад · ← → — листать"
-        } else {
-            "Space — назад · ← → — листать · Ctrl+← — Markdown · Ctrl+→ — Исходный текст"
-        });
     }
 }
 impl Drop for TextPreview {

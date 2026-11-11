@@ -72,7 +72,15 @@ impl Shelf {
     ) {
         self.images.begin_frame();
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme_ui::color(ctx,theme_ui::Role::Background,Color32::TRANSPARENT)).inner_margin(12))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme_ui::color(
+                        ctx,
+                        theme_ui::Role::Background,
+                        Color32::TRANSPARENT,
+                    ))
+                    .inner_margin(12),
+            )
             .show(root, |ui| {
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
@@ -82,122 +90,213 @@ impl Shelf {
                                 let description = self.call(Command::DescribePod { id });
                                 self.pods_ui.set_description(id, revision, description);
                             }
-                            let description = self.pods_ui.description().cloned().unwrap_or(Value::Null);
+                            let description =
+                                self.pods_ui.description().cloned().unwrap_or(Value::Null);
                             let mut full_event = event.clone();
-                            if let Some(text) = description["text"].as_str() { full_event["text_preview"] = Value::String(text.to_owned()); }
+                            if let Some(text) = description["text"].as_str() {
+                                full_event["text_preview"] = Value::String(text.to_owned());
+                            }
                             let width = ui.available_width();
-                            let height = (ui.available_height()-30.0).max(32.0);
+                            let height = ui.available_height().max(32.0);
                             let layout = pods_preview_layout(width, height);
                             ui.vertical_centered(|ui| {
-                                let (canvas, _) = ui.allocate_exact_size(layout.canvas, egui::Sense::hover());
-                                #[cfg(test)] ctx.data_mut(|data|data.insert_temp(egui::Id::new("pod-preview-canvas"),canvas));
-                                self.pods_ui.paint(ui, &full_event, canvas);
-                                egui::ScrollArea::vertical().id_salt("pods-metadata").max_height(layout.metadata_height).show(ui, |ui| {
-                                    ui.set_width(width);
-                                    ui.vertical_centered(|ui| {
-                                        ui.heading(description["name"].as_str().unwrap_or("Pods"));
-                                        if description.is_null() { ui.label("Метаданные недоступны"); }
-                                        else {
-                                            ui.label(format!("UTF-8: {} байт · UTF-16: {}", description["utf8_bytes"], description["utf16_units"]));
-                                            if let Some(points)=description["codepoints"].as_array() { for point in points {
-                                                ui.label(format!("{} · {}",point["codepoint"].as_str().unwrap_or(""),point["name"].as_str().unwrap_or("")));
-                                                ui.weak(point["utf8"].as_str().unwrap_or(""));
-                                            }}
-                                            if description["metadata_truncated"]==true { ui.weak("Показана часть метаданных"); }
-                                        }
-                                    });
+                                let (canvas, _) =
+                                    ui.allocate_exact_size(layout.canvas, egui::Sense::hover());
+                                #[cfg(test)]
+                                ctx.data_mut(|data| {
+                                    data.insert_temp(egui::Id::new("pod-preview-canvas"), canvas)
                                 });
+                                self.pods_ui.paint(ui, &full_event, canvas);
+                                egui::ScrollArea::vertical()
+                                    .id_salt("pods-metadata")
+                                    .max_height(layout.metadata_height)
+                                    .show(ui, |ui| {
+                                        ui.set_width(width);
+                                        ui.vertical_centered(|ui| {
+                                            ui.heading(
+                                                description["name"].as_str().unwrap_or("Pods"),
+                                            );
+                                            if description.is_null() {
+                                                ui.label("Метаданные недоступны");
+                                            } else {
+                                                ui.label(format!(
+                                                    "UTF-8: {} байт · UTF-16: {}",
+                                                    description["utf8_bytes"],
+                                                    description["utf16_units"]
+                                                ));
+                                                if let Some(points) =
+                                                    description["codepoints"].as_array()
+                                                {
+                                                    for point in points {
+                                                        ui.label(format!(
+                                                            "{} · {}",
+                                                            point["codepoint"]
+                                                                .as_str()
+                                                                .unwrap_or(""),
+                                                            point["name"].as_str().unwrap_or("")
+                                                        ));
+                                                        ui.weak(
+                                                            point["utf8"].as_str().unwrap_or(""),
+                                                        );
+                                                    }
+                                                }
+                                                if description["metadata_truncated"] == true {
+                                                    ui.weak("Показана часть метаданных");
+                                                }
+                                            }
+                                        });
+                                    });
                             });
-                            ui.weak("Space — назад · ← → — листать");
-                        } else if event["kind"] == "table_fragment" { if let Some(api) = self.api.as_mut() { self.table_preview.show(ui,event,api); } } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) || katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or(""))) {
+                        } else if event["kind"] == "table_fragment" {
+                            if let Some(api) = self.api.as_mut() {
+                                self.table_preview.show(ui, event, api);
+                            }
+                        } else if matches!(
+                            event["kind"].as_str(),
+                            Some("text_fragment" | "link_fragment")
+                        ) || katran::file_types::is_markdown(std::path::Path::new(
+                            event["name"].as_str().unwrap_or(""),
+                        )) {
                             self.text_preview.show(ui, event);
                         } else {
-                        let width = ui.available_width();
-                        let height = ui.available_height();
-                        let (title, _) = ui.allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
-                        let name = event["name"].as_str().unwrap_or("Изображение");
-                        let mut job = egui::text::LayoutJob::simple_singleline(
-                            name.into(), egui::FontId::proportional(16.0), Color32::from_gray(235));
-                        job.wrap.max_width = title.width();
-                        job.wrap.max_rows = 1;
-                        job.wrap.overflow_character = Some('…');
-                        let galley = ui.fonts_mut(|f| f.layout_job(job));
-                        let position = title.center() - galley.size() / 2.0;
-                        ui.painter_at(title).galley(position, galley, Color32::from_gray(235));
-                        let (canvas, response) = ui.allocate_exact_size(
-                            Vec2::new(width, (height - 76.0).max(32.0)), egui::Sense::click_and_drag());
-                        let mut image_rect = None;
-                        let drag_id = response.id.with(("preview-drag", id));
-                        // Resolve the gesture even while a background job owns the API
-                        // or the preview texture is loading. Neither may enable export.
-                        let factor = self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
-                        let started = response.drag_started_by(egui::PointerButton::Primary);
-                        let intent = ctx.data_mut(|data| {
-                            let intent = latched_preview_drag(data.get_temp::<PreviewDrag>(drag_id), started, factor);
-                            if let Some(intent) = intent { data.insert_temp(drag_id, intent); }
-                            intent
-                        });
-                        let mut export_started = started && intent == Some(PreviewDrag::Export) && factor <= 1.0;
-                        if self.api.is_some() && let Some(size) = self.images.fitted_preview_size(event, canvas) {
-                            use katran::preview_view::{Point, Size};
-                            let viewport = Size { width: canvas.width(), height: canvas.height() };
-                            let fitted = Size { width: size.x, height: size.y };
-                            if response.hovered() {
-                                let (wheel, center_zoom, cursor) = ui.input(|i| (i.smooth_scroll_delta().y, i.zoom_delta(), i.pointer.hover_pos()));
-                                if wheel.abs() > 0.01 && let Some(cursor) = cursor {
-                                    self.state = self.call(Command::ZoomPreview {
-                                        multiplier: (wheel * 0.003).exp(),
-                                        anchor: Point { x: cursor.x - canvas.min.x, y: cursor.y - canvas.min.y }, viewport, fitted,
-                                    });
+                            let width = ui.available_width();
+                            let height = ui.available_height();
+                            let (title, _) = ui
+                                .allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
+                            let name = event["name"].as_str().unwrap_or("Изображение");
+                            let mut job = egui::text::LayoutJob::simple_singleline(
+                                name.into(),
+                                egui::FontId::proportional(16.0),
+                                Color32::from_gray(235),
+                            );
+                            job.wrap.max_width = title.width();
+                            job.wrap.max_rows = 1;
+                            job.wrap.overflow_character = Some('…');
+                            let galley = ui.fonts_mut(|f| f.layout_job(job));
+                            let position = title.center() - galley.size() / 2.0;
+                            ui.painter_at(title)
+                                .galley(position, galley, Color32::from_gray(235));
+                            let (canvas, response) = ui.allocate_exact_size(
+                                Vec2::new(width, (height - 40.0).max(32.0)),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let mut image_rect = None;
+                            let drag_id = response.id.with(("preview-drag", id));
+                            // Resolve the gesture even while a background job owns the API
+                            // or the preview texture is loading. Neither may enable export.
+                            let factor =
+                                self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
+                            let started = response.drag_started_by(egui::PointerButton::Primary);
+                            let intent = ctx.data_mut(|data| {
+                                let intent = latched_preview_drag(
+                                    data.get_temp::<PreviewDrag>(drag_id),
+                                    started,
+                                    factor,
+                                );
+                                if let Some(intent) = intent {
+                                    data.insert_temp(drag_id, intent);
                                 }
-                                if (center_zoom - 1.0).abs() > 0.001 {
-                                    self.state = self.call(Command::ZoomPreview {
-                                        multiplier: center_zoom,
-                                        anchor: Point { x: viewport.width / 2.0, y: viewport.height / 2.0 }, viewport, fitted,
+                                intent
+                            });
+                            let mut export_started =
+                                started && intent == Some(PreviewDrag::Export) && factor <= 1.0;
+                            if self.api.is_some()
+                                && let Some(size) = self.images.fitted_preview_size(event, canvas)
+                            {
+                                use katran::preview_view::{Point, Size};
+                                let viewport = Size {
+                                    width: canvas.width(),
+                                    height: canvas.height(),
+                                };
+                                let fitted = Size {
+                                    width: size.x,
+                                    height: size.y,
+                                };
+                                if response.hovered() {
+                                    let (wheel, center_zoom, cursor) = ui.input(|i| {
+                                        (
+                                            i.smooth_scroll_delta().y,
+                                            i.zoom_delta(),
+                                            i.pointer.hover_pos(),
+                                        )
                                     });
+                                    if wheel.abs() > 0.01
+                                        && let Some(cursor) = cursor
+                                    {
+                                        self.state = self.call(Command::ZoomPreview {
+                                            multiplier: (wheel * 0.003).exp(),
+                                            anchor: Point {
+                                                x: cursor.x - canvas.min.x,
+                                                y: cursor.y - canvas.min.y,
+                                            },
+                                            viewport,
+                                            fitted,
+                                        });
+                                    }
+                                    if (center_zoom - 1.0).abs() > 0.001 {
+                                        self.state = self.call(Command::ZoomPreview {
+                                            multiplier: center_zoom,
+                                            anchor: Point {
+                                                x: viewport.width / 2.0,
+                                                y: viewport.height / 2.0,
+                                            },
+                                            viewport,
+                                            fitted,
+                                        });
+                                    }
+                                }
+                                let factor =
+                                    self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
+                                export_started &= factor <= 1.0;
+                                let primary_pan = response.dragged_by(egui::PointerButton::Primary)
+                                    && intent == Some(PreviewDrag::Pan);
+                                let middle_pan = response.dragged_by(egui::PointerButton::Middle);
+                                if let Some(command) = preview_pan_command(
+                                    primary_pan,
+                                    middle_pan,
+                                    ctx.input(|i| i.pointer.delta()),
+                                    viewport,
+                                    fitted,
+                                ) {
+                                    self.state = self.call(command);
+                                }
+                                if primary_pan || middle_pan {
+                                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                                } else if response.hovered()
+                                    && preview_drag(factor) == PreviewDrag::Pan
+                                {
+                                    ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                                }
+                                let geometry =
+                                    self.call(Command::PreviewGeometry { viewport, fitted });
+                                if let (Some(left), Some(top), Some(width), Some(height)) = (
+                                    geometry["left"].as_f64(),
+                                    geometry["top"].as_f64(),
+                                    geometry["width"].as_f64(),
+                                    geometry["height"].as_f64(),
+                                ) {
+                                    image_rect = Some(egui::Rect::from_min_size(
+                                        canvas.min + Vec2::new(left as f32, top as f32),
+                                        Vec2::new(width as f32, height as f32),
+                                    ));
                                 }
                             }
-                            let factor = self.state["preview_view"]["factor"].as_f64().unwrap_or(1.0);
-                            export_started &= factor <= 1.0;
-                            let primary_pan = response.dragged_by(egui::PointerButton::Primary)
-                                && intent == Some(PreviewDrag::Pan);
-                            let middle_pan = response.dragged_by(egui::PointerButton::Middle);
-                            if let Some(command) = preview_pan_command(primary_pan, middle_pan, ctx.input(|i| i.pointer.delta()), viewport, fitted) {
-                                self.state = self.call(command);
+                            if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
+                                ctx.data_mut(|data| data.remove::<PreviewDrag>(drag_id));
                             }
-                            if primary_pan || middle_pan {
-                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                            } else if response.hovered() && preview_drag(factor) == PreviewDrag::Pan {
-                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                            self.images.paint_preview(ui, event, canvas, image_rect);
+                            if export_started {
+                                self.start_drag(vec![id], ctx);
                             }
-                            let geometry = self.call(Command::PreviewGeometry { viewport, fitted });
-                            if let (Some(left), Some(top), Some(width), Some(height)) = (
-                                geometry["left"].as_f64(), geometry["top"].as_f64(), geometry["width"].as_f64(), geometry["height"].as_f64()) {
-                                image_rect = Some(egui::Rect::from_min_size(canvas.min + Vec2::new(left as f32, top as f32), Vec2::new(width as f32, height as f32)));
+                            if let Some(index) = visible.iter().position(|e| e["id"] == id) {
+                                let neighbors = [
+                                    index.checked_sub(1),
+                                    index.checked_add(1).filter(|n| *n < visible.len()),
+                                ];
+                                for neighbor in neighbors.into_iter().flatten() {
+                                    self.images.prefetch(ctx, &visible[neighbor], 1400);
+                                }
                             }
-                        }
-                        if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
-                            ctx.data_mut(|data| data.remove::<PreviewDrag>(drag_id));
-                        }
-                        self.images.paint_preview(ui, event, canvas, image_rect);
-                        if export_started {
-                            self.start_drag(vec![id], ctx);
-                        }
-                        ui.vertical_centered(|ui| {
-                            let zoomed = self.state["preview_view"]["factor"].as_f64().is_some_and(|factor| factor > 1.0);
-                            let hint = if zoomed {
-                                "ЛКМ — сдвиг · Space — назад · ← → — листать"
-                            } else {
-                                "Тащить — экспорт · колесо — увеличить · Space — назад · ← → — листать"
-                            };
-                            ui.weak(hint).on_hover_text("Колесо приближает к курсору, Ctrl+колесо — к центру. Увеличенное изображение можно двигать левой или средней кнопкой мыши.");
-                        });
-                        if let Some(index) = visible.iter().position(|e| e["id"] == id) {
-                            let neighbors = [index.checked_sub(1), index.checked_add(1).filter(|n| *n < visible.len())];
-                            for neighbor in neighbors.into_iter().flatten() {
-                                self.images.prefetch(ctx, &visible[neighbor], 1400);
-                            }
-                        }
                         }
                     }
                 } else {
@@ -211,7 +310,11 @@ impl Shelf {
                     ui.spacing_mut().item_spacing = Vec2::splat(gap);
                     let pods = self.state["tab"] == "pods";
                     let cell_width = if pods {
-                        f32::from(self.pods_tile_size).min(((ui.available_width() - 16.0 - gap * (columns - 1) as f32) / columns as f32).max(1.0))
+                        f32::from(self.pods_tile_size).min(
+                            ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
+                                / columns as f32)
+                                .max(1.0),
+                        )
                     } else if gallery {
                         ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
                             / columns as f32)
@@ -219,7 +322,11 @@ impl Shelf {
                     } else {
                         (ui.available_width() - 16.0).max(80.0)
                     };
-                    let height = if pods { cell_width } else if gallery { cell_width + 54.0 } else {
+                    let height = if pods {
+                        cell_width
+                    } else if gallery {
+                        cell_width + 54.0
+                    } else {
                         stream_row_height(ui.available_height(), self.stream_rows, gap)
                     };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
@@ -247,7 +354,8 @@ impl Shelf {
                                     .take(((row + 1) * columns).min(visible.len()))
                                     .skip(row * columns)
                                 {
-                                    let criterion=sorting_ui::criterion(event,&self.state["sort"]);
+                                    let criterion =
+                                        sorting_ui::criterion(event, &self.state["sort"]);
                                     let id = event["id"].as_i64().unwrap();
                                     let selected = self.state["selected"]
                                         .as_array()
@@ -258,27 +366,73 @@ impl Shelf {
                                         egui::Sense::click_and_drag(),
                                     );
                                     #[cfg(test)]
-                                    if pods { ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-pod-tile-rect"), rect)); }
+                                    if pods {
+                                        ctx.data_mut(|data| {
+                                            data.insert_temp(
+                                                egui::Id::new("test-pod-tile-rect"),
+                                                rect,
+                                            )
+                                        });
+                                    }
                                     ui.painter().rect_filled(
                                         rect,
                                         8.0,
-                                        theme_ui::color(ctx,if selected {theme_ui::Role::Selection}else{theme_ui::Role::Surface},Color32::from_gray(if selected {74}else{46})),
+                                        theme_ui::color(
+                                            ctx,
+                                            if selected {
+                                                theme_ui::Role::Selection
+                                            } else {
+                                                theme_ui::Role::Surface
+                                            },
+                                            Color32::from_gray(if selected { 74 } else { 46 }),
+                                        ),
                                     );
                                     theme_ui::paint_optical(ui, rect, 8.0);
                                     if cursor {
                                         ui.painter().rect_stroke(
                                             rect,
                                             8.0,
-                                            egui::Stroke::new(1.5, theme_ui::color(ctx,theme_ui::Role::Accent,Color32::from_gray(180))),
+                                            egui::Stroke::new(
+                                                1.5,
+                                                theme_ui::color(
+                                                    ctx,
+                                                    theme_ui::Role::Accent,
+                                                    Color32::from_gray(180),
+                                                ),
+                                            ),
                                             egui::StrokeKind::Inside,
                                         );
                                     }
                                     if pods {
-                                        self.pods_ui.paint(ui,event,rect.shrink(6.0));
+                                        self.pods_ui.paint(ui, event, rect.shrink(6.0));
                                     } else if gallery {
                                         let zones = gallery_card::geometry(rect);
-                                        if self.state["tab"] == "pods" { self.pods_ui.paint(ui,event,zones.image); } else if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,zones.image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, zones.image); } else { self.images.paint_at(ui, event, zones.image, 512); }
-                                        let title = if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() };
+                                        if self.state["tab"] == "pods" {
+                                            self.pods_ui.paint(ui, event, zones.image);
+                                        } else if event["kind"] == "table_fragment" {
+                                            table_preview_ui::paint_card(ui, event, zones.image);
+                                        } else if matches!(
+                                            event["kind"].as_str(),
+                                            Some("text_fragment" | "link_fragment")
+                                        ) {
+                                            text_preview_ui::paint_card(ui, event, zones.image);
+                                        } else {
+                                            self.images.paint_at(ui, event, zones.image, 512);
+                                        }
+                                        let title = if let Some(name) =
+                                            event["properties"]["display_name"].as_str()
+                                        {
+                                            name.to_owned()
+                                        } else if event["kind"] == "table_fragment" {
+                                            table_preview_ui::card_title(event)
+                                        } else if matches!(
+                                            event["kind"].as_str(),
+                                            Some("text_fragment" | "link_fragment")
+                                        ) {
+                                            text_preview_ui::card_title(event)
+                                        } else {
+                                            event["name"].as_str().unwrap_or("Файл").to_owned()
+                                        };
                                         gallery_card::text(
                                             ui,
                                             zones.name,
@@ -289,12 +443,27 @@ impl Shelf {
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
-                                        let origin_label = origin.label().unwrap_or_else(|| "Источник не определён".into());
-                                        let label = criterion.as_ref().map_or_else(||origin_label.clone(),|criterion|if self.state["sort"]["mode"]=="origin" {criterion.clone()}else{format!("{criterion} · {origin_label}")});
+                                        let origin_label = origin
+                                            .label()
+                                            .unwrap_or_else(|| "Источник не определён".into());
+                                        let label = criterion.as_ref().map_or_else(
+                                            || origin_label.clone(),
+                                            |criterion| {
+                                                if self.state["sort"]["mode"] == "origin" {
+                                                    criterion.clone()
+                                                } else {
+                                                    format!("{criterion} · {origin_label}")
+                                                }
+                                            },
+                                        );
                                         ui.painter_at(zones.origin).rect_filled(
                                             zones.origin,
                                             4.0,
-                                            theme_ui::color(ctx,theme_ui::Role::Raised,Color32::from_gray(55)),
+                                            theme_ui::color(
+                                                ctx,
+                                                theme_ui::Role::Raised,
+                                                Color32::from_gray(55),
+                                            ),
                                         );
                                         gallery_card::text(
                                             ui,
@@ -307,17 +476,46 @@ impl Shelf {
                                         let image_height = (rect.height() - 20.0).max(1.0);
                                         let image = egui::Rect::from_min_size(
                                             rect.min + Vec2::splat(10.0),
-                                            Vec2::new((image_height * 1.4667).min(176.0), image_height),
+                                            Vec2::new(
+                                                (image_height * 1.4667).min(176.0),
+                                                image_height,
+                                            ),
                                         );
-                                        if self.state["tab"] == "pods" { self.pods_ui.paint(ui,event,image); } else if event["kind"] == "table_fragment" { table_preview_ui::paint_card(ui,event,image); } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::paint_card(ui, event, image); } else { self.images.paint_at(ui, event, image, 320); }
+                                        if self.state["tab"] == "pods" {
+                                            self.pods_ui.paint(ui, event, image);
+                                        } else if event["kind"] == "table_fragment" {
+                                            table_preview_ui::paint_card(ui, event, image);
+                                        } else if matches!(
+                                            event["kind"].as_str(),
+                                            Some("text_fragment" | "link_fragment")
+                                        ) {
+                                            text_preview_ui::paint_card(ui, event, image);
+                                        } else {
+                                            self.images.paint_at(ui, event, image, 320);
+                                        }
                                         let left = image.right() + 16.0;
                                         let width = (rect.right() - left - 10.0).max(1.0);
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
                                         let lines = [
-                                            if let Some(name) = event["properties"]["display_name"].as_str() { name.to_owned() } else if event["kind"] == "table_fragment" { table_preview_ui::card_title(event) } else if matches!(event["kind"].as_str(),Some("text_fragment"|"link_fragment")) { text_preview_ui::card_title(event) } else { event["name"].as_str().unwrap_or("Файл").to_owned() },
-                                            criterion.clone().unwrap_or_else(||event["source"].as_str().unwrap_or("").to_owned()),
+                                            if let Some(name) =
+                                                event["properties"]["display_name"].as_str()
+                                            {
+                                                name.to_owned()
+                                            } else if event["kind"] == "table_fragment" {
+                                                table_preview_ui::card_title(event)
+                                            } else if matches!(
+                                                event["kind"].as_str(),
+                                                Some("text_fragment" | "link_fragment")
+                                            ) {
+                                                text_preview_ui::card_title(event)
+                                            } else {
+                                                event["name"].as_str().unwrap_or("Файл").to_owned()
+                                            },
+                                            criterion.clone().unwrap_or_else(|| {
+                                                event["source"].as_str().unwrap_or("").to_owned()
+                                            }),
                                             origin
                                                 .label()
                                                 .unwrap_or_else(|| "Источник не определён".into()),
@@ -331,7 +529,11 @@ impl Shelf {
                                             .to_owned(),
                                         ];
                                         for (index, line) in lines.iter().enumerate() {
-                                            if rect.top() + 12.0 + index as f32 * 28.0 + 24.0 > rect.bottom() { break; }
+                                            if rect.top() + 12.0 + index as f32 * 28.0 + 24.0
+                                                > rect.bottom()
+                                            {
+                                                break;
+                                            }
                                             let r = egui::Rect::from_min_size(
                                                 egui::pos2(
                                                     left,
@@ -352,7 +554,15 @@ impl Shelf {
                                             );
                                         }
                                     }
-                                    if event["properties"]["pinned"] == true { ui.painter().text(rect.right_top() + egui::vec2(-8.0, 8.0), egui::Align2::RIGHT_TOP, "•", egui::FontId::proportional(22.0), Color32::from_rgb(224,188,127)); }
+                                    if event["properties"]["pinned"] == true {
+                                        ui.painter().text(
+                                            rect.right_top() + egui::vec2(-8.0, 8.0),
+                                            egui::Align2::RIGHT_TOP,
+                                            "•",
+                                            egui::FontId::proportional(22.0),
+                                            Color32::from_rgb(224, 188, 127),
+                                        );
+                                    }
                                     let origin: katran::origin::Origin =
                                         serde_json::from_value(event["origin"].clone())
                                             .unwrap_or_default();
@@ -367,11 +577,16 @@ impl Shelf {
                                     if response.drag_started() {
                                         if !selected {
                                             self.state = self.call(Command::Select {
-                                                id, mode: katran::interaction::SelectionMode::Replace,
+                                                id,
+                                                mode: katran::interaction::SelectionMode::Replace,
                                             });
                                         }
-                                        let ids = self.state["selected"].as_array().into_iter()
-                                            .flatten().filter_map(Value::as_i64).collect();
+                                        let ids = self.state["selected"]
+                                            .as_array()
+                                            .into_iter()
+                                            .flatten()
+                                            .filter_map(Value::as_i64)
+                                            .collect();
                                         self.start_drag(ids, ctx);
                                     }
                                     if response.clicked() || response.double_clicked() {
@@ -380,7 +595,11 @@ impl Shelf {
                                             mode: mode(ctx.input(|i| i.modifiers)),
                                         });
                                         if response.double_clicked() {
-                                            self.start_job(Command::RunAction { id: "open".into() }, false, ctx.clone());
+                                            self.start_job(
+                                                Command::RunAction { id: "open".into() },
+                                                false,
+                                                ctx.clone(),
+                                            );
                                         }
                                     }
                                 }

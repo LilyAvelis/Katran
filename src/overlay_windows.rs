@@ -135,13 +135,26 @@ mod native {
             Ok(())
         }
         fn send_paste(&mut self, expected: Target, expected_sequence: u32) -> Result<()> {
+            let current = crate::capture::sequence_number();
+            let verified = if expected_sequence != 0 && current == expected_sequence {
+                Some(current)
+            } else {
+                crate::text_fragments::verified_text_paste_sequence(expected_sequence)
+            };
+            if verified.is_none() || crate::capture::sequence_number() != verified.unwrap() {
+                return Err(fail(
+                    "clipboard_changed",
+                    "Clipboard changed before pasting",
+                ));
+            }
             if self.foreground()? != expected.hwnd || self.identity(expected.hwnd)? != expected {
                 return Err(fail(
                     "foreground_changed",
                     "Previous application lost foreground",
                 ));
             }
-            if expected_sequence == 0 || crate::capture::sequence_number() != expected_sequence {
+            // Identity checking can take time; check the clipboard again immediately before input.
+            if crate::capture::sequence_number() != verified.unwrap() {
                 return Err(fail(
                     "clipboard_changed",
                     "Clipboard changed before pasting",
