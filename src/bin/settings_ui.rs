@@ -392,7 +392,9 @@ impl State {
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,"Оптика элементов · GPU","Преломление фона под карточками и меню. Нужен фон с лилиями или собственное изображение. 0 — выключено.",|ui|{
-            if ui.add(egui::Slider::new(&mut theme.optical_strength,0..=100).text("Сила")).changed(){theme_intent=Some(theme.clone());}
+            let mut enabled=theme.optical_strength>0;
+            if ui.checkbox(&mut enabled,"Включить оптику элементов").changed(){theme.optical_strength=if enabled {65}else{0};theme_intent=Some(theme.clone());}
+            if enabled && ui.add(egui::Slider::new(&mut theme.optical_strength,1..=100).text("Сила")).changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
