@@ -53,6 +53,7 @@ impl SettingsControl {
         ui.spacing_mut().interact_size.y = tokens::CONTROL_HEIGHT;
         ui.spacing_mut().button_padding = egui::vec2(tokens::SM, tokens::SM);
         ui.spacing_mut().text_edit_width = ui.available_width().min(240.0);
+        ui.spacing_mut().slider_width = (ui.available_width() - 100.0).clamp(48.0, 150.0);
         ui.horizontal_wrapped(|ui| {
             ui.set_min_height(tokens::CONTROL_HEIGHT);
             content(ui);

@@ -30,6 +30,7 @@ fn theme_is_optional_persistent_and_does_not_change_behavior_preferences() {
         glass: false,
         compact_header: false,
         optical_strength: 0,
+        ..Default::default()
     };
     call(
         &mut api,
@@ -380,4 +381,82 @@ fn optical_strength_is_optional_bounded_and_persistent() {
         call(&mut api, Command::Themes)["current"]["optical_strength"],
         45
     );
+}
+
+#[test]
+fn optical_components_default_validate_and_persist_independently() {
+    let legacy: ThemePreferences =
+        serde_json::from_value(serde_json::json!({"optical_strength":40})).unwrap();
+    assert_eq!(
+        (
+            legacy.optical_refraction,
+            legacy.optical_blur,
+            legacy.optical_highlight,
+            legacy.optical_chromatic
+        ),
+        (100, 100, 100, 100)
+    );
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let theme = ThemePreferences {
+        optical_strength: 70,
+        optical_refraction: 0,
+        optical_blur: 57,
+        optical_highlight: 125,
+        optical_chromatic: 200,
+        ..Default::default()
+    };
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    let original = call(&mut api, Command::Themes)["current"].clone();
+    for bad in [
+        ThemePreferences {
+            optical_refraction: 201,
+            ..theme.clone()
+        },
+        ThemePreferences {
+            optical_blur: 201,
+            ..theme.clone()
+        },
+        ThemePreferences {
+            optical_highlight: 201,
+            ..theme.clone()
+        },
+        ThemePreferences {
+            optical_chromatic: 201,
+            ..theme.clone()
+        },
+    ] {
+        let reply = api.execute(Request {
+            api_version: 1,
+            request_id: "invalid-optics".into(),
+            command: Command::SetTheme { theme: bad },
+        });
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(call(&mut api, Command::Themes)["current"], original);
+    }
+    let mut off = theme.clone();
+    off.optical_strength = 0;
+    call(&mut api, Command::SetTheme { theme: off });
+    drop(api);
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let off = call(&mut api, Command::Themes)["current"].clone();
+    assert_eq!(off["optical_strength"], 0);
+    assert_eq!(off["optical_refraction"], 0);
+    assert_eq!(off["optical_blur"], 57);
+    assert_eq!(off["optical_highlight"], 125);
+    assert_eq!(off["optical_chromatic"], 200);
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    drop(api);
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    assert_eq!(call(&mut api, Command::Themes)["current"], original);
 }

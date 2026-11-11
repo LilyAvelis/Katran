@@ -18,6 +18,10 @@ pub struct ThemePreferences {
     pub glass: bool,
     pub compact_header: bool,
     pub optical_strength: u8,
+    pub optical_refraction: u8,
+    pub optical_blur: u8,
+    pub optical_highlight: u8,
+    pub optical_chromatic: u8,
 }
 impl Default for ThemePreferences {
     fn default() -> Self {
@@ -30,6 +34,10 @@ impl Default for ThemePreferences {
             glass: false,
             compact_header: true,
             optical_strength: 0,
+            optical_refraction: 100,
+            optical_blur: 100,
+            optical_highlight: 100,
+            optical_chromatic: 100,
         }
     }
 }

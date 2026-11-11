@@ -72,6 +72,64 @@ fn apply_global_hotkey(
         false
     }
 }
+fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
+    let mut changed = false;
+    let mut enabled = theme.optical_strength > 0;
+    SettingsRow::show(
+        ui,
+        "Оптика элементов · GPU",
+        "Преломление фона под карточками и меню. Нужны лилии или собственный фон.",
+        |ui| {
+            if ui.checkbox(&mut enabled, "Включить").changed() {
+                theme.optical_strength = if enabled { 65 } else { 0 };
+                changed = true;
+            }
+        },
+    );
+    if enabled {
+        for (title, description, value, max) in [
+            (
+                "Сила эффекта",
+                "Общая выраженность оптики.",
+                &mut theme.optical_strength,
+                100,
+            ),
+            (
+                "Преломление",
+                "Искажение фона у краёв элемента.",
+                &mut theme.optical_refraction,
+                200,
+            ),
+            (
+                "Размытие",
+                "Мягкость фона внутри стекла.",
+                &mut theme.optical_blur,
+                200,
+            ),
+            (
+                "Краевые блики",
+                "Яркость направленного света на границах.",
+                &mut theme.optical_highlight,
+                200,
+            ),
+            (
+                "Разделение цветов",
+                "Цветовые края преломления.",
+                &mut theme.optical_chromatic,
+                200,
+            ),
+        ] {
+            SettingsRow::show(ui, title, description, |ui| {
+                changed |= ui
+                    .add(
+                        egui::Slider::new(value, if max == 100 { 1 } else { 0 }..=max).suffix(" %"),
+                    )
+                    .changed();
+            });
+        }
+    }
+    changed
+}
 fn call(api: &mut Service, command: Command) -> serde_json::Value {
     api.execute(Request {
         api_version: 1,
@@ -288,7 +346,7 @@ impl State {
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
-     egui::ScrollArea::vertical().show(ui,|ui|{
+     egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui|{
       if self.section==0 {
        ui.heading("Основные");ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
@@ -391,23 +449,19 @@ impl State {
            SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Оптика элементов · GPU","Преломление фона под карточками и меню. Нужен фон с лилиями или собственное изображение. 0 — выключено.",|ui|{
-            let mut enabled=theme.optical_strength>0;
-            if ui.checkbox(&mut enabled,"Включить оптику элементов").changed(){theme.optical_strength=if enabled {65}else{0};theme_intent=Some(theme.clone());}
-            if enabled && ui.add(egui::Slider::new(&mut theme.optical_strength,1..=100).text("Сила")).changed(){theme_intent=Some(theme.clone());}
-           });
+           if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
             for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Собственные фоны","Копия сохраняется в Katran. Пресеты лилий остаются доступны.",|ui|{
             let list=self.custom_backgrounds.get_or_insert_with(||call(api,Command::ListThemeBackgrounds)).clone();
-            egui::ComboBox::from_id_salt("custom-background-picker").selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
+            egui::ComboBox::from_id_salt("custom-background-picker").width(180.0_f32.min(ui.available_width())).selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
              for item in list["result"]["backgrounds"].as_array().into_iter().flatten(){
               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme_intent=Some(theme.clone());}
              }
             });
-            if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать из папки…")).clicked(){
+            if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать файл…")).clicked(){
                 match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
            });
@@ -599,6 +653,7 @@ mod tests {
             glass: false,
             compact_header: false,
             optical_strength: 0,
+            ..Default::default()
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =
@@ -746,5 +801,60 @@ mod tests {
         };
         assert!(state.take_overlay_retry());
         assert!(!state.take_overlay_retry());
+    }
+}
+#[cfg(test)]
+mod optical_layout_tests {
+    use super::*;
+    #[test]
+    fn optical_options_fit_and_are_hidden_when_disabled() {
+        for scale in [1.0, 1.5, 2.0] {
+            for width in [320.0, 580.0, 900.0] {
+                for enabled in [false, true] {
+                    let ctx = egui::Context::default();
+                    ctx.set_pixels_per_point(scale);
+                    super::super::ui_style::install(&ctx);
+                    let mut theme = katran::theme::ThemePreferences {
+                        optical_strength: if enabled { 65 } else { 0 },
+                        ..Default::default()
+                    };
+                    let mut allocated = egui::Rect::NOTHING;
+                    let mut boundary = egui::Rect::NOTHING;
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width + 32.0, 1600.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            ui.set_width(width);
+                            ui.set_max_width(width);
+                            boundary = ui.max_rect();
+                            optical_settings(ui, &mut theme);
+                            allocated = ui.min_rect();
+                        },
+                    );
+                    output.textures_delta.clear();
+                    assert!(
+                        allocated.right() <= boundary.right() + 1.0,
+                        "width={width}, scale={scale}: {allocated:?} exceeds {boundary:?}"
+                    );
+                    for title in [
+                        "Сила эффекта",
+                        "Преломление",
+                        "Размытие",
+                        "Краевые блики",
+                        "Разделение цветов",
+                    ] {
+                        let visible = output.shapes.iter().any(
+                            |s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()==title),
+                        );
+                        assert_eq!(visible, enabled, "{title}, width={width}, scale={scale}");
+                    }
+                }
+            }
+        }
     }
 }

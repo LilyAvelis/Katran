@@ -65,3 +65,18 @@ runs. Do not use this demo profile as the production launcher/data directory.
 Verification: theme API9 tests; existing113 UI/headless tests; additional callback
 emission gate checks opt-in + background + GPU-host availability and Standard
 fallback. UI-bin Clippy passed. The GPU image itself is not tested by those checks.
+
+## Optical controls and settings layout ·2026-11-11
+
+Owner accepted the native GPU appearance, including the distinct Sort modal.
+Preserve Actions/Sort backdrop differences. Blue now shows the strength,
+refraction, blur, edge highlights and chromatic controls only while optical glass
+is enabled. The four component controls use0..200%, with100% preserving the
+previous accepted shader constants. They persist independently and remain saved
+when the effect is disabled. Main strength remains0..100.
+
+Each control uses a separate responsive SettingsRow; sliders receive bounded
+track widths, background selection has a bounded combo, and the body scrolls
+vertically without horizontal expansion. API10 and UI115/headless tests passed;
+a new layout test covers widths320/580/900 at1/1.5/2x and hidden controls. UI-bin
+Clippy passed. These tests do not replace owner review of the resulting settings.

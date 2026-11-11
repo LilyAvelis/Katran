@@ -31,13 +31,13 @@ pub(super) fn destroy(gl: &glow::Context) {
 /// The supplied texture and mapping must represent an application-owned background;
 /// this does not capture or read the desktop or framebuffer.
 pub(super) fn shape(
-    _ctx: &egui::Context,
     rect: egui::Rect,
     source_texture: egui::TextureId,
     background_rect: egui::Rect,
     background_uv: egui::Rect,
     radius: f32,
     strength: f32,
+    adjustments: [f32; 4],
 ) -> egui::Shape {
     if !rect.is_finite()
         || !background_rect.is_finite()
@@ -48,6 +48,12 @@ pub(super) fn shape(
         || !radius.is_finite()
         || !strength.is_finite()
         || strength <= 0.0
+    {
+        return egui::Shape::Noop;
+    }
+    if adjustments
+        .iter()
+        .any(|x| !x.is_finite() || !(0.0..=2.0).contains(x))
     {
         return egui::Shape::Noop;
     }
@@ -119,6 +125,13 @@ pub(super) fn shape(
                     radius.max(0.0).min(rect.width().min(rect.height()) * 0.5),
                 );
                 gl.uniform_1_f32(uniform("strength").as_ref(), strength.clamp(0.0, 1.0));
+                gl.uniform_4_f32(
+                    uniform("optics").as_ref(),
+                    adjustments[0],
+                    adjustments[1],
+                    adjustments[2],
+                    adjustments[3],
+                );
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
                 gl.bind_texture(
                     glow::TEXTURE_2D,
@@ -181,6 +194,7 @@ const FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D image;
 uniform vec4 viewport, lens, background, uv_rect;
 uniform float radius, strength;
+uniform vec4 optics;
 out vec4 color;
 vec2 uv_at(vec2 p) {
     vec2 uv = uv_rect.xy + ((p-background.xy)/background.zw)*(uv_rect.zw-uv_rect.xy);
@@ -199,18 +213,18 @@ void main() {
     else if(q.x>q.y) normal = vec2(sign(delta.x),0.0);
     else normal = vec2(0.0,sign(delta.y));
     float edge = clamp(1.0+d/max(1.0,min(lens.z,lens.w)*0.12),0.0,1.0);
-    float shift = strength*12.0*edge*edge;
+    float shift = strength*12.0*edge*edge*optics.x;
     vec2 sample_p = p-normal*shift;
-    float blur = strength*1.25;
+    float blur = strength*1.25*optics.y;
     vec4 c = texture(image,uv_at(sample_p))*0.4;
     c += texture(image,uv_at(sample_p+vec2(blur,0)))*0.15;
     c += texture(image,uv_at(sample_p-vec2(blur,0)))*0.15;
     c += texture(image,uv_at(sample_p+vec2(0,blur)))*0.15;
     c += texture(image,uv_at(sample_p-vec2(0,blur)))*0.15;
-    float chroma = shift*0.08;
+    float chroma = shift*0.08*optics.w;
     c.r = texture(image,uv_at(sample_p-normal*chroma)).r;
     c.b = texture(image,uv_at(sample_p+normal*chroma)).b;
-    float shine = strength*0.18*pow(edge,4.0)*max(dot(normal,normalize(vec2(-1.0,-1.0))),0.0);
+    float shine = strength*0.18*optics.z*pow(edge,4.0)*max(dot(normal,normalize(vec2(-1.0,-1.0))),0.0);
     c.rgb = min(mix(c.rgb,vec3(c.a),shine),vec3(c.a));
     color = c;
 }"#;

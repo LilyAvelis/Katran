@@ -2434,6 +2434,7 @@ mod tests {
                 glass: false,
                 compact_header: false,
                 optical_strength: 0,
+                ..Default::default()
             },
         });
         let blue = visible_landmarks(&mut app, &ctx);

@@ -345,6 +345,7 @@ mod tests {
                 glass: false,
                 compact_header: false,
                 optical_strength: 0,
+                ..Default::default()
             },
         );
         let mut blue = ctx.run_ui(egui::RawInput::default(), |ui| decorate(ui, bounds));
@@ -371,6 +372,7 @@ mod tests {
             glass: false,
             compact_header: false,
             optical_strength: 0,
+            ..Default::default()
         };
         apply(&ctx, &first);
         let blue = ctx.style_of(egui::Theme::Dark);
@@ -447,6 +449,7 @@ mod tests {
             glass: false,
             compact_header: false,
             optical_strength: 0,
+            ..Default::default()
         };
         apply(&ctx, &blue);
         assert_eq!(
@@ -503,13 +506,19 @@ pub(super) fn optical_shape(
     }?;
     let background = ctx.content_rect();
     Some(crate::optical_gpu::shape(
-        ctx,
         rect,
         texture.id(),
         background,
         cover_uv(background.size(), texture.size_vec2()),
         radius,
         f32::from(theme.optical_strength) / 100.0,
+        [
+            theme.optical_refraction,
+            theme.optical_blur,
+            theme.optical_highlight,
+            theme.optical_chromatic,
+        ]
+        .map(|n| f32::from(n) / 100.0),
     ))
 }
 pub(super) fn paint_optical(ui: &egui::Ui, rect: egui::Rect, radius: f32) {

@@ -80,6 +80,17 @@ impl Settings {
         if self.theme.optical_strength > 100 {
             return Err("Сила оптического стекла: от 0 до 100".into());
         }
+        if [
+            self.theme.optical_refraction,
+            self.theme.optical_blur,
+            self.theme.optical_highlight,
+            self.theme.optical_chromatic,
+        ]
+        .iter()
+        .any(|&value| value > 200)
+        {
+            return Err("Оптические параметры: от 0 до 200".into());
+        }
         if self.theme.custom_background.is_some() && self.theme.lily_background.is_some() {
             return Err("Выберите пресет или собственный фон".into());
         }
