@@ -22,6 +22,7 @@ pub enum Command {
     PreviewPath {path: PathBuf, revision: String, max_edge: u32, #[serde(default)] image_only: bool},
     ReadDocumentPath {path: PathBuf, revision: String},
     StageTransfer {items: Vec<SelectionRef>, #[serde(default)] cut: bool},
+    TransferSelection,
     PasteToFolder,
     PasteFilesToFolder {paths: Vec<PathBuf>},
     PasteClipboardToFolder,

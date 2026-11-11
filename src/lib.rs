@@ -393,6 +393,7 @@ impl Service {
             Command::PreviewPath {path,revision,max_edge,image_only} => preview_snapshot::preview_file(&path,&revision,max_edge,image_only,&self.root),
             Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
             Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
+            Command::TransferSelection => self.transfer_selection(),
             Command::PasteToFolder => self.paste_to_folder(),
             Command::PasteFilesToFolder {paths} => self.paste_files_to_folder(paths),
             Command::PasteClipboardToFolder => self.paste_clipboard_to_folder(),

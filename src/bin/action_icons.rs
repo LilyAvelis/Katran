@@ -15,6 +15,7 @@ pub fn icon(id: &str) -> Lucide {
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,
         "copy" => Lucide::Copy,
         "add_to_katran" => Lucide::ClipboardPaste,
+        "transfer_selection" => Lucide::ArrowLeftRight,
         "delete" => Lucide::Trash2,
         "open" => Lucide::ExternalLink,
         "reveal" => Lucide::FolderOpen,

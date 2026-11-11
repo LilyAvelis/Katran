@@ -216,7 +216,7 @@ impl Shortcuts {
         if chords.iter().any(|c| {
             let parts: Vec<_> = c.split_whitespace().collect();
             let key = parts.last().copied().unwrap_or("");
-            key == "Tab"
+            (key == "Tab" && !(id == "transfer_selection" && *c == "Shift Tab"))
                 || key == "Escape"
                 || c.contains("Super")
                 || (key.starts_with("Arrow") && !parts.contains(&"Ctrl") && !parts.contains(&"Alt"))

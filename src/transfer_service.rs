@@ -5,10 +5,24 @@ use std::collections::{HashMap, HashSet};
 
 impl Service {
     pub(crate) fn stage_transfer(&mut self, items: Vec<SelectionRef>, cut: bool) -> Result<Value> {
+        self.stage_transfer_inner(items, cut, true)
+    }
+
+    fn stage_transfer_inner(
+        &mut self,
+        items: Vec<SelectionRef>,
+        cut: bool,
+        bind_clipboard: bool,
+    ) -> Result<Value> {
         // A rejected replacement must not leave an older, surprising cut armed.
         self.transfer_intent = None;
         self.transfer_sequence = None;
-        if cut && items.iter().any(|item|item.id<0) {return Err(ApiError::new("folder_cut_unavailable","Folder cut is unavailable; use ordinary file copy"));}
+        if cut && items.iter().any(|item| item.id < 0) {
+            return Err(ApiError::new(
+                "folder_cut_unavailable",
+                "Folder cut is unavailable; use ordinary file copy",
+            ));
+        }
         if items.is_empty() || items.len() > 1000 {
             return Err(ApiError::new(
                 "invalid_argument",
@@ -31,12 +45,107 @@ impl Service {
         }
         let count = items.len();
         self.transfer_intent = Some((items, cut));
-        if cut { self.transfer_sequence=Some(self.clipboard_files.sequence()); }
+        if cut && bind_clipboard {
+            self.transfer_sequence = Some(self.clipboard_files.sequence());
+        }
         Ok(json!({"staged":count,"cut":cut}))
     }
 
+    pub(crate) fn transfer_selection(&mut self) -> Result<Value> {
+        use crate::interaction::ShelfTab;
+        let ids = if self.interaction.selected.is_empty() {
+            self.interaction.cursor.into_iter().collect::<Vec<_>>()
+        } else {
+            self.interaction.selected.clone()
+        };
+        if ids.is_empty() || ids.len() > 1000 {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Выберите от 1 до 1000 объектов",
+            ));
+        }
+        if self.interaction.tab == ShelfTab::All {
+            let result = self.import_from_folder(ids)?;
+            let target = result["items"].as_array().and_then(|items| {
+                items.iter().find_map(|item| {
+                    if item["event"]["imported"].as_u64().unwrap_or(0) == 0 {
+                        return None;
+                    }
+                    match item["event"]["kind"].as_str()? {
+                        "image" => Some(ShelfTab::Images),
+                        "text" => Some(ShelfTab::Text),
+                        "table" => Some(ShelfTab::Tables),
+                        "links" => Some(ShelfTab::Links),
+                        _ => None,
+                    }
+                })
+            });
+            if let Some(tab) = target {
+                self.select_tab(tab)?;
+            }
+            return Ok(
+                json!({"direction":"from_folder","items":result["items"],"interaction":self.interaction}),
+            );
+        }
+        let folder = self
+            .work_folder
+            .current()
+            .ok_or_else(|| ApiError::new("folder_not_selected", "Папка ещё не выбрана"))?;
+        if !folder.is_dir() || folder.canonicalize().ok().as_deref() != Some(folder) {
+            return Err(ApiError::new("folder_not_selected", "Папка ещё не выбрана"));
+        }
+        let mut valid = Vec::new();
+        let mut errors = HashMap::new();
+        for &id in &ids {
+            match self.get(id).and_then(|event| {
+                crate::open_file::validate(&event)?;
+                Ok(SelectionRef {
+                    id,
+                    revision: event.revision,
+                })
+            }) {
+                Ok(item) => valid.push(item),
+                Err(error) => {
+                    errors.insert(id, failed(id, error));
+                }
+            }
+        }
+        if valid.is_empty() {
+            let items = ids
+                .into_iter()
+                .map(|id| errors.remove(&id).expect("failed selection"))
+                .collect::<Vec<_>>();
+            return Ok(
+                json!({"direction":"to_folder","items":items,"interaction":self.interaction}),
+            );
+        }
+        self.stage_transfer_inner(valid, true, false)?;
+        let mut receipt = self.paste_to_folder()?;
+        let mut by_id: HashMap<_, _> = receipt["items"]
+            .as_array_mut()
+            .expect("transfer receipts")
+            .drain(..)
+            .filter_map(|item| item["id"].as_i64().map(|id| (id, item)))
+            .collect();
+        let items = ids
+            .into_iter()
+            .map(|id| {
+                errors
+                    .remove(&id)
+                    .or_else(|| by_id.remove(&id))
+                    .expect("selection receipt")
+            })
+            .collect::<Vec<_>>();
+        self.select_tab(ShelfTab::All)?;
+        Ok(json!({"direction":"to_folder","items":items,"interaction":self.interaction}))
+    }
+
     pub(crate) fn paste_to_folder(&mut self) -> Result<Value> {
-        if self.transfer_intent.is_none() || self.transfer_sequence.is_some_and(|sequence|sequence!=self.clipboard_files.sequence()) {
+        if self.transfer_intent.is_none()
+            || self
+                .transfer_sequence
+                .is_some_and(|sequence| sequence != self.clipboard_files.sequence())
+        {
             return self.paste_clipboard_to_folder();
         }
         let destination = self
@@ -170,7 +279,9 @@ impl Service {
                 self.import_folder_event(event)
             })();
             match result {
-                Ok(event) => results.push(json!({"id":id,"ok":event["failed"].as_u64().unwrap_or(0)==0,"event":event})),
+                Ok(event) => results.push(
+                    json!({"id":id,"ok":event["failed"].as_u64().unwrap_or(0)==0,"event":event}),
+                ),
                 Err(e) => results.push(json!({"id":id,"ok":false,"error":e})),
             }
         }

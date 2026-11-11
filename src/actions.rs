@@ -13,6 +13,7 @@ pub struct Definition {
     pub in_palette: bool,
 }
 pub const DEFS: &[Definition] = &[
+    Definition {id:"transfer_selection",label:"Перенести между полкой и Folder",default_binding:"Shift Tab",rebindable:true,group:"Передача",in_palette:true},
     Definition {id:"add_to_katran",label:"Добавить в Катран",default_binding:"Ctrl Shift C",rebindable:true,group:"Передача",in_palette:true},
     Definition {
         id: "tables",
@@ -498,6 +499,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         return Some(Dispatch::Command(Command::SelectTabPosition { position }));
     }
     Some(match id {
+        "transfer_selection" => Dispatch::Command(Command::TransferSelection),
         "add_to_katran" => Dispatch::Command(Command::AddFolderFiles {ids:selected()}),
         "tables" => Dispatch::Command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Tables,
