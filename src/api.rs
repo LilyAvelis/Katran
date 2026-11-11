@@ -266,6 +266,7 @@ pub enum Command {
         #[serde(default)]
         mode: SelectionMode,
     },
+    ClearSelection,
     Navigate {
         delta: i32,
         #[serde(default)]

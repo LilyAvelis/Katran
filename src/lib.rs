@@ -648,6 +648,10 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.interaction.select(id, mode);
                 Ok(serde_json::json!(self.interaction))
             }
+            Command::ClearSelection => {
+                self.interaction.clear_selection();
+                Ok(serde_json::json!(self.interaction))
+            }
             Command::Navigate { delta, mode } => {
                 self.interaction.navigate(delta, mode);
                 Ok(serde_json::json!(self.interaction))

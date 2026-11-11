@@ -406,6 +406,14 @@ impl Shelf {
                     self.actions = false;
                 } else if self.save {
                     self.save = false;
+                } else if self.state["preview"].is_null()
+                    && self.state["settings_open"] != true
+                    && !ctx.egui_wants_keyboard_input()
+                    && self.state["selected"]
+                        .as_array()
+                        .is_some_and(|selected| !selected.is_empty())
+                {
+                    self.state = self.call(Command::ClearSelection);
                 } else {
                     self.call(Command::ClosePreview);
                 }
@@ -1160,6 +1168,58 @@ mod tests {
         output.textures_delta.clear();
         drain_domain_job(app);
     }
+
+    #[test]
+    fn escape_closes_overlays_and_preview_before_clearing_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let first = app.call(Command::IngestBytes {
+            name: "first.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        let second = app.call(Command::IngestBytes {
+            name: "second.png".into(),
+            bytes: vec![2],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.refresh();
+        app.state = app.call(Command::SetVisible {
+            ids: vec![first, second],
+        });
+        app.call(Command::Select {
+            id: first,
+            mode: SelectionMode::Replace,
+        });
+        app.state = app.call(Command::Select {
+            id: second,
+            mode: SelectionMode::Toggle,
+        });
+        app.state = app.call(Command::TogglePreview);
+        app.actions = true;
+        let selected = serde_json::json!([first, second]);
+        let cursor = app.state["cursor"].clone();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+
+        frame(&mut app, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(!app.actions);
+        assert_eq!(app.state["preview"], second);
+        assert_eq!(app.state["selected"], selected);
+
+        frame(&mut app, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(app.state["preview"].is_null());
+        assert_eq!(app.state["selected"], selected);
+
+        frame(&mut app, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(app.state["selected"], serde_json::json!([]));
+        assert_eq!(app.state["cursor"], cursor);
+    }
+
     #[test]
     fn document_ctrl_arrows_keep_preview_and_selection() {
         let root = tempfile::tempdir().unwrap();

@@ -147,7 +147,7 @@ pub struct NativeTrash;
 #[cfg(windows)]
 impl Trash for NativeTrash {
     fn recycle(&self, path: &Path) -> Result<()> {
-        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
         use windows::{
             Win32::{
                 System::Com::{
@@ -158,7 +158,34 @@ impl Trash for NativeTrash {
             },
             core::PCWSTR,
         };
-        let wide: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Filesystem validation keeps canonical paths, but Shell parsing expects
+        // ordinary drive/UNC paths (as does our Explorer/open-file adapter).
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        let unc: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+        let extended: Vec<u16> = r"\\?\".encode_utf16().collect();
+        if wide.starts_with(&unc) {
+            wide.splice(..unc.len(), [b'\\' as u16, b'\\' as u16]);
+        } else if wide.starts_with(&extended)
+            && wide.get(extended.len() + 1) == Some(&(b':' as u16))
+        {
+            wide.drain(..extended.len());
+        }
+        if wide.contains(&0) {
+            return Err(ApiError::new(
+                "recycle_failed",
+                "Path contains a null character",
+            ));
+        }
+        // Do not let ordinary Shell path normalization select a different file
+        // for names only representable in the extended filesystem namespace.
+        let shell_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&wide));
+        if shell_path.canonicalize()? != path.canonicalize()? {
+            return Err(ApiError::new(
+                "unsafe_source",
+                "Shell path resolves to a different original",
+            ));
+        }
+        wide.push(0);
         unsafe {
             let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             // RPC_E_CHANGED_MODE means the caller already owns a different apartment.

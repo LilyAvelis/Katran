@@ -83,3 +83,41 @@ fn selection_actions_and_preview_via_api() {
         serde_json::json!([id])
     );
 }
+
+#[test]
+fn clear_selection_preserves_cursor_and_resets_range_anchor_via_api() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    call(
+        &mut api,
+        Command::SetVisible {
+            ids: vec![10, 20, 30, 40],
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: 10,
+            mode: SelectionMode::Replace,
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: 30,
+            mode: SelectionMode::Range,
+        },
+    );
+    let state = call(&mut api, Command::ClearSelection);
+    assert_eq!(state["selected"], serde_json::json!([]));
+    assert_eq!(state["cursor"], 30);
+    assert_eq!(state["visible"], serde_json::json!([10, 20, 30, 40]));
+    let next = call(
+        &mut api,
+        Command::Select {
+            id: 40,
+            mode: SelectionMode::Range,
+        },
+    );
+    assert_eq!(next["selected"], serde_json::json!([30, 40]));
+}

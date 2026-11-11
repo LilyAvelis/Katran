@@ -133,6 +133,11 @@ impl Interaction {
         }
         self.cursor = Some(id);
     }
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+        self.range_order = false;
+        self.anchor = self.cursor;
+    }
     pub fn navigate(&mut self, delta: i32, mode: SelectionMode) {
         if self.visible.is_empty() {
             return;

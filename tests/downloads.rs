@@ -106,3 +106,27 @@ fn recycling_checks_revision_and_containment_before_injected_boundary() {
     assert!(recycle_original(&event, folder.path(), &trash).is_err());
     assert_eq!(trash.0.borrow().len(), 1);
 }
+
+#[cfg(windows)]
+#[test]
+fn native_windows_recycles_canonicalized_download_through_api() {
+    let shelf = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("synthetic-recycle-Катран.txt");
+    fs::write(&path, b"synthetic recycle regression only").unwrap();
+    let mut api = Service::open(shelf.path(), 100_000).unwrap();
+    let mut settings = Settings::defaults(100_000);
+    settings.downloads_folder = Some(folder.path().into());
+    call(&mut api, Command::SetSettings { settings });
+    let event = source_api::wait_event(&mut api, katran::source_policy::SourceId::Downloads, &path);
+    let id = event["id"].as_i64().unwrap();
+    let reply = call(
+        &mut api,
+        Command::DeleteSelection {
+            ids: vec![id],
+            confirmed: false,
+        },
+    );
+    assert_eq!(reply["deleted"], 1, "{reply}");
+    assert!(!path.exists());
+}

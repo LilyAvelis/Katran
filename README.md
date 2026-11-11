@@ -98,6 +98,7 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 | 1..9 | Select numbered tab in compact visible order |
 | Arrow keys | Navigate gallery; Up/Down in stream |
 | Click / Ctrl-click / Shift-click | Single / individual toggle / range |
+| Escape | Close the active panel/preview first; otherwise clear selection and retain cursor |
 | Shift + arrows | Range selection |
 | Enter / double-click | Open current file in its default app |
 | Ctrl Enter | Reveal current file in Explorer |
