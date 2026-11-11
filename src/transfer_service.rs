@@ -199,6 +199,11 @@ impl Service {
                     continue;
                 }
             };
+            if cut && allow_reference_move && event.storage!="cached"
+                && matches!(event.delete_policy,crate::source_policy::DeletePolicy::ShelfOnly)
+                && let Err(error)=self.validate_reference_move_source(&event) {
+                results[index]=Some(failed(event.id,error));continue;
+            }
             if cut
                 && event
                     .path
@@ -401,6 +406,13 @@ impl Service {
         Ok(json!({"items":results}))
     }
 
+    fn validate_reference_move_source(&self,event:&crate::Event)->Result<()> {
+        if event.path.canonicalize()?.starts_with(self.root.canonicalize()?) {
+            return Err(ApiError::new("managed_source","Managed files may be copied, not moved as external references"));
+        }
+        Ok(())
+    }
+
     fn finish_same_folder_reference(
         &mut self,
         event: &crate::Event,
@@ -569,6 +581,12 @@ impl Service {
                         "stale_selection",
                         "Selection changed before source removal",
                     ));
+                }
+                if matches!(current.delete_policy,DeletePolicy::ShelfOnly) {
+                    self.validate_reference_move_source(&current)?;
+                    if crate::delete_selection::locked_path(&source)?.starts_with(self.root.canonicalize()?) {
+                        return Err(ApiError::new("managed_source","Move source is inside Katran managed storage"));
+                    }
                 }
                 crate::delete_selection::dispose_locked_original(source)?;
                 original_removed = true;

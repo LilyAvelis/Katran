@@ -329,3 +329,15 @@ fn explicit_move_allows_legacy_reference_but_clipboard_cut_keeps_old_protection(
  call(&mut api,Command::ChooseFolder{path:folder.path().into()});call(&mut api,Command::StageTransfer{items:vec![katran::SelectionRef{id,revision:e["revision"].as_str().unwrap().into()}],cut:true});let old=call(&mut api,Command::PasteToFolder);assert_eq!(old["items"][0]["error"]["code"],"source_not_movable");assert!(path.exists());
  call(&mut api,Command::SetTab{tab:ShelfTab::Images});select(&mut api,&[id]);let result=call(&mut api,Command::TransferSelection);assert_eq!(result["items"][0]["status"],"moved","{result}");assert!(!path.exists());assert!(std::path::Path::new(result["items"][0]["path"].as_str().unwrap()).exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn legacy_alias_of_pinned_managed_blob_cannot_be_moved_or_removed(){
+ let root=tempfile::tempdir().unwrap();let source=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();let path=source.path().join("legacy.png");image::RgbaImage::from_pixel(4,3,image::Rgba([4,5,6,255])).save(&path).unwrap();let bytes=std::fs::read(&path).unwrap();
+ let mut api=Service::open(root.path(),1000000).unwrap();api.set_clipboard_files_source(Box::new(NoClipboard));let owned=call(&mut api,Command::IngestBytes{name:"owned.png".into(),bytes:bytes.clone(),source:"synthetic".into()});let owned_id=owned["id"].as_i64().unwrap();call(&mut api,Command::TogglePins{ids:vec![owned_id]});
+ let legacy=call(&mut api,Command::IngestPath{path,source:"legacy".into()});let legacy_id=legacy["id"].as_i64().unwrap();let db=rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();db.execute("UPDATE events SET path=?1 WHERE id=?2",rusqlite::params![owned["path"].as_str().unwrap(),legacy_id]).unwrap();drop(db);
+ call(&mut api,Command::ChooseFolder{path:folder.path().into()});call(&mut api,Command::SetTab{tab:ShelfTab::Images});select(&mut api,&[legacy_id]);
+ let moved=call(&mut api,Command::TransferSelection);assert_eq!(moved["items"][0]["error"]["code"],"managed_source","{moved}");
+ assert_eq!(std::fs::read(owned["path"].as_str().unwrap()).unwrap(),bytes);assert_eq!(call(&mut api,Command::Get{id:owned_id})["available"],true);
+ call(&mut api,Command::SetTab{tab:ShelfTab::Images});select(&mut api,&[legacy_id]);let copied=call(&mut api,Command::CopySelection);assert_eq!(copied["items"][0]["status"],"copied");assert_eq!(call(&mut api,Command::Get{id:owned_id})["available"],true);
+}
