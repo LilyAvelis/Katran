@@ -1,5 +1,6 @@
 //! Lazy, bounded read-only table preview. Rendering touches only visible cells.
 use super::*;
+use crate::theme_ui::{Role, color as theme_color};
 use katran::table_fragments::Table;
 use std::{
     ops::Range,
@@ -183,7 +184,7 @@ impl TablePreview {
         });
         ui.separator();
         match &self.content {
-            None => {},
+            None => {}
             Some(Err(message)) => {
                 ui.label(message);
             }
@@ -438,11 +439,18 @@ fn paint_grid(ui: &mut egui::Ui, canvas: egui::Rect, table: &Table, factor: f32,
     let painter = ui
         .painter()
         .with_clip_rect(ui.clip_rect().intersect(canvas));
-    painter.rect_filled(canvas, 0.0, Color32::from_gray(50));
+    painter.rect_filled(
+        canvas,
+        0.0,
+        theme_color(ui.ctx(), Role::Surface, Color32::from_gray(50)),
+    );
     if row < 6.0 || 13.0 * factor < 5.0 {
         let ystep = (6.0 / row).ceil().max(1.0) as usize;
         let xstep = (6.0 / col).ceil().max(1.0) as usize;
-        let color = egui::Stroke::new(0.5, Color32::from_gray(85));
+        let color = egui::Stroke::new(
+            0.5,
+            theme_color(ui.ctx(), Role::Border, Color32::from_gray(85)),
+        );
         let first_y = range_y.start.div_ceil(ystep) * ystep;
         let first_x = range_x.start.div_ceil(xstep) * xstep;
         for y in (first_y..range_y.end).step_by(ystep) {
@@ -482,12 +490,23 @@ fn paint_grid(ui: &mut egui::Ui, canvas: egui::Rect, table: &Table, factor: f32,
             painter.rect_filled(
                 cell,
                 0.0,
-                Color32::from_gray(if y % 2 == 0 { 50 } else { 54 }),
+                theme_color(
+                    ui.ctx(),
+                    if y % 2 == 0 {
+                        Role::Surface
+                    } else {
+                        Role::Raised
+                    },
+                    Color32::from_gray(if y % 2 == 0 { 50 } else { 54 }),
+                ),
             );
             painter.rect_stroke(
                 cell,
                 0.0,
-                egui::Stroke::new(0.5, Color32::from_gray(85)),
+                egui::Stroke::new(
+                    0.5,
+                    theme_color(ui.ctx(), Role::Border, Color32::from_gray(85)),
+                ),
                 egui::StrokeKind::Inside,
             );
             let value = &table.rows[y][x];
@@ -495,7 +514,7 @@ fn paint_grid(ui: &mut egui::Ui, canvas: egui::Rect, table: &Table, factor: f32,
                 &cell_ui,
                 cell,
                 &compact(value, DISPLAY_CELL_CHARS),
-                Color32::from_gray(230),
+                theme_color(ui.ctx(), Role::Text, Color32::from_gray(230)),
                 factor,
             );
             cell_ui
@@ -520,31 +539,49 @@ fn paint_grid(ui: &mut egui::Ui, canvas: egui::Rect, table: &Table, factor: f32,
             egui::pos2(origin.x + row_header + x as f32 * col, header_y),
             egui::vec2(col, row),
         );
-        painter.rect_filled(head, 0.0, Color32::from_gray(76));
-        clipped_text_scaled(&header_ui, head, &column_label(x), Color32::WHITE, factor);
+        painter.rect_filled(
+            head,
+            0.0,
+            theme_color(ui.ctx(), Role::Raised, Color32::from_gray(76)),
+        );
+        clipped_text_scaled(
+            &header_ui,
+            head,
+            &column_label(x),
+            theme_color(ui.ctx(), Role::Text, Color32::WHITE),
+            factor,
+        );
     }
     for y in range_y {
         let head = egui::Rect::from_min_size(
             egui::pos2(header_x, origin.y + row + y as f32 * row),
             egui::vec2(row_header, row),
         );
-        painter.rect_filled(head, 0.0, Color32::from_gray(76));
+        painter.rect_filled(
+            head,
+            0.0,
+            theme_color(ui.ctx(), Role::Raised, Color32::from_gray(76)),
+        );
         clipped_text_scaled(
             &header_ui,
             head,
             &(y + 1).to_string(),
-            Color32::WHITE,
+            theme_color(ui.ctx(), Role::Text, Color32::WHITE),
             factor,
         );
     }
     painter.rect_filled(
         egui::Rect::from_min_size(egui::pos2(header_x, header_y), egui::vec2(row_header, row)),
         0.0,
-        Color32::from_gray(76),
+        theme_color(ui.ctx(), Role::Raised, Color32::from_gray(76)),
     );
 }
 pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
-    ui.painter().rect_filled(rect, 4.0, Color32::from_gray(58));
+    ui.painter().rect_filled(
+        rect,
+        4.0,
+        theme_color(ui.ctx(), Role::Surface, Color32::from_gray(58)),
+    );
     let preview = event["text_preview"].as_str().unwrap_or("");
     // Preview is bounded metadata; trim incomplete final line before parsing.
     let candidate = preview
@@ -565,21 +602,29 @@ pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
                     ui.painter().rect_stroke(
                         cell,
                         0.0,
-                        egui::Stroke::new(0.5, Color32::from_gray(95)),
+                        egui::Stroke::new(
+                            0.5,
+                            theme_color(ui.ctx(), Role::Border, Color32::from_gray(95)),
+                        ),
                         egui::StrokeKind::Inside,
                     );
                     clipped_text(
                         ui,
                         cell,
                         &compact(&table.rows[y][x], 64),
-                        Color32::from_gray(220),
+                        theme_color(ui.ctx(), Role::Text, Color32::from_gray(220)),
                     );
                 }
             }
             return;
         }
     }
-    clipped_text(ui, rect, &compact(preview, 120), Color32::from_gray(220));
+    clipped_text(
+        ui,
+        rect,
+        &compact(preview, 120),
+        theme_color(ui.ctx(), Role::Text, Color32::from_gray(220)),
+    );
 }
 pub(super) fn card_title(_event: &Value) -> String {
     "Таблица".into()
@@ -588,6 +633,49 @@ pub(super) fn card_title(_event: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn text_and_table_cards_use_theme_surface_without_changing_standard() {
+        let ctx = egui::Context::default();
+        crate::ui_style::install(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(180.0, 80.0));
+        let event = serde_json::json!({"text_preview":"one\ttwo\nthree\tfour"});
+        let paint = |ctx: &egui::Context, table: bool| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if table {
+                    paint_card(ui, &event, rect);
+                } else {
+                    crate::text_preview_ui::paint_card(ui, &event, rect);
+                }
+            });
+            let fills: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(r) if r.rect == rect => Some(r.fill),
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+            fills
+        };
+        for table in [false, true] {
+            assert!(paint(&ctx, table).contains(&Color32::from_gray(58)));
+        }
+        crate::theme_ui::apply(
+            &ctx,
+            &katran::theme::ThemePreferences {
+                preset: katran::theme::Preset::BlueExperimental,
+                accent: None,
+                decoration: false,
+                ..Default::default()
+            },
+        );
+        let expected = crate::theme_ui::color(&ctx, Role::Surface, Color32::from_gray(58));
+        assert_ne!(expected, Color32::from_gray(58));
+        for table in [false, true] {
+            assert!(paint(&ctx, table).contains(&expected));
+        }
+    }
     #[test]
     fn viewport_limits_both_axes_and_labels_are_correct() {
         assert_eq!(

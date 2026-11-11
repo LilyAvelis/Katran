@@ -1,4 +1,5 @@
 //! Safe Markdown display: paints parsed text only, never executes HTML or fetches assets.
+use crate::theme_ui::{Role, color as theme_color};
 use eframe::egui::{self, Color32, RichText};
 use katran::markdown::{Document, InlineKind, Kind};
 
@@ -7,7 +8,7 @@ pub(super) fn show(ui: &mut egui::Ui, doc: &Document) {
         match block.kind {
             Kind::CodeFence => {
                 egui::Frame::new()
-                    .fill(Color32::from_gray(48))
+                    .fill(theme_color(ui.ctx(), Role::Surface, Color32::from_gray(48)))
                     .corner_radius(5)
                     .inner_margin(8)
                     .show(ui, |ui| {
@@ -38,31 +39,31 @@ fn inline(ui: &mut egui::Ui, doc: &Document, block: &katran::markdown::Block) {
         let (font, color, italics, underline) = match &span.kind {
             InlineKind::Strong => (
                 egui::FontId::proportional(size + 1.0),
-                Color32::from_gray(240),
+                theme_color(ui.ctx(), Role::Text, Color32::from_gray(240)),
                 false,
                 false,
             ),
             InlineKind::Emphasis => (
                 egui::FontId::proportional(size),
-                Color32::from_gray(225),
+                theme_color(ui.ctx(), Role::Text, Color32::from_gray(225)),
                 true,
                 false,
             ),
             InlineKind::Code => (
                 egui::FontId::monospace(size),
-                Color32::from_gray(225),
+                theme_color(ui.ctx(), Role::Text, Color32::from_gray(225)),
                 false,
                 false,
             ),
             InlineKind::Link { .. } => (
                 egui::FontId::proportional(size),
-                Color32::from_rgb(143, 197, 238),
+                theme_color(ui.ctx(), Role::Accent, Color32::from_rgb(143, 197, 238)),
                 false,
                 true,
             ),
             InlineKind::Text => (
                 egui::FontId::proportional(size),
-                Color32::from_gray(225),
+                theme_color(ui.ctx(), Role::Text, Color32::from_gray(225)),
                 false,
                 false,
             ),

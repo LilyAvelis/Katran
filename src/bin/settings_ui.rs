@@ -5,6 +5,7 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 
 #[derive(Default)]
 pub struct State {
+    custom_backgrounds: Option<serde_json::Value>,
     restart_confirmation: bool,
     restart_requested: bool,
     updates: super::updates_ui::State,
@@ -128,6 +129,7 @@ impl State {
             }
             self.confirm_history = false;
             self.draft = None;
+            self.custom_backgrounds=None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
@@ -170,7 +172,7 @@ impl State {
         let mut global_intent = None;
         let mut theme_intent = None;
         let root_ctx = ctx.clone();
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title("Katran Settings").with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title("Katran Settings").with_decorations(false).with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
    if self.restart_confirmation {
     let prompt=egui::Modal::new(egui::Id::new("restart-confirmation")).show(ctx,|ui|{
      ui.heading("Перезапустить Katran?");
@@ -187,18 +189,21 @@ impl State {
    let recording=self.editor.is_some()||self.global_editor.is_some();
    if let Some(editor)=self.global_editor.as_mut() && let Some(intent)=editor.input(ctx) && apply_global_hotkey(api,editor,intent,&mut self.draft){self.global_editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
    if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx)&& super::shortcuts_ui::apply(api,editor,intent){self.editor=None;}
+   let toggle_close=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::Comma));
    let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
-   if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape; }
+   if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape||toggle_close; }
    let surface=super::theme_ui::color(ctx,super::theme_ui::Role::Surface,Color32::from_gray(69));
    let background=super::theme_ui::color(ctx,super::theme_ui::Role::Background,Color32::from_gray(65));
    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface)).show(ctx,|ui| {
+    let (_,drag)=ui.allocate_exact_size(egui::vec2(ui.available_width(),8.0),egui::Sense::drag());
+    if drag.drag_started(){ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);}
     egui::Panel::left("settings-sidebar").exact_size(215.0).resizable(false).frame(egui::Frame::new().fill(background).inner_margin(16)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
      ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
      for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;self.global_editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
-     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL);});
+     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text("Ctrl+, — закрыть настройки");});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
@@ -306,8 +311,22 @@ impl State {
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
-            if ui.selectable_value(&mut theme.lily_background,None,"Сплошной").changed(){theme_intent=Some(theme.clone());}
-            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme_intent=Some(theme.clone());}}
+            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme_intent=Some(theme.clone());}}
+           });
+           SettingsRow::show(ui,"Собственные фоны","Копия сохраняется в Katran. Пресеты лилий остаются доступны.",|ui|{
+            let list=self.custom_backgrounds.get_or_insert_with(||call(api,Command::ListThemeBackgrounds)).clone();
+            egui::ComboBox::from_id_salt("custom-background-picker").selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
+             for item in list["result"]["backgrounds"].as_array().into_iter().flatten(){
+              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme_intent=Some(theme.clone());}
+             }
+            });
+            if ui.button("Загрузить изображение…").clicked(){
+             match super::theme_file_picker::pick_image(){
+              Ok(Some(path))=>{let r=call(api,Command::ImportThemeBackground{path});if let Some(id)=r["result"]["id"].as_str(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;self.custom_backgrounds=None;theme_intent=Some(theme.clone());}else{self.error=r["error"]["message"].as_str().unwrap_or("Не удалось загрузить фон").into();}},
+              Ok(None)=>{},Err(error)=>self.error=error,
+             }
+            }
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
@@ -363,6 +382,7 @@ impl State {
         if close {
             call(api, Command::CloseSettings);
             self.draft = None;
+            self.custom_backgrounds=None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
@@ -379,6 +399,15 @@ mod tests {
     use super::*;
     use katran::interaction::ShelfTab;
 
+    #[test]
+    fn ctrl_comma_closes_settings_and_is_consumed() {
+        let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
+        call(&mut api,Command::ShowSettings);
+        let ctx=egui::Context::default();ctx.set_embed_viewports(true);super::super::ui_style::install(&ctx);
+        let mut state=State::default();
+        let mut out=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Comma,physical_key:Some(egui::Key::Comma),pressed:true,repeat:false,modifiers:egui::Modifiers::CTRL}],..Default::default()},|ui|{state.show(ui.ctx(),&mut api);});
+        out.textures_delta.clear();assert_eq!(call(&mut api,Command::Interaction)["result"]["settings_open"],false);
+    }
     #[test]
     fn general_draft_preserves_newer_tab_changes() {
         let mut draft = Settings {
@@ -426,7 +455,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([40, 100, 220]),
-            decoration: false, lily_background:None,glass:false,compact_header:false,
+            decoration: false, lily_background:None,custom_background:None,glass:false,compact_header:false,
         };
         apply_theme(&mut api, &mut draft, blue.clone()).unwrap();
         let current: Settings =

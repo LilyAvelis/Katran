@@ -82,6 +82,7 @@ pub mod overlay;
 pub mod overlay_windows;
 pub mod tray;
 pub mod theme;
+pub mod theme_backgrounds;
 mod overlay_service;
 pub mod emoji_render;
 
@@ -412,6 +413,9 @@ impl Service {
         }
         match command {
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
+            Command::ImportThemeBackground {path} => theme_backgrounds::import(&self.root,&path),
+            Command::ListThemeBackgrounds => theme_backgrounds::list(&self.root),
+            Command::GetThemeBackground {id} => theme_backgrounds::get(&self.root,&id),
             Command::Themes => Ok(theme::catalogue(&self.settings.theme)),
             Command::SetTheme {theme} => {let mut settings=self.settings.clone();settings.theme=theme;self.dispatch(Command::SetSettings{settings})?;Ok(theme::catalogue(&self.settings.theme))},
             Command::WindowVisibility => Ok(serde_json::json!({"visible":self.window_visible})),
@@ -708,6 +712,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 .map_err(|e| ApiError::new(&e.code, e.message)),
             Command::GetSettings => Ok(serde_json::json!(self.settings)),
             Command::SetSettings { settings } => {
+                if let Some(id)=&settings.theme.custom_background {theme_backgrounds::get(&self.root,id)?;}
                 settings
                     .validate(self.usage()?)
                     .map_err(|e| ApiError::new("invalid_settings", e))?;

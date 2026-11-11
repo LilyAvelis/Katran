@@ -41,7 +41,7 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
     }
     let glass=preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false);
     let base=match role {
-        Role::Background if preference.lily_background.is_some() => Color32::TRANSPARENT,
+        Role::Background if (preference.lily_background.is_some() || preference.custom_background.is_some()) => Color32::TRANSPARENT,
         Role::Background if preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false) => Color32::from_rgba_unmultiplied(11,20,35,175),
         Role::Background => Color32::from_rgb(11, 20, 35),
         Role::Surface => Color32::from_rgb(16, 30, 50),
@@ -111,13 +111,39 @@ fn cover_uv(view:egui::Vec2,image:egui::Vec2)->egui::Rect {
 }
 pub(super) fn footer_fill(ctx:&egui::Context,legacy:Color32)->Color32 {
     let theme=current(ctx);
-    if theme.preset==Preset::BlueExperimental && theme.lily_background.is_some() {Color32::TRANSPARENT}
+    if theme.preset==Preset::BlueExperimental && (theme.lily_background.is_some() || theme.custom_background.is_some()) {Color32::TRANSPARENT}
     else {color(ctx,Role::Surface,legacy)}
+}
+fn custom_key()->egui::Id {egui::Id::new("active-custom-background")}
+pub(super) fn custom_cached(ctx:&egui::Context,id:&str)->bool {
+    ctx.data(|d|d.get_temp::<(String,egui::TextureHandle)>(custom_key())).is_some_and(|(key,_)|key==id)
+        || ctx.data(|d|d.get_temp::<String>(egui::Id::new("custom-background-failed"))).as_deref()==Some(id)
+}
+pub(super) fn load_custom(ctx:&egui::Context,id:&str,path:&std::path::Path)->Result<(),String> {
+    let result=(|| {
+        let rgba=image::open(path).map_err(|e|e.to_string())?.into_rgba8();
+        let size=[rgba.width() as usize,rgba.height() as usize];
+        let texture=ctx.load_texture(format!("custom-{id}"),egui::ColorImage::from_rgba_unmultiplied(size,rgba.as_raw()),egui::TextureOptions::LINEAR);
+        ctx.data_mut(|d|d.insert_temp(custom_key(),(id.to_owned(),texture)));
+        Ok(())
+    })();
+    if result.is_err(){ctx.data_mut(|d|d.insert_temp(egui::Id::new("custom-background-failed"),id.to_owned()));}
+    result
+}
+fn paint_background(ctx:&egui::Context,rect:egui::Rect,texture:&egui::TextureHandle,glass:bool) {
+    let painter=ctx.layer_painter(egui::LayerId::background());
+    if !glass {painter.rect_filled(rect,0.0,Color32::from_rgb(11,20,35));}
+    painter.image(texture.id(),rect,cover_uv(rect.size(),texture.size_vec2()),if glass {Color32::from_white_alpha(160)} else {Color32::WHITE});
 }
 /// Embedded owner-provided artwork, decoded once per selected variant.
 pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
     let theme = current(ctx);
     if theme.preset != Preset::BlueExperimental { return; }
+    let glass=theme.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false);
+    if let Some(id)=&theme.custom_background {
+        if let Some((cached,texture))=ctx.data(|d|d.get_temp::<(String,egui::TextureHandle)>(custom_key())) && cached==*id {paint_background(ctx,rect,&texture,glass);}
+        return;
+    }
     let Some(index) = theme.lily_background else { return; };
     let bytes: &[u8] = match index {
         1 => include_bytes!("../../assets/themes/lilies/lily-1.png"),
@@ -136,10 +162,7 @@ pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
         Some(texture)
     });
     if let Some(texture) = texture {
-        let painter = ctx.layer_painter(egui::LayerId::background());
-        let glass=theme.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false);
-        if !glass {painter.rect_filled(rect,0.0,Color32::from_rgb(11,20,35));}
-        painter.image(texture.id(),rect,cover_uv(rect.size(),texture.size_vec2()),if glass {Color32::from_white_alpha(160)} else {Color32::WHITE});
+        paint_background(ctx,rect,&texture,glass);
     }
 }
 /// Decorative arcs occupy existing bounds and never affect layout.
@@ -147,7 +170,7 @@ pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
     let theme = current(ui.ctx());
     if theme.preset != Preset::BlueExperimental
         || !theme.decoration
-        || theme.lily_background.is_some()
+        || (theme.lily_background.is_some() || theme.custom_background.is_some())
         || rect.width() <= 0.0
         || rect.height() <= 0.0
     {
@@ -219,7 +242,7 @@ mod tests {
             &ThemePreferences {
                 preset: Preset::BlueExperimental,
                 accent: None,
-                decoration: true, lily_background:None,glass:false,compact_header:false,
+                decoration: true, lily_background:None,custom_background:None,glass:false,compact_header:false,
             },
         );
         let mut blue = ctx.run_ui(egui::RawInput::default(), |ui| decorate(ui, bounds));
@@ -240,7 +263,7 @@ mod tests {
         let first = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([220, 50, 80]),
-            decoration: false, lily_background:None,glass:false,compact_header:false,
+            decoration: false, lily_background:None,custom_background:None,glass:false,compact_header:false,
         };
         apply(&ctx, &first);
         let blue = ctx.style_of(egui::Theme::Dark);
@@ -311,7 +334,7 @@ mod tests {
         let blue = ThemePreferences {
             preset: Preset::BlueExperimental,
             accent: Some([18, 90, 180]),
-            decoration: true, lily_background:None,glass:false,compact_header:false,
+            decoration: true, lily_background:None,custom_background:None,glass:false,compact_header:false,
         };
         apply(&ctx, &blue);
         assert_eq!(

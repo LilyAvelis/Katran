@@ -1,5 +1,6 @@
 //! Bounded, asynchronous read-only client for text preview.
 use super::*;
+use crate::theme_ui::{Role, color as theme_color};
 use std::sync::{Arc, Condvar, Mutex};
 
 type Key = (i64, String);
@@ -65,7 +66,10 @@ impl TextPreview {
                         api_version: 1,
                         request_id: "text-preview".into(),
                         command: match path {
-                            Some(path) => Command::ReadDocumentPath { path, revision: key.1.clone() },
+                            Some(path) => Command::ReadDocumentPath {
+                                path,
+                                revision: key.1.clone(),
+                            },
                             None => Command::GetDocumentText { id: key.0 },
                         },
                     }),
@@ -156,9 +160,13 @@ impl TextPreview {
         };
         let key = (id, revision.to_owned());
         let path = if id < 0 {
-            let Some(path) = event["path"].as_str() else { return; };
+            let Some(path) = event["path"].as_str() else {
+                return;
+            };
             Some(PathBuf::from(path))
-        } else { None };
+        } else {
+            None
+        };
         let is_link = event["kind"] == "link_fragment";
         self.start();
         if self.wanted.as_ref() != Some(&key) {
@@ -235,7 +243,7 @@ impl TextPreview {
                 Some(Err(message)) => {
                     ui.label(message);
                 }
-                None => {},
+                None => {}
             });
         ui.weak(if is_link {
             "Space — назад · ← → — листать"
@@ -251,13 +259,17 @@ impl Drop for TextPreview {
 }
 
 pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
-    ui.painter().rect_filled(rect, 4.0, Color32::from_gray(58));
+    ui.painter().rect_filled(
+        rect,
+        4.0,
+        theme_color(ui.ctx(), Role::Surface, Color32::from_gray(58)),
+    );
     let text = event["text_preview"].as_str().unwrap_or("");
     let font = egui::FontId::proportional(13.0);
     let mut job = egui::text::LayoutJob::simple(
         text.to_owned(),
         font,
-        Color32::from_gray(225),
+        theme_color(ui.ctx(), Role::Text, Color32::from_gray(225)),
         (rect.width() - 16.0).max(1.0),
     );
     job.wrap.max_rows = ((rect.height() - 16.0).max(0.0) / 17.0) as usize;
@@ -265,7 +277,11 @@ pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     ui.painter()
         .with_clip_rect(ui.clip_rect().intersect(rect))
-        .galley(rect.min + Vec2::splat(8.0), galley, Color32::from_gray(225));
+        .galley(
+            rect.min + Vec2::splat(8.0),
+            galley,
+            theme_color(ui.ctx(), Role::Text, Color32::from_gray(225)),
+        );
 }
 pub(super) fn card_title(event: &Value) -> String {
     let title = katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""));
@@ -497,7 +513,9 @@ mod tests {
         });
         assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text().contains("Первая строка"))));
         output.textures_delta.clear();
-        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Text });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Text,
+        });
         app.refresh();
         assert!(app.events.iter().any(|event| event["id"] == id));
         app.call(Command::SetVisible { ids: vec![id] });
@@ -557,12 +575,18 @@ mod tests {
         let source = "# Привет 🐄\n\n- **важно** и `код`\n<script>literal</script>";
         std::fs::write(&path, source).unwrap();
         let mut app = crate::tests::test_shelf(root.path());
-        app.call(Command::ChooseFolder { path: originals.path().to_path_buf() });
+        app.call(Command::ChooseFolder {
+            path: originals.path().to_path_buf(),
+        });
         app.call(Command::SetTab {
             tab: katran::interaction::ShelfTab::All,
         });
         app.refresh();
-        let event = app.events.iter().find(|event| event["name"] == "synthetic.md").unwrap();
+        let event = app
+            .events
+            .iter()
+            .find(|event| event["name"] == "synthetic.md")
+            .unwrap();
         let id = event["id"].as_i64().unwrap();
         assert!(id < 0);
         app.call(Command::SetVisible { ids: vec![id] });

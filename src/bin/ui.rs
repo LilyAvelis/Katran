@@ -33,6 +33,7 @@ mod ui_style;
 mod theme_ui;
 mod window_material;
 mod restart_ui;
+mod theme_file_picker;
 mod updates_ui;
 mod workspace_ui;
 use base64::Engine;
@@ -235,6 +236,10 @@ impl Shelf {
                     self.glass_active=false;
                     ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),false));
                     theme_ui::reset(&ctx);
+                }
+                if let Some(id)=&theme.custom_background && !theme_ui::custom_cached(&ctx,id) {
+                    let background=self.call(Command::GetThemeBackground{id:id.clone()});
+                    if let Some(path)=background["path"].as_str() && let Err(error)=theme_ui::load_custom(&ctx,id,std::path::Path::new(path)) {self.message=error;}
                 }
                 theme_ui::apply(&ctx,&theme);
             }
@@ -1930,7 +1935,7 @@ mod tests {
         app.refresh();
         let ctx=egui::Context::default();ui_style::install(&ctx);
         let standard=visible_landmarks(&mut app,&ctx);
-        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true,lily_background:None,glass:false,compact_header:false}});
+        app.call(Command::SetTheme{theme:katran::theme::ThemePreferences{preset:katran::theme::Preset::BlueExperimental,accent:None,decoration:true,lily_background:None,custom_background:None,glass:false,compact_header:false}});
         let blue=visible_landmarks(&mut app,&ctx);
         assert_eq!(blue,standard,"theme must not move the existing controls");
         app.call(Command::SetTheme{theme:Default::default()});

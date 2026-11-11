@@ -77,6 +77,7 @@ impl Settings {
             .collect()
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        if self.theme.custom_background.is_some() && self.theme.lily_background.is_some() {return Err("Выберите пресет или собственный фон".into());}
         if self.theme.lily_background.is_some_and(|n| !(1..=5).contains(&n)) {return Err("Неизвестный фон лилии".into());}
         if !(48..=192).contains(&self.pods_tile_size) {return Err("Pods: размер плитки должен быть 48–192".into());}
         if !self.overlay_hotkey.trim().is_empty() {

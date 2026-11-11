@@ -20,6 +20,9 @@ pub struct Request {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     RestartApplication,
+    ImportThemeBackground { path: std::path::PathBuf },
+    ListThemeBackgrounds,
+    GetThemeBackground { id: String },
     Themes,
     SetTheme { theme: crate::theme::ThemePreferences },
     WindowVisibility,
