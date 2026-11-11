@@ -2,6 +2,25 @@
 
 Latest runnable artifact and verified product commit: [ARTIFACTS.md](ARTIFACTS.md).
 
+## Latest local pre-3.0 candidate ·2026-11-11
+
+Owner accepted the blue/lily/custom-background appearance. Review fixes and the
+new dual transfer modes remain local pending native owner feedback; no3.0 tag,
+GitHub push or release was created. Original five Azuros P2s and design follow-up
+findings were fixed and statically checked; see
+[review closure](../reviews/2026-11-11-azuros-design.md).
+
+ShiftTab moves bothways; CtrlTab copies bothways without changing context or
+selection. Managed Folder image imports fix repeated moves to different folders.
+The owner withdrew the reported navigation failure: open Settings intentionally
+owns input. Sort ownership leaks were separate, reproducible and fixed.
+
+Image Actions can save/apply a selected image as a background. Native picker and
+image preparation no longer block render. Templates for future agents are
+[design-patterns](../design-patterns.md) and the
+[reusable-library map](../reusable-library-map.md). Earlier sections below are
+historical handoffs; the current transfer contract is [Folder](../work-folder.md).
+
 ## Manual-feedback patch
 
 Lilia's screenshots showed Folder service details expanding the header. These

@@ -98,23 +98,27 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 
 ## Controls
 
-In the local 2.5 feedback build, **Shift+Tab** directly transfers the selection
-between a category and Folder, without the Clipboard. From Folder it imports
-supported files while preserving originals. Service details are in the compact
-bottom information bar; click a section to expand them.
+In the local pre-3.0 candidate, **Shift+Tab moves** the selection between a
+category and Folder. **Ctrl+Tab copies**, preserving the current view and
+selection so repeated presses make additional copies. Folder image imports are
+independent managed objects. See [the transfer contract](docs/work-folder.md).
+Reusable [UI patterns](docs/design-patterns.md) and the
+[library extraction map](docs/reusable-library-map.md) guide future work.
 
 | Control | Action |
 | --- | --- |
 | Ctrl K | Actions: search, arrows, Enter, Escape |
-| Ctrl , | Settings: general, keyboard and tabs |
-| Comma, then e / m / r / n / s / a / o | Sort by extension / modification / shuffle / natural name / size / name / origin; Shift on the second key reverses order except shuffle |
+| Ctrl , | Open/close Settings |
+| Shift Tab / Ctrl Tab | Move / copy between the shelf and Folder |
+| Comma | Sort menu: arrows + Enter, or t / e / m / r / n / s / a / o; Shift reverses except shuffle |
 | Ctrl Shift , in Actions | Record shortcut for selected command |
 | 1..9 | Select numbered tab in compact visible order |
 | Arrow keys | Navigate gallery; Up/Down in stream |
 | Click / Ctrl-click / Shift-click | Single / individual toggle / range |
 | Escape | Close the active panel/preview first; otherwise clear selection and retain cursor |
 | Shift + arrows | Range selection |
-| Enter / double-click | Open current file in its default app |
+| Enter | Paste selection into the captured previous application |
+| Alt Enter / double-click | Open current file in its default app |
 | Ctrl Enter | Reveal current file in Explorer |
 | Ctrl Shift Enter | Katran's bottom [Open With app picker](docs/open-app-picker.md); “Другое приложение…” opens the Windows chooser |
 | Space | Preview images, Text, Links, Tables, and Markdown in Katran; QuickLook other files |

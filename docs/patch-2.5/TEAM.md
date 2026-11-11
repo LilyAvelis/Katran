@@ -64,3 +64,18 @@ Recovery/alignment followup: Tavi Patch /root/tavi newly created for explicitly 
 Tray followup reused Mira Socket for isolated native tray adapter; Polly owns shared visibility API/UI integration. Lilia accepted prior recovery/Pods/native paste and authorized current main push+Notion update, no tags/releases until3.0.
 
 Theme/review followup: Azuros /root/azuros newly invoked at owner's explicit request, gpt-6.1-sol xhigh, read-only review81abc6f. Reused Fenna for visual tokens and shared components, Nemi for theme settings UI. Polly owns typed preferences/API and shell integration. Five P2 recorded, no automatic core fixes/push/release.
+
+
+## Local pre-3.0 completion wave
+
+Polly integrated shared dispatcher/jobs/input/transfer contracts and ran serialized checks.
+Azuros(Sol/xhigh) reviewed immutable036a53d, control3f10a7c and6bcb2a7;
+then reviewed the owner's new move/copy contractae9b03b and confirmed the
+managed-alias guard closure inc423be3. No claim of exhaustive runtime proof.
+Fenna(Terra) handled Link/recovery and bounded transfer/import helpers; Mira(Terra)
+handled guarded text publication and nonblocking native picker; Rhea(Terra)
+handled ES/update compatibility; Lune(Luna) wrote UI patterns; Walter(Sol/low)
+produced the reusable-library inventory. Existing sessions reused, except Walter
+was newly requested by the owner. Profiles used the Garden cached snapshot
+when Notion refresh was unavailable. Agents did not run the owner's desktop,
+Clipboard, production publication or parallel Cargo builds.

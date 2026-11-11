@@ -20,26 +20,39 @@ backend; Katran does not bundle the Everything application.
 
 ## Copy, move, and return files
 
-The primary in-app action is **Shift+Tab**, independent of the system Clipboard.
-In a category it moves the selection to the current Folder and opens Folder;
-pinned items remain and produce copies. With no Folder selected it reports
-«Папка ещё не выбрана» without changing the selection. In Folder it explicitly
-imports supported files into their categories and opens the first successful
-category; originals remain in Folder and unsupported formats have per-item errors.
-Ordinary **Tab** only changes the view. Ctrl+C remains ordinary external copying.
+Owner clarification2026-11-11 supersedes the old copy-only return behavior:
+
+- **Shift+Tab / TransferSelection** moves in both directions. Category→Folder
+  verifies the destination before source disposition; pinned objects remain copy-only.
+  Folder→category first commits a complete typed import, then recycles the verified
+  original. Unsupported/partial imports keep their source and report per-item errors.
+- **Ctrl+Tab / CopySelection** copies in both directions, retains the current view
+  and selection, and permits repeated copies. Destination name collisions create
+  numbered names rather than overwrite. Folder image imports use independent
+  managed blobs, so later moves to different folders are possible.
+- Folder image import is bounded by quota and256MiB per source and preserves the
+  original modified date. It never points the new Image at the Folder source.
+- The explicit Shift+Tab move also supports legacy external references, after
+  holding their recorded-hash source and verified destination. This is the owner's
+  named move authorization, not a change to generic shelf deletion or Clipboard Cut.
+  Managed-storage aliases are rejected as move sources; copying remains allowed.
+  A same-folder external reference can be removed from the shelf without deleting
+  the already-present file. Pin aliases, source revisions and managed roots remain protected.
+- No selected Folder reports «Папка ещё не выбрана». Ordinary **Tab** changes view;
+  Ctrl+C remains external copying. The two direct modes never read the Clipboard.
 
 - **Ctrl+X** stages selected shelf objects for a move. It does not remove the
   source immediately. Open Folder and press **Ctrl+V** to complete a verified
   transfer. Pinned items stay copy-only. Partial outcomes are reported per
-  item. Same-folder transfer is a no-op.
+  item. Same-folder Clipboard transfer remains a no-op.
 - **Ctrl+V** in Folder also materializes files from the external clipboard as
   copied files. External clipboard cut/move is not supported.
 - **Ctrl+Shift+C** in Folder explicitly adds selected files to Katran. Current
   supported imports include fresh TXT/MD, CSV, images, and bookmarks HTML as
   per-URL link objects. Unsupported formats return an error. Imported files do
   not silently inherit old metadata.
-- Negative Folder selection IDs are session-local. Cut is explicitly unavailable
-  for these entries; ordinary copy and revision-bound recycle deletion are supported.
+- Negative Folder selection IDs are session-local. Clipboard Cut is explicitly unavailable
+  for these entries; explicit Shift+Tab move, copy and revision-bound recycle deletion are supported.
 
 Folder deletion, where available through the managed-file action, stages the
 verified original and asks Windows to recycle it. Recovery may expose a manual

@@ -1,6 +1,7 @@
 # Developer and agent entry point
 
 Read `AGENTS.md`, current `README.md`, then this map and the relevant API test.
+For any new view, popup or dialog, follow [reusable UI design patterns](design-patterns.md): shared tokens/ActionRow, one input owner, and asynchronous native/worker adapters.
 For builds, CI and release retries, follow [DevOps execution rules](devops.md).
 Current source structure and1.5 contracts are listed below. Historical reviews describe their examined snapshots; current behavior is in [domain-jobs.md](domain-jobs.md).
 
