@@ -17,3 +17,5 @@ Public dispatcher commands:
 Synthetic tests cover target replacement, lost foreground, clipboard replacement, modifier hold, failed copy and once-only dispatch. No native windows or personal Clipboard are manipulated by tests. Real multi-monitor/virtual-desktop summon and paste acceptance are performed by the owner.
 
 Global recording temporarily unregisters the existing listener so Windows cannot consume the chord being recorded. On completion/cancel the current binding is registered again. The only settings change from this editor is overlay_hotkey; other unsaved preferences stay in the draft. Native paste acceptance is still owner-operated.
+
+Recovery followup: an inspected disappearance left the resident process alive and had no recent Windows Application Error/WER entry. Same-current-desktop summons skip redundant desktop ID queries; failed summons request showing/focusing the resident window for recovery. Diagnostics explicitly record overlay_shown, overlay_hidden with paste_sent, and overlay_show_failed. These are not claims that an unobserved process crash can never occur.

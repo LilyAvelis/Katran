@@ -22,7 +22,18 @@ pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
     }
     #[cfg(windows)]
     {
-        render_with_flags(text, size)
+        let mut current = size;
+        loop {
+            match render_with_flags(text, current) {
+                Err(error)
+                    if error == "Rendered text exceeds maximum bitmap dimensions"
+                        && current > 2.0 =>
+                {
+                    current = (current * 0.7).max(2.0);
+                }
+                result => break result,
+            }
+        }
     }
     #[cfg(not(windows))]
     {

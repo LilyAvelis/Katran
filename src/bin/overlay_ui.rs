@@ -113,12 +113,25 @@ impl Shelf {
                         ) {
                             Ok(()) => {
                                 self.overlay_ui.summoned = true;
+                                self.message.clear();
+                                if let Some(log) = &self.logger {
+                                    log.record(
+                                        "overlay_shown",
+                                        serde_json::json!({"owner":self.native_window}),
+                                    );
+                                }
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                                 ctx.request_repaint();
                             }
                             Err(error) => {
+                                if let Some(log) = &self.logger {
+                                    log.record("overlay_show_failed",serde_json::json!({"code":error.code,"message":error.message}));
+                                }
                                 self.message =
-                                    format!("Не удалось вызвать Katran: {}", error.message)
+                                    format!("Не удалось вызвать Katran: {}", error.message);
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                                ctx.request_repaint();
                             }
                         }
                     }
@@ -145,6 +158,12 @@ impl Shelf {
             } else {
                 self.overlay_ui.pending = false;
                 if reply["state"] == "sent" {
+                    if let Some(log) = &self.logger {
+                        log.record(
+                            "overlay_hidden",
+                            serde_json::json!({"reason":"paste_sent","resident":true}),
+                        );
+                    }
                     self.overlay_ui.summoned = false;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 }

@@ -58,3 +58,5 @@ Read this file, source scope and relevant handoff. Use followup_task with the ex
 Pods/summon followup: reused Nemi (Pods storage/classifier/capture), Mira (native hotkey/foreground/paste adapter) and Fenna (color renderer/Pods UI/settings). Polly integrated dispatcher and copy receipt orchestration. No new agents, no native desktop tests, no release/push for this followup.
 
 Ergonomics followup reused Fenna (Pods grid/preview), Nemi (Pods transfer + hotkey recorder), Walter Senior Sol/low (explicitly requested deeper summon diagnosis). Lead integrated API metadata, independent density and captured-target adoption. No Astra, new sessions, native desktop checks or release.
+
+Recovery/alignment followup: Tavi Patch /root/tavi newly created for explicitly requested junior layout task, gpt-6-luna high, owns shelf_view only. Reused Vela for long-combination raster/fallback and Walter for read-only host process/WER diagnostics + same-desktop native fix. Lead integrated recovery visibility and lifecycle logs. No native desktop automation or live Clipboard effects.

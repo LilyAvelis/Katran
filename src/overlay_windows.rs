@@ -216,8 +216,12 @@ mod native {
             let moved = (|| -> windows::core::Result<()> {
                 let manager: IVirtualDesktopManager =
                     CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_INPROC_SERVER)?;
-                let desktop = manager.GetWindowDesktopId(hwnd(previous.hwnd))?;
-                if manager.GetWindowDesktopId(hwnd(own_window))? != desktop {
+                // The captured foreground is on the current desktop. Avoid
+                // asking for an own-window desktop ID during hidden-window
+                // transitions when no move is needed (Shell may report
+                // TYPE_E_ELEMENTNOTFOUND for that redundant lookup).
+                if !manager.IsWindowOnCurrentVirtualDesktop(hwnd(own_window))?.as_bool() {
+                    let desktop = manager.GetWindowDesktopId(hwnd(previous.hwnd))?;
                     manager.MoveWindowToDesktop(hwnd(own_window), &desktop)?;
                 }
                 Ok(())

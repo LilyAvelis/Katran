@@ -43,6 +43,20 @@ fn preview_pan_command(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PodsPreviewLayout {
+    canvas: Vec2,
+    metadata_height: f32,
+}
+
+fn pods_preview_layout(width: f32, height: f32) -> PodsPreviewLayout {
+    let canvas_height = (height * 0.42).clamp(0.0, 300.0);
+    PodsPreviewLayout {
+        canvas: Vec2::new(width.max(0.0), canvas_height),
+        metadata_height: (height - canvas_height).max(0.0),
+    }
+}
+
 fn stream_row_height(viewport: f32, rows: u8, gap: f32) -> f32 {
     ((viewport - gap * f32::from(rows.saturating_sub(1))) / f32::from(rows.max(1))).max(72.0)
 }
@@ -73,22 +87,25 @@ impl Shelf {
                             if let Some(text) = description["text"].as_str() { full_event["text_preview"] = Value::String(text.to_owned()); }
                             let width = ui.available_width();
                             let height = (ui.available_height()-30.0).max(32.0);
-                            ui.horizontal_top(|ui| {
-                                let canvas_width = (width * 0.58).max(1.0);
-                                let (canvas, _) = ui.allocate_exact_size(egui::vec2(canvas_width, height), egui::Sense::hover());
+                            let layout = pods_preview_layout(width, height);
+                            ui.vertical_centered(|ui| {
+                                let (canvas, _) = ui.allocate_exact_size(layout.canvas, egui::Sense::hover());
+                                #[cfg(test)] ctx.data_mut(|data|data.insert_temp(egui::Id::new("pod-preview-canvas"),canvas));
                                 self.pods_ui.paint(ui, &full_event, canvas);
-                                egui::ScrollArea::vertical().id_salt("pods-metadata").max_height(height).show(ui, |ui| {
-                                    ui.set_max_width((width-canvas_width-12.0).max(1.0));
-                                    ui.heading(description["name"].as_str().unwrap_or("Pods"));
-                                    if description.is_null() { ui.label("Метаданные недоступны"); }
-                                    else {
-                                        ui.label(format!("UTF-8: {} байт · UTF-16: {}", description["utf8_bytes"], description["utf16_units"]));
-                                        if let Some(points)=description["codepoints"].as_array() { for point in points {
-                                            ui.label(format!("{} · {}",point["codepoint"].as_str().unwrap_or(""),point["name"].as_str().unwrap_or("")));
-                                            ui.weak(point["utf8"].as_str().unwrap_or(""));
-                                        }}
-                                        if description["metadata_truncated"]==true { ui.weak("Показана часть метаданных"); }
-                                    }
+                                egui::ScrollArea::vertical().id_salt("pods-metadata").max_height(layout.metadata_height).show(ui, |ui| {
+                                    ui.set_width(width);
+                                    ui.vertical_centered(|ui| {
+                                        ui.heading(description["name"].as_str().unwrap_or("Pods"));
+                                        if description.is_null() { ui.label("Метаданные недоступны"); }
+                                        else {
+                                            ui.label(format!("UTF-8: {} байт · UTF-16: {}", description["utf8_bytes"], description["utf16_units"]));
+                                            if let Some(points)=description["codepoints"].as_array() { for point in points {
+                                                ui.label(format!("{} · {}",point["codepoint"].as_str().unwrap_or(""),point["name"].as_str().unwrap_or("")));
+                                                ui.weak(point["utf8"].as_str().unwrap_or(""));
+                                            }}
+                                            if description["metadata_truncated"]==true { ui.weak("Показана часть метаданных"); }
+                                        }
+                                    });
                                 });
                             });
                             ui.weak("Space — назад · ← → — листать");
@@ -379,6 +396,64 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::preview_view::{Point, Size};
+
+    #[test]
+    fn pods_preview_metadata_layout_keeps_canvas_full_width_and_scroll_bounded() {
+        for (width, height) in [(320.0, 360.0), (960.0, 680.0)] {
+            let root = tempfile::tempdir().unwrap();
+            let mut app = super::super::tests::test_shelf(root.path());
+            app.call(Command::SetTabEnabled { tab: katran::interaction::ShelfTab::Pods, enabled: true });
+            let event = app.call(Command::IngestText { text: "🐄".into(), source: "test".into() });
+            let id = event["id"].as_i64().unwrap();
+            app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Pods });
+            app.call(Command::SetVisible { ids: vec![id] });
+            app.call(Command::Select { id, mode: SelectionMode::Replace });
+            app.state = app.call(Command::TogglePreview);
+            let title = "UNICODE NAME ".repeat(4);
+            app.pods_ui.set_description(id, event["revision"].as_str().unwrap(), serde_json::json!({
+                "text": "🐄", "name": title, "utf8_bytes": 4, "utf16_units": 2,
+                "codepoints": [], "metadata_truncated": false
+            }));
+            let ctx = egui::Context::default();
+            let mut layout = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))),
+                    ..Default::default()
+                },
+                |ui| {
+                    layout = Some(pods_preview_layout(
+                        (ui.available_width() - 24.0).max(0.0),
+                        (ui.available_height() - 24.0 - 30.0).max(32.0),
+                    ));
+                    app.shelf_view(ui, &ctx, std::slice::from_ref(&event), true, 9);
+                },
+            );
+            output.textures_delta.clear();
+            let layout = layout.expect("preview layout measured");
+            let canvas=ctx.data(|data|data.get_temp::<egui::Rect>(egui::Id::new("pod-preview-canvas"))).expect("actual canvas");
+            assert!((canvas.center().x-width/2.0).abs()<=2.0,"canvas must use the centered content width");
+            assert!(layout.canvas.y <= 300.0);
+            assert!(layout.metadata_height >= 0.0);
+            fn find_text(shape: &egui::Shape, needle: &str) -> Option<egui::Rect> {
+                match shape {
+                    egui::Shape::Text(text) if text.galley.text().contains(needle) => Some(text.visual_bounding_rect()),
+                    egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find_text(shape, needle)),
+                    _ => None,
+                }
+            }
+            let title_rect = output.shapes.iter().find_map(|shape| find_text(&shape.shape, "UNICODE NAME"))
+                .expect("long metadata title should be painted");
+            let summary_rect = output.shapes.iter().find_map(|shape| find_text(&shape.shape, "UTF-8: 4 байт · UTF-16: 2"))
+                .expect("UTF summary should be painted");
+            let center_x = width / 2.0;
+            assert!((title_rect.center().x - center_x).abs() <= 2.0, "title should be centered at width {width}: {title_rect:?}");
+            assert!((summary_rect.center().x - center_x).abs() <= 2.0, "summary should be centered at width {width}: {summary_rect:?}");
+            assert!(title_rect.top() >= canvas.bottom(), "title must follow canvas at width {width}");
+            assert!(summary_rect.top() >= title_rect.bottom(), "summary must follow title at width {width}");
+            output.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn pods_tiles_are_square_without_text_plaques() {
