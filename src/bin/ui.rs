@@ -848,6 +848,16 @@ impl eframe::App for Shelf {
             egui::Event::Key{key,physical_key,pressed:true,modifiers,..}
                 if physical_key.unwrap_or(*key)==egui::Key::Comma && !modifiers.ctrl && !modifiers.alt && !modifiers.command));
         let modal=self.modal_owns_input() || starts_sort;
+        let copying_bound=self.shortcuts.iter().any(|s|s.id=="transfer_copy" && s.binding.as_deref().is_some_and(|b|b.split(" / ").any(|b|b=="Ctrl Tab")));
+        let editing=ctx.memory(|m|m.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some());
+        if copying_bound && input.focused && !modal && !editing {
+            let mut copy=false;
+            input.events.retain(|e|match e {
+                egui::Event::Key{key:egui::Key::Tab,pressed:true,repeat,modifiers,..} if *modifiers==egui::Modifiers::CTRL=>{copy|=!*repeat;false},
+                _=>true,
+            });
+            if copy {self.pending_tab_action=Some("transfer_copy".into());}
+        }
         if self.navigation_input.intercept(ctx, input, modal) {
             self.pending_tab_action = Some("tab_toggle".into());
         }
@@ -2088,6 +2098,7 @@ mod tests {
         eframe::App::raw_input_hook(&mut app,&ctx,&mut input);assert!(app.pending_tab_action.is_none());
         frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
         frame(&mut app,&ctx,egui::Key::V,egui::Modifiers::CTRL);
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::CTRL);
         assert_eq!(app.state["tab"],tab);assert!(app.sorting_input.is_open());assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(),0);
     }
     #[test]
@@ -2098,6 +2109,24 @@ mod tests {
         eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
         let mut output=ctx.run_ui(input,|ui|app.render(ui));output.textures_delta.clear();
         assert_eq!(app.state["tab"],before);assert!(app.sorting_input.is_open());assert!(app.pending_tab_action.is_none());
+    }
+    #[test]
+    fn ctrl_tab_copies_repeatedly_without_losing_selection_or_reading_clipboard() {
+        let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
+        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder{path:folder.path().into()});app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
+        let e=app.call(Command::IngestBytes{name:"copy.png".into(),bytes:vec![1,2,3],source:"synthetic".into()});let id=e["id"].as_i64().unwrap();app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        let mut output=ctx.run_ui(egui::RawInput::default(),|ui|app.render(ui));output.textures_delta.clear();
+        for _ in 0..3 {
+            let key=|pressed|egui::Event::Key{key:egui::Key::Tab,physical_key:Some(egui::Key::Tab),pressed,repeat:false,modifiers:egui::Modifiers::CTRL};
+            let mut input=egui::RawInput{events:vec![key(true)],..Default::default()};eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
+            let mut output=ctx.run_ui(input,|ui|app.render(ui));output.textures_delta.clear();
+            let mut output=ctx.run_ui(egui::RawInput{events:vec![key(false)],..Default::default()},|ui|app.render(ui));output.textures_delta.clear();
+            assert_eq!(app.state["tab"],"images");assert_eq!(app.state["selected"][0],id);
+        }
+        assert_eq!(std::fs::read_dir(folder.path()).unwrap().filter_map(|entry|entry.ok()).filter(|entry|entry.path().is_file()).count(),3);
+        assert!(std::path::Path::new(e["path"].as_str().unwrap()).exists());
     }
     #[test]
     fn sort_notice_obeys_preference_and_expiry_without_focus() {

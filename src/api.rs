@@ -39,6 +39,7 @@ pub enum Command {
     ReadDocumentPath {path: PathBuf, revision: String},
     StageTransfer {items: Vec<SelectionRef>, #[serde(default)] cut: bool},
     TransferSelection,
+    CopySelection,
     PasteToFolder,
     PasteFilesToFolder {paths: Vec<PathBuf>},
     PasteClipboardToFolder,

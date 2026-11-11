@@ -438,6 +438,7 @@ impl Service {
             Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
             Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
             Command::TransferSelection => self.transfer_selection(),
+            Command::CopySelection => self.copy_selection(),
             Command::PasteToFolder => self.paste_to_folder(),
             Command::PasteFilesToFolder {paths} => self.paste_files_to_folder(paths),
             Command::PasteClipboardToFolder => self.paste_clipboard_to_folder(),

@@ -52,6 +52,14 @@ impl Service {
     }
 
     pub(crate) fn transfer_selection(&mut self) -> Result<Value> {
+        self.direct_selection(true)
+    }
+
+    pub(crate) fn copy_selection(&mut self) -> Result<Value> {
+        self.direct_selection(false)
+    }
+
+    fn direct_selection(&mut self, moving: bool) -> Result<Value> {
         use crate::interaction::ShelfTab;
         let ids = if self.interaction.selected.is_empty() {
             self.interaction.cursor.into_iter().collect::<Vec<_>>()
@@ -65,7 +73,7 @@ impl Service {
             ));
         }
         if self.interaction.tab == ShelfTab::All {
-            let result = self.import_from_folder(ids)?;
+            let result = self.import_from_folder_mode(ids, moving)?;
             let target = result["items"].as_array().and_then(|items| {
                 items.iter().find_map(|item| {
                     if item["event"]["imported"].as_u64().unwrap_or(0) == 0 {
@@ -80,7 +88,7 @@ impl Service {
                     }
                 })
             });
-            if let Some(tab) = target {
+            if moving && let Some(tab) = target {
                 self.select_tab(tab)?;
             }
             return Ok(
@@ -119,8 +127,8 @@ impl Service {
                 json!({"direction":"to_folder","items":items,"interaction":self.interaction}),
             );
         }
-        self.stage_transfer_inner(valid, true, false)?;
-        let mut receipt = self.paste_to_folder()?;
+        self.stage_transfer_inner(valid, moving, false)?;
+        let mut receipt = self.paste_to_folder_inner(moving)?;
         let mut by_id: HashMap<_, _> = receipt["items"]
             .as_array_mut()
             .expect("transfer receipts")
@@ -136,11 +144,17 @@ impl Service {
                     .expect("selection receipt")
             })
             .collect::<Vec<_>>();
-        self.select_tab(ShelfTab::All)?;
+        if moving {
+            self.select_tab(ShelfTab::All)?;
+        }
         Ok(json!({"direction":"to_folder","items":items,"interaction":self.interaction}))
     }
 
     pub(crate) fn paste_to_folder(&mut self) -> Result<Value> {
+        self.paste_to_folder_inner(false)
+    }
+
+    fn paste_to_folder_inner(&mut self, allow_reference_move: bool) -> Result<Value> {
         if self.transfer_intent.is_none()
             || self
                 .transfer_sequence
@@ -193,22 +207,68 @@ impl Service {
                     .and_then(|path| path.parent().map(|p| p == root))
                     .unwrap_or(false)
             {
-                results[index] = Some(
-                    json!({"id":item.id,"path":event.path,"status":"same_folder","error":null}),
-                );
+                if allow_reference_move
+                    && event.id > 0
+                    && event.storage != "cached"
+                    && matches!(
+                        event.delete_policy,
+                        crate::source_policy::DeletePolicy::ShelfOnly
+                    )
+                {
+                    results[index] = Some(match self.finish_same_folder_reference(&event, &root) {
+                        Ok(status) => {
+                            json!({"id":item.id,"path":event.path,"status":status,"destination_created":false,"original_removed":false,"error":null})
+                        }
+                        Err(error) => failed(item.id, error),
+                    });
+                } else {
+                    results[index] = Some(
+                        json!({"id":item.id,"path":event.path,"status":"same_folder","error":null}),
+                    );
+                }
                 continue;
             }
             #[cfg(windows)]
             if cut
                 && event.id > 0
-                && matches!(
+                && (matches!(
                     event.delete_policy,
                     crate::source_policy::DeletePolicy::LiveOriginal { .. }
-                )
+                ) || (allow_reference_move
+                    && event.storage != "cached"
+                    && matches!(
+                        event.delete_policy,
+                        crate::source_policy::DeletePolicy::ShelfOnly
+                    )))
             {
                 match crate::delete_shelf::protected_by_pin(&self.db, event.id) {
                     Ok(true) => {}
-                    Ok(false) => match self.lock_transfer_source(&event) {
+                    Ok(false) => match if matches!(
+                        event.delete_policy,
+                        crate::source_policy::DeletePolicy::ShelfOnly
+                    ) {
+                        let parent = event
+                            .path
+                            .parent()
+                            .ok_or_else(|| ApiError::new("unsafe_source", "Missing source parent"));
+                        parent.and_then(|parent| {
+                            event
+                                .revision
+                                .strip_prefix("ref:")
+                                .ok_or_else(|| {
+                                    ApiError::new("stale_selection", "Missing source hash")
+                                })
+                                .and_then(|hash| {
+                                    crate::delete_selection::prepare_locked_original(
+                                        &event.path,
+                                        parent,
+                                        hash,
+                                    )
+                                })
+                        })
+                    } else {
+                        self.lock_transfer_source(&event)
+                    } {
                         Ok(lock) => {
                             source_locks.insert(event.id, lock);
                         }
@@ -244,6 +304,7 @@ impl Service {
                             result.path,
                             result.content_hash,
                             source_locks.remove(&event.id),
+                            allow_reference_move,
                         ));
                     }
                 }
@@ -261,6 +322,10 @@ impl Service {
     }
 
     pub(crate) fn import_from_folder(&mut self, ids: Vec<i64>) -> Result<Value> {
+        self.import_from_folder_mode(ids, false)
+    }
+
+    fn import_from_folder_mode(&mut self, ids: Vec<i64>, moving: bool) -> Result<Value> {
         if ids.is_empty() || ids.len() > 1000 || ids.iter().any(|id| *id >= 0) {
             return Err(ApiError::new(
                 "invalid_argument",
@@ -273,19 +338,114 @@ impl Service {
         }
         let mut results = Vec::new();
         for id in ids {
-            let result = (|| {
+            let result: Result<Value> = (|| {
                 let event = self.get(id)?;
                 crate::open_file::validate(&event)?;
-                self.import_folder_event(event)
+                let imported = self.import_folder_event(event.clone())?;
+                if !moving
+                    || imported["failed"].as_u64().unwrap_or(0) != 0
+                    || imported["imported"].as_u64().unwrap_or(0) == 0
+                {
+                    return Ok(json!({"import": imported, "status": "copied"}));
+                }
+                let effect = (|| -> Result<Value> {
+                    if self.folder_path_pinned(&event.path)? {
+                        return Ok(json!({"status":"pinned_copy"}));
+                    }
+                    let hash = imported["source_hash"].as_str().ok_or_else(|| {
+                        ApiError::new("verification_failed", "Missing import hash")
+                    })?;
+                    let root = self.work_folder.current().ok_or_else(|| {
+                        ApiError::new("folder_not_selected", "Folder unavailable")
+                    })?;
+                    if event.path.starts_with(&self.root) {
+                        return Err(ApiError::new(
+                            "managed_source",
+                            "Katran managed files cannot be moved from Folder",
+                        ));
+                    }
+                    if event.path.parent() != Some(root) || self.get(id)?.revision != event.revision
+                    {
+                        return Err(ApiError::new(
+                            "stale_selection",
+                            "Folder item changed after import",
+                        ));
+                    }
+                    let trash = self.trash.lock().map_err(|_| {
+                        ApiError::new("recycle_failed", "Trash adapter lock poisoned")
+                    })?;
+                    let recycle = crate::safe_recycle::recycle_verified(
+                        &event.path,
+                        root,
+                        hash,
+                        trash.as_ref(),
+                    )?;
+                    Ok(
+                        json!({"status": if recycle.recycled {"moved"} else {"recycle_failed"}, "recycle": recycle}),
+                    )
+                })();
+                match effect {
+                    Ok(value) => Ok(
+                        json!({"import":imported,"status":value["status"],"recycle":value["recycle"]}),
+                    ),
+                    Err(error) => {
+                        Ok(json!({"import":imported,"status":"source_not_moved","error":error}))
+                    }
+                }
             })();
             match result {
-                Ok(event) => results.push(
-                    json!({"id":id,"ok":event["failed"].as_u64().unwrap_or(0)==0,"event":event}),
-                ),
+                Ok(value) => results.push(json!({"id":id,"ok":value["import"]["failed"].as_u64().unwrap_or(0)==0 && value["status"] != "recycle_failed" && value["status"] != "source_not_moved", "status":value["status"], "recycle":value["recycle"], "error":value["error"], "event":value["import"]})),
                 Err(e) => results.push(json!({"id":id,"ok":false,"error":e})),
             }
         }
         Ok(json!({"items":results}))
+    }
+
+    fn finish_same_folder_reference(
+        &mut self,
+        event: &crate::Event,
+        root: &std::path::Path,
+    ) -> Result<&'static str> {
+        crate::open_file::validate(event)?;
+        if crate::delete_shelf::protected_by_pin(&self.db, event.id)? {
+            return Ok("pinned_copy");
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = root;
+            Err(ApiError::new(
+                "unsupported_platform",
+                "Safe move requires Windows file handles",
+            ))
+        }
+        #[cfg(windows)]
+        {
+            let hash = event
+                .revision
+                .strip_prefix("ref:")
+                .ok_or_else(|| ApiError::new("stale_selection", "Missing source hash"))?;
+            let _locked =
+                crate::delete_selection::prepare_locked_original(&event.path, root, hash)?;
+            let current = self.get(event.id)?;
+            if current.revision != event.revision
+                || current.path != event.path
+                || current.delete_policy != event.delete_policy
+            {
+                return Err(ApiError::new("stale_selection", "Selection changed"));
+            }
+            if crate::delete_shelf::protected_by_pin(&self.db, event.id)? {
+                return Ok("pinned_copy");
+            }
+            let result = self.dispatch(Command::DeleteEvents {
+                ids: vec![event.id],
+                confirmed: true,
+            })?;
+            if result["deleted"].as_u64() == Some(1) {
+                Ok("moved")
+            } else {
+                Err(ApiError::new("shelf_retained", "Shelf record retained"))
+            }
+        }
     }
 
     fn finish_cut(
@@ -294,8 +454,15 @@ impl Service {
         path: Option<std::path::PathBuf>,
         hash: Option<String>,
         source_lock: Option<crate::delete_selection::LockedOriginal>,
+        allow_reference_move: bool,
     ) -> Value {
-        let result = self.finish_cut_inner(event, path.as_deref(), hash.as_deref(), source_lock);
+        let result = self.finish_cut_inner(
+            event,
+            path.as_deref(),
+            hash.as_deref(),
+            source_lock,
+            allow_reference_move,
+        );
         match result {
             Ok(status) => {
                 json!({"id":event.id,"path":path,"status":status,"destination_created":true,"original_removed":status == "moved" && event.storage != "cached","error":null})
@@ -313,6 +480,7 @@ impl Service {
         path: Option<&std::path::Path>,
         hash: Option<&str>,
         source_lock: Option<crate::delete_selection::LockedOriginal>,
+        allow_reference_move: bool,
     ) -> Result<&'static str> {
         if event.id < 0 {
             return Err(ApiError::new(
@@ -332,7 +500,7 @@ impl Service {
         }
         #[cfg(not(windows))]
         {
-            let _ = (path, hash, source_lock);
+            let _ = (path, hash, source_lock, allow_reference_move);
             return Err(ApiError::new(
                 "unsupported_platform",
                 "Safe move requires Windows file handles",
@@ -367,22 +535,25 @@ impl Service {
             crate::open_file::validate(&current)?;
             let mut original_removed = false;
             if current.storage != "cached" {
-                let DeletePolicy::LiveOriginal {
-                    source_id,
-                    generation,
-                    ..
-                } = current.delete_policy
-                else {
-                    return Err(ApiError::new(
-                        "source_not_movable",
-                        "External reference is not a managed original",
-                    ));
-                };
-                let configured: String = self.db.query_row(
-                    "SELECT c.root FROM source_configurations c JOIN source_projection p ON p.source_id=c.source_id AND p.generation=c.generation WHERE c.source_id=?1 AND c.generation=?2 AND c.enabled=1 AND p.event_id=?3",
-                    rusqlite::params![source_id.as_str(), generation, current.id], |row| row.get(0)
-                ).map_err(|_| ApiError::new("stale_source_generation", "Original no longer belongs to the configured source"))?;
-                let _ = configured;
+                match &current.delete_policy {
+                    DeletePolicy::LiveOriginal {
+                        source_id,
+                        generation,
+                        ..
+                    } => {
+                        let _: String = self.db.query_row(
+                            "SELECT c.root FROM source_configurations c JOIN source_projection p ON p.source_id=c.source_id AND p.generation=c.generation WHERE c.source_id=?1 AND c.generation=?2 AND c.enabled=1 AND p.event_id=?3",
+                            rusqlite::params![source_id.as_str(), generation, current.id], |row| row.get(0)
+                        ).map_err(|_| ApiError::new("stale_source_generation", "Original no longer belongs to the configured source"))?;
+                    }
+                    DeletePolicy::ShelfOnly if allow_reference_move => {}
+                    _ => {
+                        return Err(ApiError::new(
+                            "source_not_movable",
+                            "External reference is not a managed original",
+                        ));
+                    }
+                }
                 let source = source_lock.ok_or_else(|| {
                     ApiError::new(
                         "source_not_locked",
