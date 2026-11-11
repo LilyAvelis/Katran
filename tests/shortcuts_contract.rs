@@ -1,5 +1,27 @@
 use katran::{Command, Request, Service};
 use serde_json::{Value, json};
+
+#[test]
+fn failed_shortcut_save_preserves_live_binding_and_preferences() {
+    let root = tempfile::tempdir().unwrap();
+    let mut shortcuts = katran::shortcuts::Shortcuts::default();
+    let before = shortcuts.binding("save");
+    // Block only the disposable fixture's staging path, without changing ACLs.
+    std::fs::create_dir(root.path().join("shortcuts.json.tmp")).unwrap();
+    let error = shortcuts
+        .set(
+            root.path(),
+            "save",
+            Some("Ctrl Shift H".into()),
+            false,
+            false,
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "storage_error");
+    assert_eq!(shortcuts.binding("save"), before);
+    assert!(!root.path().join("shortcuts.json").exists());
+}
+
 fn call(api: &mut Service, command: Command) -> Value {
     api.execute(Request {
         api_version: 1,
