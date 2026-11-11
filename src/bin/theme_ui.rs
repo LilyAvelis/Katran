@@ -23,6 +23,14 @@ fn current(ctx: &egui::Context) -> ThemePreferences {
 pub(super) fn reset(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<ThemePreferences>(key()));
 }
+fn selection_color(preference: &ThemePreferences) -> Color32 {
+    let accent = preference.accent.unwrap_or([107, 174, 255]);
+    let surface = [16u8, 30, 50];
+    let blend = |index: usize| {
+        ((u16::from(surface[index]) * 78 + u16::from(accent[index]) * 22 + 50) / 100) as u8
+    };
+    Color32::from_rgb(blend(0), blend(1), blend(2))
+}
 pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32 {
     let preference = current(ctx);
     if preference.preset == Preset::Standard {
@@ -39,7 +47,7 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
             let [r, g, b] = preference.accent.unwrap_or([107, 174, 255]);
             Color32::from_rgb(r, g, b)
         }
-        Role::Selection => Color32::from_rgb(41, 75, 112),
+        Role::Selection => selection_color(&preference),
     }
 }
 pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
@@ -62,12 +70,26 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
         visuals.override_text_color = Some(get(Role::Text));
         visuals.selection.bg_fill = get(Role::Selection);
         visuals.selection.stroke.color = get(Role::Accent);
-        visuals.widgets.inactive.bg_fill = get(Role::Raised);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(36, 65, 96);
-        visuals.widgets.active.bg_fill = get(Role::Selection);
-        visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, get(Role::Border));
-        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, get(Role::Accent));
-        visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, get(Role::Accent));
+        visuals.hyperlink_color = get(Role::Accent);
+        let normal = get(Role::Raised);
+        let hover = Color32::from_rgb(36, 65, 96);
+        let selection = get(Role::Selection);
+        let surface = get(Role::Surface);
+        let text = get(Role::Text);
+        let border = get(Role::Border);
+        let accent = get(Role::Accent);
+        for (widget, fill, stroke) in [
+            (&mut visuals.widgets.noninteractive, surface, border),
+            (&mut visuals.widgets.inactive, normal, border),
+            (&mut visuals.widgets.hovered, hover, accent),
+            (&mut visuals.widgets.active, selection, accent),
+            (&mut visuals.widgets.open, selection, accent),
+        ] {
+            widget.bg_fill = fill;
+            widget.weak_bg_fill = fill;
+            widget.bg_stroke = egui::Stroke::new(1.0, stroke);
+            widget.fg_stroke.color = text;
+        }
     }
     ctx.set_theme(egui::Theme::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
@@ -128,6 +150,64 @@ mod tests {
         blue.textures_delta.clear();
         assert_eq!(count, 3);
         assert!(clipped);
+    }
+    #[test]
+    fn blue_widget_fills_and_selection_follow_accent_without_changing_standard() {
+        let ctx = egui::Context::default();
+        crate::ui_style::install(&ctx);
+        let standard = ctx.style_of(egui::Theme::Dark);
+        let first = ThemePreferences {
+            preset: Preset::BlueExperimental,
+            accent: Some([220, 50, 80]),
+            decoration: false,
+        };
+        apply(&ctx, &first);
+        let blue = ctx.style_of(egui::Theme::Dark);
+        for widget in [
+            &blue.visuals.widgets.noninteractive,
+            &blue.visuals.widgets.inactive,
+            &blue.visuals.widgets.hovered,
+            &blue.visuals.widgets.active,
+            &blue.visuals.widgets.open,
+        ] {
+            assert_eq!(widget.weak_bg_fill, widget.bg_fill);
+            assert_ne!(widget.weak_bg_fill, Color32::from_gray(60));
+        }
+        assert_ne!(
+            blue.visuals.widgets.inactive.weak_bg_fill,
+            standard.visuals.widgets.inactive.weak_bg_fill
+        );
+        let first_selection = blue.visuals.selection.bg_fill;
+        assert_eq!(
+            first_selection,
+            color(&ctx, Role::Selection, Color32::TRANSPARENT)
+        );
+        let second = ThemePreferences {
+            accent: Some([40, 190, 100]),
+            ..first
+        };
+        apply(&ctx, &second);
+        let green = ctx.style_of(egui::Theme::Dark);
+        assert_ne!(green.visuals.selection.bg_fill, first_selection);
+        assert_eq!(
+            green.visuals.selection.stroke.color,
+            Color32::from_rgb(40, 190, 100)
+        );
+        assert_eq!(
+            green.visuals.widgets.active.weak_bg_fill,
+            green.visuals.selection.bg_fill
+        );
+        assert_eq!(
+            green.visuals.widgets.open.weak_bg_fill,
+            green.visuals.selection.bg_fill
+        );
+        apply(&ctx, &ThemePreferences::default());
+        let restored = ctx.style_of(egui::Theme::Dark);
+        assert_eq!(
+            restored.visuals.widgets.inactive,
+            standard.visuals.widgets.inactive
+        );
+        assert_eq!(restored.visuals.widgets.open, standard.visuals.widgets.open);
     }
     #[test]
     fn standard_is_exact_and_roundtrip_restores_visuals() {

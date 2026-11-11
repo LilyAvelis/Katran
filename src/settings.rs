@@ -54,7 +54,7 @@ impl Settings {
             downloads_folder: None,
             card_width: 280.0,
             default_view: View::Gallery,
-            capture_on_start: false,
+            capture_on_start: true,
         }
     }
     pub fn tab_enabled(&self, tab: crate::interaction::ShelfTab) -> bool {

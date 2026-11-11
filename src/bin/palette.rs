@@ -57,11 +57,15 @@ impl Shelf {
         self.scroll_actions |= previous_selection != self.action_selected || self.focus_actions;
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
         let mut picked = None;
-        // Adapted directly from Afio palette.rs: anchor, surface, groups, rows, bottom search.
+        // Use the actual trigger rectangle, independent of footer height and DPI.
+        let trigger = ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect")));
+        let anchor = trigger.map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
+            .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
         let result = egui::Modal::new(egui::Id::new("actions"))
             .area(
-                egui::Modal::default_area(egui::Id::new("actions"))
-                    .anchor(egui::Align2::RIGHT_BOTTOM, [-14.0, -58.0]),
+                egui::Area::new(egui::Id::new("actions")).order(egui::Order::Foreground)
+                    .pivot(egui::Align2::RIGHT_BOTTOM)
+                    .fixed_pos(anchor),
             )
             .backdrop_color(Color32::from_black_alpha(24))
             .frame(crate::action_row::popup_frame(ctx))
@@ -132,6 +136,8 @@ impl Shelf {
                     ui_style::keycap(ui, "Esc");
                 });
             });
+        #[cfg(test)]
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("test-actions-popup-rect"), result.response.rect));
         if enter && picked.is_none() {
             picked = catalogue
                 .as_array()

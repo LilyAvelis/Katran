@@ -3,7 +3,6 @@ mod action_icons;
 mod action_row;
 mod api_client;
 mod app_identity;
-mod capture_lamp;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
 mod gallery_card;
@@ -533,33 +532,25 @@ impl Shelf {
         #[cfg(test)]
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-header-rect"), _header.response.rect));
         let _footer = egui::Panel::bottom("footer")
-            .exact_size(84.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme_ui::color(&ctx,theme_ui::Role::Raised,Color32::from_rgb(54,54,58)))
-                    .inner_margin(10),
-            )
+            .exact_size(34.0)
+            .frame(egui::Frame::new()
+                .fill(theme_ui::color(&ctx, theme_ui::Role::Surface, Color32::from_rgb(54,54,58)))
+                .inner_margin(egui::Margin::symmetric(8, 2)))
             .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "{} · {} выбрано",
-                        if self.capture {
-                            "Захват включён"
-                        } else {
-                            "Захват на паузе"
-                        },
-                        self.state["selected"].as_array().map_or(0, Vec::len)
-                    ));
+                ui.horizontal_centered(|ui| {
+                    self.info_bar(ui);
+                    let selected = self.state["selected"].as_array().map_or(0, Vec::len);
+                    if selected > 0 { ui.weak(format!("{selected} выбрано")); }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui_style::actions_button(ui, self.actions).clicked() {
+                        let response = ui_style::actions_button(ui, self.actions);
+                        ctx.data_mut(|data| data.insert_temp(egui::Id::new("actions-button-rect"), response.rect));
+                        if response.clicked() {
                             self.actions = !self.actions;
                             self.focus_actions = self.actions;
                             self.action_query.clear();
                         }
-                        capture_lamp::show(ui, self.capture);
                     });
                 });
-                self.info_bar(ui);
             });
         #[cfg(test)]
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-footer-rect"), _footer.response.rect));
@@ -1926,7 +1917,7 @@ mod tests {
         };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
         output.textures_delta.clear();
-        let positions = ["Katran ·", "Захват на паузе", "image3.png"]
+        let positions = ["Katran ·", "Actions  Ctrl K", "image3.png"]
             .iter()
             .map(|needle| {
                 output
@@ -2007,6 +1998,25 @@ mod tests {
         assert_eq!(app.call(Command::Interaction)["selected"],serde_json::json!([id]));
     }
     #[test]
+    fn actions_popup_tracks_actual_status_bar_trigger() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        app.actions = true;
+        for size in [egui::vec2(940.0,680.0), egui::vec2(620.0,480.0)] {
+            for _ in 0..3 {
+                let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO,size)), ..Default::default() }, |ui| app.render(ui));
+                output.textures_delta.clear();
+            }
+            let trigger = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect"))).unwrap();
+            let popup = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-actions-popup-rect"))).unwrap();
+            assert!(popup.bottom() <= trigger.top() - 4.0, "{popup:?} must stay above {trigger:?}");
+            assert!((popup.right()-trigger.right()).abs() <= 2.0, "right edges: {popup:?} / {trigger:?}");
+        }
+    }
+    #[test]
     fn folder_header_keeps_category_geometry_with_long_status_and_recovery() {
         fn panel_sizes(app: &mut Shelf, ctx: &egui::Context, size: egui::Vec2) -> (f32, f32) {
             let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
@@ -2029,7 +2039,7 @@ mod tests {
         app.workspace.recovery = Some((0..30).map(|i| serde_json::json!({"recovery_path":format!("long-recovery-path-{i}"),"error":{"message":"synthetic"}})).collect());
         let folder_sizes = panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0));
         assert_eq!(normal, folder_sizes, "Folder details must not change panel heights");
-        assert!((48.0..=110.0).contains(&folder_sizes.1), "footer must stay compact: {:?}", folder_sizes);
+        assert!((30.0..=40.0).contains(&folder_sizes.1), "footer must stay compact: {:?}", folder_sizes);
         app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
         app.call(Command::SelectTabPosition { position: 1 });
         assert_eq!(normal, panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0)), "Pinned state must not change panel heights");

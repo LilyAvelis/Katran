@@ -39,90 +39,35 @@ impl Shelf {
         } else {
             self.message.clone()
         };
-        let width = ui.available_width();
-        let available = (width
-            - ui.spacing().item_spacing.x
-                * if folder {
-                    3.0
-                } else if pods {
-                    1.0
-                } else {
-                    2.0
-                })
-        .max(0.0);
-        let widths = if folder {
-            [
-                available * 0.30,
-                available * 0.22,
-                available * 0.28,
-                available * 0.20,
-            ]
-        } else if pods {
-            [available * 0.32, 0.0, available * 0.68, 0.0]
-        } else {
-            [available * 0.25, available * 0.30, available * 0.45, 0.0]
-        };
-        ui.horizontal(|ui| {
-            let context = if folder {
-                format!("Folder · {path}")
-            } else if self.state["pinned_only"] == true {
-                "Закреплённые".into()
-            } else {
-                "Категория".into()
-            };
-            for (index, (label, page, tooltip)) in [
-                (
-                    context,
-                    Page::Folder,
-                    if folder {
-                        format!("{path}\nShift Tab · Добавить в Катран")
-                    } else {
-                        "Shift Tab · Перенести в Folder".into()
-                    },
-                ),
-                (sort.clone(), Page::Sort, sort.clone()),
-                (format!("Статус · {status}"), Page::Status, status.clone()),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                if pods && page == Page::Sort {
-                    continue;
-                }
-                if ui
-                    .add_sized(
-                        [widths[index], 24.0],
-                        egui::Button::new(RichText::new(label).size(11.0)).truncate(),
-                    )
-                    .on_hover_text(tooltip)
-                    .clicked()
-                {
-                    self.info.page = Some(page);
+        // Compact IDE-style segments; detail belongs to the existing API-backed panels.
+        let context = if folder { format!("Folder · {path}") }
+            else if self.state["pinned_only"] == true { "Закреплённые".into() }
+            else { "Категория".into() };
+        for (icon, page, tooltip) in [
+            (egui_lucide::Lucide::FolderOpen, Page::Folder, context),
+            (egui_lucide::Lucide::ArrowUpDown, Page::Sort, sort),
+            (egui_lucide::Lucide::CircleQuestionMark, Page::Status, status),
+            (egui_lucide::Lucide::RefreshCw, Page::Recovery, "Восстановление файлов".into()),
+        ] {
+            if (pods && page == Page::Sort) || (!folder && page == Page::Recovery) { continue; }
+            if crate::ui_style::status_icon(ui, icon, &tooltip).clicked() {
+                self.info.page = Some(page);
+                if page == Page::Recovery {
+                    let result = self.call(Command::FolderRecovery);
+                    self.workspace.recovery = result["items"].as_array().cloned();
+                    self.workspace.recovery_root = self.state["folder_path"].as_str().map(str::to_owned);
                 }
             }
-            if folder
-                && ui
-                    .add_sized(
-                        [widths[3], 24.0],
-                        egui::Button::new(RichText::new("Восстановление").size(11.0)).truncate(),
-                    )
-                    .clicked()
-            {
-                self.info.page = Some(Page::Recovery);
-                let result = self.call(Command::FolderRecovery);
-                self.workspace.recovery = result["items"].as_array().cloned();
-                self.workspace.recovery_root =
-                    self.state["folder_path"].as_str().map(str::to_owned);
-            }
-        });
+        }
     }
+
     pub(super) fn info_panel(&mut self, ctx: &egui::Context) {
         let Some(page) = self.info.page else {
             return;
         };
         let width = (ctx.content_rect().width() - 32.0).clamp(200.0, 560.0);
         let modal=egui::Modal::new(egui::Id::new("information-bar"))
-            .area(egui::Modal::default_area(egui::Id::new("information-bar")).anchor(egui::Align2::CENTER_BOTTOM,[0.0,-90.0]))
+            .area(egui::Modal::default_area(egui::Id::new("information-bar")).anchor(egui::Align2::CENTER_BOTTOM,[0.0,-38.0]))
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx,|ui| {
                 ui.set_width(width);
                 ui.heading(match page {Page::Folder=>"Папка и категория",Page::Sort=>"Сортировка",Page::Status=>"Статус и операции",Page::Recovery=>"Восстановление файлов"});
