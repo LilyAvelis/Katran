@@ -8,6 +8,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[path = "bundled_emoji.rs"]
+mod bundled_emoji;
+
 const MAX_BYTES: u64 = 384 * 1024 * 1024;
 pub fn valid_id(id: &str) -> bool {
     matches!(id, "apple" | "system")
@@ -48,9 +51,17 @@ pub fn resolve(root: &Path, id: &str) -> Result<Value> {
             json!({"id":id,"label":"Windows · Segoe UI Emoji","available":true,"path":null}),
         );
     }
-    let path = directory(root)?.join(format!("{id}.ttf"));
-    let available = fs::symlink_metadata(&path)
+    let dir = directory(root)?;
+    let mut path = dir.join(format!("{id}.ttf"));
+    let mut available = fs::symlink_metadata(&path)
         .is_ok_and(|m| m.is_file() && !is_link(&m) && m.len() > 0 && m.len() <= MAX_BYTES);
+    if id == "apple"
+        && !available
+        && let Some(bundled) = bundled_emoji::materialize(&dir)?
+    {
+        path = bundled;
+        available = true;
+    }
     let label = if id == "apple" {
         "Apple · macOS".into()
     } else {

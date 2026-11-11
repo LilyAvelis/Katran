@@ -31,8 +31,13 @@ The file is256391076bytes. Its first family is named Segoe UI Emoji, so the
 private collection is essential to distinguish it from Windows' own font.
 Apple designs remain Apple's assets; the converter's code license is not a
 grant to redistribute those designs. This local file and its source receipt
-remain in ignored profile data, outside Git and release packages. Application
-code does not download it automatically for other users.
+remain in ignored profile data, outside Git. Version 3.1 release builds include
+a deterministic compact resource retaining all glyphs at the 96px bitmap strike;
+larger previews scale that strike. Other bitmap sizes are omitted to preserve the
+legacy updater's 100MiB archive limit. The resource is materialized privately on
+first startup without replacing a user's existing apple.ttf. Source and resource
+hashes are recorded in the build manifest. The converter's license does not
+establish redistribution rights for Apple's artwork.
 
 ## Verification
 

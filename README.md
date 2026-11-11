@@ -1,9 +1,9 @@
 # Katran
 
-**Katran 3.0** is the owner-accepted Windows release candidate, with Folder,
-Pods, pinned objects, tray/global overlay, native paste and optional Blue themes,
-lily/custom backgrounds and Acrylic glass. Publication evidence is recorded in
-[3.0 release notes](docs/releases/3.0.0.md).
+**Katran 3.1** adds silent video backgrounds, GPU optics, configurable selection
+colors and bundled Apple emoji. New profiles start with the Blue theme and lily
+artwork; existing preferences are preserved. Personal videos are never included.
+See [3.1 release notes](docs/releases/3.1.0.md).
 
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and integrations use one Rust command dispatcher. Clipboard events are the
@@ -16,11 +16,15 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 3.0.2
+## Current release · 3.1.0
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-reports **3.0.2** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
+reports **3.1.0** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
+
+Video backgrounds use your own file. Portable/setup include FFmpeg components;
+users upgrading through the in-app updater can prepare them explicitly in
+Settings → Themes → Video background. No video is downloaded automatically.
 
 Prepare an updated build without overwriting a running executable:
 

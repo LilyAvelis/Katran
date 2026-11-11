@@ -1,6 +1,18 @@
 use std::{env, fs, path::PathBuf};
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(katran_bundled_apple)");
+    println!("cargo:rerun-if-env-changed=KATRAN_BUNDLE_APPLE");
+    println!("cargo:rerun-if-changed=assets/emoji-bundle/apple.zip");
+    if env::var("KATRAN_BUNDLE_APPLE").as_deref() == Ok("1") {
+        let bundle = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("assets/emoji-bundle/apple.zip");
+        assert!(
+            bundle.is_file(),
+            "KATRAN_BUNDLE_APPLE=1 requires prepared assets/emoji-bundle/apple.zip"
+        );
+        println!("cargo:rustc-cfg=katran_bundled_apple");
+    }
     println!("cargo:rerun-if-changed=assets/branding/katran.ico");
     println!("cargo:rerun-if-changed=assets/branding/katran.rc");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")

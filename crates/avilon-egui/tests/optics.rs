@@ -63,8 +63,10 @@ fn rejects_bad_sizes_sources_and_parameters() {
             LensError::InvalidSize
         );
     }
-    let mut invalid = LensOptions::default();
-    invalid.refraction = f32::NAN;
+    let mut invalid = LensOptions {
+        refraction: f32::NAN,
+        ..Default::default()
+    };
     assert_eq!(
         render_lens(&source, [4, 4], invalid).unwrap_err(),
         LensError::InvalidOptions

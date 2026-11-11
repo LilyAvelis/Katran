@@ -81,7 +81,9 @@ fn theme_is_optional_persistent_and_does_not_change_behavior_preferences() {
     let original = call(&mut api, Command::GetSettings);
     let interaction = call(&mut api, Command::Interaction);
     let catalog = call(&mut api, Command::Themes);
-    assert_eq!(catalog["current"]["preset"], "standard");
+    assert_eq!(catalog["current"]["preset"], "blue_experimental");
+    assert_eq!(catalog["current"]["lily_background"], 1);
+    assert!(catalog["current"]["video_background"].is_null());
     assert_eq!(catalog["themes"][1]["experimental"], true);
     let pref = ThemePreferences {
         preset: Preset::BlueExperimental,
@@ -116,9 +118,10 @@ fn theme_is_optional_persistent_and_does_not_change_behavior_preferences() {
             theme: Default::default(),
         },
     );
-    assert_eq!(call(&mut api, Command::GetSettings), original);
+    let reset = call(&mut api, Command::GetSettings);
+    assert_eq!(reset["theme"]["preset"], "standard");
     let old: katran::settings::Settings = serde_json::from_value(serde_json::json!({})).unwrap();
-    assert_eq!(old.theme.preset, Preset::Standard);
+    assert_eq!(old.theme.preset, Preset::BlueExperimental);
     assert!(
         serde_json::from_value::<ThemePreferences>(serde_json::json!({"preset":"remote_url"}))
             .is_err()
@@ -401,7 +404,7 @@ fn image_action_availability_is_metadata_only_but_execution_checks_actual_bytes(
     assert_eq!(reply["error"]["code"], "source_changed");
     assert_eq!(
         call(&mut api, Command::Themes)["current"]["preset"],
-        "standard"
+        "blue_experimental"
     );
 }
 #[test]

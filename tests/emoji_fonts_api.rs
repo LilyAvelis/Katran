@@ -16,7 +16,10 @@ fn defaults_migrate_and_selection_round_trips_without_modifying_text() {
     let fonts = call(&mut api, Command::EmojiFonts);
     assert_eq!(fonts["ok"], true, "{fonts}");
     assert_eq!(fonts["result"]["selected"], "apple");
-    assert_eq!(fonts["result"]["fonts"][0]["available"], false);
+    assert_eq!(
+        fonts["result"]["fonts"][0]["available"],
+        cfg!(katran_bundled_apple)
+    );
     let system = call(
         &mut api,
         Command::ResolveEmojiFont {
@@ -112,4 +115,29 @@ fn valid_font_import_is_profile_local_deduplicated_and_does_not_select_itself() 
         assert!(std::time::Instant::now() < end, "{state}");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+}
+
+#[cfg(all(windows, katran_bundled_apple))]
+#[test]
+fn bundled_font_is_private_verified_and_original_takes_precedence() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    let font = call(&mut api, Command::ResolveEmojiFont { id: "apple".into() });
+    assert_eq!(font["ok"], true, "{font}");
+    let path = std::path::PathBuf::from(font["result"]["path"].as_str().unwrap());
+    assert_eq!(path.file_name().unwrap(), "apple-bundled96.ttf");
+    assert!(path.starts_with(root.path().canonicalize().unwrap()));
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), 66_360_392);
+    assert!(katran::emoji_render::probe_font(&path).is_ok());
+    let original = path.parent().unwrap().join("apple.ttf");
+    std::fs::write(&original, b"user file remains untouched").unwrap();
+    let picked = call(&mut api, Command::ResolveEmojiFont { id: "apple".into() });
+    assert_eq!(
+        std::path::PathBuf::from(picked["result"]["path"].as_str().unwrap()),
+        original
+    );
+    assert_eq!(
+        std::fs::read(original).unwrap(),
+        b"user file remains untouched"
+    );
 }

@@ -38,7 +38,11 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
         Self {
-            theme: Default::default(),
+            theme: crate::theme::ThemePreferences {
+                preset: crate::theme::Preset::BlueExperimental,
+                lily_background: Some(1),
+                ..Default::default()
+            },
             overlay_hotkey: String::new(),
             emoji_font: "apple".into(),
             sort_notifications: true,

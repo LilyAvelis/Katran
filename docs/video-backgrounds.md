@@ -27,8 +27,12 @@ names/paths are passed as separate arguments without a command shell.
 
 ## Rendering and limits
 
-Requires the user's `ffmpeg` and `ffprobe` on PATH; these tools are not bundled
-or downloaded by the application. The first local prototype supports H.264.
+Version 3.1 portable/setup bundles pinned `ffmpeg` and `ffprobe` with shared DLLs.
+Legacy in-app upgrades retain the three-file update format; Themes offers an
+explicit download of the checksum-pinned runtime when missing. Domain commands
+`MediaRuntimeStatus` and `EnsureMediaRuntime` expose status and installation;
+the latter supports BeginJob/PollJob. Existing PATH tools remain supported.
+No network download runs on ordinary startup. The prototype supports H.264.
 The player explicitly requests D3D11VA hardware surfaces. Hardware/tool failure
 is an explicit error rather than an implicit software decoding fallback.
 

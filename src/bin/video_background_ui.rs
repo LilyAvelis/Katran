@@ -3,7 +3,7 @@ use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use std::{
     io::Read,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -248,7 +248,14 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
     thread::spawn(move || {
         #[cfg(test)]
         let _finished = Finished(finish_flag);
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = match katran::media_runtime::command("ffmpeg") {
+            Ok(command) => command,
+            Err(error) => {
+                let _ = tx.try_send(Message::Error(error));
+                ctx.request_repaint();
+                return;
+            }
+        };
         cmd.args([
             "-v",
             "error",
@@ -391,6 +398,7 @@ impl Drop for Finished {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use std::process::Command;
     use std::time::{Duration, Instant};
 
     #[test]

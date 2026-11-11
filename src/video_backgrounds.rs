@@ -68,7 +68,7 @@ fn run(mut cmd: Command, timeout: Duration) -> Result<(), String> {
 fn probe(path: &Path) -> Result<(u32, u32, f64), String> {
     let (output, file) = temp("json")?;
     // Output is redirected to a file, so neither pipe can fill and deadlock.
-    let mut cmd = Command::new("ffprobe");
+    let mut cmd = crate::media_runtime::command("ffprobe")?;
     cmd.args([
         "-v",
         "error",
@@ -193,7 +193,7 @@ fn prepare_inner(source: &Path, expected: Option<(u64, &str)>) -> Result<Prepare
     let (width, height, duration) = probe(&input.0)?;
     let (output, file) = temp("mp4")?;
     drop(file);
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = crate::media_runtime::command("ffmpeg")?;
     cmd.args(["-v", "error", "-nostdin", "-y", "-i"])
         .arg(&input.0)
         .args([

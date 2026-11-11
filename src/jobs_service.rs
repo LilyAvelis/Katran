@@ -251,6 +251,12 @@ impl Service {
             };
         }
         let id = match command {
+            Command::EnsureMediaRuntime => self.jobs.submit(Lane::Foreground, move |cancel| {
+                cancel.begin_effect()?;
+                crate::media_runtime::install()
+                    .map(PreparedWork::Value)
+                    .map_err(|e| ApiError::new("media_runtime_error", e))
+            })?,
             Command::ImportVideoBackground { path } => {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;

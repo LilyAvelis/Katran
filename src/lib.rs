@@ -29,6 +29,7 @@ pub mod interaction;
 mod jobs_service;
 pub mod link_fragments;
 pub mod markdown;
+pub mod media_runtime;
 pub mod open_file;
 pub mod origin;
 mod paste_service;
@@ -420,6 +421,8 @@ impl Service {
             ));
         }
         match command {
+            Command::MediaRuntimeStatus => Ok(media_runtime::status()),
+            Command::EnsureMediaRuntime => media_runtime::install().map_err(|e|ApiError::new("media_runtime_error",e)),
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
             Command::VideoBackgrounds => video_backgrounds::catalogue(&self.root).map(|items|serde_json::json!({"items":items})).map_err(|e|ApiError::new("video_background_error",e)),
             Command::GetVideoBackground {id} => video_backgrounds::get(&self.root,&id).map_err(|e|ApiError::new("video_background_error",e)),

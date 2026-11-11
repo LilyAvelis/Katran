@@ -10,6 +10,8 @@ pub struct State {
     video_picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
     video_job: Option<katran::domain_jobs::JobId>,
     video_backgrounds: Option<serde_json::Value>,
+    media_runtime: Option<serde_json::Value>,
+    media_job: Option<katran::domain_jobs::JobId>,
     font_picker: Option<std::sync::mpsc::Receiver<super::theme_file_picker::PickResult>>,
     font_job: Option<katran::domain_jobs::JobId>,
     emoji_fonts: Option<serde_json::Value>,
@@ -271,6 +273,7 @@ impl State {
             || self.background_job.is_some()
             || self.video_picker.is_some()
             || self.video_job.is_some()
+            || self.media_job.is_some()
             || self.font_picker.is_some()
             || self.font_job.is_some()
     }
@@ -443,6 +446,32 @@ impl State {
             }
         }
     }
+    fn tick_media(&mut self, api: &mut Service, ctx: &egui::Context) {
+        if let Some(job_id) = self.media_job {
+            let response = call(api, Command::PollJob { job_id });
+            let status = &response["result"];
+            match status["state"].as_str() {
+                Some("queued" | "running" | "ready") => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                }
+                Some("succeeded") => {
+                    self.media_job = None;
+                    self.media_runtime = None;
+                    self.error.clear();
+                    ctx.request_repaint();
+                }
+                _ => {
+                    self.media_job = None;
+                    self.error = status["error"]["message"]
+                        .as_str()
+                        .or_else(|| response["error"]["message"].as_str())
+                        .unwrap_or("Не удалось подготовить компоненты видео")
+                        .into();
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
     fn tick_font(&mut self, api: &mut Service, ctx: &egui::Context) {
         if let Some(picker) = &self.font_picker {
             match picker.try_recv() {
@@ -516,6 +545,7 @@ impl State {
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
         self.tick_background(api, ctx);
         self.tick_video(api, ctx);
+        self.tick_media(api, ctx);
         self.tick_font(api, ctx);
         self.updates.tick(api, ctx);
         let interaction = call(api, Command::Interaction);
@@ -528,6 +558,7 @@ impl State {
             self.draft = None;
             self.custom_backgrounds = None;
             self.video_backgrounds = None;
+            self.media_runtime = None;
             self.emoji_fonts = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
@@ -742,6 +773,19 @@ impl State {
             if ui.checkbox(&mut video_enabled,"Включить").changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
            });
            if video_enabled {
+           let media=self.media_runtime.get_or_insert_with(||call(api,Command::MediaRuntimeStatus)).clone();
+           let media_available=media["ok"] == true && media["result"]["available"] == true;
+           if media["ok"] == true && !media_available {
+            SettingsRow::show(ui,"Компоненты видео","Для работы видео требуется загрузка около 73 МиБ.",|ui|{
+             if ui.add_enabled(!self.background_busy(),egui::Button::new(if self.media_job.is_some(){"Подготовка…"}else{"Подготовить компоненты видео"})).clicked(){
+              let response=call(api,Command::BeginJob{command:Box::new(Command::EnsureMediaRuntime)});
+              self.media_job=response["result"]["job_id"].as_u64().map(katran::domain_jobs::JobId);
+              if response["ok"] != true || self.media_job.is_none(){self.error=response["error"]["message"].as_str().unwrap_or("Не удалось начать подготовку компонентов видео").into();}else{self.error.clear();ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));}
+             }
+            });
+           } else if media["ok"] != true {
+            ui.weak("Не удалось проверить компоненты видео. Откройте настройки повторно.");
+           }
            SettingsRow::show(ui,"Сглаживать стык","Короткое смешивание кадров на границе кэшированного цикла.",|ui|{
             if ui.checkbox(&mut theme.video_seam_smoothing,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
@@ -755,7 +799,7 @@ impl State {
                if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Видео")).clicked(){theme.video_background=Some(id.to_owned());theme.video_enabled=Some(true);theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
               }
              });
-             if ui.add_enabled(self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать видео…")).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
+             if ui.add_enabled(!self.background_busy() && media_available,egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать видео…")).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
             });
            });
            }

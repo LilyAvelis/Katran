@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$Version,
     [Parameter(Mandatory)][string]$DependencyNoticesPath,
+    [string]$MediaRuntimeArchive,
+    [string]$AppleBundleSha256,
     [switch]$BuildInstaller,
     [string]$IsccPath = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 )
@@ -53,12 +55,21 @@ $portable = Join-Path $OutputDirectory 'portable'
 $update = Join-Path $OutputDirectory 'update'
 $versionDir = Join-Path $portable "runtime/versions/$id"
 New-Item -ItemType Directory -Path $versionDir,$update | Out-Null
+if ($MediaRuntimeArchive) {
+    & python (Join-Path $PSScriptRoot 'media-runtime.py') $MediaRuntimeArchive (Join-Path $versionDir 'media-runtime')
+    if ($LASTEXITCODE -ne 0) { throw 'Media runtime validation failed' }
+    Copy-Item -LiteralPath $MediaRuntimeArchive -Destination (Join-Path $OutputDirectory "Katran-$Version-media-runtime.zip")
+    Write-Json (Join-Path $OutputDirectory 'media-runtime.json') ([ordered]@{schema_version=1;version='9.0.2';url="https://github.com/LilyAvelis/Katran/releases/download/v$Version/Katran-$Version-media-runtime.zip";sha256=(Hash $MediaRuntimeArchive);size_bytes=(Get-Item -LiteralPath $MediaRuntimeArchive).Length;source='https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/tag/autobuild-2026-11-11-12-39';license='LGPL shared build'})
+}
 # Explicit whitelist: never copy a working tree, runtime tree, user data or build directory.
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'Katran.exe')
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'runtime/Katran.exe')
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran.exe') -Destination (Join-Path $portable 'katran-cli.exe')
 [IO.File]::WriteAllText((Join-Path $portable 'portable.flag'), '', $utf8)
 $combinedNotices = (Get-Content -LiteralPath $DependencyNoticesPath -Raw) + "`n`nEverything ES:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Raw) + "`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Raw)
+if ($AppleBundleSha256) {
+    $combinedNotices += "`n`nApple emoji artwork: Apple Inc. Source conversion: https://github.com/samuelngs/apple-emoji-ttf/releases/tag/macos-26-20260722-484daf4e . Compact resource retains the 96px bitmap strike. The converter code license does not grant rights to Apple's artwork. Source SHA256: 18e48f1785564fbf511241e0963b265057bfe742036d8543406c6ce07e48ec0b . Resource SHA256: $AppleBundleSha256 .`n"
+}
 foreach($assetNotice in @('assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) {
     $combinedNotices += "`n`n$assetNotice`n" + (Get-Content -LiteralPath (Join-Path $Root $assetNotice) -Raw)
 }
@@ -75,6 +86,11 @@ $sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets
 $sourceFiles += @('assets/branding/katran.ico','assets/branding/katran.rc' | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
 $sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })
 $manifest = [ordered]@{profile='release';version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash (Join-Path $portable 'THIRD-PARTY-NOTICES.txt'));everything_es_sha256=(Hash (Join-Path $Root 'assets/everything/es.exe'));everything_license_sha256=(Hash (Join-Path $Root 'assets/everything/LICENSE'));everything_notice_sha256=(Hash (Join-Path $Root 'assets/everything/NOTICE.txt'));sources=$sources}
+if ($AppleBundleSha256) {
+    if ($AppleBundleSha256 -cne '8cb7eb78303459c10a90d70cd2ee85adae6c331985692570024487f3656c7474') { throw 'Unexpected Apple resource digest' }
+    $manifest.bundled_apple_sha256 = $AppleBundleSha256
+    $manifest.apple_source_sha256 = '18e48f1785564fbf511241e0963b265057bfe742036d8543406c6ce07e48ec0b'
+}
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-ui.exe') -Destination (Join-Path $versionDir 'katran-ui.exe')
 Copy-Item -LiteralPath (Join-Path $portable 'THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt')
 Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/es.exe') -Destination (Join-Path $versionDir 'es.exe')
@@ -91,6 +107,7 @@ $updateName = "Katran-$Version-update.zip"
 $updateZip = Join-Path $OutputDirectory $updateName
 Write-Zip $portable $portableZip
 Write-Zip $update $updateZip
+if ((Get-Item -LiteralPath $updateZip).Length -ge 100MB -or (Get-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-ui.exe')).Length -ge 200MB) { throw 'Legacy update ZIP or UI executable exceeds updater limits' }
 Write-Json (Join-Path $OutputDirectory 'release.json') ([ordered]@{schema_version=1;data_schema_version=6;minimum_launcher_protocol=1;version=$Version;tag="v$Version";repository='LilyAvelis/Katran';update=[ordered]@{url="https://github.com/LilyAvelis/Katran/releases/download/v$Version/$updateName";size_bytes=(Get-Item -LiteralPath $updateZip).Length;sha256=(Hash $updateZip)}})
 if ($BuildInstaller) {
     if (!(Test-Path -LiteralPath $IsccPath -PathType Leaf)) { throw 'Inno Setup 6 compiler missing; pass -IsccPath' }

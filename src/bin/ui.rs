@@ -1289,6 +1289,8 @@ fn main() -> eframe::Result {
         }
         execute(Command::SetCaptureEnabled { enabled: false });
     }
+    // Materialize bundled emoji once before the first frame, preserving a user font.
+    let _ = katran::emoji_fonts::resolve(&root, "apple");
     let logger = katran::diagnostics::Logger::start(&root).ok();
     if let Some(logger) = &logger {
         api.attach_logger(logger.clone());
@@ -1486,6 +1488,8 @@ mod tests {
         )
         .unwrap();
         settings.downloads_folder = Some(root.join("synthetic-downloads"));
+        // These behavioral fixtures exercise the stable baseline; theme-specific tests opt in.
+        settings.theme = katran::theme::ThemePreferences::default();
         api.execute(Request {
             api_version: 1,
             request_id: "test-no-personal-folders".into(),
