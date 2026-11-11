@@ -80,11 +80,13 @@ pub mod pods;
 mod pod_metadata;
 pub mod overlay;
 pub mod overlay_windows;
+pub mod tray;
 mod overlay_service;
 pub mod emoji_render;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    window_visible: bool,
     overlay_session: overlay::Session,
     overlay_host: Box<dyn overlay::Host + Send>,
     overlay_copy: Option<(domain_jobs::JobId, u64)>,
@@ -231,6 +233,7 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
             overlay_copy: None,
@@ -293,6 +296,7 @@ impl Service {
         )?;
         pods::register_sql(&db)?;
         Ok(Self {
+            window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
             overlay_copy: None,
@@ -406,6 +410,10 @@ impl Service {
             ));
         }
         match command {
+            Command::WindowVisibility => Ok(serde_json::json!({"visible":self.window_visible})),
+            Command::SetWindowVisibility { visible } => {self.window_visible=visible;if !visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":visible}))},
+            Command::ToggleWindowVisibility => {self.window_visible = !self.window_visible;if !self.window_visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":self.window_visible}))},
+            Command::ToggleResidentOverlay { owner_window,capture } => self.toggle_resident_overlay(owner_window,capture),
             Command::DescribePod { id } => self.describe_pod(id),
             Command::SummonCapturedOverlay { owner_window, capture } => self.summon_captured_overlay(owner_window,capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),

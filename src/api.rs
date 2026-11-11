@@ -19,6 +19,10 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    WindowVisibility,
+    SetWindowVisibility { visible: bool },
+    ToggleWindowVisibility,
+    ToggleResidentOverlay { owner_window: u64, capture: Option<crate::overlay::SummonReceipt> },
     DescribePod { id: i64 },
     SummonCapturedOverlay { owner_window: u64, capture: crate::overlay::SummonReceipt },
     SummonOverlay { owner_window: u64 },

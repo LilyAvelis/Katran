@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct State {
+    foreground: u64,
     sequence: u32,
     sent: usize,
     fail_copy: bool,
@@ -30,7 +31,8 @@ impl katran::text_fragments::ClipboardSink for Sink {
 struct Fake(Arc<Mutex<State>>);
 impl Host for Fake {
     fn foreground(&mut self) -> katran::overlay::Result<u64> {
-        Ok(7)
+        let value = self.0.lock().unwrap().foreground;
+        Ok(if value == 0 { 7 } else { value })
     }
     fn identity(&mut self, h: u64) -> katran::overlay::Result<Target> {
         Ok(Target {
@@ -177,4 +179,61 @@ fn copy_must_succeed_before_paste_and_session_is_single_use() {
             false
         );
     }
+}
+#[test]
+fn resident_toggle_hides_only_own_foreground_and_keeps_external_target() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10000).unwrap();
+    let state = Arc::new(Mutex::new(State::default()));
+    api.set_overlay_host(Box::new(Fake(state.clone())));
+    assert_eq!(call(&mut api, Command::WindowVisibility)["visible"], true);
+    assert_eq!(
+        reply(
+            &mut api,
+            Command::ToggleResidentOverlay {
+                owner_window: 8,
+                capture: None
+            }
+        )["ok"],
+        false
+    );
+    call(
+        &mut api,
+        Command::ToggleResidentOverlay {
+            owner_window: 8,
+            capture: Some(katran::overlay::SummonReceipt {
+                previous: Target {
+                    hwnd: 7,
+                    pid: 7,
+                    process_started: 7,
+                },
+                work_area: WorkArea {
+                    left: 0,
+                    top: 0,
+                    right: 1920,
+                    bottom: 1080,
+                },
+            }),
+        },
+    );
+    state.lock().unwrap().foreground = 8;
+    assert_eq!(
+        call(
+            &mut api,
+            Command::ToggleResidentOverlay {
+                owner_window: 8,
+                capture: None
+            }
+        )["visible"],
+        false
+    );
+    assert_eq!(call(&mut api, Command::WindowVisibility)["visible"], false);
+    assert_eq!(
+        call(&mut api, Command::ToggleWindowVisibility)["visible"],
+        true
+    );
+    assert_eq!(
+        call(&mut api, Command::SetWindowVisibility { visible: false })["visible"],
+        false
+    );
 }

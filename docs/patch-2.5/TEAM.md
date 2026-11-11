@@ -60,3 +60,5 @@ Pods/summon followup: reused Nemi (Pods storage/classifier/capture), Mira (nativ
 Ergonomics followup reused Fenna (Pods grid/preview), Nemi (Pods transfer + hotkey recorder), Walter Senior Sol/low (explicitly requested deeper summon diagnosis). Lead integrated API metadata, independent density and captured-target adoption. No Astra, new sessions, native desktop checks or release.
 
 Recovery/alignment followup: Tavi Patch /root/tavi newly created for explicitly requested junior layout task, gpt-6-luna high, owns shelf_view only. Reused Vela for long-combination raster/fallback and Walter for read-only host process/WER diagnostics + same-desktop native fix. Lead integrated recovery visibility and lifecycle logs. No native desktop automation or live Clipboard effects.
+
+Tray followup reused Mira Socket for isolated native tray adapter; Polly owns shared visibility API/UI integration. Lilia accepted prior recovery/Pods/native paste and authorized current main push+Notion update, no tags/releases until3.0.

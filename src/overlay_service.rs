@@ -5,6 +5,34 @@ fn overlay_error(error: crate::overlay::OverlayError) -> ApiError {
     ApiError::new(&error.code, error.message)
 }
 impl Service {
+    pub(crate) fn toggle_resident_overlay(
+        &mut self,
+        owner: u64,
+        capture: Option<crate::overlay::SummonReceipt>,
+    ) -> Result<Value> {
+        if let Some(capture) = capture {
+            let mut result = self.summon_captured_overlay(owner, capture)?;
+            self.window_visible = true;
+            result["visible"] = json!(true);
+            Ok(result)
+        } else {
+            let foreground = self.overlay_host.foreground().map_err(overlay_error)?;
+            let own = self.overlay_host.identity(owner).map_err(overlay_error)?;
+            let current = self
+                .overlay_host
+                .identity(foreground)
+                .map_err(overlay_error)?;
+            if current.pid != own.pid {
+                return Err(ApiError::new(
+                    "foreground_changed",
+                    "Katran уже не является активным приложением",
+                ));
+            }
+            self.window_visible = false;
+            self.interaction.settings_open = false;
+            Ok(json!({"visible":false}))
+        }
+    }
     pub(crate) fn summon_captured_overlay(
         &mut self,
         owner: u64,

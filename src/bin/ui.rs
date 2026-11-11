@@ -222,6 +222,7 @@ fn mode(m: egui::Modifiers) -> SelectionMode {
 impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        self.resident_close_requested(&ctx);
         self.overlay_escape(&ctx);
         input_log::record(&ctx, self.logger.as_ref());
         if self.api.is_some() && !self.info.is_open() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
@@ -758,6 +759,7 @@ impl Shelf {
 }
 impl eframe::App for Shelf {
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.tray_tick(ctx);
         self.overlay_tick(ctx);
         self.finish_job();
         self.preview_warmup_tick();
@@ -774,6 +776,7 @@ impl eframe::App for Shelf {
             if self.api.is_some() {
                 let reply = self.call(Command::ActivateWindow);
                 if reply["activation_requested"] == true {
+                    self.call(Command::SetWindowVisibility{visible:true});
                     let foreground = single_instance::show(self.native_window);
                     if let Some(log) = &self.logger {
                         log.record(

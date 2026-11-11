@@ -5,22 +5,94 @@ pub(super) struct State {
     configured: Option<String>,
     #[cfg(windows)]
     listener: Option<katran::overlay_windows::HotkeyListener>,
+    #[cfg(windows)]
+    tray: Option<katran::tray::Listener>,
+    tray_attempted: bool,
     pending: bool,
     summoned: bool,
     registration_status: String,
     recorder_suspended: bool,
+    quitting: bool,
 }
 impl Shelf {
-    pub(super) fn close_or_hide(&mut self, ctx: &egui::Context) {
+    pub(super) fn quit_application(&mut self, ctx: &egui::Context) {
+        self.overlay_ui.quitting = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+    pub(super) fn resident_close_requested(&mut self, ctx: &egui::Context) {
         #[cfg(windows)]
-        let resident = self.overlay_ui.listener.is_some();
+        let resident = self.overlay_ui.tray.is_some() || self.overlay_ui.listener.is_some();
         #[cfg(not(windows))]
         let resident = false;
-        ctx.send_viewport_cmd(if resident {
-            egui::ViewportCommand::Visible(false)
+        if resident && !self.overlay_ui.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.apply_window_visibility(ctx, false);
+        }
+    }
+    pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        self.call(Command::SetWindowVisibility { visible });
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(visible));
+        if visible {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         } else {
-            egui::ViewportCommand::Close
-        });
+            self.overlay_ui.summoned = false;
+        }
+    }
+    pub(super) fn tray_tick(&mut self, ctx: &egui::Context) {
+        if self.api.is_none() || self.native_window == 0 {
+            return;
+        }
+        if !self.overlay_ui.tray_attempted {
+            self.overlay_ui.tray_attempted = true;
+            #[cfg(all(windows, not(test)))]
+            {
+                let wake = ctx.clone();
+                match katran::tray::Listener::start(move || wake.request_repaint()) {
+                    Ok(tray) => self.overlay_ui.tray = Some(tray),
+                    Err(error) => self.message = format!("Трей Katran: {error}"),
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            let mut events = Vec::new();
+            if let Some(tray) = &self.overlay_ui.tray {
+                for _ in 0..8 {
+                    match tray.try_recv() {
+                        Ok(Some(event)) => events.push(event),
+                        Ok(None) => break,
+                        Err(error) => {
+                            self.message = error;
+                            break;
+                        }
+                    }
+                }
+            }
+            for event in events {
+                match event {
+                    katran::tray::Event::Show => self.apply_window_visibility(ctx, true),
+                    katran::tray::Event::Hide => self.apply_window_visibility(ctx, false),
+                    katran::tray::Event::Toggle => {
+                        let result = self.call(Command::ToggleWindowVisibility);
+                        if let Some(visible) = result["visible"].as_bool() {
+                            self.apply_window_visibility(ctx, visible);
+                        }
+                    }
+                    katran::tray::Event::Quit => self.run("quit".into(), ctx),
+                }
+            }
+        }
+    }
+    pub(super) fn close_or_hide(&mut self, ctx: &egui::Context) {
+        #[cfg(windows)]
+        let resident = self.overlay_ui.listener.is_some() || self.overlay_ui.tray.is_some();
+        #[cfg(not(windows))]
+        let resident = false;
+        if resident {
+            self.apply_window_visibility(ctx, false);
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         self.overlay_ui.summoned = false;
     }
     pub(super) fn overlay_escape(&mut self, ctx: &egui::Context) {
@@ -98,9 +170,9 @@ impl Shelf {
         if let Some(listener) = self.overlay_ui.listener.as_ref() {
             match listener.try_recv_capture() {
                 Ok(Some(Ok(capture))) => {
-                    let reply = self.call(Command::SummonCapturedOverlay {
+                    let reply = self.call(Command::ToggleResidentOverlay {
                         owner_window: self.native_window,
-                        capture,
+                        capture: Some(capture),
                     });
                     if let (Ok(target), Ok(area)) = (
                         serde_json::from_value(reply["previous"].clone()),
@@ -121,6 +193,7 @@ impl Shelf {
                                     );
                                 }
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                                self.call(Command::SetWindowVisibility { visible: true });
                                 ctx.request_repaint();
                             }
                             Err(error) => {
@@ -130,6 +203,7 @@ impl Shelf {
                                 self.message =
                                     format!("Не удалось вызвать Katran: {}", error.message);
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                                self.call(Command::SetWindowVisibility { visible: true });
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                                 ctx.request_repaint();
                             }
@@ -138,7 +212,17 @@ impl Shelf {
                 }
                 Ok(None) => {}
                 Ok(Some(Err(error))) => {
-                    self.message = format!("Вызов Katran: {}", error.message);
+                    if error.code == "self_target" {
+                        let reply = self.call(Command::ToggleResidentOverlay {
+                            owner_window: self.native_window,
+                            capture: None,
+                        });
+                        if reply["visible"] == false {
+                            self.apply_window_visibility(ctx, false);
+                        }
+                    } else {
+                        self.message = format!("Вызов Katran: {}", error.message);
+                    }
                 }
                 Err(error) => {
                     self.message = error.message;
@@ -166,6 +250,7 @@ impl Shelf {
                     }
                     self.overlay_ui.summoned = false;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    self.call(Command::SetWindowVisibility { visible: false });
                 }
             }
         }

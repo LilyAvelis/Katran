@@ -354,7 +354,7 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
-        if id=="quit" {ctx.send_viewport_cmd(egui::ViewportCommand::Close);return;}
+        if id=="quit" {self.quit_application(ctx);return;}
         if id=="paste_previous" {self.paste_previous(ctx);return;}
         if id=="transfer_selection" {
             let result=self.call(Command::TransferSelection);

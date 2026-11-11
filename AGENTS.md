@@ -81,3 +81,5 @@ deletions use recoverable handle-bound staging and recycle-only Windows calls;
 there is no permanent fallback. Recovery journals are excluded from discovery.
 Check `docs/patch-2.5/TEAM.md` and `HANDOFF.md` before assigning followup work.
 The accepted public version remains 2.0; a local 2.5 preview is not owner acceptance.
+
+Owner update 2026-11-11: prior local Pods/native-paste/recovery behavior confirmed working. User explicitly authorized updating GitHub main and Notion, without release/tag; next release3.0. Tray/global show-hide are the current followup and still need native owner acceptance. Earlier no-push notes describe prior checkpoints.
