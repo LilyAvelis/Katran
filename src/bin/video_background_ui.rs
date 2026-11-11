@@ -10,6 +10,7 @@ use std::{
         mpsc::{self, Receiver, TryRecvError},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +18,43 @@ pub struct VideoSource {
     pub path: PathBuf,
     pub width: u32,
     pub height: u32,
+    pub duration_ms: u32,
+}
+const CACHE_LIMIT: u64 = 512 * 1024 * 1024;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackPolicy {
+    Cache { bytes: u64, frames: u32 },
+    Streaming { bytes: u64 },
+}
+fn output_size(source: &VideoSource) -> (usize, usize) {
+    let scale = (1280.0 / source.width as f64)
+        .min(720.0 / source.height as f64)
+        .min(1.0);
+    let w = (((source.width as f64 * scale).floor() as usize) & !1).max(2);
+    let h = (((source.height as f64 * scale).floor() as usize) & !1).max(2);
+    (w, h)
+}
+pub fn playback_policy(source: &VideoSource) -> PlaybackPolicy {
+    if source.width == 0
+        || source.height == 0
+        || source.width > 3840
+        || source.height > 2160
+        || source.duration_ms == 0
+        || source.duration_ms > 120_000
+    {
+        return PlaybackPolicy::Streaming { bytes: u64::MAX };
+    }
+    let (w, h) = output_size(source);
+    let frames = ((u64::from(source.duration_ms) * 24).div_ceil(1000) + 2) as u32;
+    // FFmpeg frame buffers may have aligned rows and heights.
+    let stride = (w as u64 + 63) & !63;
+    let rows = (h as u64 + 31) & !31;
+    let bytes = stride * rows * 3 / 2 * u64::from(frames);
+    if bytes <= CACHE_LIMIT {
+        PlaybackPolicy::Cache { bytes, frames }
+    } else {
+        PlaybackPolicy::Streaming { bytes }
+    }
 }
 enum Message {
     Frame(Vec<u8>),
@@ -76,14 +114,16 @@ impl State {
             && self.error.is_none()
             && let Some(src) = self.source.clone()
         {
-            if src.width == 0 || src.height == 0 || src.width > 3840 || src.height > 2160 {
+            if src.width == 0
+                || src.height == 0
+                || src.width > 3840
+                || src.height > 2160
+                || src.duration_ms == 0
+                || src.duration_ms > 120_000
+            {
                 self.error = Some("Invalid video dimensions".into());
             } else {
-                let scale = (1280.0 / src.width as f64)
-                    .min(720.0 / src.height as f64)
-                    .min(1.0);
-                let w = ((src.width as f64 * scale).round() as usize).max(1);
-                let h = ((src.height as f64 * scale).round() as usize).max(1);
+                let (w, h) = output_size(&src);
                 self.size = [w, h];
                 self.worker = Some(start(src, w, h, ctx.clone()));
             }
@@ -143,20 +183,29 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
             "d3d11va",
             "-hwaccel_output_format",
             "d3d11",
-            "-re",
-            "-stream_loop",
-            "-1",
-            "-i",
-        ])
-        .arg(source.path)
-        .args([
+        ]);
+        let policy = playback_policy(&source);
+        if matches!(policy, PlaybackPolicy::Streaming { .. }) {
+            cmd.args(["-stream_loop", "-1"]);
+        }
+        let filter = match policy {
+            PlaybackPolicy::Cache { frames, .. } => format!(
+                "hwdownload,format=nv12,fps=24,scale={w}:{h},format=nv12,loop=loop=-1:size={frames}:start=0,setpts=N/(24*TB)"
+            ),
+            PlaybackPolicy::Streaming { .. } => {
+                format!("hwdownload,format=nv12,fps=24,scale={w}:{h}")
+            }
+        };
+        cmd.arg("-i").arg(source.path).args([
             "-map",
             "0:v:0",
             "-an",
             "-sn",
             "-dn",
             "-vf",
-            &format!("hwdownload,format=nv12,fps=24,scale={w}:{h}"),
+            &filter,
+            "-fps_mode",
+            "passthrough",
             "-pix_fmt",
             "rgba",
             "-f",
@@ -204,10 +253,26 @@ fn start(source: VideoSource, w: usize, h: usize, ctx: egui::Context) -> Worker 
             return;
         }
         let frame_len = w * h * 4;
+        let interval = Duration::from_nanos(1_000_000_000 / 24);
+        let mut next = Instant::now();
         while !stop_flag.load(Ordering::SeqCst) {
+            while Instant::now() < next && !stop_flag.load(Ordering::SeqCst) {
+                thread::sleep(
+                    next.saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(10)),
+                );
+            }
+            if stop_flag.load(Ordering::SeqCst) {
+                break;
+            }
             let mut frame = vec![0; frame_len];
             if stdout.read_exact(&mut frame).is_err() {
                 break;
+            }
+            next += interval;
+            let now = Instant::now();
+            if next <= now {
+                next = now + interval;
             }
             match tx.try_send(Message::Frame(frame)) {
                 Ok(()) => ctx.request_repaint(),
@@ -283,7 +348,12 @@ mod tests {
             path,
             width: 160,
             height: 90,
+            duration_ms: 2000,
         });
+        assert!(matches!(
+            playback_policy(src.as_ref().unwrap()),
+            PlaybackPolicy::Cache { .. }
+        ));
         state.tick(&ctx, src.clone(), true);
         let finished = state.worker.as_ref().unwrap().finished.clone();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -325,6 +395,45 @@ mod tests {
             }
         }
         assert!(decoded, "hardware decoder did not produce a frame");
+        let pid = state
+            .worker
+            .as_ref()
+            .unwrap()
+            .child
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .id();
+        let began = Instant::now();
+        let deadline = began + Duration::from_secs(9);
+        let mut frames = 1;
+        while frames < 110 && Instant::now() < deadline {
+            match state.worker.as_ref().unwrap().rx.try_recv() {
+                Ok(Message::Frame(_)) => frames += 1,
+                Ok(Message::Error(error)) => panic!("{error}"),
+                Err(TryRecvError::Disconnected) => panic!("decoder exited during loop"),
+                Err(TryRecvError::Empty) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        assert_eq!(frames, 110, "cached video did not loop beyond two cycles");
+        assert!(
+            began.elapsed() > Duration::from_secs(4),
+            "output was not paced"
+        );
+        assert_eq!(
+            state
+                .worker
+                .as_ref()
+                .unwrap()
+                .child
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .id(),
+            pid
+        );
         let start = Instant::now();
         state.tick(&ctx, src, false);
         assert!(start.elapsed() < Duration::from_secs(1), "pause blocked UI");
@@ -333,5 +442,26 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(finished.load(Ordering::SeqCst), "decoder was not reaped");
+    }
+    #[test]
+    fn policy_enforces_cache_budget() {
+        let src = VideoSource {
+            path: PathBuf::new(),
+            width: 1168,
+            height: 784,
+            duration_ms: 15042,
+        };
+        assert!(matches!(
+            playback_policy(&src),
+            PlaybackPolicy::Cache { .. }
+        ));
+        let long = VideoSource {
+            duration_ms: 120_000,
+            ..src
+        };
+        assert!(matches!(
+            playback_policy(&long),
+            PlaybackPolicy::Streaming { .. }
+        ));
     }
 }

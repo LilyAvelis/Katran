@@ -73,7 +73,7 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
         Role::Background
             if (preference.lily_background.is_some()
                 || preference.custom_background.is_some()
-                || preference.video_background.is_some()) =>
+                || preference.active_video().is_some()) =>
         {
             Color32::TRANSPARENT
         }
@@ -176,7 +176,7 @@ pub(super) fn footer_fill(ctx: &egui::Context, legacy: Color32) -> Color32 {
     if theme.preset == Preset::BlueExperimental
         && (theme.lily_background.is_some()
             || theme.custom_background.is_some()
-            || theme.video_background.is_some())
+            || theme.active_video().is_some())
     {
         Color32::TRANSPARENT
     } else {
@@ -192,7 +192,7 @@ pub(super) fn set_video_texture(
     id: &str,
     texture: Option<egui::TextureHandle>,
 ) {
-    if texture.is_some() && current(ctx).video_background.as_deref() != Some(id) {
+    if texture.is_some() && current(ctx).active_video() != Some(id) {
         return;
     }
     ctx.data_mut(|data| {
@@ -274,7 +274,7 @@ pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
         && ctx
             .data(|d| d.get_temp::<bool>(egui::Id::new("native-glass-active")))
             .unwrap_or(false);
-    if let Some(id) = &theme.video_background {
+    if let Some(id) = theme.active_video() {
         if let Some(texture) = video_texture(ctx, id) {
             paint_background(ctx, rect, &texture, glass);
         }
@@ -325,7 +325,7 @@ pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
         || !theme.decoration
         || (theme.lily_background.is_some()
             || theme.custom_background.is_some()
-            || theme.video_background.is_some())
+            || theme.active_video().is_some())
         || rect.width() <= 0.0
         || rect.height() <= 0.0
     {
@@ -648,7 +648,7 @@ fn optical_shape_for(
     {
         return None;
     }
-    let texture = if let Some(id) = &theme.video_background {
+    let texture = if let Some(id) = theme.active_video() {
         video_texture(ctx, id)
     } else if let Some(id) = &theme.custom_background {
         ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(custom_key()))
@@ -766,6 +766,74 @@ mod optical_tests {
         assert!(video_texture(&ctx, "video-b").is_some());
         set_video_texture(&ctx, "video-b", None);
         assert!(video_texture(&ctx, "video-b").is_none());
+    }
+    #[test]
+    fn disabled_video_retains_id_but_does_not_paint_or_drive_optics() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(180.0, 100.0));
+        let theme = ThemePreferences {
+            preset: Preset::BlueExperimental,
+            video_background: Some("saved-video".into()),
+            video_enabled: Some(true),
+            optical_strength: 50,
+            ..Default::default()
+        };
+        apply(&ctx, &theme);
+        let texture = ctx.load_texture(
+            "disabled-video",
+            egui::ColorImage::filled([2, 2], Color32::RED),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        set_video_texture(&ctx, "saved-video", Some(texture));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("optical-gpu-ready"), true));
+        apply(
+            &ctx,
+            &ThemePreferences {
+                video_enabled: Some(false),
+                ..theme.clone()
+            },
+        );
+        let mut optical = true;
+        let mut background_color = Color32::TRANSPARENT;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                background(ui.ctx(), rect);
+                background_color = color(ui.ctx(), Role::Background, Color32::BLACK);
+                optical = optical_shape(ui.ctx(), rect, 8.0).is_some();
+            },
+        );
+        let painted = output.shapes.iter().any(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) => rect
+                .brush
+                .as_ref()
+                .is_some_and(|brush| brush.fill_texture_id == texture_id),
+            egui::Shape::Mesh(mesh) => mesh.texture_id == texture_id,
+            _ => false,
+        });
+        output.textures_delta.clear();
+        assert!(!painted);
+        assert!(!optical);
+        assert_ne!(background_color, Color32::TRANSPARENT);
+        assert!(video_texture(&ctx, "saved-video").is_some());
+        apply(&ctx, &theme);
+        let mut optical = false;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                background(ui.ctx(), rect);
+                optical = optical_shape(ui.ctx(), rect, 8.0).is_some();
+            },
+        );
+        output.textures_delta.clear();
+        assert!(optical);
     }
     #[test]
     fn optical_layer_requires_opt_in_source_and_gpu_host() {

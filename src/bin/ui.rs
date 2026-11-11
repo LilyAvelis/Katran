@@ -421,7 +421,7 @@ impl Shelf {
                 }
                 theme_ui::apply(&ctx, &theme);
                 let wanted = if theme.preset == katran::theme::Preset::BlueExperimental {
-                    theme.video_background.clone()
+                    theme.active_video().map(str::to_owned)
                 } else {
                     None
                 };
@@ -442,6 +442,11 @@ impl Shelf {
                                 path: PathBuf::from(path),
                                 width: u32::try_from(width).unwrap_or(0),
                                 height: u32::try_from(height).unwrap_or(0),
+                                duration_ms: video["duration"]
+                                    .as_f64()
+                                    .filter(|s| s.is_finite() && *s > 0.0 && *s <= 120.0)
+                                    .map(|s| (s * 1000.0).ceil() as u32)
+                                    .unwrap_or(0),
                             });
                         }
                     }

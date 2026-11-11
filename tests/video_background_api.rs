@@ -112,6 +112,28 @@ fn downloads_action_imports_muted_copy_and_persists_video_theme() {
     );
     let mut theme: katran::theme::ThemePreferences =
         serde_json::from_value(call(&mut api, Command::Themes)["current"].clone()).unwrap();
+    theme.video_enabled = Some(false);
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    let disabled: katran::theme::ThemePreferences =
+        serde_json::from_value(call(&mut api, Command::Themes)["current"].clone()).unwrap();
+    assert_eq!(
+        disabled.video_background.as_deref(),
+        Some(video_id.as_str())
+    );
+    assert_eq!(disabled.active_video(), None);
+    theme.video_enabled = Some(true);
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    assert!(theme.active_video().is_some());
     theme.lily_background = Some(1);
     assert_eq!(
         api.execute(Request {

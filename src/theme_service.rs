@@ -57,6 +57,7 @@ impl Service {
         let mut settings = self.settings.clone();
         settings.theme.preset = theme::Preset::BlueExperimental;
         settings.theme.video_background = Some(id);
+        settings.theme.video_enabled = Some(true);
         settings.theme.custom_background = None;
         settings.theme.lily_background = None;
         self.dispatch(Command::SetSettings { settings })?;

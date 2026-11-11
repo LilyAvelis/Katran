@@ -343,6 +343,7 @@ impl State {
                             theme.custom_background = Some(id.to_owned());
                             theme.lily_background = None;
                             theme.video_background = None;
+                            theme.video_enabled = Some(false);
                             self.error = apply_theme(api, &mut self.draft, theme)
                                 .err()
                                 .unwrap_or_default();
@@ -416,6 +417,7 @@ impl State {
                             )
                         {
                             theme.video_background = Some(id.to_owned());
+                            theme.video_enabled = Some(true);
                             theme.lily_background = None;
                             theme.custom_background = None;
                             self.error = apply_theme(api, &mut self.draft, theme)
@@ -721,32 +723,39 @@ impl State {
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
-            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.video_background.is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}
-            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}}
+            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.active_video().is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Собственные фоны","Копия сохраняется в Katran. Пресеты лилий остаются доступны.",|ui|{
             let list=self.custom_backgrounds.get_or_insert_with(||call(api,Command::ListThemeBackgrounds)).clone();
             egui::ComboBox::from_id_salt("custom-background-picker").width(180.0_f32.min(ui.available_width())).selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
              for item in list["result"]["backgrounds"].as_array().into_iter().flatten(){
-              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme.video_background=None;theme_intent=Some(theme.clone());}
+              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
              }
             });
             if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать файл…")).clicked(){
                 match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
            });
-           SettingsRow::show(ui,"Видео на фоне","Управляемая копия; звук не воспроизводится.",|ui|{
+           let mut video_enabled = theme.video_is_enabled();
+           SettingsRow::show(ui,"Видеофон","Управляемая копия; звук не воспроизводится.",|ui|{
+            if ui.checkbox(&mut video_enabled,"Включить").changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
+           });
+           if video_enabled {
+           ui.weak("Короткие ролики кэшируются до 512 МиБ; длинные воспроизводятся потоком.");
+           SettingsRow::show(ui,"Файл видео","Выберите сохранённое видео или добавьте файл.",|ui|{
             let list=self.video_backgrounds.get_or_insert_with(||call(api,Command::VideoBackgrounds)).clone();
             let selected=list["result"]["items"].as_array().and_then(|items|items.iter().find(|item|item["id"].as_str()==theme.video_background.as_deref())).and_then(|item|item["name"].as_str()).unwrap_or("Выбрать сохранённое");
             ui.horizontal_wrapped(|ui|{
              egui::ComboBox::from_id_salt("video-background-picker").truncate().width(180.0_f32.min(ui.available_width())).selected_text(selected).show_ui(ui,|ui|{
               for item in list["result"]["items"].as_array().into_iter().flatten(){
-               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Видео")).clicked(){theme.video_background=Some(id.to_owned());theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
+               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Видео")).clicked(){theme.video_background=Some(id.to_owned());theme.video_enabled=Some(true);theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
               }
              });
              if ui.add_enabled(self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать видео…")).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
             });
            });
+           }
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
            });

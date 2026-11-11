@@ -749,7 +749,10 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                     if font["available"] != true { return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен")); }
                 }
                 if let Some(id)=&settings.theme.custom_background {theme_backgrounds::get(&self.root,id)?;}
-                if let Some(id)=&settings.theme.video_background {video_backgrounds::get(&self.root,id).map_err(|e|ApiError::new("video_background_error",e))?;}
+                if let Some(id)=&settings.theme.video_background {
+                    if !video_backgrounds::valid_id(id) {return Err(ApiError::new("invalid_video","Invalid video background ID"));}
+                    if settings.theme.video_is_enabled() {video_backgrounds::get(&self.root,id).map_err(|e|ApiError::new("video_background_error",e))?;}
+                }
                 settings
                     .validate(self.usage()?)
                     .map_err(|e| ApiError::new("invalid_settings", e))?;

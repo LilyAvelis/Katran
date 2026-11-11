@@ -18,6 +18,7 @@ pub struct ThemePreferences {
     pub lily_background: Option<u8>,
     pub custom_background: Option<String>,
     pub video_background: Option<String>,
+    pub video_enabled: Option<bool>,
     pub glass: bool,
     pub compact_header: bool,
     pub optical_strength: u8,
@@ -37,6 +38,7 @@ impl Default for ThemePreferences {
             lily_background: None,
             custom_background: None,
             video_background: None,
+            video_enabled: None,
             glass: false,
             compact_header: true,
             optical_strength: 0,
@@ -44,6 +46,20 @@ impl Default for ThemePreferences {
             optical_blur: 100,
             optical_highlight: 100,
             optical_chromatic: 100,
+        }
+    }
+}
+impl ThemePreferences {
+    /// Missing flag preserves active videos from the first video-background build.
+    pub fn video_is_enabled(&self) -> bool {
+        self.video_enabled
+            .unwrap_or(self.video_background.is_some())
+    }
+    pub fn active_video(&self) -> Option<&str> {
+        if self.video_is_enabled() {
+            self.video_background.as_deref()
+        } else {
+            None
         }
     }
 }

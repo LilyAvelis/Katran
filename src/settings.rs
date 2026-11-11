@@ -102,7 +102,7 @@ impl Settings {
         if [
             self.theme.custom_background.is_some(),
             self.theme.lily_background.is_some(),
-            self.theme.video_background.is_some(),
+            self.theme.active_video().is_some(),
         ]
         .into_iter()
         .filter(|v| *v)
