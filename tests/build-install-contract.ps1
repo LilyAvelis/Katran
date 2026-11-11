@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('katran-contract-' + [guid]::NewGuid().ToString('N'))
 try {
     foreach ($dir in @('src','assets/branding','scripts','target/build/release','runtime')) { New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null }
-    foreach ($crate in @('avilon-actions','avilon-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $root $dir) -Force | Out-Null }
         foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs','src/target/private.rs','target/privatefile','Cargo.lock')) { Set-Content (Join-Path $root "crates/$crate/$file") "synthetic-$file" }
     }
@@ -23,7 +23,7 @@ try {
     if ($manifest.update_format -ne 1 -or $manifest.minimum_launcher_protocol -ne 1) { throw 'Missing updater protocol' }
     if ($manifest.executable_sha256 -ne (Get-FileHash (Join-Path $root "runtime/versions/$id/katran-ui.exe") -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Incorrect executable hash' }
     $sourcePaths = @($manifest.sources | ForEach-Object { $_.path.Replace('\','/') })
-    foreach ($crate in @('avilon-actions','avilon-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs')) {
             $path = "crates/$crate/$file"
             $entry = @($manifest.sources | Where-Object { $_.path.Replace('\','/') -eq $path })

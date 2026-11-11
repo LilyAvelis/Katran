@@ -1,8 +1,40 @@
 # Avilon — reusable desktop components
 
-Owner direction, 2026-11-11: begin extracting reusable solutions while the
-separately tagged Katran 3.0 release proceeds. Work is local on
-`codex/garden-framework`; it is not included in the release tags.
+Owner direction, 2026-11-11: preserve working components while separately tagged
+releases proceed. The initial actions/rows/CPU reference extraction is included
+in 3.1.0. The additional design-library extraction below is a local checkpoint
+after immutable tag v3.1.0; it is not silently included in that release.
+
+## Design library extraction after 3.1.0
+
+The [Avilon package index](../crates/README.md) is the entry point for reuse.
+Katran now consumes the same shared implementations through thin adapters:
+
+- `avilon-egui::theme`: semantic palette with Standard fallbacks, Blue, selection
+  colors, translucent fills and background-presence input. No preferences or
+  Katran context are stored in the library.
+- `avilon-egui::settings_layout`: shared spacing, responsive settings rows and
+  host-styled sections. ActionRow/KeyCaps remain the command-list primitives.
+- Optional `avilon-egui::optical_gpu`: live OpenGL shader, input checks, per-context
+  cache and explicit cleanup. Source textures belong to the host application.
+- `avilon-windows::material`: Desktop Acrylic/corners with typed outcomes and
+  rollback. Transparent viewport, clear color, panels and fallback stay host-owned.
+- `avilon-media`: bounded playback policy and optional egui decoder/texture
+  adapter, cache/streaming choice, seam smoothing and stop/reap. The host supplies
+  an FFmpeg command factory; the library neither downloads tools nor reads a profile.
+
+No art, font or personal video is bundled in these SDK packages. A neutral
+headless example demonstrates using the layout outside Katran. Native appearance
+and external desktop refraction are not established by headless tests.
+
+Extraction checks: 130 Katran headless UI tests passed after all adapters were
+connected. The standalone egui suite covers palette, callback validation,
+reference lens, responsive layout and command-row geometry; native material has
+five fake-provider tests. Media policy/seam/texture checks passed, and the explicit
+synthetic D3D11VA test confirmed continuous loops and stop/reap. Workspace all-target
+Clippy, formatting and synthetic release/install/preview contracts passed. The
+neutral design example runs without a native window. Existing dependency versions
+are unchanged; only workspace package relationships and optional features changed.
 
 ## First component: avilon-actions
 

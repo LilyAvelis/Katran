@@ -14,12 +14,14 @@ path = "src/bin/launcher.rs"
 required-features = ["ui"]
 
 [workspace]
-members = ["crates/avilon-actions", "crates/avilon-egui"]
+members = ["crates/avilon-actions", "crates/avilon-egui", "crates/avilon-media", "crates/avilon-windows"]
 resolver = "3"
 
 [dependencies]
 avilon-actions = { path = "crates/avilon-actions" }
 avilon-egui = { path = "crates/avilon-egui", optional = true }
+avilon-media = { path = "crates/avilon-media", optional = true, features = ["egui"] }
+avilon-windows = { path = "crates/avilon-windows", optional = true }
 rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "functions"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
@@ -52,7 +54,7 @@ features = ["glow", "default_fonts"]
 
 [features]
 default = ["clipboard-events"]
-ui = ["dep:avilon-egui","dep:eframe","dep:egui-lucide","dep:egui_extras"]
+ui = ["dep:avilon-egui","avilon-egui/glow","dep:avilon-media","dep:avilon-windows","dep:eframe","dep:egui-lucide","dep:egui_extras"]
 clipboard-events = []
 clipboard-events-test = ["clipboard-events"]
 

@@ -3,7 +3,7 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('katran-release-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode') | Out-Null
 try {
-    foreach ($crate in @('avilon-actions','avilon-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $sandbox $dir) -Force | Out-Null }
         foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs','src/target/private.rs','target/privatefile','Cargo.lock')) { [IO.File]::WriteAllText((Join-Path $sandbox "crates/$crate/$file"), "synthetic-$file") }
     }
@@ -29,7 +29,7 @@ try {
         $reader = New-Object IO.StreamReader($zip.GetEntry('build-manifest.json').Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $sourcePaths = @($manifest.sources | ForEach-Object { $_.path.Replace('\','/') })
-        foreach ($crate in @('avilon-actions','avilon-egui')) {
+        foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
             foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs')) {
                 $path = "crates/$crate/$file"
                 $entry = @($manifest.sources | Where-Object { $_.path.Replace('\','/') -eq $path })

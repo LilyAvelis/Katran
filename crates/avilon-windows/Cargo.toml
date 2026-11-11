@@ -1,0 +1,10 @@
+[package]
+name = "avilon-windows"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Explicit Windows window material requests for Avilon clients"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }

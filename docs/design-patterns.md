@@ -6,6 +6,11 @@ existing domain/API contract.
 
 ## Theme through semantic tokens
 
+The extracted implementations now live in [Avilon's design library](../crates/README.md):
+`avilon-egui::theme` and `settings_layout`, optional `optical_gpu`,
+`avilon-windows::material`, and `avilon-media`. Katran adapters supply preferences,
+commands, source metadata, platform tool discovery and renderer lifetime.
+
 Use `theme_ui::Role` for background, surface, raised surface, border, text,
 muted text, accent and selection. Pass the exact legacy color at each call site:
 the Standard preset returns that value unchanged. Avoid new view-specific color

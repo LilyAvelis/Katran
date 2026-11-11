@@ -2,18 +2,7 @@
 use eframe::egui::{self, Color32};
 use katran::theme::{Preset, ThemePreferences};
 
-#[derive(Clone, Copy)]
-pub(super) enum Role {
-    Background,
-    Surface,
-    Raised,
-    Border,
-    Text,
-    Muted,
-    Accent,
-    Selection,
-    SelectionOutline,
-}
+pub(super) use avilon_egui::theme::Role;
 fn key() -> egui::Id {
     egui::Id::new("katran-theme-preferences")
 }
@@ -42,74 +31,25 @@ fn selection_rgb(preference: &ThemePreferences) -> Option<[u8; 3]> {
             .then_some(preference.accent.unwrap_or([107, 174, 255]))
     })
 }
-fn selection_fill(surface: Color32, rgb: [u8; 3], intensity: u8) -> Color32 {
-    let weight = (u32::from(intensity.min(100)) * 22).min(3500);
-    let blend = |base: u8, selected: u8| {
-        ((u32::from(base) * (3500 - weight) + u32::from(selected) * weight + 1750) / 3500) as u8
-    };
-    Color32::from_rgba_unmultiplied(
-        blend(surface.r(), rgb[0]),
-        blend(surface.g(), rgb[1]),
-        blend(surface.b(), rgb[2]),
-        surface.a(),
-    )
-}
 pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32 {
     let preference = current(ctx);
-    if preference.preset == Preset::Standard {
-        return match (role, preference.selection) {
-            (Role::Selection, Some(rgb)) => {
-                selection_fill(legacy, rgb, preference.selection_intensity)
-            }
-            (Role::SelectionOutline, Some([r, g, b])) => Color32::from_rgb(r, g, b),
-            _ => legacy,
-        };
-    }
-    let glass = preference.glass
-        && ctx
-            .data(|d| d.get_temp::<bool>(egui::Id::new("native-glass-active")))
-            .unwrap_or(false);
-    let base = match role {
-        Role::Background
-            if (preference.lily_background.is_some()
-                || preference.custom_background.is_some()
-                || preference.active_video().is_some()) =>
-        {
-            Color32::TRANSPARENT
-        }
-        Role::Background
-            if preference.glass
+    avilon_egui::theme::color(
+        role,
+        legacy,
+        avilon_egui::theme::PaletteOptions {
+            blue: preference.preset == Preset::BlueExperimental,
+            accent: preference.accent,
+            selection: preference.selection,
+            selection_intensity: preference.selection_intensity,
+            glass_active: preference.glass
                 && ctx
                     .data(|d| d.get_temp::<bool>(egui::Id::new("native-glass-active")))
-                    .unwrap_or(false) =>
-        {
-            Color32::from_rgba_unmultiplied(11, 20, 35, 175)
-        }
-        Role::Background => Color32::from_rgb(11, 20, 35),
-        Role::Surface => Color32::from_rgb(16, 30, 50),
-        Role::Raised => Color32::from_rgb(23, 43, 70),
-        Role::Border => Color32::from_rgb(52, 87, 121),
-        Role::Text => Color32::from_rgb(230, 241, 255),
-        Role::Muted => Color32::from_rgb(155, 176, 200),
-        Role::Accent => {
-            let [r, g, b] = preference.accent.unwrap_or([107, 174, 255]);
-            Color32::from_rgb(r, g, b)
-        }
-        Role::Selection => selection_fill(
-            Color32::from_rgb(16, 30, 50),
-            selection_rgb(&preference).unwrap_or([107, 174, 255]),
-            preference.selection_intensity,
-        ),
-        Role::SelectionOutline => {
-            let [r, g, b] = selection_rgb(&preference).unwrap_or([107, 174, 255]);
-            Color32::from_rgb(r, g, b)
-        }
-    };
-    if glass && matches!(role, Role::Surface | Role::Raised | Role::Selection) {
-        Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 200)
-    } else {
-        base
-    }
+                    .unwrap_or(false),
+            has_background: preference.lily_background.is_some()
+                || preference.custom_background.is_some()
+                || preference.active_video().is_some(),
+        },
+    )
 }
 pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
     if ctx

@@ -5,7 +5,7 @@ Set-Location $root
 $state = Join-Path $root 'target/preview-inputs.json'
 function Inputs {
     $files = @(Get-ChildItem src,assets -Recurse -File) + @(Get-Item Cargo.toml,Cargo.lock,build.rs)
-    foreach ($crate in @('avilon-actions','avilon-egui')) {
+    foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         $crateRoot = Join-Path $root "crates/$crate"
         $files += @(Get-Item -LiteralPath (Join-Path $crateRoot 'Cargo.toml'),(Join-Path $crateRoot 'LICENSE'))
         $files += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' })

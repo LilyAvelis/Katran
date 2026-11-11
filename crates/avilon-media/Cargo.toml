@@ -1,0 +1,19 @@
+[package]
+name = "avilon-media"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Bounded FFmpeg video background playback for egui hosts"
+
+[features]
+default = []
+egui = ["dep:egui"]
+
+[dependencies]
+egui = { version = "=0.36.2", optional = true }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+
