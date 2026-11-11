@@ -1,12 +1,12 @@
 //! Read-only ShareX folder discovery, independent of UI and storage.
 //!
-//! A nonempty supported image is offered after two consecutive successful scans
+//! A nonempty supported image or recording is offered after two consecutive successful scans
 //! observe the same size and modification time and can read it. Each revision is
 //! offered once while continuously present and readable. Restarting the scanner
 //! or removing and restoring a file offers it again; ingestion clients must apply
 //! their own durable deduplication. This is a
 //! polling adapter: intermediate revisions and same-size edits preserving mtime
-//! cannot be detected. It does not decode images or guarantee a writer has closed
+//! cannot be detected. It does not decode media or guarantee a writer has closed
 //! them. Symlinks are skipped. Traversal is capped at 20,000 directory entries;
 //! exceeding this limit or failing to enumerate a directory returns an error and
 //! leaves scanner state unchanged. Missing/unreadable individual files are skipped.
@@ -98,6 +98,14 @@ impl SharexScanner {
 
 fn supported(path: &Path) -> bool {
     crate::file_types::is_native_image(path)
+        || path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                ["mp4", "mkv", "webm", "avi", "mov", "m4v"]
+                    .iter()
+                    .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+            })
 }
 
 fn readable_revision(path: &Path) -> Option<Revision> {
