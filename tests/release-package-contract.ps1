@@ -3,6 +3,10 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('katran-release-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode') | Out-Null
 try {
+    foreach ($crate in @('garden-actions','garden-egui')) {
+        foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $sandbox $dir) -Force | Out-Null }
+        foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs','src/target/private.rs','target/privatefile','Cargo.lock')) { [IO.File]::WriteAllText((Join-Path $sandbox "crates/$crate/$file"), "synthetic-$file") }
+    }
     foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) { [IO.File]::WriteAllText((Join-Path $sandbox "binaries/$file"), "synthetic-$file") }
     foreach ($file in @('Cargo.toml','Cargo.lock','build.rs','AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','src/lib.rs','.env.local','katran-data/private.txt','runtime/old/private.exe','binaries/private.pdb')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), 'synthetic-private-canary') }
     foreach ($file in @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt','assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
@@ -24,6 +28,15 @@ try {
         if (@(Compare-Object @($zip.Entries.FullName | Sort-Object) @('build-manifest.json','katran-ui.exe','THIRD-PARTY-NOTICES.txt' | Sort-Object)).Count) { throw 'Update whitelist differs' }
         $reader = New-Object IO.StreamReader($zip.GetEntry('build-manifest.json').Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        $sourcePaths = @($manifest.sources | ForEach-Object { $_.path.Replace('\','/') })
+        foreach ($crate in @('garden-actions','garden-egui')) {
+            foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs')) {
+                $path = "crates/$crate/$file"
+                $entry = @($manifest.sources | Where-Object { $_.path.Replace('\','/') -eq $path })
+                if ($entry.Count -ne 1 -or $entry[0].sha256 -cne (Get-FileHash -LiteralPath (Join-Path $sandbox $path) -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Missing or incorrect source hash: $path" }
+            }
+            foreach ($file in @('src/target/private.rs','target/privatefile','Cargo.lock')) { if ("crates/$crate/$file" -in $sourcePaths) { throw "Unexpected crate input: $file" } }
+        }
         $noticesEntry = $zip.GetEntry('THIRD-PARTY-NOTICES.txt')
         $noticesStream = $noticesEntry.Open()
         try { $noticesHash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($noticesStream)).Replace('-','').ToLowerInvariant() } finally { $noticesStream.Dispose() }

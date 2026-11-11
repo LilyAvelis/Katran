@@ -1,5 +1,5 @@
 //! Host-supplied shortcut definitions and pure assignment policy.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Definition<'a> {
@@ -18,6 +18,9 @@ pub struct Conflict {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
+    InvalidCatalogue {
+        message: String,
+    },
     UnknownAction {
         id: String,
     },
@@ -38,6 +41,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidCatalogue { message } => f.write_str(message),
             Self::UnknownAction { id } => write!(f, "Unknown action: {id}"),
             Self::ProtectedAction { id } => write!(f, "Protected action: {id}"),
             Self::InvalidShortcut { message } => f.write_str(message),
@@ -158,6 +162,37 @@ pub fn normalize(text: &str) -> Result<String, Error> {
         .collect::<Result<Vec<_>, _>>()
         .map(|v| v.join(" / "))
 }
+/// Validate unique nonempty IDs and canonical defaults without checking overlaps.
+pub fn validate_catalogue(catalogue: &[Definition<'_>]) -> Result<(), Error> {
+    let mut ids = HashSet::new();
+    for definition in catalogue {
+        if definition.id.trim().is_empty() {
+            return Err(Error::InvalidCatalogue {
+                message: "Action ID must not be empty".into(),
+            });
+        }
+        if !ids.insert(definition.id) {
+            return Err(Error::InvalidCatalogue {
+                message: format!("Duplicate action ID: {}", definition.id),
+            });
+        }
+        let canonical =
+            normalize(definition.default_binding).map_err(|error| Error::InvalidCatalogue {
+                message: format!("Invalid default for action {}: {error}", definition.id),
+            })?;
+        if canonical != definition.default_binding {
+            return Err(Error::InvalidCatalogue {
+                message: format!(
+                    "Default for action {} must be canonical: {:?} (expected {:?})",
+                    definition.id, definition.default_binding, canonical
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Call `validate_catalogue` first; this lookup does not normalize defaults.
 /// Return the effective shortcut, or the empty string when unbound or unknown.
 pub fn binding<'a>(catalogue: &'a [Definition<'a>], overrides: &'a Overrides, id: &str) -> &'a str {
     overrides
@@ -176,6 +211,7 @@ pub fn validate_overrides(
     catalogue: &[Definition<'_>],
     current: &Overrides,
 ) -> Result<Overrides, Error> {
+    validate_catalogue(catalogue)?;
     let mut result = Overrides::new();
     for (id, value) in current {
         let definition = catalogue
@@ -199,6 +235,7 @@ pub fn plan_set(
     replace: bool,
     reserved: impl Fn(&str, &str) -> bool,
 ) -> Result<Overrides, Error> {
+    validate_catalogue(catalogue)?;
     let definition = catalogue
         .iter()
         .find(|d| d.id == id)

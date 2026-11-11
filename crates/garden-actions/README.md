@@ -5,6 +5,10 @@ Hosts supply action definitions, reserved-chord rules, override storage and all
 input, UI and dispatch behavior. The crate does not read or write preferences.
 
 An absent override uses the definition's default; `None` explicitly unbinds it.
+Catalogues must have unique, nonempty action IDs and canonical defaults (or an
+empty default). `validate_catalogue` checks these constraints without rejecting
+context-dependent default overlaps. `plan_set` and `validate_overrides` validate
+automatically; call it explicitly before using the infallible `binding` lookup.
 `validate_overrides` normalizes stored values and checks their action IDs and
 rebindability, but deliberately does not reject pre-existing conflicts or
 reserved keys. `plan_set` returns a new map without changing its input. It checks

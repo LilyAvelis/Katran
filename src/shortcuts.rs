@@ -70,6 +70,7 @@ impl From<garden_actions::Error> for ShortcutError {
     fn from(error: garden_actions::Error) -> Self {
         use garden_actions::Error;
         match error {
+            Error::InvalidCatalogue { message } => Self::new("invalid_shortcuts", message),
             Error::UnknownAction { id } => Self::new("unknown_action", id),
             Error::ProtectedAction { .. } => {
                 Self::new("reserved_shortcut", "Это сочетание нельзя изменить")

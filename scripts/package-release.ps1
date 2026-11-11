@@ -66,6 +66,11 @@ foreach($assetNotice in @('assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-fl
 if ((Get-Item -LiteralPath (Join-Path $portable 'THIRD-PARTY-NOTICES.txt')).Length -gt 8MB) { throw 'Combined notices exceed updater limit' }
 [IO.File]::WriteAllText((Join-Path $portable 'runtime/current-version.txt'), $id + "`n", $utf8)
 $sourceFiles = @('Cargo.toml','Cargo.lock','build.rs') + @(Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File -Filter '*.rs' | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+foreach ($crate in @('garden-actions','garden-egui')) {
+    $crateRoot = Join-Path $Root "crates/$crate"
+    $sourceFiles += @("crates/$crate/Cargo.toml", "crates/$crate/LICENSE")
+    $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+}
 $sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt')
 $sourceFiles += @('assets/branding/katran.ico','assets/branding/katran.rc' | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
 $sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })

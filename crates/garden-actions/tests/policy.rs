@@ -204,3 +204,54 @@ fn loading_normalizes_without_rejecting_conflicts_or_reserved_values() {
         Err(Error::ProtectedAction { .. })
     ));
 }
+
+#[test]
+fn malformed_catalogues_are_rejected_before_planning_or_loading() {
+    use garden_actions::validate_catalogue;
+    let def = |id, default_binding| Definition {
+        id,
+        label: "Action",
+        default_binding,
+        rebindable: true,
+    };
+    let duplicate = [def("same", "Ctrl S"), def("same", "Ctrl O")];
+    let empty = [def("  ", "")];
+    let aliases = [def("one", "Ctrl+S"), def("two", "Ctrl O")];
+    let invalid = [def("one", "Ctrl")];
+    for catalogue in [&duplicate[..], &empty[..], &aliases[..], &invalid[..]] {
+        assert!(matches!(
+            validate_catalogue(catalogue),
+            Err(Error::InvalidCatalogue { .. })
+        ));
+        assert!(matches!(
+            validate_overrides(catalogue, &Overrides::new()),
+            Err(Error::InvalidCatalogue { .. })
+        ));
+        let original = Overrides::new();
+        assert!(matches!(
+            plan_set(
+                catalogue,
+                &original,
+                "two",
+                Assignment::Set(Some("Ctrl S")),
+                true,
+                |_, _| panic!("invalid catalogue must be rejected first")
+            ),
+            Err(Error::InvalidCatalogue { .. })
+        ));
+        assert!(original.is_empty());
+    }
+    let message = validate_catalogue(&aliases).unwrap_err().to_string();
+    assert!(
+        message.contains("Ctrl+S") && message.contains("Ctrl S"),
+        "{message}"
+    );
+    let valid = [def("one", "Ctrl S"), def("two", "Ctrl S"), def("three", "")];
+    assert!(
+        validate_catalogue(&valid).is_ok(),
+        "overlaps are host-context dependent"
+    );
+    assert!(
+        matches!(plan_set(&valid, &Overrides::new(), "three", Assignment::Set(Some("Ctrl S")), false, allow), Err(Error::Conflict { conflicts }) if conflicts.len() == 2)
+    );
+}

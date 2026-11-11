@@ -70,8 +70,9 @@ are included beside each crate.
 
 ## Verification and checkpoints
 
-- `garden-actions`: five policy tests, two distinct catalogues and the neutral
-  example compiled; crate/all-target Clippy passed.
+- `garden-actions`: six policy tests, two distinct catalogues and the neutral
+  example compiled; crate/all-target Clippy passed. Invalid or noncanonical host catalogues are
+  rejected before assignment, preventing aliases from hiding conflicts.
 - Katran adapter: 23 targeted API tests and two original shortcut unit tests
   passed. The new storage-failure test confirms the planned binding does not
   become live when persistence fails. Walter's bounded comparison against
@@ -83,6 +84,11 @@ are included beside each crate.
   existing production-catalogue geometry and scrolling cases. Workspace
   all-target Clippy with `ui,clipboard-events` passed. No native window was
   opened or owner desktop manipulated.
+
+The three synthetic PowerShell contracts for release packaging, preview
+snapshotting and local installation also passed. Provenance includes the two
+crates’ manifests, source files and licenses, and excludes nested build/cache
+files. A changed library input invalidates the matching local snapshot.
 
 The implementation checkpoints are local Git commits; release tags continue to
 reference their original source. Library extraction is not evidence that the
