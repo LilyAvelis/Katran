@@ -9,6 +9,7 @@ mod clipboard_events_ui;
 mod gallery_card;
 mod images;
 mod input_log;
+mod info_bar;
 mod markdown_ui;
 mod native_drag_ui;
 mod open_apps_ui;
@@ -154,6 +155,7 @@ struct Shelf {
     settings_ui: settings_ui::State,
     open_apps: open_apps_ui::State,
     workspace: workspace_ui::State,
+    info: info_bar::State,
     pinned_ui: pinned_ui::State,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
@@ -214,7 +216,7 @@ impl Shelf {
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         input_log::record(&ctx, self.logger.as_ref());
-        if self.api.is_some() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
+        if self.api.is_some() && !self.info.is_open() { self.pinned_input(&ctx); self.pinned_tick(&ctx); if !self.pinned_ui.open { self.workspace_input(&ctx); } self.workspace_tick(&ctx); }
         if self.api.is_none()
             && self.job.is_some()
             && self.shortcut_editor.is_none()
@@ -222,6 +224,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
@@ -240,11 +243,13 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
             self.shortcuts =
                 serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
+            self.direct_transfer_input(&ctx);
         }
         let tab_input_allowed = self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
@@ -294,6 +299,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
@@ -371,6 +377,7 @@ impl Shelf {
             }
             if self.shortcut_editor.is_none()
                 && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
                 && !self.save
                 && self.state["settings_open"] != true
@@ -394,6 +401,7 @@ impl Shelf {
         }
         if self.api.is_some() {
             if !self.open_apps.open && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
             {
@@ -405,6 +413,7 @@ impl Shelf {
             if self.shortcut_editor.is_none()
                 && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
@@ -434,7 +443,7 @@ impl Shelf {
             root.set_opacity(1.0);
         }
         self.state = self.call(Command::Interaction);
-        egui::Panel::top("header")
+        let _header = egui::Panel::top("header")
             .frame(egui::Frame::new().inner_margin(12))
             .show(root, |ui| {
                 ui.horizontal(|ui| {
@@ -456,25 +465,6 @@ impl Shelf {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                if self.state["pinned_only"] == true { ui.label(RichText::new("Закреплённые").size(12.0).color(Color32::from_gray(185))); }
-                if self.state["tab"] == "folder" {
-                    let text = self.state["folder_path"].as_str().unwrap_or("Выберите папку · Ctrl Shift K");
-                    ui.label(RichText::new(text).size(12.0).color(Color32::from_gray(185))).on_hover_text(text);
-                    ui.weak("Ctrl Shift K · выбрать папку   Ctrl V · вставить   Ctrl Shift C · добавить в Катран   Ctrl . · избранное");
-                    if self.workspace.recovery_root.as_deref() != self.state["folder_path"].as_str() { self.workspace.recovery = None; self.workspace.recovery_root = self.state["folder_path"].as_str().map(str::to_owned); }
-                    if ui.button("Восстановление файлов").clicked() {
-                        if self.workspace.recovery.is_some() { self.workspace.recovery = None; }
-                        else { let result = self.call(Command::FolderRecovery); if let Some(items) = result["items"].as_array() { self.workspace.recovery = Some(items.clone()); } }
-                    }
-                    if let Some(items) = &self.workspace.recovery {
-                        if items.is_empty() { ui.weak("Записей восстановления нет"); }
-                        for item in items {
-                            let path = item["recovery_path"].as_str().or_else(||item["journal_path"].as_str()).unwrap_or("Путь недоступен");
-                            let error = item["error"]["message"].as_str().or_else(||item["error"].as_str()).unwrap_or("");
-                            ui.label(format!("{} · {}", path, error)).on_hover_text(path);
-                        }
-                    }
-                }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .id(egui::Id::new("shelf-search"))
@@ -526,7 +516,9 @@ impl Shelf {
                     self.load_more();
                 }
             });
-        egui::Panel::bottom("footer")
+        #[cfg(test)]
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-header-rect"), _header.response.rect));
+        let _footer = egui::Panel::bottom("footer")
             .exact_size(84.0)
             .frame(
                 egui::Frame::new()
@@ -553,17 +545,10 @@ impl Shelf {
                         capture_lamp::show(ui, self.capture);
                     });
                 });
-                let status = if self.message.is_empty() {
-                    sorting_ui::confirmation(&self.state["sort"])
-                } else {
-                    self.message.clone()
-                };
-                ui.add_sized(
-                    [ui.available_width(), 24.0],
-                    egui::Label::new(&status).truncate(),
-                )
-                .on_hover_text(status);
+                self.info_bar(ui);
             });
+        #[cfg(test)]
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-footer-rect"), _footer.response.rect));
         if self.state["tab"] == "folder" {
             if self.state["folder_path"].is_null() { self.events.clear(); self.next_cursor = None; }
             else if self.workspace.last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(1)) {
@@ -594,6 +579,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
             && !self.save
             && self.pending_delete.is_empty()
@@ -669,6 +655,7 @@ impl Shelf {
         }
         self.shelf_view(root, &ctx, &visible, gallery, columns);
         if self.api.is_some() {
+            self.info_panel(&ctx);
             self.workspace_panel(&ctx);
             self.pinned_panel(&ctx);
             self.palette(&ctx);
@@ -746,6 +733,7 @@ impl Shelf {
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
+            && !self.info.is_open()
             && !self.pinned_ui.open
             && !self.save
             && self.shortcut_editor.is_none()
@@ -842,6 +830,7 @@ fn main() -> eframe::Result {
         settings_ui: settings_ui::State::default(),
         open_apps: open_apps_ui::State::default(),
         workspace: workspace_ui::State::default(),
+            info: info_bar::State::default(),
             pinned_ui: pinned_ui::State::default(),
         shortcut_editor: None,
         api: Some(api),
@@ -1008,6 +997,7 @@ mod tests {
             settings_ui: settings_ui::State::default(),
             open_apps: open_apps_ui::State::default(),
             workspace: workspace_ui::State::default(),
+            info: info_bar::State::default(),
             pinned_ui: pinned_ui::State::default(),
             shortcut_editor: None,
             api: Some(api),
@@ -1811,6 +1801,101 @@ mod tests {
             .collect();
         output.textures_delta.clear();
         positions
+    }
+    struct NoTransferClipboard;
+    impl katran::clipboard_files::Source for NoTransferClipboard {
+        fn sequence(&self) -> u32 { panic!("Shift+Tab must not read clipboard"); }
+        fn files(&self) -> katran::Result<Vec<PathBuf>> { panic!("Shift+Tab must not read clipboard"); }
+    }
+    #[test]
+    fn shift_tab_transfers_and_imports_without_clipboard() {
+        fn release_tab(app: &mut Shelf, ctx: &egui::Context, modifiers: egui::Modifiers) {
+            let mut output = ctx.run_ui(egui::RawInput { events: vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers }], ..Default::default() }, |ui| app.render(ui));
+            output.textures_delta.clear();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let png = tempfile::tempdir().unwrap();
+        let png_path = png.path().join("sample.png");
+        image::RgbaImage::new(2,2).save(&png_path).unwrap();
+        let mut app = test_shelf(root.path());
+        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::ChooseFolder { path: folder.path().into() });
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let id=app.call(Command::IngestBytes { name:"sample.png".into(),bytes:std::fs::read(png_path).unwrap(),source:"synthetic".into() })["id"].as_i64().unwrap();
+        app.call(Command::TogglePins {ids:vec![id]});
+        app.refresh();
+        app.call(Command::SetVisible{ids:vec![id]});
+        app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"],"folder");
+        assert!(!folder.path().join("sample.png").exists(), "plain Tab must not transfer");
+        release_tab(&mut app, &ctx, egui::Modifiers::NONE);
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::NONE);
+        assert_eq!(app.state["tab"],"images");
+        release_tab(&mut app, &ctx, egui::Modifiers::NONE);
+        app.call(Command::SetVisible{ids:vec![id]});
+        app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"],"folder", "{}",app.message);
+        assert!(folder.path().join("sample.png").exists(), "{}",app.message);
+        assert_eq!(app.call(Command::Get{id})["id"],id, "pinned source stays");
+        let page=app.call(Command::BrowseShelfSorted{query:"".into(),limit:100,cursor:None});
+        let folder_id=page["events"].as_array().unwrap().iter().find(|v|v["name"]=="sample.png").unwrap()["id"].as_i64().unwrap();
+        app.call(Command::SetVisible{ids:vec![folder_id]});
+        app.state=app.call(Command::Select{id:folder_id,mode:SelectionMode::Replace});
+        release_tab(&mut app, &ctx, egui::Modifiers::SHIFT);
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"],"images", "{}",app.message);
+        assert!(folder.path().join("sample.png").exists());
+        assert!(app.events.iter().any(|v|v["id"].as_i64().is_some_and(|n|n>0)));
+    }
+    #[test]
+    fn shift_tab_without_folder_preserves_selection_and_text_input() {
+        let root=tempfile::tempdir().unwrap();let mut app=test_shelf(root.path());
+        app.api.as_mut().unwrap().set_clipboard_files_source(Box::new(NoTransferClipboard));
+        app.call(Command::SetTab{tab:katran::interaction::ShelfTab::Images});
+        let id=app.call(Command::IngestBytes{name:"test.png".into(),bytes:vec![1],source:"synthetic".into()})["id"].as_i64().unwrap();
+        app.refresh();app.call(Command::SetVisible{ids:vec![id]});app.state=app.call(Command::Select{id,mode:SelectionMode::Replace});
+        let ctx=egui::Context::default();ui_style::install(&ctx);
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
+        assert_eq!(app.state["tab"],"images");assert_eq!(app.state["selected"],serde_json::json!([id]));
+        assert!(!app.message.is_empty(),"missing folder must be reported");
+        ctx.memory_mut(|m|m.request_focus(egui::Id::new("shelf-search")));
+        let mut released=ctx.run_ui(egui::RawInput{events:vec![egui::Event::Key{key:egui::Key::Tab,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::SHIFT}],..Default::default()},|ui|app.render(ui));released.textures_delta.clear();
+        app.message.clear();
+        frame(&mut app,&ctx,egui::Key::Tab,egui::Modifiers::SHIFT);
+        assert!(app.message.is_empty(),"text editing must retain Shift+Tab");
+        assert_eq!(app.call(Command::Interaction)["selected"],serde_json::json!([id]));
+    }
+    #[test]
+    fn folder_header_keeps_category_geometry_with_long_status_and_recovery() {
+        fn panel_sizes(app: &mut Shelf, ctx: &egui::Context, size: egui::Vec2) -> (f32, f32) {
+            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+            let header = ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-header-rect")));
+            let footer = ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-footer-rect")));
+            (header.expect("header layout recorded").height(), footer.expect("footer layout recorded").height())
+        }
+        let root = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let folder = parent.path().join("long-folder-name-".repeat(5));
+        std::fs::create_dir(&folder).unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        let ctx = egui::Context::default(); ui_style::install(&ctx);
+        let normal = panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0));
+        app.call(Command::ChooseFolder { path: folder });
+        app.message = "ошибка с длинным путём ".repeat(50);
+        app.workspace.recovery = Some((0..30).map(|i| serde_json::json!({"recovery_path":format!("long-recovery-path-{i}"),"error":{"message":"synthetic"}})).collect());
+        let folder_sizes = panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0));
+        assert_eq!(normal, folder_sizes, "Folder details must not change panel heights");
+        assert!((48.0..=110.0).contains(&folder_sizes.1), "footer must stay compact: {:?}", folder_sizes);
+        app.call(Command::SetTab { tab: katran::interaction::ShelfTab::Images });
+        app.call(Command::SelectTabPosition { position: 1 });
+        assert_eq!(normal, panel_sizes(&mut app, &ctx, egui::vec2(940.0, 680.0)), "Pinned state must not change panel heights");
     }
     #[test]
     fn reveal_rows_only_at_viewport_edges() {

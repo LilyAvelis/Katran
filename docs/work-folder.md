@@ -20,6 +20,14 @@ backend; Katran does not bundle the Everything application.
 
 ## Copy, move, and return files
 
+The primary in-app action is **Shift+Tab**, independent of the system Clipboard.
+In a category it moves the selection to the current Folder and opens Folder;
+pinned items remain and produce copies. With no Folder selected it reports
+«Папка ещё не выбрана» without changing the selection. In Folder it explicitly
+imports supported files into their categories and opens the first successful
+category; originals remain in Folder and unsupported formats have per-item errors.
+Ordinary **Tab** only changes the view. Ctrl+C remains ordinary external copying.
+
 - **Ctrl+X** stages selected shelf objects for a move. It does not remove the
   source immediately. Open Folder and press **Ctrl+V** to complete a verified
   transfer. Pinned items stay copy-only. Partial outcomes are reported per
@@ -38,6 +46,13 @@ verified original and asks Windows to recycle it. Recovery may expose a manual
 path if automatic restoration cannot safely put a file back. Downloads and
 ShareX Screenshots managed originals also use Windows recycling in the 2.5
 branch. No permanent-delete fallback is intended.
+
+## Information panel
+
+The header has only the application title, search and tabs. Folder paths,
+sorting, operation details and recovery records are in the fixed-height bottom
+information bar. Click a section for a bounded details panel; long paths and
+errors do not reduce the gallery height by expanding the header.
 
 ## Current limits
 

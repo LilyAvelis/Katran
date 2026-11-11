@@ -1,6 +1,15 @@
 //! Single-writer dispatcher jobs and UI result handling.
 use super::*;
 impl Shelf {
+    pub(super) fn direct_transfer_input(&mut self, ctx:&egui::Context) {
+        if self.api.is_none() || self.shortcut_editor.is_some() || self.actions || self.open_apps.open || self.workspace.open || self.info.is_open() || self.pinned_ui.open || self.save || !self.pending_delete.is_empty() || self.state["settings_open"]==true || ctx.memory(|m|m.focused()).is_some_and(|id|egui::TextEdit::load_state(ctx,id).is_some()) {return;}
+        let catalogue:Vec<_>=self.shortcuts.iter().filter(|shortcut|shortcut.id=="transfer_selection").cloned().collect();
+        if shortcuts_ui::take_action_with_editing(ctx,&catalogue,false).is_some() {
+            if self.job.is_some() {self.message="Дождитесь завершения текущей операции".into();return;}
+            if let Some(id)=ctx.memory(|memory|memory.focused()) {ctx.memory_mut(|memory|memory.surrender_focus(id));}
+            self.run("transfer_selection".into(),ctx);
+        }
+    }
     pub(super) fn start_drag(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
         if self.native_drag.is_some() || self.job.is_some() {
             return;
@@ -346,6 +355,21 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id=="transfer_selection" {
+            let result=self.call(Command::TransferSelection);
+            self.actions=false;
+            if result.is_null() {return;}
+            if result["interaction"].is_object() {self.state=result["interaction"].clone();}
+            let items=result["items"].as_array().cloned().unwrap_or_default();
+            let from_folder=result["direction"]=="from_folder";
+            let failures=items.iter().filter(|item|if from_folder {item["ok"]!=true}else{!matches!(item["status"].as_str(),Some("moved"|"copied"|"pinned_copy"|"same_folder"))}).count();
+            let pinned=items.iter().filter(|item|item["status"]=="pinned_copy").count();
+            let moved=items.iter().filter(|item|item["status"]=="moved").count();
+            let details=items.iter().filter_map(|item|item["error"]["message"].as_str()).collect::<Vec<_>>().join("; ");
+            self.message=if from_folder {format!("Добавлено в Катран: {} · Ошибок: {failures}. {details}",items.len()-failures)}else{format!("В Folder: перемещено {moved} · Закреплённых скопировано {pinned} · Ошибок: {failures}. {details}")};
+            self.refresh();
+            return;
+        }
         if id=="add_to_katran" {
             let result=self.call(Command::RunAction{id});
             self.actions=false;

@@ -333,9 +333,6 @@ impl Shelf {
                         }
                     });
                 }
-                if self.job.is_some() {
-                    ui.label("Выполняется операция…");
-                }
             });
         self.images.end_frame(ctx);
     }

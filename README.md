@@ -98,6 +98,11 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 
 ## Controls
 
+In the local 2.5 feedback build, **Shift+Tab** directly transfers the selection
+between a category and Folder, without the Clipboard. From Folder it imports
+supported files while preserving originals. Service details are in the compact
+bottom information bar; click a section to expand them.
+
 | Control | Action |
 | --- | --- |
 | Ctrl K | Actions: search, arrows, Enter, Escape |

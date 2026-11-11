@@ -66,6 +66,23 @@ fn missing_folder_keeps_selection_and_never_reads_clipboard() {
     assert!(std::path::Path::new(event["path"].as_str().unwrap()).exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn direct_move_commits_verified_destination_without_clipboard() {
+    let root=tempfile::tempdir().unwrap();let folder=tempfile::tempdir().unwrap();
+    let mut api=Service::open(root.path(),1_000_000).unwrap();
+    api.set_clipboard_files_source(Box::new(NoClipboard));
+    let event=call(&mut api,Command::IngestBytes{name:"move.png".into(),bytes:vec![4,5,6],source:"synthetic".into()});
+    let id=event["id"].as_i64().unwrap();
+    call(&mut api,Command::ChooseFolder{path:folder.path().into()});
+    call(&mut api,Command::SetTab{tab:ShelfTab::Images});
+    select(&mut api,&[id]);
+    let result=call(&mut api,Command::TransferSelection);
+    assert_eq!(result["items"][0]["status"],"moved","{result}");
+    assert_eq!(std::fs::read(folder.path().join("move.png")).unwrap(),vec![4,5,6]);
+    assert_eq!(request(&mut api,Command::Get{id})["ok"],false);
+}
+
 #[test]
 fn pinned_and_missing_sources_are_reported_individually() {
     let root = tempfile::tempdir().unwrap();

@@ -2,6 +2,25 @@
 
 Latest runnable artifact and verified product commit: [ARTIFACTS.md](ARTIFACTS.md).
 
+## Manual-feedback patch
+
+Lilia's screenshots showed Folder service details expanding the header. These
+details now live in a fixed bottom information bar with bounded click-open
+panels. Header/footer geometry is verified across Images/Folder/pinned.
+
+Shift+Tab is the primary direct transfer/import action, implemented as
+TransferSelection in the shared API without any Clipboard reads. Category to
+Folder moves unpinned items and copies pinned ones; Folder to category imports
+supported formats, preserving originals and reporting unsupported items.
+API checkpoint: 8366a8a. Four synthetic direct-transfer scenarios, the headless
+keyboard round trip and no-Folder/text-field cases passed. Ordinary Tab stays
+navigation-only. The information pane and shortcuts follow in the next checkpoint.
+
+The same-ID/revision preview regression passed for external QuickLook and an
+internal PNG in ordinary/pinned slices. No slice-specific QuickLook branch was
+found. The generic job label moved into the information bar; the reported native
+latency difference is not yet measured or claimed fixed.
+
 2026-11-11. This supersedes onboarding and intermediate status in HANDOFF.md. The local implementation is unaccepted; public release remains 2.0.0. Read TEAM.md for reusable sessions and PIPELINE.md for the agreed order.
 
 ## Checkpoints
