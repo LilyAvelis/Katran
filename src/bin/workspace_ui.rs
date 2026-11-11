@@ -354,14 +354,40 @@ impl Shelf {
                     else if state.items.is_empty() { ui.weak(if state.mode == Mode::Search && query.trim().is_empty() { "Введите имя или путь папки" } else { "Папки не найдены" }); }
                 });
                 ui.separator();
-                let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text("Поиск папки…").desired_width(f32::INFINITY));
+                let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text("Имя или полный путь папки…").desired_width(f32::INFINITY));
                 if state.focus { field.request_focus(); state.focus = false; }
                 ui.weak("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Enter · открыть    Esc · закрыть");
             });
+        let mut direct = false;
+        let mut direct_error = None;
+        if enter && state.mode == Mode::Search {
+            match katran::everything::direct_folder_query(&query) {
+                Ok(Some(path)) => {
+                    chosen = Some(path);
+                    direct = true;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    chosen = None;
+                    direct = true;
+                    direct_error = Some(error.message);
+                }
+            }
+        }
         if query != state.query {
             state.query = query;
-            self.workspace_reload(ctx);
-            return;
+            if !direct {
+                self.workspace_reload(ctx);
+                return;
+            }
+        }
+        if direct {
+            self.workspace_cancel();
+            self.workspace.items.clear();
+            if let Some(error) = direct_error {
+                self.workspace.error = Some(error);
+                return;
+            }
         }
         if let Some(path) = chosen {
             let result = self.call(Command::ChooseFolder { path });
@@ -375,5 +401,72 @@ impl Shelf {
         } else if modal.should_close() {
             self.workspace_close();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(app: &mut Shelf, ctx: &egui::Context, event: Option<egui::Event>) {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events: event.into_iter().collect(),
+                ..Default::default()
+            },
+            |_| app.workspace_panel(ctx),
+        );
+        output.textures_delta.clear();
+    }
+    fn enter(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+    #[test]
+    fn enter_opens_absolute_path_while_search_pending_and_keeps_old_folder_on_error() {
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let folder = source.path().join("тестовая папка");
+        std::fs::create_dir(&folder).unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.workspace.open = true;
+        app.workspace.mode = Mode::Search;
+        frame(&mut app, &ctx, None);
+        app.workspace.query = format!("  \"{}\"  ", folder.display());
+        app.workspace.loading = true;
+        app.workspace.due = Some(Instant::now() + Duration::from_secs(60));
+        let revision = app.workspace.revision;
+        frame(&mut app, &ctx, Some(enter(true)));
+        assert!(!app.workspace.open);
+        assert!(!app.workspace.loading);
+        assert!(app.workspace.due.is_none());
+        assert!(app.workspace.revision > revision);
+        let current = app.call(Command::CurrentFolder);
+        assert_eq!(
+            PathBuf::from(current["path"].as_str().unwrap()),
+            folder.canonicalize().unwrap()
+        );
+        frame(&mut app, &ctx, Some(enter(false)));
+        app.workspace.open = true;
+        app.workspace.mode = Mode::Search;
+        app.workspace.query = source.path().join("missing").to_string_lossy().into_owned();
+        app.workspace.loading = true;
+        app.workspace.due = Some(Instant::now() + Duration::from_secs(60));
+        frame(&mut app, &ctx, Some(enter(true)));
+        assert!(app.workspace.open);
+        assert!(!app.workspace.loading);
+        assert!(app.workspace.due.is_none());
+        assert!(app.workspace.error.is_some());
+        assert_eq!(app.call(Command::CurrentFolder), current);
     }
 }

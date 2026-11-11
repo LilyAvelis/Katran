@@ -8,14 +8,18 @@ chosen path is session state, not a copied/imported collection.
 ## Choose and browse
 
 - **Ctrl+Shift+K** opens folder search through Everything. Enter selects the
-  highlighted result. **Ctrl+H** and **Ctrl+F** switch the picker to recent
+  highlighted result. Paste a full directory path and press Enter to open it
+  directly, even before search completes; this does not require Everything.
+  Outer double quotes from Explorer are accepted. Missing paths and files report
+  an error and leave the current Folder unchanged. **Ctrl+H** and **Ctrl+F** switch the picker to recent
   folders and favorites.
 - **Tab** toggles Folder and the remembered shelf tab. **Ctrl+.** adds or
   removes the current Folder from favorites.
 - Files from Folder can be previewed in Katran where supported. The preview is
   read-only.
 
-Everything must be installed and running. Search uses the bundled Katran
+Name/index search requires Everything installed and running; direct full paths do not.
+Search uses the bundled Katran
 backend; Katran does not bundle the Everything application.
 
 ## Copy, move, and return files

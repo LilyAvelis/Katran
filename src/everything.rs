@@ -35,18 +35,78 @@ fn error(code: &str, message: impl Into<String>) -> EverythingError {
     }
 }
 
+/// Identify a full path without touching the filesystem or the Everything index.
+/// Trims outside whitespace and removes one matched pair of outer double quotes.
+pub fn direct_folder_query(query: &str) -> Result<Option<PathBuf>, EverythingError> {
+    if query.contains('\0') || query.encode_utf16().count() > 16_000 {
+        return Err(error(
+            "invalid_argument",
+            "Invalid query or result limit (1–100)",
+        ));
+    }
+    let query = query.trim();
+    let text = query
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(query);
+    let bytes = text.as_bytes();
+    let slash = |b| b == b'\\' || b == b'/';
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && slash(bytes[2]);
+    let mut unc = false;
+    if bytes.len() >= 2 && slash(bytes[0]) && slash(bytes[1]) {
+        let rest = &text[2..];
+        if let Some(extended) = rest.strip_prefix("?\\").or_else(|| rest.strip_prefix("?/")) {
+            let b = extended.as_bytes();
+            unc = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && slash(b[2]);
+            if b.len() >= 4 && b[..3].eq_ignore_ascii_case(b"UNC") && slash(b[3]) {
+                let server_share = &extended[4..];
+                unc = server_share
+                    .split(['\\', '/'])
+                    .filter(|part| !part.is_empty())
+                    .count()
+                    >= 2;
+            }
+        } else {
+            unc = rest
+                .split(['\\', '/'])
+                .filter(|part| !part.is_empty())
+                .count()
+                >= 2;
+        }
+    }
+    let native = cfg!(not(windows)) && Path::new(text).is_absolute();
+    Ok((drive || unc || native).then(|| PathBuf::from(text)))
+}
+
+fn direct_result(path: &Path) -> Result<EverythingFolders, EverythingError> {
+    let path = fs::canonicalize(path)
+        .map_err(|e| error("invalid_folder", format!("Папка недоступна: {e}")))?;
+    if !path.is_dir() {
+        return Err(error("invalid_folder", "Указанный путь не является папкой"));
+    }
+    Ok(EverythingFolders {
+        items: vec![EverythingFolder { path }],
+    })
+}
+
 /// Search the existing Everything index. Missing helper/index is an error, not an empty result.
 /// Run off the UI thread. Results are index snapshots and must be revalidated on use.
 pub fn search_folders(query: &str, limit: usize) -> Result<EverythingFolders, EverythingError> {
+    if !(1..=MAX_RESULTS).contains(&limit) {
+        return Err(error(
+            "invalid_argument",
+            "Invalid query or result limit (1–100)",
+        ));
+    }
+    if let Some(path) = direct_folder_query(query)? {
+        return direct_result(&path);
+    }
+    if query.trim().is_empty() {
+        return Ok(EverythingFolders { items: Vec::new() });
+    }
     let executable =
         std::env::current_exe().map_err(|e| error("helper_unavailable", e.to_string()))?;
-    if query.trim().is_empty()
-        || query.contains('\0')
-        || query.encode_utf16().count() > 16_000
-        || !(1..=MAX_RESULTS).contains(&limit)
-    {
-        return search_with_runner(query, limit, Path::new(""), run);
-    }
     let local = std::env::var_os("LOCALAPPDATA")
         .ok_or_else(|| error("helper_unavailable", "LOCALAPPDATA unavailable"))?;
     let helper = resolve_helper(&executable, &PathBuf::from(local))?;
@@ -166,6 +226,9 @@ where
             "invalid_argument",
             "Invalid query or result limit (1–100)",
         ));
+    }
+    if let Some(path) = direct_folder_query(query)? {
+        return direct_result(&path);
     }
     if query.trim().is_empty() {
         return Ok(EverythingFolders { items: Vec::new() });
@@ -310,6 +373,25 @@ fn run(helper: &Path, query: &str, limit: usize) -> Result<Vec<u8>, EverythingEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn literal_directory_never_invokes_the_helper_runner() {
+        let folder = tempfile::tempdir().unwrap();
+        let query = format!("\"{}\"", folder.path().display());
+        let value = search_with_runner(&query, 1, Path::new("unavailable"), |_, _, _| {
+            panic!("literal paths bypass the helper")
+        })
+        .unwrap();
+        assert_eq!(value.items[0].path, folder.path().canonicalize().unwrap());
+        let absent = folder.path().join("missing");
+        let err = search_with_runner(
+            &absent.to_string_lossy(),
+            1,
+            Path::new("unavailable"),
+            |_, _, _| panic!("invalid literal paths bypass the helper"),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_folder");
+    }
     #[test]
     fn embedded_helper_cache_rejects_tampering() {
         let root = tempfile::tempdir().unwrap();
