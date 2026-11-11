@@ -8,7 +8,7 @@ pub(super) struct State {
     #[cfg(windows)]
     tray: Option<katran::tray::Listener>,
     tray_attempted: bool,
-    pending: bool,
+    pub(super) pending: bool,
     summoned: bool,
     registration_status: String,
     recorder_suspended: bool,

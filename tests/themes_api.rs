@@ -22,7 +22,14 @@ fn call(api:&mut Service,c:Command)->Value{let r=api.execute(Request{api_version
 
 #[test]fn experimental_window_preferences_roundtrip_through_api(){
  let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
- let theme=ThemePreferences{preset:Preset::BlueExperimental,glass:true,compact_header:true,..Default::default()};
+ let theme=ThemePreferences{preset:Preset::BlueExperimental,glass:true,lily_background:Some(2),compact_header:true,..Default::default()};
  call(&mut api,Command::SetTheme{theme:theme.clone()});drop(api);
  let mut api=Service::open(root.path(),10000).unwrap();assert_eq!(call(&mut api,Command::Themes)["current"],serde_json::to_value(theme).unwrap());
+}
+
+#[test]fn restart_is_a_host_intent_and_preserves_settings_and_interaction(){
+ let root=tempfile::tempdir().unwrap();let mut api=Service::open(root.path(),10000).unwrap();
+ let before=call(&mut api,Command::GetSettings);let interaction=call(&mut api,Command::Interaction);
+ assert_eq!(call(&mut api,Command::RestartApplication)["restart_requested"],true);
+ assert_eq!(call(&mut api,Command::GetSettings),before);assert_eq!(call(&mut api,Command::Interaction),interaction);
 }

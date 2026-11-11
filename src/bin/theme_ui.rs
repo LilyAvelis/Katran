@@ -39,9 +39,10 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
     if preference.preset == Preset::Standard {
         return legacy;
     }
-    match role {
-        Role::Background if preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false) => Color32::from_rgba_unmultiplied(11,20,35,175),
+    let glass=preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false);
+    let base=match role {
         Role::Background if preference.lily_background.is_some() => Color32::TRANSPARENT,
+        Role::Background if preference.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false) => Color32::from_rgba_unmultiplied(11,20,35,175),
         Role::Background => Color32::from_rgb(11, 20, 35),
         Role::Surface => Color32::from_rgb(16, 30, 50),
         Role::Raised => Color32::from_rgb(23, 43, 70),
@@ -53,7 +54,10 @@ pub(super) fn color(ctx: &egui::Context, role: Role, legacy: Color32) -> Color32
             Color32::from_rgb(r, g, b)
         }
         Role::Selection => selection_color(&preference),
-    }
+    };
+    if glass && matches!(role,Role::Surface|Role::Raised|Role::Selection) {
+        Color32::from_rgba_unmultiplied(base.r(),base.g(),base.b(),200)
+    } else {base}
 }
 pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
     if ctx
@@ -99,6 +103,17 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
     ctx.set_theme(egui::Theme::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
+/// Crop rather than letterbox: artwork reaches all window edges without stretching.
+fn cover_uv(view:egui::Vec2,image:egui::Vec2)->egui::Rect {
+    let scale=(view.x/image.x).max(view.y/image.y);
+    let visible=egui::vec2(view.x/(image.x*scale),view.y/(image.y*scale)).min(egui::Vec2::splat(1.0));
+    egui::Rect::from_center_size(egui::pos2(0.5,0.5),visible)
+}
+pub(super) fn footer_fill(ctx:&egui::Context,legacy:Color32)->Color32 {
+    let theme=current(ctx);
+    if theme.preset==Preset::BlueExperimental && theme.lily_background.is_some() {Color32::TRANSPARENT}
+    else {color(ctx,Role::Surface,legacy)}
+}
 /// Embedded owner-provided artwork, decoded once per selected variant.
 pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
     let theme = current(ctx);
@@ -122,12 +137,9 @@ pub(super) fn background(ctx: &egui::Context, rect: egui::Rect) {
     });
     if let Some(texture) = texture {
         let painter = ctx.layer_painter(egui::LayerId::background());
-        // Contain the whole illustration; navy fills any letterboxing.
-        painter.rect_filled(rect,0.0,Color32::from_rgb(11,20,35));
-        let size = texture.size_vec2();
-        let scale = (rect.width()/size.x).min(rect.height()/size.y);
-        let dest = egui::Rect::from_center_size(rect.center(),size*scale);
-        painter.image(texture.id(),dest,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),Color32::WHITE);
+        let glass=theme.glass && ctx.data(|d|d.get_temp::<bool>(egui::Id::new("native-glass-active"))).unwrap_or(false);
+        if !glass {painter.rect_filled(rect,0.0,Color32::from_rgb(11,20,35));}
+        painter.image(texture.id(),rect,cover_uv(rect.size(),texture.size_vec2()),if glass {Color32::from_white_alpha(160)} else {Color32::WHITE});
     }
 }
 /// Decorative arcs occupy existing bounds and never affect layout.
@@ -161,6 +173,21 @@ pub(super) fn decorate(ui: &egui::Ui, rect: egui::Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cover_has_no_bars_and_glass_translucency_keeps_text_opaque() {
+        for view in [egui::vec2(940.0,680.0),egui::vec2(1645.0,1190.0),egui::vec2(600.0,1000.0)] {
+            let image=egui::vec2(1672.0,941.0);let uv=cover_uv(view,image);
+            assert!(uv.min.x>=0.0 && uv.min.y>=0.0 && uv.max.x<=1.0 && uv.max.y<=1.0);
+            let aspect=(uv.width()*image.x)/(uv.height()*image.y);
+            assert!((aspect-view.x/view.y).abs()<0.001);
+        }
+        let ctx=egui::Context::default();crate::ui_style::install(&ctx);
+        ctx.data_mut(|d|d.insert_temp(egui::Id::new("native-glass-active"),true));
+        apply(&ctx,&ThemePreferences{preset:Preset::BlueExperimental,glass:true,lily_background:Some(1),..Default::default()});
+        assert_eq!(footer_fill(&ctx,Color32::GRAY),Color32::TRANSPARENT);
+        assert!(color(&ctx,Role::Surface,Color32::BLACK).a()<255);
+        assert_eq!(color(&ctx,Role::Text,Color32::WHITE).a(),255);
+    }
     #[test]
     fn glass_falls_back_opaque_until_native_activation_and_lily_texture_is_reused() {
         let ctx=egui::Context::default();crate::ui_style::install(&ctx);

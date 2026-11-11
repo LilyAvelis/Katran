@@ -180,7 +180,11 @@ impl Shelf {
                     for item in catalogue.as_array().into_iter().flatten().filter(|a|a["id"].as_str().is_some_and(|id|id.starts_with("sort_"))) {
                         let id=item["id"].as_str().unwrap();
                         let hint=sorting_ui::sequence_hint(id).unwrap_or("").trim_start_matches(", ");
-                        if ui.button(format!("{}    {hint}",item["label"].as_str().unwrap_or(id))).clicked(){picked=Some(id.to_owned());}
+                        let row=crate::action_row::ActionRow::new(crate::action_row::ActionPresentation {
+                            label:item["label"].as_str().unwrap_or(id),icon:action_icons::icon(id),
+                            primary_shortcut:hint,full_shortcut_tooltip:hint,
+                        }).show(ui,false);
+                        if row.clicked(){picked=Some(id.to_owned());}
                     }
                 });
             });

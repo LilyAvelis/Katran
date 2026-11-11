@@ -5,6 +5,8 @@ use katran::{Command, Request, Service, interaction::View, settings::Settings};
 
 #[derive(Default)]
 pub struct State {
+    restart_confirmation: bool,
+    restart_requested: bool,
     updates: super::updates_ui::State,
     confirm_history: bool,
     query: String,
@@ -105,6 +107,8 @@ fn apply_theme(
     Ok(())
 }
 impl State {
+    pub(super) fn take_restart_requested(&mut self)->bool {std::mem::take(&mut self.restart_requested)}
+
     pub fn set_overlay_status(&mut self, status: String) {
         self.overlay_status = status;
     }
@@ -167,6 +171,17 @@ impl State {
         let mut theme_intent = None;
         let root_ctx = ctx.clone();
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title("Katran Settings").with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
+   if self.restart_confirmation {
+    let prompt=egui::Modal::new(egui::Id::new("restart-confirmation")).show(ctx,|ui|{
+     ui.heading("Перезапустить Katran?");
+     ui.label("Настройка стекла сохранена. Новое окно откроется с теми же данными.");
+     ui.horizontal(|ui|{
+      if ui.button("Перезапустить сейчас").clicked(){self.restart_requested=true;self.restart_confirmation=false;}
+      if ui.button("Позже").clicked(){self.restart_confirmation=false;}
+     });
+    });
+    if prompt.should_close(){self.restart_confirmation=false;}
+   }
    let updates_ctx=ctx.clone();
    super::input_log::record(ctx,logger.as_ref());
    let recording=self.editor.is_some()||self.global_editor.is_some();
@@ -288,11 +303,11 @@ impl State {
             if ui.checkbox(&mut theme.compact_header,"Без шапки").changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
-            if ui.checkbox(&mut theme.glass,"Включить").changed(){if theme.glass{theme.lily_background=None;}theme_intent=Some(theme.clone());}
+            if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_value(&mut theme.lily_background,None,"Сплошной").changed(){theme_intent=Some(theme.clone());}
-            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.glass=false;theme_intent=Some(theme.clone());}}
+            for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme_intent=Some(theme.clone());}}
            });
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
@@ -330,8 +345,10 @@ impl State {
    });
   });
         if let Some(theme) = theme_intent {
+            let previous=call(api,Command::Themes)["result"]["current"]["glass"].as_bool().unwrap_or(false);
+            let changed=previous!=theme.glass;
             self.error = match apply_theme(api, &mut self.draft, theme) {
-                Ok(()) => String::new(),
+                Ok(()) => {if changed {self.restart_confirmation=true;}String::new()},
                 Err(error) => error,
             };
             ctx.request_repaint_of(egui::ViewportId::ROOT);

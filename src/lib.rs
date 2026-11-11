@@ -411,6 +411,7 @@ impl Service {
             ));
         }
         match command {
+            Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
             Command::Themes => Ok(theme::catalogue(&self.settings.theme)),
             Command::SetTheme {theme} => {let mut settings=self.settings.clone();settings.theme=theme;self.dispatch(Command::SetSettings{settings})?;Ok(theme::catalogue(&self.settings.theme))},
             Command::WindowVisibility => Ok(serde_json::json!({"visible":self.window_visible})),

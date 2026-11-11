@@ -32,6 +32,7 @@ mod ui_foundation;
 mod ui_style;
 mod theme_ui;
 mod window_material;
+mod restart_ui;
 mod updates_ui;
 mod workspace_ui;
 use base64::Engine;
@@ -546,7 +547,7 @@ impl Shelf {
         let _footer = egui::Panel::bottom("footer")
             .exact_size(34.0)
             .frame(egui::Frame::new()
-                .fill(theme_ui::color(&ctx, theme_ui::Role::Surface, Color32::from_rgb(54,54,58)))
+                .fill(theme_ui::footer_fill(&ctx, Color32::from_rgb(54,54,58)))
                 .inner_margin(egui::Margin::symmetric(8, 2)))
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -692,6 +693,13 @@ impl Shelf {
             self.refresh();
             ctx.request_repaint();
         }
+        if self.api.is_some() && self.job.is_none() && self.capture_job.is_none()
+            && !self.overlay_ui.pending && self.settings_ui.take_restart_requested() {
+            let result=self.call(Command::RestartApplication);
+            if result["restart_requested"]==true {
+                match restart_ui::spawn_successor(){Ok(())=>self.quit_application(&ctx),Err(error)=>self.message=error}
+            }
+        }
         if self.job.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -831,6 +839,7 @@ impl eframe::App for Shelf {
     }
 }
 fn main() -> eframe::Result {
+    restart_ui::wait_for_predecessor().map_err(|error|eframe::Error::AppCreation(Box::new(std::io::Error::other(error))))?;
     if let Some(code) = katran::shell_visual_worker::run_if_requested() {
         std::process::exit(code);
     }
