@@ -20,7 +20,7 @@ fn restart_is_in_actions_and_returns_intent_without_changing_profile() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|a| a["id"] == "restart" && a["label"] == "Перезапустить Katran")
+            .any(|a| a["id"] == "restart" && a["label"] == "Restart Katran")
     );
     assert_eq!(
         call(
