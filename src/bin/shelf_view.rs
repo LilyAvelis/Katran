@@ -336,7 +336,7 @@ impl Shelf {
                     ui.spacing_mut().item_spacing = Vec2::splat(gap);
                     let pods = self.state["tab"] == "pods";
                     let links = self.state["tab"] == "links";
-                    let compact = pods || links;
+                    let compact = gallery && (pods || links);
                     let theme = ctx
                         .data(|data| {
                             data.get_temp::<katran::theme::ThemePreferences>(egui::Id::new(
@@ -549,7 +549,7 @@ impl Shelf {
                                     }
                                     if pods {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
-                                    } else if links {
+                                    } else if links && compact {
                                         self.link_cards.paint(ui, event, rect.shrink(6.0));
                                     } else if gallery {
                                         let zones = gallery_card::geometry(rect);
@@ -651,6 +651,12 @@ impl Shelf {
                                         );
                                         if self.state["tab"] == "pods" {
                                             self.pods_ui.paint(ui, event, image);
+                                        } else if links {
+                                            let icon = egui::Rect::from_min_size(
+                                                image.min,
+                                                Vec2::splat(image.height()),
+                                            );
+                                            self.link_cards.paint(ui, event, icon);
                                         } else if event["kind"] == "table_fragment" {
                                             table_preview_ui::paint_card(ui, event, image);
                                         } else if matches!(
@@ -667,7 +673,23 @@ impl Shelf {
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
                                         let lines = [
-                                            if let Some(name) =
+                                            if links {
+                                                event["properties"]["display_name"]
+                                                    .as_str()
+                                                    .filter(|name| !name.trim().is_empty())
+                                                    .map(str::to_owned)
+                                                    .or_else(|| {
+                                                        event["text_preview"]
+                                                            .as_str()
+                                                            .and_then(|url| {
+                                                                url::Url::parse(url).ok()
+                                                            })
+                                                            .and_then(|url| {
+                                                                url.host_str().map(str::to_owned)
+                                                            })
+                                                    })
+                                                    .unwrap_or_else(|| "Ссылка".to_owned())
+                                            } else if let Some(name) =
                                                 event["properties"]["display_name"].as_str()
                                             {
                                                 name.to_owned()
@@ -681,9 +703,19 @@ impl Shelf {
                                             } else {
                                                 event["name"].as_str().unwrap_or("Файл").to_owned()
                                             },
-                                            criterion.clone().unwrap_or_else(|| {
-                                                event["source"].as_str().unwrap_or("").to_owned()
-                                            }),
+                                            if links {
+                                                event["text_preview"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_owned()
+                                            } else {
+                                                criterion.clone().unwrap_or_else(|| {
+                                                    event["source"]
+                                                        .as_str()
+                                                        .unwrap_or("")
+                                                        .to_owned()
+                                                })
+                                            },
                                             {
                                                 let origin = origin.label().unwrap_or_else(|| {
                                                     "Источник не определён".into()
@@ -1009,6 +1041,39 @@ mod tests {
             .expect("compact Links tile allocated");
         assert_eq!(tile.width(), tile.height());
         assert!(tile.width() <= 96.0);
+    }
+    #[test]
+    fn links_stream_shows_name_and_address_in_wide_row() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"links","view":"list","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
+        let event = serde_json::json!({"id":1,"kind":"link_fragment","text_preview":"https://app.notion.com/p/katran","properties":{"pinned":true,"display_name":"Katran project"},"revision":"r1"});
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.shelf_view(ui, &ctx, std::slice::from_ref(&event), false, 1),
+        );
+        let painted = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(painted.contains("Katran project"), "{painted}");
+        assert!(
+            painted.contains("https://app.notion.com/p/katran"),
+            "{painted}"
+        );
+        output.textures_delta.clear();
     }
     #[test]
     fn compact_link_row_fills_width_with_equal_side_margins() {

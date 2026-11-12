@@ -1050,8 +1050,8 @@ impl Shelf {
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
         });
-        let compact = matches!(self.state["tab"].as_str(), Some("pods" | "links"));
-        let gallery = self.state["view"] == "gallery" || compact;
+        let gallery = self.state["view"] == "gallery" || self.state["tab"] == "pods";
+        let compact = gallery && matches!(self.state["tab"].as_str(), Some("pods" | "links"));
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             self.gallery_columns = settings["gallery_columns"]
