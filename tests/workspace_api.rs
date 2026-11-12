@@ -110,6 +110,52 @@ fn folder_history_session_and_pinned_navigation_via_dispatcher() {
 }
 
 #[test]
+fn selected_folder_favorite_can_be_removed_after_directory_disappears() {
+    let root = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("favorite");
+    std::fs::create_dir(&path).unwrap();
+    let mut api = Service::open(root.path(), 100000).unwrap();
+    assert_eq!(
+        call(
+            &mut api,
+            Command::ToggleFavoriteFolderPath { path: path.clone() }
+        )["favorite"],
+        true
+    );
+    assert_eq!(
+        call(
+            &mut api,
+            Command::ToggleFavoriteFolderPath { path: path.clone() }
+        )["favorite"],
+        false
+    );
+    assert_eq!(
+        call(
+            &mut api,
+            Command::ToggleFavoriteFolderPath { path: path.clone() }
+        )["favorite"],
+        true
+    );
+    let saved = std::path::PathBuf::from(
+        call(&mut api, Command::FavoriteFolders { query: "".into() })["items"][0]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    std::fs::remove_dir(&path).unwrap();
+    assert_eq!(
+        call(&mut api, Command::ToggleFavoriteFolderPath { path: saved })["favorite"],
+        false
+    );
+    assert!(
+        call(&mut api, Command::FavoriteFolders { query: "".into() })["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn folder_preview_snapshot_via_read_only_dispatcher() {
     let root = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();

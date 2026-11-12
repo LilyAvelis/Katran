@@ -211,6 +211,24 @@ impl Shelf {
             self.workspace_mode(Mode::Search, ctx);
         }
         if self.workspace.open {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Period))
+                && let Some(path) = self.workspace.items.get(self.workspace.selected).cloned()
+            {
+                let result = self.call(Command::ToggleFavoriteFolderPath { path });
+                if let Some(favorite) = result["favorite"].as_bool() {
+                    let text = if favorite {
+                        "Добавлено в избранное"
+                    } else {
+                        "Удалено из избранного"
+                    };
+                    self.favorite_notice = Some((text.into(), Instant::now()));
+                    if self.workspace.mode == Mode::Favorites {
+                        self.workspace_reload(ctx);
+                    }
+                } else {
+                    self.workspace.error = Some(self.message.clone());
+                }
+            }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::H)) {
                 self.workspace_mode(Mode::History, ctx);
             }
@@ -228,12 +246,15 @@ impl Shelf {
             if self.state["tab"] == "folder" {
                 let result = self.call(Command::ToggleFavoriteFolder);
                 if let Some(favorite) = result["favorite"].as_bool() {
-                    self.message = if favorite {
-                        "Папка добавлена в избранное"
-                    } else {
-                        "Папка удалена из избранного"
-                    }
-                    .into();
+                    self.favorite_notice = Some((
+                        if favorite {
+                            "Добавлено в избранное"
+                        } else {
+                            "Удалено из избранного"
+                        }
+                        .into(),
+                        Instant::now(),
+                    ));
                 }
             } else {
                 let ids = self.state["selected"]
@@ -369,7 +390,7 @@ impl Shelf {
                 ui.separator();
                 let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text("Имя или полный путь папки…").desired_width(f32::INFINITY));
                 if state.focus { field.request_focus(); state.focus = false; }
-                ui.weak("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Enter · открыть    Esc · закрыть");
+                ui.weak("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть");
             });
         let mut direct = false;
         let mut direct_error = None;
@@ -476,5 +497,43 @@ mod tests {
         assert!(app.workspace.due.is_none());
         assert!(app.workspace.error.is_some());
         assert_eq!(app.call(Command::CurrentFolder), current);
+    }
+    #[test]
+    fn ctrl_period_removes_missing_favorite_from_picker() {
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let folder = source.path().join("favorite");
+        std::fs::create_dir(&folder).unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.call(Command::ToggleFavoriteFolderPath {
+            path: folder.clone(),
+        });
+        let saved = app.call(Command::FavoriteFolders { query: "".into() });
+        let saved_path = PathBuf::from(saved["items"][0]["path"].as_str().unwrap());
+        std::fs::remove_dir(&folder).unwrap();
+        app.workspace.open = true;
+        app.workspace.mode = Mode::Favorites;
+        app.workspace.items = vec![saved_path];
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Period,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |_| app.workspace_input(&ctx),
+        );
+        output.textures_delta.clear();
+        assert!(app.workspace.open);
+        assert!(app.workspace.items.is_empty());
+        assert_eq!(
+            app.favorite_notice.as_ref().unwrap().0,
+            "Удалено из избранного"
+        );
     }
 }

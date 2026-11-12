@@ -27,18 +27,31 @@ fn friendly_path(path: &str) -> String {
 }
 impl Shelf {
     pub(super) fn sort_notice(&mut self, ctx: &egui::Context) {
-        let Some((text, started)) = &self.sort_notice else {
+        if self
+            .favorite_notice
+            .as_ref()
+            .is_some_and(|(_, started)| started.elapsed() >= Duration::from_secs(2))
+        {
+            self.favorite_notice = None;
+        }
+        if self
+            .sort_notice
+            .as_ref()
+            .is_some_and(|(_, started)| started.elapsed() >= Duration::from_secs(2))
+        {
+            self.sort_notice = None;
+        }
+        let favorite = self.favorite_notice.is_some();
+        if !favorite
+            && self.sort_notice.is_some()
+            && self.call(Command::GetSettings)["sort_notifications"] == false
+        {
+            self.sort_notice = None;
+        }
+        let Some((text, _)) = self.favorite_notice.as_ref().or(self.sort_notice.as_ref()) else {
             return;
         };
-        if started.elapsed() >= Duration::from_secs(2) {
-            self.sort_notice = None;
-            return;
-        }
         let text = text.clone();
-        if self.call(Command::GetSettings)["sort_notifications"] == false {
-            self.sort_notice = None;
-            return;
-        }
         egui::Area::new(egui::Id::new("sort-notice"))
             .order(egui::Order::Foreground)
             .interactable(false)

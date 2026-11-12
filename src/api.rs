@@ -114,6 +114,9 @@ pub enum Command {
         query: String,
     },
     ToggleFavoriteFolder,
+    ToggleFavoriteFolderPath {
+        path: PathBuf,
+    },
     ClearFolderHistory {
         #[serde(default)]
         confirmed: bool,

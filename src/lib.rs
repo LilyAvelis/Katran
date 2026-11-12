@@ -504,6 +504,9 @@ impl Service {
                 let path=self.work_folder.current().ok_or_else(||ApiError::new("no_folder","Choose a working folder first"))?;
                 Ok(serde_json::json!({"favorite":pinned::toggle_favorite(&self.db,path)?}))
             },
+            Command::ToggleFavoriteFolderPath { path } => {
+                Ok(serde_json::json!({"favorite":pinned::toggle_favorite_path(&self.db,&path)?}))
+            },
             Command::ClearFolderHistory {confirmed} => {
                 if !confirmed {Ok(serde_json::json!({"confirmation_required":true}))} else {pinned::clear_folder_history(&self.db)?;Ok(serde_json::json!({"cleared":true}))}
             },

@@ -286,6 +286,28 @@ pub fn toggle_favorite(db: &Connection, path: &Path) -> Result<bool> {
     Ok(removed == 0)
 }
 
+/// A picker selection may refer to a favorite whose directory was removed.
+/// Removal uses the stored path key and never touches the filesystem.
+pub fn toggle_favorite_path(db: &Connection, path: &Path) -> Result<bool> {
+    if !path.is_absolute() {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Folder path must be absolute",
+        ));
+    }
+    if path.is_dir() {
+        return toggle_favorite(db, path);
+    }
+    if remove_favorite(db, path)? {
+        Ok(false)
+    } else {
+        Err(ApiError::new(
+            "folder_missing",
+            "Folder is unavailable and is not a favorite",
+        ))
+    }
+}
+
 pub fn folder_history(db: &Connection) -> Result<Vec<FolderEntry>> {
     let mut stmt = db.prepare(
         "SELECT path,opened_at_ms FROM folder_history ORDER BY opened_at_ms DESC,rowid DESC",
