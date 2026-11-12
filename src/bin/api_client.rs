@@ -260,6 +260,8 @@ impl Shelf {
         }
     }
     pub(super) fn refresh(&mut self) {
+        self.preloaded_has_more = false;
+        self.tab_preload.waiting = None;
         let target = if self.query == self.loaded_query {
             self.events.len().max(1000)
         } else {
@@ -536,6 +538,21 @@ impl Shelf {
             return;
         }
         let sort_action = id.starts_with("sort_");
+        let tab_action = id.starts_with("tab_position_")
+            || matches!(
+                id.as_str(),
+                "tab_toggle"
+                    | "tab_previous"
+                    | "tab_next"
+                    | "images"
+                    | "screenshots"
+                    | "downloads"
+                    | "text"
+                    | "links"
+                    | "tables"
+                    | "pods"
+                    | "files"
+            );
         let r = self.call(Command::RunAction { id });
         if sort_action && r["sort"].is_object() {
             let enabled = self.call(Command::GetSettings)["sort_notifications"] != false;
@@ -546,7 +563,10 @@ impl Shelf {
         if preview_action {
             self.state = self.call(Command::Interaction);
         } else {
-            self.refresh();
+            self.state = self.call(Command::Interaction);
+            if !tab_action || !self.show_preloaded_tab(ctx) {
+                self.refresh();
+            }
         }
     }
     pub(super) fn action_result(&mut self, r: Value) {

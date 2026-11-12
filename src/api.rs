@@ -326,6 +326,15 @@ pub enum Command {
         limit: u32,
         cursor: Option<String>,
     },
+    /// Stateless first page for an enabled category; safe on a read-only worker.
+    /// Uses that tab's saved sort and no pinned/tag filters. Folder is session-only.
+    BrowseTabSnapshot {
+        tab: crate::interaction::ShelfTab,
+        query: String,
+        limit: u32,
+    },
+    /// Conservative cache stamp. Compare only on the same Service connection.
+    CatalogueStamp,
     SetSort {
         mode: crate::sorting::SortMode,
         #[serde(default)]

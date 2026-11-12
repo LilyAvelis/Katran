@@ -34,6 +34,7 @@ mod sorting_ui;
 mod source_jobs;
 mod summon_animation;
 mod tab_bar;
+mod tab_preload_ui;
 mod table_preview_ui;
 mod tag_material_ui;
 mod tag_menu_ui;
@@ -218,6 +219,8 @@ struct Shelf {
     table_preview: table_preview_ui::TablePreview,
     events: Vec<Value>,
     next_cursor: Option<String>,
+    preloaded_has_more: bool,
+    tab_preload: tab_preload_ui::State,
     sorting_input: sorting_input::State,
     pending_sort: Option<String>,
     glass_active: bool,
@@ -501,6 +504,7 @@ impl Shelf {
         if self.api.is_some() {
             self.state = self.call(Command::Interaction);
         }
+        self.poll_preloaded_tab(&ctx);
         let sort_allowed = self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
@@ -943,9 +947,17 @@ impl Shelf {
                 ) {
                     self.call(command);
                     self.state = self.call(Command::Interaction);
-                    self.refresh();
+                    if !self.show_preloaded_tab(&ctx) {
+                        self.refresh();
+                    }
                 }
-                if self.next_cursor.is_some() && ui.button("Загрузить ещё").clicked() {
+                if (self.next_cursor.is_some() || self.preloaded_has_more)
+                    && ui.button("Загрузить ещё").clicked()
+                {
+                    if self.preloaded_has_more {
+                        self.preloaded_has_more = false;
+                        self.refresh();
+                    }
                     self.load_more();
                 }
             });
@@ -1624,6 +1636,8 @@ fn main() -> eframe::Result {
         table_preview: table_preview_ui::TablePreview::new(root),
         events: vec![],
         next_cursor: None,
+        preloaded_has_more: false,
+        tab_preload: Default::default(),
         sorting_input: Default::default(),
         pending_sort: None,
         glass_active: false,
@@ -1706,6 +1720,7 @@ fn main() -> eframe::Result {
             }
             ui_style::install(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            app.start_tab_preload(&cc.egui_ctx);
             Ok(Box::new(app))
         }),
     )
@@ -1831,6 +1846,8 @@ mod tests {
             table_preview: table_preview_ui::TablePreview::new(root.into()),
             events: vec![],
             next_cursor: None,
+            preloaded_has_more: false,
+            tab_preload: Default::default(),
             sorting_input: Default::default(),
             pending_sort: None,
             glass_active: false,

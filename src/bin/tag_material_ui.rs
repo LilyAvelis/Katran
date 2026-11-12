@@ -72,6 +72,30 @@ pub struct Cache {
     pub assignments: std::collections::HashMap<i64, u8>,
 }
 impl super::Shelf {
+    pub(super) fn seed_preloaded_tags(&mut self, page: &serde_json::Value) {
+        let ids: Vec<i64> = self
+            .events
+            .iter()
+            .filter_map(|e| e["id"].as_i64())
+            .filter(|id| *id > 0)
+            .collect();
+        let generation = self.state["view_generation"].as_u64().unwrap_or(0);
+        self.tag_material_cache.key = Some((ids, generation));
+        self.tag_material_cache.slots =
+            serde_json::from_value(page["slots"].clone()).unwrap_or_default();
+        self.tag_material_cache.assignments = page["assignments"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                Some((
+                    item["id"].as_i64()?,
+                    u8::try_from(item["slot"].as_u64()?).ok()?,
+                ))
+            })
+            .collect();
+    }
+
     pub(super) fn refresh_tag_materials(&mut self) {
         if self.api.is_none() {
             return;

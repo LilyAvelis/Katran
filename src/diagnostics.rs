@@ -273,6 +273,7 @@ pub(crate) fn hot_command(command: &crate::Command) -> Option<&'static str> {
     Some(match command {
         Interaction => "interaction",
         GetSettings => "get_settings",
+        CatalogueStamp => "catalogue_stamp",
         Tabs => "tabs",
         Shortcuts => "shortcuts",
         SetVisible { .. } => "set_visible",

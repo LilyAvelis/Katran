@@ -3,6 +3,7 @@ pub mod capture;
 pub mod capture_events;
 mod catalogue_query;
 mod catalogue_schema;
+mod catalogue_snapshot;
 mod classification_runtime;
 pub mod clipboard_files;
 pub mod clipboard_listener;
@@ -313,7 +314,7 @@ impl Service {
             root.join("index.sqlite3"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
-        pods::register_sql(&db)?;
+        storage::register_sql(&db)?;
         let stored: Option<String> = db
             .query_row(
                 "SELECT document FROM preferences WHERE key='general'",
@@ -429,6 +430,8 @@ impl Service {
             && !matches!(
                 command,
                 Command::GetUpdateStatus
+                    | Command::BrowseTabSnapshot { .. }
+                    | Command::CatalogueStamp
                     | Command::Get { .. }
                     | Command::PreviewImage { .. }
                     | Command::PreviewFile { .. }
@@ -643,6 +646,8 @@ impl Service {
             Command::ToggleTab => { self.normalize_tabs(); self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
             Command::BrowseShelf { query, limit, after_id } => {let result=self.browse_shelf(&query, limit, after_id)?; self.interaction.browse_query=query; Ok(result)},
             Command::BrowseShelfSorted { query, limit, cursor } => {let result=self.browse_shelf_sorted(&query, limit, cursor.as_deref())?; self.interaction.browse_query=query; Ok(result)},
+            Command::BrowseTabSnapshot { tab, query, limit } => self.browse_tab_snapshot(tab, &query, limit),
+            Command::CatalogueStamp => self.catalogue_stamp(),
             Command::SetSort { mode, reverse, seed } => {
                 let mut settings = self.settings.clone();
                 settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();

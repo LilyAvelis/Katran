@@ -71,12 +71,8 @@ fn process_has_exited(_pid: u32) -> bool {
     false
 }
 
-/// Run after the origin_json column migration. The table rebuild and cleanup hold
-/// SQLite's writer lock, so no concurrent ingestion can lose its staged object.
-/// Missing referenced files remain explicit unavailable events and can be repaired
-/// by ingesting the same bytes again. External event paths are never followed.
-pub fn initialize(db: &Connection, root: &Path) -> Result<()> {
-    crate::catalogue_schema::check_version(db)?;
+/// Connection-local catalogue functions shared by writer and read-only clients.
+pub(crate) fn register_sql(db: &Connection) -> Result<()> {
     crate::sorting::register_sql(db)?;
     crate::pods::register_sql(db)?;
     db.create_scalar_function(
@@ -90,6 +86,16 @@ pub fn initialize(db: &Connection, root: &Path) -> Result<()> {
             Ok(haystack.to_lowercase().contains(&needle.to_lowercase()))
         },
     )?;
+    Ok(())
+}
+
+/// Run after the origin_json column migration. The table rebuild and cleanup hold
+/// SQLite's writer lock, so no concurrent ingestion can lose its staged object.
+/// Missing referenced files remain explicit unavailable events and can be repaired
+/// by ingesting the same bytes again. External event paths are never followed.
+pub fn initialize(db: &Connection, root: &Path) -> Result<()> {
+    crate::catalogue_schema::check_version(db)?;
+    register_sql(db)?;
     let directory = directory(root)?;
     let tx = db.unchecked_transaction()?;
     // Acquire the writer lock before inspecting files.
