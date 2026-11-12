@@ -12,6 +12,7 @@ pub fn show(
     enabled: bool,
 ) -> Option<Command> {
     let mut intent = None;
+    let dragging_tab = egui::DragAndDrop::payload::<ShelfTab>(ui.ctx()).is_some();
     let active = active.as_str().unwrap_or("");
     let indicator_id = egui::Id::new("category-strip-indicator");
     let mut indicator = ui
@@ -26,6 +27,7 @@ pub fn show(
                 egui::Button::new("Folder").selected(active == "folder"),
             )
             .clicked()
+            && !dragging_tab
         {
             intent = Some(Command::SetTab { tab: ShelfTab::All });
         }
@@ -91,7 +93,7 @@ pub fn show(
                                 tab: *payload,
                                 index,
                             });
-                        } else if response.clicked() {
+                        } else if response.clicked() && !dragging_tab {
                             intent = Some(Command::SelectTabPosition {
                                 position: (index + 1) as u8,
                             });
@@ -137,6 +139,7 @@ pub fn show_with_glass(
         return show(ui, order, active, enabled);
     }
     let mut intent = None;
+    let dragging_tab = egui::DragAndDrop::payload::<ShelfTab>(ui.ctx()).is_some();
     ui.horizontal(|ui| {
         let body = ui.painter().add(egui::Shape::Noop);
         let optical = ui.painter().add(egui::Shape::Noop);
@@ -194,7 +197,7 @@ pub fn show_with_glass(
         ui.painter().set(rim, pill.rim(border));
         ui.painter()
             .set(shine, pill.shine(egui::Color32::from_white_alpha(42)));
-        if response.clicked() {
+        if response.clicked() && !dragging_tab {
             intent = Some(Command::SetTab { tab: ShelfTab::All });
         }
         ui.separator();
@@ -219,6 +222,7 @@ fn show_glass(
         .unwrap_or_default();
     let active_changed = indicator.active != active;
     let mut intent = None;
+    let dragging_tab = egui::DragAndDrop::payload::<ShelfTab>(ui.ctx()).is_some();
     let _scroll = egui::ScrollArea::horizontal()
         .id_salt("glass-category-strip-scroll")
         .auto_shrink([true, true])
@@ -327,7 +331,7 @@ fn show_glass(
                             tab: *payload,
                             index,
                         });
-                    } else if response.clicked() {
+                    } else if response.clicked() && !dragging_tab {
                         intent = Some(Command::SelectTabPosition {
                             position: (index + 1) as u8,
                         });

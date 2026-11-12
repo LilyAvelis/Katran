@@ -336,6 +336,15 @@ mod folder_launch_tests {
     }
 }
 impl Shelf {
+    fn apply_tab_bar_command(&mut self, command: Command, ctx: &egui::Context) {
+        let reorder_only = matches!(command, Command::MoveTab { .. });
+        self.call(command);
+        self.state = self.call(Command::Interaction);
+        if !reorder_only && !self.show_preloaded_tab(ctx) {
+            self.refresh();
+        }
+    }
+
     fn consume_launch_folders(&mut self) {
         let Some(root) = self.launch_root.clone() else {
             return;
@@ -957,11 +966,7 @@ impl Shelf {
                     self.api.is_some(),
                     self.experimental_glass_tabs,
                 ) {
-                    self.call(command);
-                    self.state = self.call(Command::Interaction);
-                    if !self.show_preloaded_tab(&ctx) {
-                        self.refresh();
-                    }
+                    self.apply_tab_bar_command(command, &ctx);
                 }
                 if (self.next_cursor.is_some() || self.preloaded_has_more)
                     && ui.button("Загрузить ещё").clicked()
@@ -2911,6 +2916,27 @@ mod tests {
         assert_eq!(app.state["tab"], "images");
         assert_eq!(app.state["pinned_only"], false);
     }
+    #[test]
+    fn reordering_tabs_keeps_the_active_shelf_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let event = serde_json::json!({"id": 42, "name": "currently visible"});
+        app.events = vec![event.clone()];
+        let ctx = egui::Context::default();
+        app.apply_tab_bar_command(
+            Command::MoveTab {
+                tab: katran::interaction::ShelfTab::Downloads,
+                index: 0,
+            },
+            &ctx,
+        );
+        assert_eq!(app.state["tab"], "images");
+        assert_eq!(app.events, vec![event]);
+    }
+
     #[test]
     fn repeated_tab_and_positional_shortcuts_follow_api_order() {
         let root = tempfile::tempdir().unwrap();
