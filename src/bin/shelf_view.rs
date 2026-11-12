@@ -446,9 +446,8 @@ impl Shelf {
                     let (_, _, full_height) = dimensions(full_width);
                     let content_height =
                         rows as f32 * full_height + rows.saturating_sub(1) as f32 * gap;
-                    let bar_shown = visibility
-                        != egui::scroll_area::ScrollBarVisibility::AlwaysHidden
-                        && content_height > ui.available_height();
+                    // Keep the scrollbar lane stable while its handle fades in/out.
+                    let bar_shown = content_height > ui.available_height();
                     let inner_width = (full_width - if bar_shown { 22.0 } else { 0.0 }).max(1.0);
                     let (compact_layout, cell_width, height) = dimensions(inner_width);
                     let mut area = egui::ScrollArea::vertical()
@@ -759,31 +758,25 @@ impl Shelf {
                                     if cursor {
                                         paint_cursor(ui, rect);
                                     }
-                                    if compact
-                                        && let Some(slot) =
-                                            self.tag_material_cache.assignments.get(&id).and_then(
-                                                |n| {
-                                                    self.tag_material_cache
-                                                        .slots
-                                                        .iter()
-                                                        .find(|slot| slot.number == *n)
-                                                },
-                                            )
-                                    {
-                                        let dot = rect.left_top() + egui::vec2(5.0, 5.0);
-                                        ui.painter().circle_filled(
-                                            dot,
-                                            3.0,
-                                            super::tag_material_ui::color(slot),
-                                        );
-                                    }
                                     if event["properties"]["pinned"] == true {
-                                        ui.painter().text(
-                                            rect.right_top() + egui::vec2(-8.0, 8.0),
-                                            egui::Align2::RIGHT_TOP,
-                                            "•",
-                                            egui::FontId::proportional(22.0),
-                                            Color32::from_rgb(224, 188, 127),
+                                        let color = self
+                                            .tag_material_cache
+                                            .assignments
+                                            .get(&id)
+                                            .and_then(|n| {
+                                                self.tag_material_cache
+                                                    .slots
+                                                    .iter()
+                                                    .find(|slot| slot.number == *n)
+                                            })
+                                            .map(super::tag_material_ui::color)
+                                            .unwrap_or(Color32::from_rgb(236, 159, 72));
+                                        let dot = rect.left_top() + egui::vec2(9.0, 9.0);
+                                        ui.painter().circle_filled(dot, 4.0, color);
+                                        ui.painter().circle_stroke(
+                                            dot,
+                                            4.0,
+                                            egui::Stroke::new(1.0, Color32::from_black_alpha(115)),
                                         );
                                     }
                                     let origin: katran::origin::Origin =
