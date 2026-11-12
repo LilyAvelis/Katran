@@ -100,17 +100,17 @@ impl State {
                         repeat: false,
                         modifiers,
                         ..
-                    } if modifiers.is_none() || *modifiers == egui::Modifiers::CTRL => {
+                    } if modifiers.is_none() || *modifiers == egui::Modifiers::SHIFT => {
                         match physical_key.unwrap_or(*key) {
-                            egui::Key::Num1 => Some((1, modifiers.ctrl)),
-                            egui::Key::Num2 => Some((2, modifiers.ctrl)),
-                            egui::Key::Num3 => Some((3, modifiers.ctrl)),
-                            egui::Key::Num4 => Some((4, modifiers.ctrl)),
-                            egui::Key::Num5 => Some((5, modifiers.ctrl)),
-                            egui::Key::Num6 => Some((6, modifiers.ctrl)),
-                            egui::Key::Num7 => Some((7, modifiers.ctrl)),
-                            egui::Key::Num8 => Some((8, modifiers.ctrl)),
-                            egui::Key::Num9 => Some((9, modifiers.ctrl)),
+                            egui::Key::Num1 => Some((1, modifiers.shift)),
+                            egui::Key::Num2 => Some((2, modifiers.shift)),
+                            egui::Key::Num3 => Some((3, modifiers.shift)),
+                            egui::Key::Num4 => Some((4, modifiers.shift)),
+                            egui::Key::Num5 => Some((5, modifiers.shift)),
+                            egui::Key::Num6 => Some((6, modifiers.shift)),
+                            egui::Key::Num7 => Some((7, modifiers.shift)),
+                            egui::Key::Num8 => Some((8, modifiers.shift)),
+                            egui::Key::Num9 => Some((9, modifiers.shift)),
                             egui::Key::Slash if modifiers.is_none() => Some((0, false)),
                             _ => None,
                         }
@@ -190,7 +190,7 @@ impl State {
                             let shortcut_label = match intent {
                                 Intent::Filter(None) => "/".to_owned(),
                                 Intent::Filter(Some(number)) => number.to_string(),
-                                Intent::Assign(Some(number)) => format!("Ctrl+{number}"),
+                                Intent::Assign(Some(number)) => format!("Shift+{number}"),
                                 _ => String::new(),
                             };
                             let response = ui
@@ -370,6 +370,102 @@ impl super::Shelf {
 
 #[cfg(test)]
 mod tests {
+    fn slot(number: u8) -> katran::tag_slots::Slot {
+        katran::tag_slots::Slot {
+            number,
+            name: "Test".into(),
+            color: "#123456".into(),
+            material: katran::tag_slots::Material::Solid,
+            scale: 50,
+            intensity: 50,
+            angle: 0,
+            seed: 1,
+        }
+    }
+
+    #[test]
+    fn shifted_physical_digit_assigns_plain_digit_filters_and_slash_clears() {
+        use eframe::egui::{self, Key, Modifiers};
+        for (key, physical, modifiers, eligible, expected) in [
+            (Key::A, Key::Num2, Modifiers::SHIFT, true, "assign"),
+            (Key::Num2, Key::Num2, Modifiers::NONE, true, "filter"),
+            (Key::Slash, Key::Slash, Modifiers::NONE, true, "clear"),
+            (Key::A, Key::Num2, Modifiers::SHIFT, false, "disabled"),
+            (Key::Num2, Key::Num2, Modifiers::CTRL, true, "ignored"),
+        ] {
+            let ctx = egui::Context::default();
+            let mut state = super::State::default();
+            state.start(vec![slot(2)]);
+            let mut result = None;
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(physical),
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    result = state.show(ui.ctx(), eligible, 1, false, "", None);
+                },
+            );
+            out.textures_delta.clear();
+            match expected {
+                "assign" => assert!(matches!(result, Some(super::Intent::Assign(Some(2))))),
+                "filter" => assert!(matches!(result, Some(super::Intent::Filter(Some(2))))),
+                "clear" => assert!(matches!(result, Some(super::Intent::Filter(None)))),
+                "disabled" => {
+                    assert!(result.is_none());
+                    assert!(state.open);
+                    assert!(!state.error.is_empty());
+                }
+                _ => {
+                    assert!(result.is_none());
+                    assert!(state.open);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shifted_digit_remains_text_when_search_has_focus() {
+        use eframe::egui::{self, Key, Modifiers};
+        let ctx = egui::Context::default();
+        let mut state = super::State::default();
+        state.start(vec![slot(2)]);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            state.show(ui.ctx(), true, 1, false, "", None);
+        });
+        out.textures_delta.clear();
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("tag-menu-search")));
+        let mut result = None;
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: Key::A,
+                        physical_key: Some(Key::Num2),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::SHIFT,
+                    },
+                    egui::Event::Text("@".into()),
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                result = state.show(ui.ctx(), true, 1, false, "", None);
+            },
+        );
+        out.textures_delta.clear();
+        assert!(result.is_none());
+        assert_eq!(state.query, "@");
+        assert!(state.open);
+    }
+
     #[test]
     fn partial_assignment_retries_only_failed_items() {
         let root = tempfile::tempdir().unwrap();

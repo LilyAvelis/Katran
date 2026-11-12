@@ -2459,7 +2459,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_digit_assigns_selected_pin_and_second_slash_clears_only_tag_filter() {
+    fn shift_digit_assigns_selected_pin_and_second_slash_clears_only_tag_filter() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
         app.call(Command::SetTab {
@@ -2483,7 +2483,7 @@ mod tests {
         ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
         assert!(app.tag_menu.open);
-        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::CTRL);
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::SHIFT);
         assert_eq!(app.call(Command::GetTagSlot { id })["slot"], 1);
         assert!(app.call(Command::Interaction)["tag_slot_filter"].is_null());
         assert!(!app.tag_menu.open);

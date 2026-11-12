@@ -19,7 +19,7 @@ is implied by this document.
    the tab number still does the same. Type into a text field to check that
    punctuation stays in the editor.
 4. Pin a card and open the tag menu with `/` or the footer tag icon. Press a
-   digit `1`–`9` to filter by that slot, or `Ctrl+digit` to assign it to the
+   digit `1`–`9` to filter by that slot, or `Shift+digit` to assign it to the
    selected pinned cards. Press `/` again to clear only the tag filter; the
    pinned-only view from `.` stays active. Unpin the card: its assignment
    disappears, while the slot definition remains. Re-pin does not restore it.
