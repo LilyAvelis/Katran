@@ -337,6 +337,13 @@ impl Shelf {
                     let pods = self.state["tab"] == "pods";
                     let links = self.state["tab"] == "links";
                     let compact = pods || links;
+                    let theme = ctx
+                        .data(|data| {
+                            data.get_temp::<katran::theme::ThemePreferences>(egui::Id::new(
+                                "katran-theme-preferences",
+                            ))
+                        })
+                        .unwrap_or_default();
                     // Reserve a separate lane for the handle so it never covers a card.
                     let scroll = &mut ui.style_mut().spacing.scroll;
                     *scroll = egui::style::ScrollStyle::solid();
@@ -344,48 +351,109 @@ impl Shelf {
                     scroll.bar_inner_margin = 8.0;
                     scroll.bar_outer_margin = 2.0;
                     scroll.handle_min_length = 36.0;
-                    if theme_ui::is_blue(ctx) {
+                    // The bar overlays its reserved lane; width is computed below so
+                    // hidden bars and shelves that fit do not consume any space.
+                    scroll.floating = true;
+                    scroll.floating_width = 12.0;
+                    scroll.floating_allocated_width = 0.0;
+                    scroll.dormant_handle_opacity = 1.0;
+                    scroll.active_handle_opacity = 1.0;
+                    scroll.dormant_background_opacity = 1.0;
+                    scroll.active_background_opacity = 1.0;
+                    if theme.scrollbar_glass || theme_ui::is_blue(ctx) {
                         scroll.foreground_color = true;
                         let visuals = &mut ui.style_mut().visuals;
-                        visuals.extreme_bg_color =
-                            Color32::from_rgba_unmultiplied(90, 140, 205, 38);
-                        let accent = theme_ui::color(
-                            ctx,
-                            theme_ui::Role::Accent,
-                            Color32::from_rgb(107, 174, 255),
-                        );
+                        visuals.extreme_bg_color = if theme.scrollbar_glass {
+                            Color32::from_rgba_unmultiplied(230, 240, 255, 24)
+                        } else {
+                            Color32::from_rgba_unmultiplied(90, 140, 205, 38)
+                        };
+                        let accent = if theme.scrollbar_glass {
+                            Color32::from_rgba_unmultiplied(225, 240, 255, 145)
+                        } else {
+                            theme_ui::color(
+                                ctx,
+                                theme_ui::Role::Accent,
+                                Color32::from_rgb(107, 174, 255),
+                            )
+                        };
                         visuals.widgets.inactive.fg_stroke.color = accent.gamma_multiply(0.7);
                         visuals.widgets.hovered.fg_stroke.color = accent;
                         visuals.widgets.active.fg_stroke.color = accent;
                     }
-                    let inner_width = (ui.available_width() - 22.0).max(1.0);
-                    let compact_layout = katran::compact_layout::compact_layout(
-                        inner_width,
-                        columns,
-                        gap,
-                        48.0,
-                        f32::INFINITY,
-                    );
-                    let cell_width = if compact {
-                        compact_layout.tile_width
-                    } else if gallery {
-                        ((inner_width - gap * (columns - 1) as f32) / columns as f32).max(1.0)
-                    } else {
-                        inner_width.max(80.0)
-                    };
-                    let height = if compact {
-                        cell_width
-                    } else if gallery {
-                        cell_width + 54.0
-                    } else {
-                        stream_row_height(ui.available_height(), self.stream_rows, gap)
-                    };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
+                    let activity_id = scroll_id.with("activity");
+                    let offset = egui::scroll_area::State::load(ctx, scroll_id)
+                        .map_or(0.0, |state| state.offset.y);
+                    let (now, wheel, pointer_inside, pointer_down) = ctx.input(|input| {
+                        (
+                            input.time,
+                            input.smooth_scroll_delta().y,
+                            input
+                                .pointer
+                                .hover_pos()
+                                .is_some_and(|pos| ui.max_rect().contains(pos)),
+                            input.pointer.any_down(),
+                        )
+                    });
+                    let (last_offset, mut last_activity) = ctx.data(|data| {
+                        data.get_temp::<(f32, f64)>(activity_id)
+                            .unwrap_or((offset, f64::NEG_INFINITY))
+                    });
+                    if (pointer_inside && wheel.abs() > 0.01) || (offset - last_offset).abs() > 0.01
+                    {
+                        last_activity = now;
+                    }
+                    let active = now - last_activity < 0.8;
+                    if active && pointer_down {
+                        last_activity = now;
+                    }
+                    ctx.data_mut(|data| data.insert_temp(activity_id, (offset, last_activity)));
+                    if !theme.scrollbar_always_visible && active {
+                        ctx.request_repaint_after(std::time::Duration::from_millis(850));
+                    }
+                    let visibility = if theme.scrollbar_always_visible || active {
+                        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+                    } else {
+                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                    };
+                    let full_width = ui.available_width().max(1.0);
+                    let dimensions = |width: f32| {
+                        let layout = katran::compact_layout::compact_layout(
+                            width,
+                            columns,
+                            gap,
+                            48.0,
+                            f32::INFINITY,
+                        );
+                        let cell_width = if compact {
+                            layout.tile_width
+                        } else if gallery {
+                            ((width - gap * (columns - 1) as f32) / columns as f32).max(1.0)
+                        } else {
+                            width.max(80.0)
+                        };
+                        let height = if compact {
+                            cell_width
+                        } else if gallery {
+                            cell_width + 54.0
+                        } else {
+                            stream_row_height(ui.available_height(), self.stream_rows, gap)
+                        };
+                        (layout, cell_width, height)
+                    };
+                    let rows = visible.len().div_ceil(columns);
+                    let (_, _, full_height) = dimensions(full_width);
+                    let content_height =
+                        rows as f32 * full_height + rows.saturating_sub(1) as f32 * gap;
+                    let bar_shown = visibility
+                        != egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                        && content_height > ui.available_height();
+                    let inner_width = (full_width - if bar_shown { 22.0 } else { 0.0 }).max(1.0);
+                    let (compact_layout, cell_width, height) = dimensions(inner_width);
                     let mut area = egui::ScrollArea::vertical()
                         .id_salt("shelf-scroll")
-                        .scroll_bar_visibility(
-                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
-                        );
+                        .scroll_bar_visibility(visibility);
                     if self.scroll
                         && let Some(index) =
                             visible.iter().position(|e| e["id"] == self.state["cursor"])
@@ -401,7 +469,8 @@ impl Shelf {
                         ));
                     }
                     self.scroll = false;
-                    area.show_rows(ui, height, visible.len().div_ceil(columns), |ui, range| {
+                    area.show_rows(ui, height, rows, |ui, range| {
+                        ui.set_max_width(inner_width);
                         for row in range {
                             ui.horizontal(|ui| {
                                 #[cfg(test)]

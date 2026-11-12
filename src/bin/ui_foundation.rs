@@ -4,6 +4,15 @@ pub(super) use avilon_egui::settings_layout::{SettingsRow, tokens};
 use eframe::egui::{self, Color32};
 pub(super) struct SettingsSection;
 impl SettingsSection {
+    /// A named group keeps related preferences in one raised panel.
+    pub fn group(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui::Ui)) {
+        ui.add_space(tokens::SM);
+        ui.label(egui::RichText::new(title).strong());
+        ui.add_space(tokens::XS);
+        Self::show(ui, content);
+        ui.add_space(tokens::SM);
+    }
+
     pub fn show(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
         let style = avilon_egui::settings_layout::SectionStyle {
             fill: crate::theme_ui::color(

@@ -282,15 +282,28 @@ impl State {
             );
         }
         let site = visual.map_or("Ссылка", |v| v.site.as_str());
-        let mut job = egui::text::LayoutJob::simple_singleline(
-            site.to_owned(),
-            egui::FontId::proportional(11.0),
-            Color32::from_gray(230),
-        );
-        job.wrap.max_width = (rect.width() - 8.0).max(1.0);
-        job.wrap.max_rows = 1;
-        job.wrap.overflow_character = Some('…');
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let available = (rect.width() - 8.0).max(1.0);
+        let galley = ui.fonts_mut(|fonts| {
+            for size in [12.0, 11.0, 10.0, 9.0] {
+                let galley = fonts.layout_no_wrap(
+                    site.to_owned(),
+                    egui::FontId::proportional(size),
+                    Color32::from_gray(230),
+                );
+                if galley.size().x <= available {
+                    return galley;
+                }
+            }
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                site.to_owned(),
+                egui::FontId::proportional(9.0),
+                Color32::from_gray(230),
+            );
+            job.wrap.max_width = available;
+            job.wrap.max_rows = 1;
+            job.wrap.overflow_character = Some('…');
+            fonts.layout_job(job)
+        });
         painter.galley(
             egui::pos2(
                 rect.center().x - galley.size().x / 2.0,

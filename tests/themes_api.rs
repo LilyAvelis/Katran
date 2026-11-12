@@ -4,6 +4,31 @@ use katran::{
 };
 use serde_json::Value;
 #[test]
+fn scrollbar_preferences_default_and_persist_independently() {
+    let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert!(!legacy.scrollbar_glass);
+    assert!(legacy.scrollbar_always_visible);
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    let theme = ThemePreferences {
+        scrollbar_glass: true,
+        scrollbar_always_visible: false,
+        ..Default::default()
+    };
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    drop(api);
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"],
+        serde_json::to_value(theme).unwrap()
+    );
+}
+#[test]
 fn experimental_glass_tabs_are_opt_in_and_persist() {
     let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
     assert!(!legacy.experimental_glass_tabs);

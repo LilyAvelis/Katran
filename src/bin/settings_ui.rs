@@ -93,6 +93,27 @@ fn apply_global_hotkey(
         false
     }
 }
+/// Search routes to the owning page, including settings inside named groups.
+fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
+    let terms = match index {
+        0 => {
+            "запуск управление вызов katran захват поиск сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш квота история folder"
+        }
+        1 => "команда клавиатура сочетание shortcut hotkey",
+        2 => "доступные вкладки включить выключить сбор данных",
+        3 => "версия установка обновить",
+        4 => {
+            "тема цвета акцент выделение интенсивность окно компактное стекло оптика gpu преломление размытие фон лилии изображение видео компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
+        }
+        5 => "метки теги tag",
+        _ => "",
+    };
+    let query = query.trim().to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| label.to_lowercase().contains(word) || terms.contains(word))
+}
+
 fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
     let mut changed = false;
     SettingsRow::show(
@@ -652,7 +673,7 @@ impl State {
      ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы","Теги"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы","Теги"].iter().enumerate(){if section_matches_query(index,label,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text("Ctrl+, — закрыть настройки");});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
@@ -661,7 +682,7 @@ impl State {
       if self.section==0 {
        ui.heading("Основные");ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
-        SettingsSection::show(ui,|ui|{
+        SettingsSection::group(ui,"Запуск и управление",|ui|{
          let binding=if draft.overlay_hotkey.is_empty(){"Не назначена"}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,"Вызов Katran поверх окна",binding,|ui|{
           if ui.button("Изменить").clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
@@ -670,6 +691,18 @@ impl State {
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
+         SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
+         SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
+         SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
+        });
+        SettingsSection::group(ui,"Ссылки",|ui|{
+         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran загружает favicon с публичных HTTPS-сайтов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
+         SettingsRow::show(ui,"Обновление значков","После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.",|ui|{
+          let online=call(api,Command::GetSettings)["result"]["link_favicons_online"]==true;
+          if ui.add_enabled(online,egui::Button::new("Обновить значки сохранённых ссылок")).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+         });
+        });
+        SettingsSection::group(ui,"Представление карточек",|ui|{
          let font_list=self.emoji_fonts.get_or_insert_with(||call(api,Command::EmojiFonts)).clone();
          let entries=font_list["result"]["fonts"].as_array();
          let selected_font=entries.and_then(|items|items.iter().find(|item|item["id"].as_str()==Some(draft.emoji_font.as_str())));
@@ -681,19 +714,13 @@ impl State {
           });
           if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
          });
-         SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
-         SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
-         SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
-         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran загружает favicon с публичных HTTPS-сайтов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
-         SettingsRow::show(ui,"Обновление значков","После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.",|ui|{
-          let online=call(api,Command::GetSettings)["result"]["link_favicons_online"]==true;
-          if ui.add_enabled(online,egui::Button::new("Обновить значки сохранённых ссылок")).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
-         });
          SettingsRow::show(ui,"Плитки Pods","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.pods_columns,1..=12));});
          SettingsRow::show(ui,"Плитки Links","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.links_columns,1..=12));});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
          SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});
+        });
+        SettingsSection::group(ui,"Папки и хранение",|ui|{
          SettingsRow::show(ui,"Папка ShareX","Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.",|ui|{
           if ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")).changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
          });
@@ -705,6 +732,7 @@ impl State {
         });
        }
        ui.add_space(16.0);
+       SettingsSection::group(ui,"История Folder",|ui|{
        if ui.button("Очистить историю Folder").clicked() {
         let r=call(api,Command::ClearFolderHistory{confirmed:false});
         if r["result"]["confirmation_required"]==true {self.confirm_history=true;} else if r["ok"]==false {self.error=r["error"]["message"].as_str().unwrap_or("Ошибка").into();}
@@ -717,6 +745,7 @@ impl State {
          if ui.button("Отмена").clicked(){self.confirm_history=false;}
         });
        }
+       });
        ui.add_space(16.0);
        if ui.button("Сохранить настройки").clicked()&&let Some(mut settings)=self.draft.clone(){
         let current=call(api,Command::GetSettings);
@@ -732,7 +761,7 @@ impl State {
        ui.label("Выключенная вкладка скрывается и останавливает сбор связанных данных. Сохранённые данные остаются на месте.");ui.add_space(16.0);
        let result=call(api,Command::Tabs);
        if let Some(tabs)=result["result"]["tabs"].as_array() {
-        SettingsSection::show(ui,|ui|{
+        SettingsSection::group(ui,"Доступные вкладки",|ui|{
          for entry in tabs {
           let label=entry["label"].as_str().unwrap_or("");
           let enabled=entry["enabled"]==true;
@@ -760,7 +789,7 @@ impl State {
        let response=call(api,Command::Themes);
        if response["ok"]==true {
         if let Ok(mut theme)=serde_json::from_value::<katran::theme::ThemePreferences>(response["result"]["current"].clone()) {
-         SettingsSection::show(ui,|ui|{
+         SettingsSection::group(ui,"Тема и цвета",|ui|{
           SettingsRow::show(ui,"Стандартная","Привычный внешний вид Katran.",|ui|{
            if ui.selectable_value(&mut theme.preset,katran::theme::Preset::Standard,"Выбрать").changed(){theme_intent=Some(theme.clone());}
           });
@@ -774,6 +803,10 @@ impl State {
             if ui.color_edit_button_srgb(&mut accent).changed(){theme.accent=Some(accent);theme_intent=Some(theme.clone());}
             if ui.button("Сбросить цвет").clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
            });
+          }
+         });
+         if theme.preset==katran::theme::Preset::BlueExperimental {
+          SettingsSection::group(ui,"Окно и эффекты",|ui|{
            SettingsRow::show(ui,"Компактное окно","Убрать название и крестик. Перемещение — за узкую полосу над поиском.",|ui|{
             if ui.checkbox(&mut theme.compact_header,"Без шапки").changed(){theme_intent=Some(theme.clone());}
            });
@@ -784,6 +817,8 @@ impl State {
             if ui.checkbox(&mut theme.experimental_glass_tabs,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
+          });
+          SettingsSection::group(ui,"Фон",|ui|{
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
             if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.active_video().is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
             for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}}
@@ -799,6 +834,8 @@ impl State {
                 match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
            });
+          });
+          SettingsSection::group(ui,"Видеофон",|ui|{
            let mut video_enabled = theme.video_is_enabled();
            SettingsRow::show(ui,"Видеофон","Управляемая копия; звук не воспроизводится.",|ui|{
             if ui.checkbox(&mut video_enabled,"Включить").changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
@@ -834,10 +871,20 @@ impl State {
             });
            });
            }
+          });
+          SettingsSection::group(ui,"Декор",|ui|{
            SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
             if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
            });
-          }
+          });
+         }
+         SettingsSection::group(ui,"Прокрутка",|ui|{
+          SettingsRow::show(ui,"Стеклянная полоса прокрутки","Прозрачное оформление полосы прокрутки полки.",|ui|{
+           if ui.checkbox(&mut theme.scrollbar_glass,"Включить").changed(){theme_intent=Some(theme.clone());}
+          });
+          SettingsRow::show(ui,"Всегда показывать полосу прокрутки","Полоса остаётся видимой, когда содержимое можно прокручивать.",|ui|{
+           if ui.checkbox(&mut theme.scrollbar_always_visible,"Показывать").changed(){theme_intent=Some(theme.clone());}
+          });
          });
         } else {ui.label("Не удалось прочитать текущую тему.");}
        } else {ui.label(response["error"]["message"].as_str().unwrap_or("Не удалось загрузить темы"));}
