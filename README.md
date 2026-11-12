@@ -12,7 +12,7 @@ Download the **portable ZIP** or **per-user setup EXE** from
 [GitHub Releases](https://github.com/LilyAvelis/Katran/releases).
 Portable: extract the entire archive and run `Katran.exe`; data stays beside it.
 Setup: installs without administrator rights and keeps data in
-`%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
+`%LOCALAPPDATA%/Katran/data`. Settings → Updates checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
 ## Current release · 3.4.1
@@ -59,21 +59,22 @@ documented with each feature.
 
 Accepted 2.0 contract: Images is the clipboard/manual image shelf; Screenshots
 and Downloads are live views of originals. Downloads uses the Windows Known
-Folder by default; Settings can disable it or override the root. In 3.0, All is replaced by Folder and managed originals in Downloads,
+Folder by default; Settings can disable it or override the root. Folder replaces the former All tab. Managed originals in Downloads,
 Screenshots, and Folder use Windows recycling. Single deletion is immediate;
 groups confirm with Enter. These operations report per-item failures and protect pinned objects.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 
-Tabs are positional: 1..9 select enabled non-All tabs in their saved order. Drag tabs
-with the mouse to reorder; All stays pinned. Tab toggles All and the remembered
+Tabs are positional: 1..9 select visible numbered tabs in their saved order. Drag tabs
+with the mouse to reorder; Folder stays separate. Tab toggles Folder and the remembered
 tab, including when a button has focus. Text fields/dialogs retain local input.
 Tab positions are registered in the shared shortcut catalogue; direct source
 commands no longer have Ctrl J/H/D defaults. Existing user overrides are retained.
 Settings → Tabs eye buttons hide a tab and stop its associated collection;
 the remaining number positions close the gap. Existing data is retained.
 
-Enter uses the default app for the current file. Ctrl Enter reveals the exact
+Alt Enter or double-click opens the current file in its default app. Enter pastes
+the selection into the previously active application. Ctrl Enter reveals the exact
 file in Explorer; Ctrl Shift Enter opens Katran's bottom
 [Open With app picker](docs/open-app-picker.md). Space previews supported
 images, Text fragments, Links, Tables, and `.md` / `.markdown` files in Katran; other files use
@@ -91,7 +92,7 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 
 ## Controls
 
-In the local pre-3.0 candidate, **Shift+Tab moves** the selection between a
+**Shift+Tab moves** the selection between a
 category and Folder. **Ctrl+Tab copies**, preserving the current view and
 selection so repeated presses make additional copies. Folder image imports are
 independent managed objects. See [the transfer contract](docs/work-folder.md).
@@ -102,8 +103,11 @@ Reusable [UI patterns](docs/design-patterns.md) and the
 | --- | --- |
 | Ctrl K | Actions: search, arrows, Enter, Escape |
 | Ctrl , | Open/close Settings |
+| Ctrl T | Focus/unfocus shelf search |
+| Ctrl . / . | Pin selection / show only pinned items |
+| Ctrl Alt Up/Down | Move selected pinned item earlier/later in custom pinned order (visible with pinned sort) |
 | Shift Tab / Ctrl Tab | Move / copy between the shelf and Folder |
-| Comma | Sort menu: arrows + Enter, or t / e / m / r / n / s / a / o; Shift reverses except shuffle |
+| Comma | Sort menu: arrows + Enter or a sort key; Y shows pinned in custom order first |
 | Ctrl Shift , in Actions | Record shortcut for selected command |
 | 1..9 | Select numbered tab in compact visible order |
 | Arrow keys | Navigate gallery; Up/Down in stream |
@@ -135,7 +139,7 @@ unchanged. See [zoom and font contracts](docs/preview-zoom-and-fonts.md).
 Use Actions to enable/pause capture, select gallery/stream, refresh or save copies
 to a folder. When Text is enabled, Actions also offers **Копировать тексты одним
 текстом**, joining selected fragments in selection order. A green/red lamp next
-to Actions shows the current capture state. Capture is disabled at startup
+to Actions shows the current capture state. Capture is enabled at startup
 unless explicitly changed in Settings.
 
 Copied Explorer files are references; browser **Copy image** creates a cached PNG.
@@ -143,8 +147,8 @@ Arbitrary regular files remain transferable. Gallery and stream use Windows
 Shell thumbnails when available, then associated file icons or a generic icon.
 See [file visual API and limits](docs/file-visuals.md).
 Clipboard Text is optional and off by default. When enabled with capture, plain
-Unicode clipboard text is saved as Text fragments; URL-looking strings remain
-unclassified text. [Text fragment behavior, limits and API](docs/text-fragments.md).
+Unicode clipboard text is saved as Text fragments; HTTP(S) URLs are classified
+as Links when that tab is enabled. [Text fragment behavior, limits and API](docs/text-fragments.md).
 Ctrl+C joins all-Text selections with `\n\n`; selection order follows Ctrl
 toggle order or the current visible order for Shift ranges. Drag always exports
 files. Markdown previews offer rendered and source views with conservative
@@ -191,7 +195,7 @@ Responses echo `request_id`, include `api_version`, `ok`, and `result` or
 Import never overwrites existing files, selects numbered names on conflict and
 does not remove sources. Delete confirmation must resubmit the exact returned
 IDs with `confirmed:true`. General settings persist in SQLite; shortcut overrides
-in JSON. UI interaction state is process-local until the planned IPC layer.
+in JSON. UI selection and preview state are process-local; per-tab sort and display preferences persist.
 
 See [drag-out and Space preview](docs/drag-and-preview.md), [1.0 gallery layout](docs/version-1.0.md),
 [0.5 changes and diagnostics](docs/version-0.5.md) and the
@@ -208,8 +212,8 @@ Automated checks use synthetic files and headless egui. The owner checks native
 Windows appearance and paste compatibility. Tests never replace her clipboard
 or manipulate the desktop.
 
-Current boundaries: no global hotkey, autostart, built-in video decoding,
-Afio adapter or protected IPC. Preview is fitted by default, with bounded image
+Current boundaries: no autostart, Afio adapter or protected IPC. A configurable
+global hotkey and optional video background are available. Preview is fitted by default, with bounded image
 zoom and pan controls described above.
 Blobs default to a 2 GiB quota with reject-new policy. Clipboard snapshots have a
 separate budget of the same size, including the previous and prepared batch; old
@@ -221,10 +225,10 @@ retention is still future work. Use one window/service writer per data directory
 Afio UI/components and clipboard conventions are reused under the retained
 [MIT notice](AFIO-LICENSE), without a runtime dependency on Afio.
 
-Local 2.5 navigation: Ctrl+Shift+Left/Right moves between visible categories in saved order and exits pinned, including at the ends. It never enters Folder; use Tab for Folder. Tab is routed before widget focus traversal when returning from another application; search editing and dialogs retain their own keyboard focus.
+Ctrl+Shift+Left/Right moves between visible categories in saved order and exits pinned, including at the ends. It never enters Folder; use Tab for Folder. Tab is routed before widget focus traversal when returning from another application; search editing and dialogs retain their own keyboard focus.
 
-Optional Pods is the seventh category: enable it in Settings → Вкладки. Emoji and symbol-only captures are deduplicated, support pinned and render in color. [Classification, limits and graphics attribution](docs/pods.md). Settings → Основные can assign an independent global summon chord; Alt+Enter copies the selection and requests paste into the previous application. [Summon, residency, quit and Windows limits](docs/overlay.md). These are local pre-3.0 changes, not a published release.
+Optional Pods captures emoji and symbol-only content, deduplicates it and renders it in color. [Classification, limits and graphics attribution](docs/pods.md). Settings → General can assign a global summon chord. Enter pastes the selection into the previous application; Alt+Enter opens the selected item. [Summon, residency, quit and Windows limits](docs/overlay.md).
 
-Resident mode: Katran has a system-tray icon with Show / Hide / Quit. The assigned global chord shows Katran from another app and hides it when Katran is active. Closing the resident window hides it; Quit exits. Native tray behavior awaits owner acceptance; no startup registration is installed.
+Resident mode: Katran has a system-tray icon with Show / Hide / Quit. The assigned global chord shows Katran from another app and hides it when Katran is active. Closing the resident window hides it; Quit exits. No startup registration is installed.
 
-Experimental appearance: Settings → Темы selects Standard (default) or Blue Experimental, with accent/decor controls. [Theme foundation and designer handoff](docs/themes.md). This local prototype is separate from the accepted behavior and has no published release. [Azuros review of81abc6f](docs/reviews/2026-11-11-azuros.md) records five open P2 findings.
+Appearance: new profiles start with Blue Experimental and Lily background 1; existing profiles keep their saved theme. Settings → Themes includes Standard, glass, video and animation options. [Theme foundation](docs/themes.md). The [Azuros review of 81abc6f](docs/reviews/2026-11-11-azuros.md) is a historical snapshot; its five findings were addressed in the later follow-up.

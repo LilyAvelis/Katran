@@ -1,5 +1,21 @@
 # Katran development rules
 
+## Current baseline · 3.4.1 · 2026-11-12
+
+The current source and public-release line is 3.4.1. Read `README.md`,
+`docs/development.md`, and the latest `docs/releases/` entry for current
+behavior. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
+is valuable product context; it currently labels itself 3.2.3, so reconcile
+individual claims with the code before using it as a 3.4 technical contract.
+Earlier dated sections below record decisions at the time, not the current
+release or authorization to push new work.
+
+For each release or change to an architectural contract, update this current
+baseline, the affected README/development-map passage, and the relevant release
+note in the same local checkpoint. Keep historical decisions dated rather than
+silently rewriting their original context. New work uses small local commits;
+GitHub publication requires the owner's instruction for that work.
+
 API First is mandatory, as explicitly required by the project owner.
 
 Clipboard events were accepted by the owner after browser/filesystem testing
@@ -70,7 +86,7 @@ item failure. Existing `DeleteEvents` remains shelf-only. Images and other
 external references retain the original non-deletion contract. Never delete
 personal files as part of tests or reconciliation.
 
-## Katran 2.5 local implementation · 2026-11-11
+## Historical: Katran 2.5 local implementation · 2026-11-11
 
 Work on `codex/katran-2.5` uses local Git checkpoints; no GitHub push is authorized.
 The owner subsequently authorized local integration: main was fast-forwarded to

@@ -1,5 +1,18 @@
 # Developer and agent entry point
 
+Current baseline: **3.4.1** (2026-11-12). For each new release, update this
+baseline and the current section of `AGENTS.md` together with the README and
+release note. Older numbered sections and reviews are dated evidence, not
+current product instructions. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
+describes the user experience; its page currently identifies itself as 3.2.3,
+so check exact shortcuts and defaults against the current command catalogue.
+
+Known scaling boundary: Folder browsing currently enumerates and sorts the
+selected directory synchronously for each page. Do not replace this with an
+mtime-only cache: a file can change without changing the directory mtime.
+Moving it off the UI thread requires revision-safe prepared snapshots and
+stale-result handling across folder, query, sort and tab changes.
+
 Read `AGENTS.md`, current `README.md`, then this map and the relevant API test.
 For any new view, popup or dialog, follow [reusable UI design patterns](design-patterns.md): shared tokens/ActionRow, one input owner, and asynchronous native/worker adapters.
 For the local reusable-component workspace, see [Avilon framework](garden-framework.md).

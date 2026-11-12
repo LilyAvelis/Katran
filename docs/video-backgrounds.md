@@ -47,8 +47,10 @@ shader. Short loops may use the bounded decoded cache described below; larger cl
 Eliminating this transfer requires a separate D3D11/OpenGL interop implementation.
 No whole-application GPU/CPU load percentage is claimed without measurement.
 
-Hiding the main window in the tray or minimizing stops and reaps this owned
-decoder process. The last displayed frame remains cached; showing starts a new
+By default, hiding the main window in the tray or minimizing stops and reaps this owned
+decoder process. The optional "play while hidden" setting keeps decoding while
+the window is hidden and continues using resources. The last displayed frame
+remains cached when paused; showing starts a new
 loop near its previous playback position. Selecting another source drops the former texture and
 worker. There is no poster extraction yet; before the first frame or on initial
 hardware failure, ordinary theme fallback remains available. A failed source
@@ -87,8 +89,9 @@ with the same output pacing; they are never silently truncated to fit the cache.
 The owner's clip now renders at1072×720. Including aligned rows and a small
 frame-count margin, estimated frame-cache payload is about417MiB. This is a
 RAM/decoding tradeoff; the limit describes cached frame payload, not total
-process memory. Cache and decoder are released on hide/minimize; resuming
-starts a fresh decoding pass. RGBA conversion and OpenGL upload still happen
+process memory. By default, cache and decoder are released on hide/minimize;
+resuming starts a fresh decoding pass. The "play while hidden" setting retains
+playback and its cache while hidden. RGBA conversion and OpenGL upload still happen
 through CPU memory. Hardware decode is avoided on subsequent cached loops,
 not on initial playback. Source files and cached frame content remain unchanged; optional presentation-time
 seam smoothing is described below.
