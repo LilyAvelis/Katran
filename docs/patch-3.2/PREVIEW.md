@@ -23,10 +23,11 @@ is implied by this document.
    selected pinned cards. Press `/` again to clear only the tag filter; the
    pinned-only view from `.` stays active. Unpin the card: its assignment
    disappears, while the slot definition remains. Re-pin does not restore it.
-5. In `Ctrl+,` → Теги, edit a slot name, color and Color/Dots material. Check
-   Apply/Cancel and the Standard/Blue preview. Inspect real cards in both
-   themes, including a selected card and cursor. The settings preview does not
-   reproduce native GPU glass.
+5. In `Ctrl+,` → Теги, edit a slot name and color; compare Color, denser Dots,
+   Lines and Grain. Adjust color opacity independently of texture strength,
+   then check Apply/Cancel and the Standard/Blue preview. Inspect real cards in
+   both themes, including a bright fully opaque tag, a selected card and cursor.
+   The settings preview does not reproduce native GPU glass.
 6. Copy identical Text and Links twice from an external app: each value should
    retain one card. Copy a Text or Link card out of Katran: that publication
    should not add a card. Externally copied equal Tables retain their existing
@@ -58,6 +59,10 @@ native UI and Clipboard checks on her own desktop.
   gets at most one slot. Assignment requires pin; unpin deletes assignment in
   the pin transaction. Filtering intersects the current category and only
   exposes pinned assignments. `GetTagSlots` batches card lookup.
+- Schema v11 adds independent 0–100 tag-color opacity to each slot. Existing
+  definitions migrate with 55% opacity while retaining color, material,
+  strength and assignments. Dots, Lines and Grain are deterministic procedural
+  marks in the card decoration region; no external image is stored.
 - Text/Links exact-value dedup reuses an existing ID without merging historical
   duplicates. Private owner tokens distinguish Katran's own Text/Links/files
   Clipboard publications from later external copies; sequence receipts remain

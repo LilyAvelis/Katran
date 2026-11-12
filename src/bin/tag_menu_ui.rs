@@ -378,6 +378,7 @@ mod tests {
             material: katran::tag_slots::Material::Solid,
             scale: 50,
             intensity: 50,
+            opacity: 55,
             angle: 0,
             seed: 1,
         }

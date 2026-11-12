@@ -65,8 +65,15 @@ pub struct Slot {
     /// Scale 1..=100, intensity 0..=100, angle 0..=359 degrees.
     pub scale: u8,
     pub intensity: u8,
+    /// Base tag color opacity, independently of procedural texture strength.
+    #[serde(default = "default_opacity")]
+    pub opacity: u8,
     pub angle: u16,
     pub seed: u32,
+}
+
+fn default_opacity() -> u8 {
+    55
 }
 
 fn valid_slot_number(number: u8) -> bool {
@@ -89,7 +96,11 @@ fn validate(slot: &Slot) -> Result<()> {
     if color.len() != 7 || color[0] != b'#' || !color[1..].iter().all(u8::is_ascii_hexdigit) {
         return Err(StoreError::Invalid("color must be #RRGGBB"));
     }
-    if !(1..=100).contains(&slot.scale) || slot.intensity > 100 || slot.angle > 359 {
+    if !(1..=100).contains(&slot.scale)
+        || slot.intensity > 100
+        || slot.opacity > 100
+        || slot.angle > 359
+    {
         return Err(StoreError::Invalid("material parameters out of range"));
     }
     Ok(())
@@ -98,12 +109,12 @@ fn validate(slot: &Slot) -> Result<()> {
 /// Changes settings only; existing object assignments are unaffected.
 pub(crate) fn save_slot(db: &Connection, slot: &Slot) -> Result<()> {
     validate(slot)?;
-    db.execute("INSERT INTO tag_slots(number,name,color,material,scale,intensity,angle,seed) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(number) DO UPDATE SET name=excluded.name,color=excluded.color,material=excluded.material,scale=excluded.scale,intensity=excluded.intensity,angle=excluded.angle,seed=excluded.seed", params![slot.number,slot.name,slot.color,slot.material.as_str(),slot.scale,slot.intensity,slot.angle,slot.seed])?;
+    db.execute("INSERT INTO tag_slots(number,name,color,material,scale,intensity,angle,seed,opacity) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(number) DO UPDATE SET name=excluded.name,color=excluded.color,material=excluded.material,scale=excluded.scale,intensity=excluded.intensity,angle=excluded.angle,seed=excluded.seed,opacity=excluded.opacity", params![slot.number,slot.name,slot.color,slot.material.as_str(),slot.scale,slot.intensity,slot.angle,slot.seed,slot.opacity])?;
     Ok(())
 }
 
 pub(crate) fn list_slots(db: &Connection) -> Result<Vec<Slot>> {
-    let mut statement = db.prepare("SELECT number,name,color,material,scale,intensity,angle,seed FROM tag_slots ORDER BY number")?;
+    let mut statement = db.prepare("SELECT number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_slots ORDER BY number")?;
     let slots = statement
         .query_map([], |r| {
             let material: String = r.get(3)?;
@@ -116,6 +127,7 @@ pub(crate) fn list_slots(db: &Connection) -> Result<Vec<Slot>> {
                 intensity: r.get(5)?,
                 angle: r.get(6)?,
                 seed: r.get(7)?,
+                opacity: r.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 10;
+pub(crate) const VERSION: i64 = 11;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -155,6 +155,8 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
       (7,'Тег 7','#808080','solid',50,0,0,7),(8,'Тег 8','#808080','solid',50,0,0,8),
       (9,'Тег 9','#808080','solid',50,0,0,9);
       PRAGMA user_version=10;")?;
+    tx.execute_batch("ALTER TABLE tag_slots ADD COLUMN opacity INTEGER NOT NULL DEFAULT 55 CHECK(opacity BETWEEN 0 AND 100);
+      PRAGMA user_version=11;")?;
     tx.commit()?;
     Ok(())
 }

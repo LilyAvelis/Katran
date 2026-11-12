@@ -6,6 +6,12 @@ use katran::{
     tag_slots::{Material, Slot},
 };
 
+fn default_texture_strength(slot: &mut Slot, previous: Material) {
+    if previous == Material::Solid && slot.material != Material::Solid && slot.intensity == 0 {
+        slot.intensity = 60;
+    }
+}
+
 #[derive(Default)]
 pub struct State {
     slots: Option<Vec<Slot>>,
@@ -88,6 +94,7 @@ impl State {
                     slot.color = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
                 }
             });
+            let previous_material = slot.material;
             egui::ComboBox::from_id_salt("tag-material")
                 .selected_text(match slot.material {
                     Material::Solid => "Цвет",
@@ -98,14 +105,17 @@ impl State {
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut slot.material, Material::Solid, "Цвет");
                     ui.selectable_value(&mut slot.material, Material::Dots, "Точки");
-                    // Preserve legacy or externally configured modes until they have a renderer.
+                    ui.selectable_value(&mut slot.material, Material::Lines, "Линии");
+                    ui.selectable_value(&mut slot.material, Material::Grain, "Зерно");
                 });
-            if matches!(slot.material, Material::Lines | Material::Grain) {
-                ui.weak("Этот материал пока отображается как обычный цвет. Выберите точки или цвет для предпросмотра.");
-            }
-            ui.add(egui::Slider::new(&mut slot.intensity, 0..=100).text("Интенсивность"));
-            if slot.material == Material::Dots {
+            default_texture_strength(slot, previous_material);
+            ui.add(egui::Slider::new(&mut slot.opacity, 0..=100).text("Непрозрачность цвета"));
+            if slot.material != Material::Solid {
+                ui.add(egui::Slider::new(&mut slot.intensity, 0..=100).text("Сила фактуры"));
                 ui.add(egui::Slider::new(&mut slot.scale, 1..=100).text("Масштаб"));
+                if slot.material == Material::Lines {
+                    ui.add(egui::Slider::new(&mut slot.angle, 0..=359).text("Угол"));
+                }
             }
             ui.label("Предпросмотр материала");
             ui.horizontal(|ui| {
@@ -131,7 +141,7 @@ impl State {
                         "Пример текста"
                     },
                     egui::FontId::proportional(14.0),
-                    ui.visuals().text_color(),
+                    super::tag_material_ui::title_color(slot),
                 );
                 if image {
                     ui.painter().rect_filled(
@@ -186,5 +196,41 @@ impl State {
             ui.colored_label(Color32::LIGHT_RED, &self.error);
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_procedural_choice_has_visible_draft_without_changing_existing_strength() {
+        let saved = Slot {
+            number: 1,
+            name: "Test".into(),
+            color: "#112233".into(),
+            opacity: 55,
+            material: Material::Solid,
+            scale: 50,
+            intensity: 0,
+            angle: 0,
+            seed: 0,
+        };
+        let mut draft = saved.clone();
+        draft.material = Material::Dots;
+        default_texture_strength(&mut draft, saved.material);
+        assert_eq!(draft.intensity, 60);
+        assert_eq!(saved.intensity, 0);
+        draft.intensity = 0;
+        draft.material = Material::Lines;
+        default_texture_strength(&mut draft, Material::Dots);
+        assert_eq!(draft.intensity, 0);
+        draft.material = Material::Solid;
+        default_texture_strength(&mut draft, Material::Lines);
+        assert_eq!(draft.intensity, 0);
+        draft.intensity = 35;
+        draft.material = Material::Grain;
+        default_texture_strength(&mut draft, Material::Solid);
+        assert_eq!(draft.intensity, 35);
     }
 }

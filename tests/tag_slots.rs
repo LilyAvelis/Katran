@@ -12,7 +12,7 @@ fn fixture(path: &std::path::Path) -> Connection {
     db.execute_batch("PRAGMA foreign_keys=ON;
         CREATE TABLE events(id INTEGER PRIMARY KEY);
         CREATE TABLE katran_properties(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,pinned INTEGER NOT NULL CHECK(pinned IN(0,1)));
-        CREATE TABLE tag_slots(number INTEGER PRIMARY KEY CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295));
+        CREATE TABLE tag_slots(number INTEGER PRIMARY KEY CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295), opacity INTEGER NOT NULL DEFAULT 55 CHECK(opacity BETWEEN 0 AND 100));
         CREATE TABLE tag_slot_assignments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,slot_number INTEGER NOT NULL REFERENCES tag_slots(number));
         CREATE INDEX tag_slot_assignments_slot ON tag_slot_assignments(slot_number,event_id DESC);
         INSERT INTO events VALUES(1),(2),(3);
@@ -27,6 +27,7 @@ fn slot(number: u8) -> Slot {
         material: Material::Dots,
         scale: 22,
         intensity: 45,
+        opacity: 72,
         angle: 30,
         seed: 12345,
     }

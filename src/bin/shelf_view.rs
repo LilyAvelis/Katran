@@ -471,7 +471,17 @@ impl Shelf {
                                             zones.name,
                                             &title,
                                             14.0,
-                                            Color32::from_gray(235),
+                                            self.tag_material_cache
+                                                .assignments
+                                                .get(&id)
+                                                .and_then(|n| {
+                                                    self.tag_material_cache
+                                                        .slots
+                                                        .iter()
+                                                        .find(|slot| slot.number == *n)
+                                                })
+                                                .map(super::tag_material_ui::title_color)
+                                                .unwrap_or(Color32::from_gray(235)),
                                         );
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())

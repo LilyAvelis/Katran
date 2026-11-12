@@ -27,6 +27,7 @@ fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
         material: Material::Dots,
         scale: 22,
         intensity: 18,
+        opacity: 72,
         angle: 0,
         seed: 7,
     };
@@ -71,7 +72,36 @@ fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
         call(&mut api, Command::ListTagSlots)["slots"][0]["name"],
         "Работа"
     );
+    assert_eq!(
+        call(&mut api, Command::ListTagSlots)["slots"][0]["opacity"],
+        72
+    );
     assert!(call(&mut api, Command::GetTagSlot { id })["slot"].is_null());
+}
+
+#[test]
+fn existing_tag_slots_gain_opacity_without_losing_materials() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let mut saved: Slot =
+        serde_json::from_value(call(&mut api, Command::ListTagSlots)["slots"][0].clone()).unwrap();
+    saved.material = Material::Dots;
+    saved.intensity = 90;
+    saved.opacity = 80;
+    call(&mut api, Command::SaveTagSlot { slot: saved });
+    drop(api);
+
+    let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
+    db.execute_batch("ALTER TABLE tag_slots DROP COLUMN opacity; PRAGMA user_version=10;")
+        .unwrap();
+    drop(db);
+
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let result = call(&mut api, Command::ListTagSlots);
+    let restored = &result["slots"][0];
+    assert_eq!(restored["material"], "dots");
+    assert_eq!(restored["intensity"], 90);
+    assert_eq!(restored["opacity"], 55);
 }
 
 #[test]
