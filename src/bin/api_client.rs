@@ -1,6 +1,88 @@
 //! Single-writer dispatcher jobs and UI result handling.
 use super::i18n::tr;
 use super::*;
+
+#[cfg(test)]
+mod folder_page_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn drain(app: &mut Shelf) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.folder_page_job.is_some() {
+            app.finish_folder_page(&egui::Context::default());
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn folder_refresh_discards_old_query_and_loads_more_asynchronously() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        for n in 0..1002 {
+            std::fs::write(folder.path().join(format!("item-{n:04}")), b"x").unwrap();
+        }
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.refresh();
+        assert!(app.folder_page_job.is_some());
+        app.query = "item-100".into();
+        app.refresh();
+        drain(&mut app);
+        assert_eq!(app.events.len(), 2);
+        assert!(
+            app.events
+                .iter()
+                .all(|event| event["name"].as_str().unwrap().contains("item-100"))
+        );
+        app.query.clear();
+        app.refresh();
+        drain(&mut app);
+        assert_eq!(app.events.len(), 1000);
+        app.load_more();
+        assert!(app.folder_page_job.is_some());
+        drain(&mut app);
+        assert_eq!(app.events.len(), 1002);
+    }
+
+    #[test]
+    fn select_all_runs_as_a_job_and_updates_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("a"), b"x").unwrap();
+        std::fs::write(folder.path().join("b"), b"x").unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        app.refresh();
+        drain(&mut app);
+        app.run("select_all".into(), &egui::Context::default());
+        assert!(app.job.is_some());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.job.is_some() {
+            app.finish_job();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(app.state["selected"].as_array().unwrap().len(), 2);
+
+        app.query = "a".into();
+        app.refresh();
+        app.run("select_all".into(), &egui::Context::default());
+        assert!(app.pending_folder_select_all);
+        drain(&mut app);
+        while app.job.is_some() {
+            app.finish_job();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(app.state["selected"].as_array().unwrap().len(), 1);
+    }
+}
 impl Shelf {
     pub(super) fn direct_transfer_input(&mut self, ctx: &egui::Context) {
         if self.api.is_none()
@@ -281,7 +363,105 @@ impl Shelf {
             self.refresh();
         }
     }
+    fn folder_page_context(&self) -> Value {
+        serde_json::json!({"tab":self.state["tab"], "path":self.state["folder_path"], "sort":self.state["sort"], "query":self.query})
+    }
+    fn cancel_folder_page(&mut self) {
+        if let Some(job) = self.folder_page_job.take() {
+            if let Some(api) = self.api.as_mut() {
+                api.execute(Request {
+                    api_version: 1,
+                    request_id: "ui-folder-cancel".into(),
+                    command: Command::CancelJob { job_id: job.id },
+                });
+            }
+        }
+    }
+    fn start_folder_page(&mut self, cursor: Option<String>, target: usize) {
+        self.workspace.last_refresh = Some(Instant::now());
+        let append = cursor.is_some();
+        let context = self.folder_page_context();
+        let response = self.call(Command::BeginJob {
+            command: Box::new(Command::BrowseShelfSorted {
+                query: self.query.clone(),
+                limit: 1000,
+                cursor,
+            }),
+        });
+        if let Ok(id) = serde_json::from_value(response["job_id"].clone()) {
+            self.folder_page_job = Some(FolderPageJob {
+                id,
+                context,
+                append,
+                target,
+            });
+        }
+    }
+    pub(super) fn finish_folder_page(&mut self, ctx: &egui::Context) {
+        let Some(job) = self.folder_page_job.take() else {
+            return;
+        };
+        if self.folder_page_context() != job.context {
+            self.pending_folder_select_all = false;
+            self.folder_page_job = Some(job);
+            self.cancel_folder_page();
+            return;
+        }
+        let status = self.call(Command::PollJob { job_id: job.id });
+        if matches!(
+            status["state"].as_str(),
+            Some("succeeded" | "failed" | "cancelled")
+        ) {
+            self.workspace.last_refresh = Some(Instant::now());
+        }
+        match status["state"].as_str() {
+            Some("queued" | "running" | "ready") => self.folder_page_job = Some(job),
+            Some("succeeded") => {
+                let result = &status["result"];
+                if let Some(events) = result["events"].as_array() {
+                    if !job.append {
+                        self.events.clear();
+                    }
+                    self.events.extend(events.iter().cloned());
+                    self.next_cursor = result["next_cursor"].as_str().map(str::to_owned);
+                    self.loaded_query = self.query.clone();
+                    let ids = self
+                        .events
+                        .iter()
+                        .filter_map(|event| event["id"].as_i64())
+                        .collect();
+                    self.state = self.call(Command::SetVisible { ids });
+                    if self.events.len() < job.target
+                        && let Some(cursor) = self.next_cursor.clone()
+                    {
+                        self.start_folder_page(Some(cursor), job.target);
+                    } else if self.pending_folder_select_all {
+                        self.pending_folder_select_all = false;
+                        self.start_job(Command::SelectAll, false, ctx.clone());
+                    }
+                }
+            }
+            Some("failed") => {
+                self.pending_folder_select_all = false;
+                if status["error"]["code"] == "stale_cursor" {
+                    self.next_cursor = None;
+                    self.message = tr(
+                        "Папка изменилась; обновляем список",
+                        "Folder changed; refreshing the list",
+                    )
+                    .into();
+                } else if status["error"]["code"] != "stale_folder" {
+                    self.message = status["error"]["message"]
+                        .as_str()
+                        .unwrap_or("Folder browse failed")
+                        .into();
+                }
+            }
+            _ => self.pending_folder_select_all = false,
+        }
+    }
     pub(super) fn refresh(&mut self) {
+        self.pending_folder_select_all = false;
         self.preloaded_has_more = false;
         self.tab_preload.waiting = None;
         let target = if self.query == self.loaded_query {
@@ -289,6 +469,20 @@ impl Shelf {
         } else {
             1000
         };
+        self.cancel_folder_page();
+        if self.state["tab"] == "folder" {
+            if self.state["folder_path"].is_null() {
+                self.events.clear();
+                self.next_cursor = None;
+                return;
+            }
+            if self.query != self.loaded_query {
+                self.events.clear();
+                self.next_cursor = None;
+            }
+            self.start_folder_page(None, target);
+            return;
+        }
         let r = self.call(Command::BrowseShelfSorted {
             query: self.query.clone(),
             limit: 1000,
@@ -312,9 +506,16 @@ impl Shelf {
         self.capture = self.call(Command::Status)["capture_enabled"] == true;
     }
     pub(super) fn load_more(&mut self) {
+        if self.state["tab"] == "folder" && self.folder_page_job.is_some() {
+            return;
+        }
         let Some(cursor) = self.next_cursor.clone() else {
             return;
         };
+        if self.state["tab"] == "folder" {
+            self.start_folder_page(Some(cursor), self.events.len().saturating_add(1000));
+            return;
+        }
         let r = self.call(Command::BrowseShelfSorted {
             query: self.query.clone(),
             limit: 1000,
@@ -454,6 +655,30 @@ impl Shelf {
         }
         if id == "paste_previous" {
             self.paste_previous(ctx);
+            return;
+        }
+        if id == "select_all"
+            && self.state["tab"] == "folder"
+            && !self.state["folder_path"].is_null()
+        {
+            self.actions = false;
+            if self.folder_page_job.is_some() {
+                if self
+                    .folder_page_job
+                    .as_ref()
+                    .is_some_and(|job| job.context != self.folder_page_context())
+                {
+                    self.refresh();
+                }
+                self.pending_folder_select_all = self.folder_page_job.is_some();
+                return;
+            }
+            if self.loaded_query != self.query {
+                self.refresh();
+                self.pending_folder_select_all = self.folder_page_job.is_some();
+                return;
+            }
+            self.start_job(Command::RunAction { id }, false, ctx.clone());
             return;
         }
         if matches!(id.as_str(), "transfer_selection" | "transfer_copy") {

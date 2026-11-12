@@ -240,6 +240,11 @@ mod tests {
             tab: katran::interaction::ShelfTab::Images,
         });
         assert!(app.show_preloaded_tab(&ctx));
+        while app.tab_preload.waiting.is_some() && Instant::now() < deadline {
+            app.poll_preloaded_tab(&ctx);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(app.tab_preload.waiting.is_none());
         assert_eq!(app.events.len(), 1);
     }
 

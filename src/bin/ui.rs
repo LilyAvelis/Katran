@@ -171,6 +171,12 @@ enum UiJob {
     #[cfg(test)]
     UnavailableTransport(mpsc::Receiver<(Service, Value, bool)>),
 }
+struct FolderPageJob {
+    id: katran::domain_jobs::JobId,
+    context: Value,
+    append: bool,
+    target: usize,
+}
 struct Shelf {
     #[cfg(feature = "clipboard-events")]
     clipboard_events: clipboard_events_ui::State,
@@ -204,6 +210,8 @@ struct Shelf {
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
+    folder_page_job: Option<FolderPageJob>,
+    pending_folder_select_all: bool,
     capture_job: Option<katran::domain_jobs::JobId>,
     preview_warmup: Option<katran::domain_jobs::JobId>,
     pending_preview: Option<(String, Value)>,
@@ -305,6 +313,7 @@ mod folder_launch_tests {
         );
         assert!(!app.actions);
         assert!(app.query.is_empty());
+        crate::tests::drain_folder(&mut app);
         assert!(
             app.events.iter().any(|e| e["name"] == "untouched.txt"),
             "{:?}",
@@ -1111,10 +1120,12 @@ impl Shelf {
             if self.state["folder_path"].is_null() {
                 self.events.clear();
                 self.next_cursor = None;
-            } else if self
-                .workspace
-                .last_refresh
-                .is_none_or(|last| last.elapsed() >= Duration::from_secs(1))
+            } else if self.folder_page_job.is_none()
+                && self.job.is_none()
+                && self
+                    .workspace
+                    .last_refresh
+                    .is_none_or(|last| last.elapsed() >= Duration::from_secs(1))
             {
                 self.workspace.last_refresh = Some(Instant::now());
                 self.refresh();
@@ -1480,11 +1491,16 @@ impl eframe::App for Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
+        self.finish_folder_page(ctx);
         self.preview_warmup_tick(ctx);
         if self.api.is_some() {
             self.open_apps_tick(ctx);
         }
-        if self.job.is_some() || self.capture_job.is_some() || self.preview_warmup.is_some() {
+        if self.job.is_some()
+            || self.folder_page_job.is_some()
+            || self.capture_job.is_some()
+            || self.preview_warmup.is_some()
+        {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
         if let Some(rx) = &self.activation_rx {
@@ -1710,6 +1726,8 @@ fn main() -> eframe::Result {
         shortcut_editor: None,
         api: Some(api),
         job: None,
+        folder_page_job: None,
+        pending_folder_select_all: false,
         capture_job: None,
         preview_warmup,
         pending_preview: None,
@@ -1829,6 +1847,14 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    pub(super) fn drain_folder(app: &mut Shelf) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.folder_page_job.is_some() {
+            app.finish_folder_page(&egui::Context::default());
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
     pub(super) fn test_shelf(root: &std::path::Path) -> Shelf {
         struct NoExternalPreview;
         impl katran::quicklook::Launcher for NoExternalPreview {
@@ -1938,6 +1964,8 @@ mod tests {
             shortcut_editor: None,
             api: Some(api),
             job: None,
+            folder_page_job: None,
+            pending_folder_select_all: false,
             capture_job: None,
             preview_warmup: None,
             pending_preview: None,
@@ -2001,6 +2029,14 @@ mod tests {
         })["id"]
             .as_i64()
             .unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         app.call(Command::SetVisible { ids: vec![id] });
         app.state = app.call(Command::Select {
             id,

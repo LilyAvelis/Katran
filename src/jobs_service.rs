@@ -41,6 +41,8 @@ pub(crate) enum PreparedWork {
         query: String,
         sort: sorting::SortSpec,
         page: Value,
+        select_all: bool,
+        selection: Option<(Vec<i64>, Option<i64>)>,
     },
     VideoBackground {
         prepared: video_backgrounds::PreparedVideo,
@@ -285,6 +287,50 @@ impl Service {
                         query,
                         sort,
                         page,
+                        select_all: false,
+                        selection: None,
+                    })
+                })?
+            }
+            Command::SelectAll
+                if self.interaction.tab == interaction::ShelfTab::All
+                    && self.work_folder.current().is_some() =>
+            {
+                let (generation, snapshot) = self.work_folder.reserve_snapshot();
+                let view_generation = self.interaction.view_generation;
+                let previous_query = self.interaction.browse_query.clone();
+                let query = previous_query.clone();
+                let sort = self.interaction.sort;
+                let selection = (self.interaction.selected.clone(), self.interaction.cursor);
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    let mut cursor = None;
+                    let mut ids = Vec::new();
+                    loop {
+                        cancel.check()?;
+                        let page = snapshot.browse(&query, 1000, cursor.as_deref(), sort)?;
+                        for event in page["events"].as_array().ok_or_else(|| {
+                            ApiError::new("invalid_page", "Folder page has no events")
+                        })? {
+                            ids.push(event["id"].as_i64().ok_or_else(|| {
+                                ApiError::new("invalid_page", "Folder event has no ID")
+                            })?);
+                        }
+                        cursor = page["next_cursor"].as_str().map(str::to_owned);
+                        if cursor.is_none() {
+                            break;
+                        }
+                    }
+                    cancel.check()?;
+                    Ok(PreparedWork::FolderBrowse {
+                        snapshot,
+                        generation,
+                        view_generation,
+                        previous_query,
+                        query,
+                        sort,
+                        page: json!(ids),
+                        select_all: true,
+                        selection: Some(selection),
                     })
                 })?
             }
@@ -926,13 +972,20 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
-                PreparedWork::FolderBrowse{snapshot,generation,view_generation,previous_query,query,sort,page}=>{
+                PreparedWork::FolderBrowse{snapshot,generation,view_generation,previous_query,query,sort,page,select_all,selection}=>{
                     if self.interaction.tab != interaction::ShelfTab::All || self.interaction.view_generation != view_generation || self.interaction.sort != sort || self.interaction.browse_query != previous_query {
                         return Err(ApiError::new("stale_folder", "Folder browsing context changed"));
                     }
+                    if let Some((selected,cursor))=selection && (self.interaction.selected != selected || self.interaction.cursor != cursor) {
+                        return Err(ApiError::new("stale_folder", "Folder selection changed"));
+                    }
                     self.work_folder.commit_snapshot(generation,snapshot)?;
                     self.interaction.browse_query=query;
-                    Ok(page)
+                    if select_all {
+                        let ids: Vec<i64> = serde_json::from_value(page).map_err(|e| ApiError::new("invalid_page",e))?;
+                        self.interaction.select_all(ids);
+                        Ok(json!(self.interaction))
+                    } else { Ok(page) }
                 },
                 PreparedWork::ThemeBackground{prepared,event,activate}=>{
                     if let Some(event)=event {self.validate_job_events(&[event])?;}

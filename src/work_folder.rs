@@ -10,20 +10,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Clone, Default)]
 pub struct State {
     root: Option<PathBuf>,
-    cache: RefCell<Cache>,
+    generation: Cell<u64>,
+    cache: RefCell<Arc<Cache>>,
 }
 #[derive(Clone, Default)]
 struct Cache {
-    generation: u64,
     next: i64,
     by_path: HashMap<PathBuf, Event>,
     by_id: HashMap<i64, Event>,
@@ -43,10 +44,12 @@ impl State {
             return Err(ApiError::new("invalid_folder", "Expected a directory"));
         }
         self.root = Some(root);
-        let cache = self.cache.get_mut();
-        cache.generation = cache.generation.wrapping_add(1);
-        cache.by_path.clear();
-        cache.by_id.clear();
+        self.generation.set(self.generation.get().wrapping_add(1));
+        let next = self.cache.get_mut().next;
+        *self.cache.get_mut() = Arc::new(Cache {
+            next,
+            ..Cache::default()
+        });
         Ok(())
     }
     pub fn current(&self) -> Option<&Path> {
@@ -56,16 +59,13 @@ impl State {
     /// Reserve an isolated preparation. Any subsequent browse or reservation
     /// invalidates it, so IDs allocated in concurrent snapshots cannot collide.
     pub(crate) fn reserve_snapshot(&self) -> (u64, Self) {
-        let generation = {
-            let mut cache = self.cache.borrow_mut();
-            cache.generation = cache.generation.wrapping_add(1);
-            cache.generation
-        };
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
         (generation, self.clone())
     }
 
     pub(crate) fn commit_snapshot(&mut self, generation: u64, prepared: Self) -> Result<()> {
-        if self.cache.borrow().generation != generation || self.root != prepared.root {
+        if self.generation.get() != generation || self.root != prepared.root {
             return Err(ApiError::new(
                 "stale_folder",
                 "Folder browsing context changed",
@@ -83,10 +83,7 @@ impl State {
         cursor: Option<&str>,
         sort: SortSpec,
     ) -> Result<Value> {
-        {
-            let mut cache = self.cache.borrow_mut();
-            cache.generation = cache.generation.wrapping_add(1);
-        }
+        self.generation.set(self.generation.get().wrapping_add(1));
         if !(1..=1000).contains(&limit) {
             return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
         }
@@ -124,7 +121,8 @@ impl State {
             files.push((canonical, metadata, revision));
         }
         files.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut cache = self.cache.borrow_mut();
+        let mut cache_ref = self.cache.borrow_mut();
+        let cache = Arc::make_mut(&mut cache_ref);
         let present: HashSet<_> = files.iter().map(|v| v.0.clone()).collect();
         cache.by_path.retain(|path, _| present.contains(path));
         for (path, metadata, revision) in files {
