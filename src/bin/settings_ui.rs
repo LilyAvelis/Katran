@@ -769,7 +769,7 @@ impl State {
            SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Стеклянная полоска вкладок · эксперимент","Цельная капсула с анимированным выбором. Базовая полоска остаётся доступной; оптика зависит от настроек стекла и может потребовать больше ресурсов.",|ui|{
+           SettingsRow::show(ui,"Стеклянные вкладки · эксперимент","Отдельные объёмные кнопки и движущееся выделение вашего цвета. Базовая полоска остаётся доступной; оптика может потребовать больше ресурсов.",|ui|{
             if ui.checkbox(&mut theme.experimental_glass_tabs,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}

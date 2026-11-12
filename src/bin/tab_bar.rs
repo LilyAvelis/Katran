@@ -174,13 +174,77 @@ pub fn show_with_glass(
     }
     let mut intent = None;
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(
-                enabled,
-                egui::Button::new("Folder").selected(active.as_str() == Some("folder")),
+        let body = ui.painter().add(egui::Shape::Noop);
+        let optical = ui.painter().add(egui::Shape::Noop);
+        let rim = ui.painter().add(egui::Shape::Noop);
+        let shine = ui.painter().add(egui::Shape::Noop);
+        let label_width = ui
+            .painter()
+            .layout_no_wrap(
+                "Folder".to_owned(),
+                egui::TextStyle::Button.resolve(ui.style()),
+                egui::Color32::WHITE,
             )
-            .clicked()
-        {
+            .size()
+            .x;
+        let response = ui.add_enabled(
+            enabled,
+            egui::Button::new("Folder")
+                .frame(false)
+                .min_size(egui::vec2(label_width + 24.0, 32.0)),
+        );
+        let rect = response.rect.shrink(0.5);
+        let radius = rect.height() / 2.0;
+        let selected = active.as_str() == Some("folder");
+        let surface = crate::theme_ui::color(
+            ui.ctx(),
+            if selected {
+                crate::theme_ui::Role::Selection
+            } else {
+                crate::theme_ui::Role::Raised
+            },
+            if selected {
+                ui.visuals().selection.bg_fill
+            } else {
+                egui::Color32::from_rgb(36, 36, 42)
+            },
+        );
+        let border = crate::theme_ui::color(
+            ui.ctx(),
+            if selected {
+                crate::theme_ui::Role::SelectionOutline
+            } else {
+                crate::theme_ui::Role::Border
+            },
+            if selected {
+                ui.visuals().selection.stroke.color
+            } else {
+                egui::Color32::from_gray(100)
+            },
+        );
+        ui.painter()
+            .set(body, egui::Shape::rect_filled(rect, radius, surface));
+        if !selected && let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
+            ui.painter().set(optical, shape);
+        }
+        ui.painter().set(
+            rim,
+            egui::Shape::rect_stroke(
+                rect,
+                radius,
+                egui::Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            ),
+        );
+        let highlight = egui::Rect::from_min_max(
+            rect.min + egui::vec2(radius * 0.55, 2.0),
+            egui::pos2(rect.max.x - radius * 0.55, rect.min.y + 3.0),
+        );
+        ui.painter().set(
+            shine,
+            egui::Shape::rect_filled(highlight, 1.0, egui::Color32::from_white_alpha(42)),
+        );
+        if response.clicked() {
             intent = Some(Command::SetTab { tab: ShelfTab::All });
         }
         ui.separator();
@@ -205,19 +269,30 @@ fn show_glass(
         .unwrap_or_default();
     let active_changed = indicator.active != active;
     let mut intent = None;
-    // Reserve the background before the scroll area's clipped contents so the
-    // viewport remains one capsule even when the category list overflows.
-    let body_slot = ui.painter().add(egui::Shape::Noop);
-    let optics_slot = ui.painter().add(egui::Shape::Noop);
-    let rim_slot = ui.painter().add(egui::Shape::Noop);
-    let scroll = egui::ScrollArea::horizontal()
+    let _scroll = egui::ScrollArea::horizontal()
         .id_salt("glass-category-strip-scroll")
         .auto_shrink([true, true])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.spacing_mut().item_spacing.x = 6.0;
+                // Allocate all backgrounds before the indicator and labels so
+                // the animated selection can pass over the individual pills.
+                let slots: Vec<_> = order
+                    .iter()
+                    .map(|_| {
+                        (
+                            ui.painter().add(egui::Shape::Noop),
+                            ui.painter().add(egui::Shape::Noop),
+                            ui.painter().add(egui::Shape::Noop),
+                            ui.painter().add(egui::Shape::Noop),
+                        )
+                    })
+                    .collect();
                 let indicator_slot = ui.painter().add(egui::Shape::Noop);
+                let indicator_rim_slot = ui.painter().add(egui::Shape::Noop);
                 let mut target = None;
+                #[cfg(test)]
+                let mut button_geometry = Vec::new();
                 for (index, &tab) in order.iter().enumerate() {
                     let (label, value) = match tab {
                         ShelfTab::All => continue,
@@ -230,12 +305,64 @@ fn show_glass(
                         ShelfTab::Pods => ("Pods", "pods"),
                         ShelfTab::Files => ("Files", "files"),
                     };
+                    let label = format!("{} {label}", index + 1);
+                    let label_width = ui
+                        .painter()
+                        .layout_no_wrap(
+                            label.clone(),
+                            egui::TextStyle::Button.resolve(ui.style()),
+                            egui::Color32::WHITE,
+                        )
+                        .size()
+                        .x;
                     let response = ui.add_enabled(
                         enabled,
-                        egui::Button::new(format!("{} {label}", index + 1))
+                        egui::Button::new(label)
                             .frame(false)
+                            .min_size(egui::vec2(label_width + 24.0, 32.0))
                             .sense(egui::Sense::click_and_drag()),
                     );
+                    let rect = response.rect.shrink(0.5);
+                    let radius = rect.height() / 2.0;
+                    let surface = crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::Raised,
+                        egui::Color32::from_rgb(36, 36, 42),
+                    );
+                    let border = crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::Border,
+                        egui::Color32::from_gray(100),
+                    );
+                    let (body, optical, rim, shine) = slots[index];
+                    ui.painter()
+                        .set(body, egui::Shape::rect_filled(rect, radius, surface));
+                    if let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
+                        ui.painter().set(optical, shape);
+                    }
+                    ui.painter().set(
+                        rim,
+                        egui::Shape::rect_stroke(
+                            rect,
+                            radius,
+                            egui::Stroke::new(1.0, border),
+                            egui::StrokeKind::Inside,
+                        ),
+                    );
+                    let highlight = egui::Rect::from_min_max(
+                        rect.min + egui::vec2(radius * 0.55, 2.0),
+                        egui::pos2(rect.max.x - radius * 0.55, rect.min.y + 3.0),
+                    );
+                    ui.painter().set(
+                        shine,
+                        egui::Shape::rect_filled(
+                            highlight,
+                            1.0,
+                            egui::Color32::from_white_alpha(42),
+                        ),
+                    );
+                    #[cfg(test)]
+                    button_geometry.push((response.rect, label_width));
                     if active == value {
                         target = Some(response.rect);
                         if active_changed {
@@ -279,47 +406,40 @@ fn show_glass(
                     ui.ctx().request_repaint();
                 }
                 if let Some(rect) = indicator.rect {
-                    let inset = rect.shrink2(egui::vec2(1.0, 2.0));
+                    let inset = rect.shrink(1.5);
+                    let selection = crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::Selection,
+                        ui.visuals().selection.bg_fill,
+                    );
+                    let outline = crate::theme_ui::color(
+                        ui.ctx(),
+                        crate::theme_ui::Role::SelectionOutline,
+                        ui.visuals().selection.stroke.color,
+                    );
                     ui.painter().set(
                         indicator_slot,
-                        egui::Shape::rect_filled(
+                        egui::Shape::rect_filled(inset, inset.height() / 2.0, selection),
+                    );
+                    ui.painter().set(
+                        indicator_rim_slot,
+                        egui::Shape::rect_stroke(
                             inset,
                             inset.height() / 2.0,
-                            egui::Color32::from_black_alpha(205),
+                            egui::Stroke::new(1.0, outline),
+                            egui::StrokeKind::Inside,
                         ),
                     );
                 }
+                #[cfg(test)]
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("test-glass-button-geometry"), button_geometry)
+                });
             });
         });
-    let rect = scroll.inner_rect;
-    let radius = rect.height() / 2.0;
-    let surface = crate::theme_ui::color(
-        ui.ctx(),
-        crate::theme_ui::Role::Surface,
-        egui::Color32::from_rgb(30, 30, 34),
-    );
-    ui.painter()
-        .set(body_slot, egui::Shape::rect_filled(rect, radius, surface));
-    if let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
-        ui.painter().set(optics_slot, shape);
-    }
-    let border = crate::theme_ui::color(
-        ui.ctx(),
-        crate::theme_ui::Role::Border,
-        egui::Color32::from_gray(95),
-    );
-    ui.painter().set(
-        rim_slot,
-        egui::Shape::rect_stroke(
-            rect.shrink(0.5),
-            radius,
-            egui::Stroke::new(1.0, border),
-            egui::StrokeKind::Inside,
-        ),
-    );
     #[cfg(test)]
     ui.ctx()
-        .data_mut(|d| d.insert_temp(egui::Id::new("test-glass-tab-body"), rect));
+        .data_mut(|d| d.insert_temp(egui::Id::new("test-glass-tab-body"), _scroll.inner_rect));
     ui.ctx()
         .data_mut(|d| d.insert_temp(indicator_id, indicator));
     intent
@@ -354,8 +474,71 @@ mod tests {
             if let Some(body) = body {
                 assert!(body.is_positive());
                 assert!(body.right() <= width);
+                let buttons = ctx
+                    .data(|d| {
+                        d.get_temp::<Vec<(egui::Rect, f32)>>(egui::Id::new(
+                            "test-glass-button-geometry",
+                        ))
+                    })
+                    .unwrap();
+                assert_eq!(buttons.len(), order.len());
+                for (rect, text_width) in &buttons {
+                    assert!(rect.width() >= text_width + 23.0);
+                    assert!(rect.height() >= 32.0);
+                }
+                for pair in buttons.windows(2) {
+                    assert!(pair[1].0.left() - pair[0].0.right() >= 5.0);
+                }
             }
         }
+    }
+
+    #[test]
+    fn experimental_visible_tabs_use_configured_selection_colors() {
+        let ctx = egui::Context::default();
+        crate::theme_ui::apply(
+            &ctx,
+            &katran::theme::ThemePreferences {
+                selection: Some([30, 220, 80]),
+                selection_intensity: 80,
+                ..Default::default()
+            },
+        );
+        let order = [ShelfTab::Images, ShelfTab::Pods];
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(220.0, 100.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            show_with_glass(ui, &order, &Value::String("pods".into()), true, true);
+        });
+        let fill = crate::theme_ui::color(
+            &ctx,
+            crate::theme_ui::Role::Selection,
+            ctx.style_of(egui::Theme::Dark).visuals.selection.bg_fill,
+        );
+        let outline = egui::Color32::from_rgb(30, 220, 80);
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|s| matches!(&s.shape, egui::Shape::Rect(rect) if rect.fill == fill))
+        );
+        assert!(
+            output.shapes.iter().any(
+                |s| matches!(&s.shape, egui::Shape::Rect(rect) if rect.stroke.color == outline)
+            )
+        );
+        let buttons = ctx
+            .data(|d| {
+                d.get_temp::<Vec<(egui::Rect, f32)>>(egui::Id::new("test-glass-button-geometry"))
+            })
+            .unwrap();
+        assert_eq!(buttons.len(), 2);
+        output.textures_delta.clear();
     }
 
     #[test]
@@ -389,6 +572,49 @@ mod tests {
         output.textures_delta.clear();
         assert_eq!(state().active, "downloads");
         assert!(state().rect.is_some());
+    }
+    #[test]
+    fn experimental_drag_emits_existing_reorder_command() {
+        let ctx = egui::Context::default();
+        let order = [ShelfTab::Images, ShelfTab::Pods];
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 100.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(), |ui| {
+            show_with_glass(ui, &order, &Value::String("folder".into()), true, true);
+        });
+        output.textures_delta.clear();
+        let target = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-first-tab-rect")))
+            .unwrap()
+            .center();
+        egui::DragAndDrop::set_payload(&ctx, ShelfTab::Pods);
+        let mut release = input();
+        release.events = vec![
+            egui::Event::PointerMoved(target),
+            egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        let mut command = None;
+        let mut output = ctx.run_ui(release, |ui| {
+            command = show_with_glass(ui, &order, &Value::String("folder".into()), true, true);
+        });
+        output.textures_delta.clear();
+        assert!(matches!(
+            command,
+            Some(Command::MoveTab {
+                tab: ShelfTab::Pods,
+                index: 0
+            })
+        ));
     }
     #[test]
     fn indicator_retargets_and_folder_breaks_the_path() {

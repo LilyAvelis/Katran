@@ -35,9 +35,10 @@ is implied by this document.
    field. In `Ctrl+,` → Main, enable “Только через Ctrl+T”; then clicking the
    search area must not focus it, while dragging that area moves the window.
    With the option off, mouse search remains available.
-8. In `Ctrl+,` → Themes → Blue, enable “Стеклянная полоска вкладок · эксперимент”.
-   The numbered tabs form one capsule with a dark animated selection. Check
-   narrow and wide window sizes and tab drag/reorder. Disable the option to
+8. In `Ctrl+,` → Themes → Blue, enable “Стеклянные вкладки · эксперимент”.
+   Numbered tabs become separate glass buttons with room around each label.
+   Their moving selection uses the configured selection color. Check narrow
+   and wide windows, hidden tabs and drag/reorder. Disable the option to
    restore the standard animated strip.
 
 Only synthetic files and data are used in automated checks. The owner performs
