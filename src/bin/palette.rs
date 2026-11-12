@@ -1,25 +1,33 @@
 use super::*;
 
+fn action_matches(action: &Value, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return !action["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("sort_"));
+    }
+    let haystack = format!(
+        "{} {} {}",
+        action["label"].as_str().unwrap_or(""),
+        action["group"].as_str().unwrap_or(""),
+        action["search_terms"].as_str().unwrap_or(""),
+    )
+    .to_lowercase();
+    query.split_whitespace().all(|term| haystack.contains(term))
+}
+
 impl Shelf {
     pub(super) fn palette(&mut self, ctx: &egui::Context) {
         if !self.actions {
             return;
         }
-        let mut catalogue = self.call(Command::Actions);
-        if let Some(items) = catalogue.as_array_mut() {
-            items.retain(|a| !a["id"].as_str().unwrap_or("").starts_with("sort_"));
-        }
+        let catalogue = self.call(Command::Actions);
         let actions: Vec<_> = catalogue
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|a| {
-                a["label"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&self.action_query.to_lowercase())
-            })
+            .filter(|a| action_matches(a, &self.action_query))
             .cloned()
             .collect();
         let count = actions.len();
@@ -78,11 +86,27 @@ impl Shelf {
             .show(ctx, |ui| {
                 optical_slot=Some((ui.painter().clone(),ui.painter().add(egui::Shape::Noop)));
                 ui.set_width(width);
-                ui.label(
-                    RichText::new("Действия с выделением и полкой")
-                        .strong()
-                        .size(13.0),
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Действия").strong().size(14.0));
+                    ui.weak(if self.state["selected"].as_array().is_some_and(|selected| !selected.is_empty()) {
+                        "Есть выделение"
+                    } else {
+                        "Ничего не выделено"
+                    });
+                });
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.action_query)
+                        .hint_text("Найти действие…")
+                        .desired_width(width - 12.0),
                 );
+                if self.focus_actions {
+                    search.request_focus();
+                    self.focus_actions = false;
+                }
+                if search.changed() {
+                    self.action_selected = 0;
+                    self.scroll_actions = true;
+                }
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
                     .show(ui, |ui| {
@@ -125,23 +149,7 @@ impl Shelf {
                         }
                     });
                 ui.separator();
-                ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut self.action_query)
-                            .hint_text("Поиск действий…")
-                            .frame(egui::Frame::NONE)
-                            .desired_width(width - 65.0),
-                    );
-                    if self.focus_actions {
-                        r.request_focus();
-                        self.focus_actions = false;
-                    }
-                    if r.changed() {
-                        self.action_selected = 0;
-                        self.scroll_actions = true;
-                    }
-                    ui_style::keycap(ui, "Esc");
-                });
+                ui.weak("↑↓ выбрать · Enter выполнить · Esc закрыть");
             });
         if let Some((painter, index)) = optical_slot
             && let Some(shape) = theme_ui::optical_shape(ctx, result.response.rect, 12.0)
@@ -156,18 +164,8 @@ impl Shelf {
             )
         });
         if enter && picked.is_none() {
-            picked = catalogue
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|a| {
-                    a["label"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&self.action_query.to_lowercase())
-                })
-                .nth(self.action_selected)
+            picked = actions
+                .get(self.action_selected)
                 .and_then(|a| a["id"].as_str())
                 .map(str::to_owned);
         }
@@ -249,5 +247,21 @@ impl Shelf {
         } else if response.should_close() {
             self.sorting_input.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn actions_searches_group_aliases_and_keeps_sorting_out_of_empty_list() {
+        let copy = serde_json::json!({"id":"transfer_copy","label":"Копировать в Folder","group":"Полка ↔ Folder","search_terms":"папка импорт копия"});
+        assert!(action_matches(&copy, "папка копия"));
+        assert!(action_matches(&copy, "folder"));
+        assert!(!action_matches(&copy, "удалить"));
+        let sort = serde_json::json!({"id":"sort_name","label":"Сортировать по имени","group":"Сортировка","search_terms":""});
+        assert!(!action_matches(&sort, ""));
+        assert!(action_matches(&sort, "сортировка"));
     }
 }

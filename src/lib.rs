@@ -452,105 +452,197 @@ impl Service {
         }
         match command {
             Command::MediaRuntimeStatus => Ok(media_runtime::status()),
-            Command::EnsureMediaRuntime => media_runtime::install().map_err(|e|ApiError::new("media_runtime_error",e)),
+            Command::EnsureMediaRuntime => {
+                media_runtime::install().map_err(|e| ApiError::new("media_runtime_error", e))
+            }
             Command::RestartApplication => Ok(serde_json::json!({"restart_requested":true})),
-            Command::VideoBackgrounds => video_backgrounds::catalogue(&self.root).map(|items|serde_json::json!({"items":items})).map_err(|e|ApiError::new("video_background_error",e)),
-            Command::GetVideoBackground {id} => video_backgrounds::get(&self.root,&id).map_err(|e|ApiError::new("video_background_error",e)),
-            Command::ImportVideoBackground {path} => {
-                let prepared=video_backgrounds::prepare(&path).map_err(|e|ApiError::new("video_background_error",e))?;
-                video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))
-            },
+            Command::VideoBackgrounds => video_backgrounds::catalogue(&self.root)
+                .map(|items| serde_json::json!({"items":items}))
+                .map_err(|e| ApiError::new("video_background_error", e)),
+            Command::GetVideoBackground { id } => video_backgrounds::get(&self.root, &id)
+                .map_err(|e| ApiError::new("video_background_error", e)),
+            Command::ImportVideoBackground { path } => {
+                let prepared = video_backgrounds::prepare(&path)
+                    .map_err(|e| ApiError::new("video_background_error", e))?;
+                video_backgrounds::commit(&self.root, prepared)
+                    .map_err(|e| ApiError::new("video_background_error", e))
+            }
             Command::UseSelectedVideoAsBackground => {
-                let event=self.selected_background_video()?;
-                let prepared=video_backgrounds::prepare_event(&event).map_err(|e|ApiError::new("video_background_error",e))?;
+                let event = self.selected_background_video()?;
+                let prepared = video_backgrounds::prepare_event(&event)
+                    .map_err(|e| ApiError::new("video_background_error", e))?;
                 self.validate_job_events(&[event])?;
-                let result=video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))?;
+                let result = video_backgrounds::commit(&self.root, prepared)
+                    .map_err(|e| ApiError::new("video_background_error", e))?;
                 self.activate_video_background(result)
-            },
+            }
             Command::UseSelectedImageAsBackground => {
-                let event=self.selected_background_image()?;
-                let prepared=theme_backgrounds::prepare_event(&event)?;
-                let result=theme_backgrounds::commit(&self.root,prepared)?;
+                let event = self.selected_background_image()?;
+                let prepared = theme_backgrounds::prepare_event(&event)?;
+                let result = theme_backgrounds::commit(&self.root, prepared)?;
                 self.activate_background(result)
-            },
-            Command::ImportThemeBackground {path} => theme_backgrounds::import(&self.root,&path),
+            }
+            Command::ImportThemeBackground { path } => theme_backgrounds::import(&self.root, &path),
             Command::ListThemeBackgrounds => theme_backgrounds::list(&self.root),
-            Command::GetThemeBackground {id} => theme_backgrounds::get(&self.root,&id),
+            Command::GetThemeBackground { id } => theme_backgrounds::get(&self.root, &id),
             Command::Themes => Ok(theme::catalogue(&self.settings.theme)),
-            Command::SetTheme {theme} => {let mut settings=self.settings.clone();settings.theme=theme;self.dispatch(Command::SetSettings{settings})?;Ok(theme::catalogue(&self.settings.theme))},
+            Command::SetTheme { theme } => {
+                let mut settings = self.settings.clone();
+                settings.theme = theme;
+                self.dispatch(Command::SetSettings { settings })?;
+                Ok(theme::catalogue(&self.settings.theme))
+            }
             Command::WindowVisibility => Ok(serde_json::json!({"visible":self.window_visible})),
-            Command::SetWindowVisibility { visible } => {self.window_visible=visible;if !visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":visible}))},
-            Command::ToggleWindowVisibility => {self.window_visible = !self.window_visible;if !self.window_visible {self.interaction.settings_open=false;}Ok(serde_json::json!({"visible":self.window_visible}))},
-            Command::ToggleResidentOverlay { owner_window,capture } => self.toggle_resident_overlay(owner_window,capture),
+            Command::SetWindowVisibility { visible } => {
+                self.window_visible = visible;
+                if !visible {
+                    self.interaction.settings_open = false;
+                }
+                Ok(serde_json::json!({"visible":visible}))
+            }
+            Command::ToggleWindowVisibility => {
+                self.window_visible = !self.window_visible;
+                if !self.window_visible {
+                    self.interaction.settings_open = false;
+                }
+                Ok(serde_json::json!({"visible":self.window_visible}))
+            }
+            Command::ToggleResidentOverlay {
+                owner_window,
+                capture,
+            } => self.toggle_resident_overlay(owner_window, capture),
             Command::DescribePod { id } => self.describe_pod(id),
-            Command::SummonCapturedOverlay { owner_window, capture } => self.summon_captured_overlay(owner_window,capture),
+            Command::SummonCapturedOverlay {
+                owner_window,
+                capture,
+            } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
-            Command::CompletePastePrevious { owner_window } => self.complete_paste_previous(owner_window),
-            Command::PreviewPath {path,revision,max_edge,image_only} => preview_snapshot::preview_file(&path,&revision,max_edge,image_only,&self.root),
-            Command::ReadDocumentPath {path,revision} => preview_snapshot::read_document(&path,&revision),
-            Command::StageTransfer {items,cut} => self.stage_transfer(items,cut),
+            Command::CompletePastePrevious { owner_window } => {
+                self.complete_paste_previous(owner_window)
+            }
+            Command::PreviewPath {
+                path,
+                revision,
+                max_edge,
+                image_only,
+            } => preview_snapshot::preview_file(&path, &revision, max_edge, image_only, &self.root),
+            Command::ReadDocumentPath { path, revision } => {
+                preview_snapshot::read_document(&path, &revision)
+            }
+            Command::StageTransfer { items, cut } => self.stage_transfer(items, cut),
             Command::TransferSelection => self.transfer_selection(),
             Command::CopySelection => self.copy_selection(),
             Command::PasteToFolder => self.paste_to_folder(),
-            Command::PasteFilesToFolder {paths} => self.paste_files_to_folder(paths),
+            Command::PasteFilesToFolder { paths } => self.paste_files_to_folder(paths),
             Command::PasteClipboardToFolder => self.paste_clipboard_to_folder(),
-            Command::AddFolderFiles {ids} => self.import_from_folder(ids),
-            Command::AddFiles {paths} => self.add_files(paths),
+            Command::AddFolderFiles { ids } => self.import_from_folder(ids),
+            Command::AddFiles { paths } => self.add_files(paths),
             Command::ChooseFolder { path } => self.choose_folder(path),
             Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
-            Command::SearchFolders {query,limit} => everything::search_folders(&query,limit as usize).map(|v|serde_json::json!(v)).map_err(|e|ApiError::new(&e.code,e.message)),
-            Command::FolderHistory {query} => self.folder_entries(false,&query),
-            Command::FolderRecovery => {let path=self.work_folder.current().ok_or_else(||ApiError::new("folder_not_selected","Choose a folder first"))?;safe_recycle::list_recovery(path)},
-            Command::FavoriteFolders {query} => self.folder_entries(true,&query),
+            Command::SearchFolders { query, limit } => {
+                everything::search_folders(&query, limit as usize)
+                    .map(|v| serde_json::json!(v))
+                    .map_err(|e| ApiError::new(&e.code, e.message))
+            }
+            Command::FolderHistory { query } => self.folder_entries(false, &query),
+            Command::FolderRecovery => {
+                let path = self
+                    .work_folder
+                    .current()
+                    .ok_or_else(|| ApiError::new("folder_not_selected", "Choose a folder first"))?;
+                safe_recycle::list_recovery(path)
+            }
+            Command::FavoriteFolders { query } => self.folder_entries(true, &query),
             Command::ToggleFavoriteFolder => {
-                let path=self.work_folder.current().ok_or_else(||ApiError::new("no_folder","Choose a working folder first"))?;
+                let path = self
+                    .work_folder
+                    .current()
+                    .ok_or_else(|| ApiError::new("no_folder", "Choose a working folder first"))?;
                 Ok(serde_json::json!({"favorite":pinned::toggle_favorite(&self.db,path)?}))
-            },
+            }
             Command::ToggleFavoriteFolderPath { path } => {
                 Ok(serde_json::json!({"favorite":pinned::toggle_favorite_path(&self.db,&path)?}))
-            },
-            Command::ClearFolderHistory {confirmed} => {
-                if !confirmed {Ok(serde_json::json!({"confirmation_required":true}))} else {pinned::clear_folder_history(&self.db)?;Ok(serde_json::json!({"cleared":true}))}
-            },
-            Command::TogglePins {ids} => self.toggle_pins(ids),
-            Command::GetPinnedProperties {id} => Ok(serde_json::json!({"properties":pinned::properties(&self.db,id)?,"tags":pinned::tags(&self.db,id)?})),
-            Command::SetPinnedProperties {id,display_name,opener} => {self.validate_pinned_opener(id,&opener)?;let value=pinned::set_properties(&self.db,id,display_name,opener)?;self.interaction.view_generation=self.interaction.view_generation.wrapping_add(1);Ok(serde_json::json!(value))},
-            Command::SetPinnedTags {id,tags} => {let value=pinned::set_tags(&self.db,id,&tags)?;self.interaction.view_generation=self.interaction.view_generation.wrapping_add(1);Ok(serde_json::json!({"tags":value}))},
-            Command::PinnedTags => self.pinned_tags(),
-            Command::FilterPinnedTag {tag} => {
-                if self.interaction.tab==interaction::ShelfTab::All {return Err(ApiError::new("folder_has_no_tags","Folder has no tag filters"));}
-                let tag=tag.map(|t|t.trim().to_lowercase()).filter(|t|!t.is_empty());
-                let next=if self.interaction.tag_filter==tag {None}else{tag};
-                self.interaction.reset_context();self.interaction.pinned_only=true;self.interaction.tag_filter=next;
-                Ok(serde_json::json!(self.interaction))
-            },
-            Command::ListTagSlots => self.list_tag_slots(),
-            Command::SaveTagSlot {slot} => self.save_tag_slot(slot),
-            Command::AssignTagSlot {ids,slot} => self.assign_tag_slot(ids,slot),
-            Command::GetTagSlot {id} => self.get_tag_slot(id),
-            Command::GetTagSlots {ids} => self.get_tag_slots(ids),
-            Command::GetLinkVisual {id} => self.get_link_visual(id),
-            Command::ListLinkIds {after_id,limit} => self.list_link_visual_ids(after_id,limit),
-            Command::FilterTagSlot {slot} => self.filter_tag_slot(slot),
-            Command::GetUpdateStatus => Ok(self.update_status.clone()),
-            Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
-            Command::InstallUpdate => {
-                let release=self.checked_update.clone().ok_or_else(||ApiError::new("update_not_checked","Check for an available update first"))?;
-                let prepared=self.updater.prepare(&release)?;
-                let installed=self.updater.commit(prepared)?;
-                self.accept_update_install(installed)
-            },
-            Command::BeginJob{command} => self.begin_job(*command),
-            Command::PollJob{job_id} => self.poll_job(job_id),
-            Command::CancelJob{job_id} => {
-                Ok(serde_json::json!(self.jobs.cancel(job_id)?))
             }
+            Command::ClearFolderHistory { confirmed } => {
+                if !confirmed {
+                    Ok(serde_json::json!({"confirmation_required":true}))
+                } else {
+                    pinned::clear_folder_history(&self.db)?;
+                    Ok(serde_json::json!({"cleared":true}))
+                }
+            }
+            Command::TogglePins { ids } => self.toggle_pins(ids),
+            Command::GetPinnedProperties { id } => Ok(
+                serde_json::json!({"properties":pinned::properties(&self.db,id)?,"tags":pinned::tags(&self.db,id)?}),
+            ),
+            Command::SetPinnedProperties {
+                id,
+                display_name,
+                opener,
+            } => {
+                self.validate_pinned_opener(id, &opener)?;
+                let value = pinned::set_properties(&self.db, id, display_name, opener)?;
+                self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                Ok(serde_json::json!(value))
+            }
+            Command::SetPinnedTags { id, tags } => {
+                let value = pinned::set_tags(&self.db, id, &tags)?;
+                self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                Ok(serde_json::json!({"tags":value}))
+            }
+            Command::PinnedTags => self.pinned_tags(),
+            Command::FilterPinnedTag { tag } => {
+                if self.interaction.tab == interaction::ShelfTab::All {
+                    return Err(ApiError::new(
+                        "folder_has_no_tags",
+                        "Folder has no tag filters",
+                    ));
+                }
+                let tag = tag
+                    .map(|t| t.trim().to_lowercase())
+                    .filter(|t| !t.is_empty());
+                let next = if self.interaction.tag_filter == tag {
+                    None
+                } else {
+                    tag
+                };
+                self.interaction.reset_context();
+                self.interaction.pinned_only = true;
+                self.interaction.tag_filter = next;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::ListTagSlots => self.list_tag_slots(),
+            Command::SaveTagSlot { slot } => self.save_tag_slot(slot),
+            Command::AssignTagSlot { ids, slot } => self.assign_tag_slot(ids, slot),
+            Command::GetTagSlot { id } => self.get_tag_slot(id),
+            Command::GetTagSlots { ids } => self.get_tag_slots(ids),
+            Command::GetLinkVisual { id } => self.get_link_visual(id),
+            Command::ListLinkIds { after_id, limit } => self.list_link_visual_ids(after_id, limit),
+            Command::FilterTagSlot { slot } => self.filter_tag_slot(slot),
+            Command::GetUpdateStatus => Ok(self.update_status.clone()),
+            Command::CheckUpdates => {
+                let status = self.updater.check()?;
+                self.accept_update_check(status)
+            }
+            Command::InstallUpdate => {
+                let release = self.checked_update.clone().ok_or_else(|| {
+                    ApiError::new("update_not_checked", "Check for an available update first")
+                })?;
+                let prepared = self.updater.prepare(&release)?;
+                let installed = self.updater.commit(prepared)?;
+                self.accept_update_install(installed)
+            }
+            Command::BeginJob { command } => self.begin_job(*command),
+            Command::PollJob { job_id } => self.poll_job(job_id),
+            Command::CancelJob { job_id } => Ok(serde_json::json!(self.jobs.cancel(job_id)?)),
             Command::EnsurePreviewBackend => quicklook_backend::warmup(),
             Command::PreviewBackendStatus => quicklook_backend::status(),
             Command::EnsureSources => self.ensure_sources(),
             Command::PollSources { limit } => self.poll_sources(limit),
-            Command::SourceStatus => Ok(serde_json::json!({"sources":self.source_runtime.statuses()})),
+            Command::SourceStatus => {
+                Ok(serde_json::json!({"sources":self.source_runtime.statuses()}))
+            }
             Command::RescanSource { source_id } => {
                 self.ensure_sources()?;
                 self.source_runtime.rescan(source_id)?;
@@ -559,183 +651,412 @@ impl Service {
             Command::AdjustDensity { delta } => {
                 let mut settings = self.settings.clone();
                 let tab = self.interaction.tab;
-                let prefs = settings.tab_preferences.get_mut(&tab).expect("tab preferences initialized");
-                if (tab == interaction::ShelfTab::Pods || tab == interaction::ShelfTab::Links) && self.interaction.view == interaction::View::Gallery {
+                let prefs = settings
+                    .tab_preferences
+                    .get_mut(&tab)
+                    .expect("tab preferences initialized");
+                if (tab == interaction::ShelfTab::Pods || tab == interaction::ShelfTab::Links)
+                    && self.interaction.view == interaction::View::Gallery
+                {
                     prefs.compact_columns = density::adjust_density(prefs.compact_columns, delta);
-                    if tab == interaction::ShelfTab::Pods { settings.pods_columns = prefs.compact_columns; }
-                    else { settings.links_columns = prefs.compact_columns; }
+                    if tab == interaction::ShelfTab::Pods {
+                        settings.pods_columns = prefs.compact_columns;
+                    } else {
+                        settings.links_columns = prefs.compact_columns;
+                    }
                 } else {
                     match self.interaction.view {
                         interaction::View::Gallery => {
-                            prefs.gallery_columns = density::adjust_density(prefs.gallery_columns, delta);
+                            prefs.gallery_columns =
+                                density::adjust_density(prefs.gallery_columns, delta);
                             settings.gallery_columns = prefs.gallery_columns;
-                        },
+                        }
                         interaction::View::List => {
                             prefs.stream_rows = density::adjust_density(prefs.stream_rows, delta);
                             settings.stream_rows = prefs.stream_rows;
-                        },
+                        }
                     }
                 }
                 self.dispatch(Command::SetSettings { settings })
-            },
-            Command::CommitFolderCandidates { .. } => Err(ApiError::new("untrusted_worker_result","Prepared source results are accepted only from the domain supervisor")),
+            }
+            Command::CommitFolderCandidates { .. } => Err(ApiError::new(
+                "untrusted_worker_result",
+                "Prepared source results are accepted only from the domain supervisor",
+            )),
             Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
-            Command::CommitScreenshotMatches { .. } => Err(ApiError::new("untrusted_worker_result","Pixel identity must be verified by the domain worker")),
-            Command::IngestText {text,source} => {
-                if pods::is_pod(&text) {self.check_pods_enabled()?;} else {self.check_text_enabled()?;}
+            Command::CommitScreenshotMatches { .. } => Err(ApiError::new(
+                "untrusted_worker_result",
+                "Pixel identity must be verified by the domain worker",
+            )),
+            Command::IngestText { text, source } => {
+                if pods::is_pod(&text) {
+                    self.check_pods_enabled()?;
+                } else {
+                    self.check_text_enabled()?;
+                }
                 validate_source(&source)?;
-                let prepared=text_fragments::prepare(&self.root,self.quota,&text,&source,&self.ingest_origin,&self.reference_paths()?)?;
-                let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?;
+                let prepared = text_fragments::prepare(
+                    &self.root,
+                    self.quota,
+                    &text,
+                    &source,
+                    &self.ingest_origin,
+                    &self.reference_paths()?,
+                )?;
+                let id =
+                    storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
                 Ok(serde_json::json!(self.get(id)?))
             }
-            Command::IngestTable { rows,source } => self.ingest_table(table_fragments::Table{rows},&source),
-            Command::IngestTableTsv { text,source } => {self.check_tables_enabled()?;let table=table_fragments::parse_tsv(&text,true).map_err(table_service::invalid)?;self.ingest_table(table,&source)},
-            Command::IngestTableHtml { html,source } => {self.check_tables_enabled()?;let table=table_fragments::parse_html(&html).map_err(table_service::invalid)?;self.ingest_table(table,&source)},
-            Command::GetTable {id} => self.get_table(id),
-            Command::CopyTables {items} => self.copy_tables(items),
-            Command::GetLink {id} => self.get_link(id),
-            Command::CopyLinks {items} => self.copy_links(&items),
-            Command::IngestLink {url,source} => { self.check_links_enabled()?; validate_source(&source)?; let prepared=link_fragments::prepare(&self.root,self.quota,&url,&source,&self.ingest_origin,&self.reference_paths()?)?; let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(serde_json::json!(self.get(id)?)) },
-            Command::GetText {id}=>self.get_text(id),
-            Command::GetDocumentText {id}=>self.get_document_text(id),
-            Command::MergeText {items,separator}=>self.merge_text(&items,&separator),
-            Command::CopyText {items,separator}=>self.copy_text(&items,&separator),
-            Command::CopySelectedObjects=>{let items=self.selected_refs()?;self.dispatch(Command::CopySmart{items})},
-            Command::CopySmart{items}=>{if self.selection_is_tables(&items)?{self.copy_tables(items)}else if self.selection_is_links(&items)?{self.copy_links(&items)}else if self.selection_is_text(&items)?{self.copy_text(&items,if self.selection_is_pods(&items)? {""} else {"\n\n"})}else{self.dispatch(Command::CopyEventsChecked{items})}},
-            Command::CopySelectedText=>{let items=self.selected_refs()?;self.copy_text(&items,"\n\n")},
-            Command::ListOpenApps {id} => self.list_open_apps(id),
-            Command::OpenWithApp {token,app_id} => self.open_with_app(&token,app_id),
-            Command::ReleaseOpenApps {token} => Ok(serde_json::json!({"released":self.app_sessions.release(&token)})),
+            Command::IngestTable { rows, source } => {
+                self.ingest_table(table_fragments::Table { rows }, &source)
+            }
+            Command::IngestTableTsv { text, source } => {
+                self.check_tables_enabled()?;
+                let table =
+                    table_fragments::parse_tsv(&text, true).map_err(table_service::invalid)?;
+                self.ingest_table(table, &source)
+            }
+            Command::IngestTableHtml { html, source } => {
+                self.check_tables_enabled()?;
+                let table = table_fragments::parse_html(&html).map_err(table_service::invalid)?;
+                self.ingest_table(table, &source)
+            }
+            Command::GetTable { id } => self.get_table(id),
+            Command::CopyTables { items } => self.copy_tables(items),
+            Command::GetLink { id } => self.get_link(id),
+            Command::CopyLinks { items } => self.copy_links(&items),
+            Command::IngestLink { url, source } => {
+                self.check_links_enabled()?;
+                validate_source(&source)?;
+                let prepared = link_fragments::prepare(
+                    &self.root,
+                    self.quota,
+                    &url,
+                    &source,
+                    &self.ingest_origin,
+                    &self.reference_paths()?,
+                )?;
+                let id =
+                    storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
+                Ok(serde_json::json!(self.get(id)?))
+            }
+            Command::GetText { id } => self.get_text(id),
+            Command::GetDocumentText { id } => self.get_document_text(id),
+            Command::MergeText { items, separator } => self.merge_text(&items, &separator),
+            Command::CopyText { items, separator } => self.copy_text(&items, &separator),
+            Command::CopySelectedObjects => {
+                let items = self.selected_refs()?;
+                self.dispatch(Command::CopySmart { items })
+            }
+            Command::CopySmart { items } => {
+                if self.selection_is_tables(&items)? {
+                    self.copy_tables(items)
+                } else if self.selection_is_links(&items)? {
+                    self.copy_links(&items)
+                } else if self.selection_is_text(&items)? {
+                    self.copy_text(
+                        &items,
+                        if self.selection_is_pods(&items)? {
+                            ""
+                        } else {
+                            "\n\n"
+                        },
+                    )
+                } else {
+                    self.dispatch(Command::CopyEventsChecked { items })
+                }
+            }
+            Command::CopySelectedText => {
+                let items = self.selected_refs()?;
+                self.copy_text(&items, "\n\n")
+            }
+            Command::ListOpenApps { id } => self.list_open_apps(id),
+            Command::OpenWithApp { token, app_id } => self.open_with_app(&token, app_id),
+            Command::ReleaseOpenApps { token } => {
+                Ok(serde_json::json!({"released":self.app_sessions.release(&token)}))
+            }
             Command::Tabs => Ok(self.tabs()),
-            Command::SetTabEnabled {tab, enabled} => self.set_tab_enabled(tab, enabled),
-            Command::ToggleTabEnabled {tab} => self.set_tab_enabled(tab, !self.settings.tab_enabled(tab)),
+            Command::SetTabEnabled { tab, enabled } => self.set_tab_enabled(tab, enabled),
+            Command::ToggleTabEnabled { tab } => {
+                self.set_tab_enabled(tab, !self.settings.tab_enabled(tab))
+            }
             Command::ShowTabSettings => {
-                self.interaction.settings_section=2;
-                self.interaction.settings_open=true;
+                self.interaction.settings_section = 2;
+                self.interaction.settings_open = true;
                 Ok(serde_json::json!(self.interaction))
-            },
+            }
             Command::OpenFile { id, operation } => {
-                let event=self.get(id)?;
-                if id>0 && operation==open_file::Operation::Open && self.pinned_app_launcher(&event)?.is_some() {return self.open_pinned_default(&event);}
-                let launcher=self.file_launcher.lock().map_err(|_|ApiError::new("open_busy","File launcher lock poisoned"))?;
-                if event.kind==EventKind::LinkFragment && operation==open_file::Operation::Open { open_file::execute_link(&event,launcher.as_ref()) } else { open_file::execute_with_cache(&event,operation,launcher.as_ref(),&self.root,self.quota) }
-            },
+                let event = self.get(id)?;
+                if id > 0
+                    && operation == open_file::Operation::Open
+                    && self.pinned_app_launcher(&event)?.is_some()
+                {
+                    return self.open_pinned_default(&event);
+                }
+                let launcher = self
+                    .file_launcher
+                    .lock()
+                    .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?;
+                if event.kind == EventKind::LinkFragment && operation == open_file::Operation::Open
+                {
+                    open_file::execute_link(&event, launcher.as_ref())
+                } else {
+                    open_file::execute_with_cache(
+                        &event,
+                        operation,
+                        launcher.as_ref(),
+                        &self.root,
+                        self.quota,
+                    )
+                }
+            }
             Command::SelectTabPosition { position } => {
-                let tab = tab_layout::tab_at_visible(&self.settings.visible_tabs(),position)?;
+                let tab = tab_layout::tab_at_visible(&self.settings.visible_tabs(), position)?;
                 self.interaction.select_position(tab);
                 Ok(serde_json::json!(self.interaction))
-            },
+            }
             Command::TogglePinnedView => {
                 if self.interaction.tab == interaction::ShelfTab::All {
-                    return Err(ApiError::new("folder_has_no_pins", "Folder has no pinned view"));
+                    return Err(ApiError::new(
+                        "folder_has_no_pins",
+                        "Folder has no pinned view",
+                    ));
                 }
                 self.interaction.toggle_pinned_only();
                 Ok(serde_json::json!(self.interaction))
-            },
+            }
             Command::NavigateTab { delta } => self.navigate_tab(delta),
-            Command::MoveTab { tab,index } => {
-                let mut settings=self.settings.clone();
-                let visible=settings.visible_tabs();
-                let target=visible.get(index).ok_or_else(||ApiError::new("invalid_tab_position","No visible tab at this position"))?;
-                if !settings.tab_enabled(tab) {return Err(ApiError::new("tab_disabled","Cannot drag a disabled tab"));}
-                let target_index=settings.tab_order.iter().position(|t|t==target).unwrap();
-                tab_layout::reorder(&mut settings.tab_order,tab,target_index).map_err(|e|ApiError::new("invalid_tab_order",e))?;
-                self.dispatch(Command::SetSettings { settings })
-            },
-            Command::SetTab { tab } => self.select_tab(tab),
-            Command::ToggleTab => { self.normalize_tabs(); self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
-            Command::BrowseShelf { query, limit, after_id } => {let result=self.browse_shelf(&query, limit, after_id)?; self.interaction.browse_query=query; Ok(result)},
-            Command::BrowseShelfSorted { query, limit, cursor } => {let result=self.browse_shelf_sorted(&query, limit, cursor.as_deref())?; self.interaction.browse_query=query; Ok(result)},
-            Command::BrowseTabSnapshot { tab, query, limit } => self.browse_tab_snapshot(tab, &query, limit),
-            Command::CatalogueStamp => self.catalogue_stamp(),
-            Command::SetSort { mode, reverse, seed } => {
+            Command::MoveTab { tab, index } => {
                 let mut settings = self.settings.clone();
-                settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();
-                settings.tab_preferences.get_mut(&self.interaction.tab).expect("tab preferences initialized").sort = settings.sort;
+                let visible = settings.visible_tabs();
+                let target = visible.get(index).ok_or_else(|| {
+                    ApiError::new("invalid_tab_position", "No visible tab at this position")
+                })?;
+                if !settings.tab_enabled(tab) {
+                    return Err(ApiError::new("tab_disabled", "Cannot drag a disabled tab"));
+                }
+                let target_index = settings.tab_order.iter().position(|t| t == target).unwrap();
+                tab_layout::reorder(&mut settings.tab_order, tab, target_index)
+                    .map_err(|e| ApiError::new("invalid_tab_order", e))?;
+                self.dispatch(Command::SetSettings { settings })
+            }
+            Command::SetTab { tab } => self.select_tab(tab),
+            Command::ToggleTab => {
+                self.normalize_tabs();
+                self.interaction.toggle_tab();
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::BrowseShelf {
+                query,
+                limit,
+                after_id,
+            } => {
+                let result = self.browse_shelf(&query, limit, after_id)?;
+                self.interaction.browse_query = query;
+                Ok(result)
+            }
+            Command::BrowseShelfSorted {
+                query,
+                limit,
+                cursor,
+            } => {
+                let result = self.browse_shelf_sorted(&query, limit, cursor.as_deref())?;
+                self.interaction.browse_query = query;
+                Ok(result)
+            }
+            Command::BrowseTabSnapshot { tab, query, limit } => {
+                self.browse_tab_snapshot(tab, &query, limit)
+            }
+            Command::CatalogueStamp => self.catalogue_stamp(),
+            Command::SetSort {
+                mode,
+                reverse,
+                seed,
+            } => {
+                let mut settings = self.settings.clone();
+                settings.sort = sorting::SortSpec {
+                    mode,
+                    reverse,
+                    seed: seed.unwrap_or_else(|| {
+                        if mode == sorting::SortMode::Shuffle {
+                            self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1)
+                        } else {
+                            self.interaction.sort.seed
+                        }
+                    }),
+                }
+                .normalized();
+                settings
+                    .tab_preferences
+                    .get_mut(&self.interaction.tab)
+                    .expect("tab preferences initialized")
+                    .sort = settings.sort;
                 self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
-            },
+            }
             Command::MovePinned { id, direction } => {
                 let result = self.move_visible_pinned(id, direction)?;
                 if result.moved {
-                    self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                    self.interaction.view_generation =
+                        self.interaction.view_generation.wrapping_add(1);
                 }
                 Ok(serde_json::json!(result))
-            },
-            Command::ScanSharex => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Sharex}),
-            Command::ScanDownloads => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Downloads}),
+            }
+            Command::ScanSharex => self.dispatch(Command::RescanSource {
+                source_id: source_policy::SourceId::Sharex,
+            }),
+            Command::ScanDownloads => self.dispatch(Command::RescanSource {
+                source_id: source_policy::SourceId::Downloads,
+            }),
             Command::CaptureClipboard { trigger } => self.capture_from_event(trigger),
             Command::ActivateWindow => {
-                self.interaction.activation_serial = self.interaction.activation_serial.wrapping_add(1);
-                Ok(serde_json::json!({"activation_requested": true, "serial": self.interaction.activation_serial}))
+                self.interaction.activation_serial =
+                    self.interaction.activation_serial.wrapping_add(1);
+                Ok(
+                    serde_json::json!({"activation_requested": true, "serial": self.interaction.activation_serial}),
+                )
             }
             Command::TableViewGeometry { viewport, content } => {
                 self.require_table_view()?;
-                self.interaction.table_view.geometry(viewport,content)
+                self.interaction.table_view.geometry(viewport, content)
             }
-            Command::ZoomTableView { multiplier, anchor, viewport, content } => {
+            Command::ZoomTableView {
+                multiplier,
+                anchor,
+                viewport,
+                content,
+            } => {
                 self.require_table_view()?;
-                self.interaction.table_view.zoom(multiplier,anchor,viewport,content)?;
+                self.interaction
+                    .table_view
+                    .zoom(multiplier, anchor, viewport, content)?;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::PanTableView { delta, viewport, content } => {
+            Command::PanTableView {
+                delta,
+                viewport,
+                content,
+            } => {
                 self.require_table_view()?;
-                self.interaction.table_view.pan(delta,viewport,content)?;
+                self.interaction.table_view.pan(delta, viewport, content)?;
                 Ok(serde_json::json!(self.interaction))
             }
             Command::FitTableView { viewport, content } => {
                 self.require_table_view()?;
-                self.interaction.table_view.fit(viewport,content)?;
+                self.interaction.table_view.fit(viewport, content)?;
                 Ok(serde_json::json!(self.interaction))
             }
             Command::ResetTableView => {
                 self.require_table_view()?;
-                self.interaction.table_view=Default::default();
+                self.interaction.table_view = Default::default();
                 Ok(serde_json::json!(self.interaction))
             }
             Command::PreviewGeometry { viewport, fitted } => {
-                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
+                if self.interaction.preview.is_none() {
+                    return Err(ApiError::new(
+                        "preview_closed",
+                        "Open an image preview first",
+                    ));
+                }
                 self.interaction.preview_view.geometry(viewport, fitted)
             }
-            Command::ZoomPreview { multiplier, anchor, viewport, fitted } => {
-                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
-                self.interaction.preview_view.zoom(multiplier, anchor, viewport, fitted)?;
+            Command::ZoomPreview {
+                multiplier,
+                anchor,
+                viewport,
+                fitted,
+            } => {
+                if self.interaction.preview.is_none() {
+                    return Err(ApiError::new(
+                        "preview_closed",
+                        "Open an image preview first",
+                    ));
+                }
+                self.interaction
+                    .preview_view
+                    .zoom(multiplier, anchor, viewport, fitted)?;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::PanPreview { delta, viewport, fitted } => {
-                if self.interaction.preview.is_none() { return Err(ApiError::new("preview_closed", "Open an image preview first")); }
+            Command::PanPreview {
+                delta,
+                viewport,
+                fitted,
+            } => {
+                if self.interaction.preview.is_none() {
+                    return Err(ApiError::new(
+                        "preview_closed",
+                        "Open an image preview first",
+                    ));
+                }
                 self.interaction.preview_view.pan(delta, viewport, fitted)?;
                 Ok(serde_json::json!(self.interaction))
             }
             Command::PreviewExternal { id } => self.preview_external(id),
             Command::TogglePreview => {
-                if self.interaction.preview.is_none() && let Some(id)=self.interaction.cursor {
-                    let event=self.get(id)?;
-                    if !file_types::has_internal_preview(&event) { return self.preview_external(event.id); }
+                if self.interaction.preview.is_none()
+                    && let Some(id) = self.interaction.cursor
+                {
+                    let event = self.get(id)?;
+                    if !file_types::has_internal_preview(&event) {
+                        return self.preview_external(event.id);
+                    }
                 }
-                self.interaction.set_preview(if self.interaction.preview.is_some() {
-                    None
-                } else {
-                    self.interaction.cursor
-                });
+                self.interaction
+                    .set_preview(if self.interaction.preview.is_some() {
+                        None
+                    } else {
+                        self.interaction.cursor
+                    });
                 Ok(serde_json::json!(self.interaction))
             }
             Command::NavigatePreview { delta } => {
                 if self.interaction.preview.is_some() {
-                    self.interaction.navigate(delta, interaction::SelectionMode::Replace);
+                    self.interaction
+                        .navigate(delta, interaction::SelectionMode::Replace);
                     self.interaction.set_preview(self.interaction.cursor);
                 }
                 Ok(serde_json::json!(self.interaction))
             }
             Command::DragEventsChecked { items } => self.prepare_drag(items),
-            Command::RunPreparedDrag { token, owner_window } => self.run_prepared_drag(&token, owner_window),
+            Command::RunPreparedDrag {
+                token,
+                owner_window,
+            } => self.run_prepared_drag(&token, owner_window),
             Command::CancelPreparedDrag { token } => self.cancel_prepared_drag(&token),
-            Command::MaintainCache=>{let before=self.usage()?;storage::initialize(&self.db,&self.root)?;Ok(serde_json::json!({"reclaimed_blob_bytes":before.saturating_sub(self.usage()?)}))},
-            Command::CopyEventsChecked{items}=>{
-                if items.is_empty(){return Err(ApiError::new("invalid_argument","No selected objects"));}
-                for item in &items {let event=self.get(item.id).map_err(|_|ApiError::new("stale_selection","Selection no longer exists; refresh the shelf"))?;if event.revision!=item.revision{return Err(ApiError::new("stale_selection","Selected content changed; refresh before copying"));}
-if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_hash(&event.path)?!=expected{return Err(ApiError::new("stale_selection","Source contents changed; copy the current source again"));}}
-                self.dispatch(Command::CopyEvents{ids:items.into_iter().map(|i|i.id).collect()})
+            Command::MaintainCache => {
+                let before = self.usage()?;
+                storage::initialize(&self.db, &self.root)?;
+                Ok(serde_json::json!({"reclaimed_blob_bytes":before.saturating_sub(self.usage()?)}))
+            }
+            Command::CopyEventsChecked { items } => {
+                if items.is_empty() {
+                    return Err(ApiError::new("invalid_argument", "No selected objects"));
+                }
+                for item in &items {
+                    let event = self.get(item.id).map_err(|_| {
+                        ApiError::new(
+                            "stale_selection",
+                            "Selection no longer exists; refresh the shelf",
+                        )
+                    })?;
+                    if event.revision != item.revision {
+                        return Err(ApiError::new(
+                            "stale_selection",
+                            "Selected content changed; refresh before copying",
+                        ));
+                    }
+                    if let Some(expected) = event.revision.strip_prefix("ref:")
+                        && preview::content_hash(&event.path)? != expected
+                    {
+                        return Err(ApiError::new(
+                            "stale_selection",
+                            "Source contents changed; copy the current source again",
+                        ));
+                    }
+                }
+                self.dispatch(Command::CopyEvents {
+                    ids: items.into_iter().map(|i| i.id).collect(),
+                })
             }
             Command::CopyEvents { ids } => {
                 if ids.is_empty() || ids.len() > 1000 {
@@ -750,14 +1071,33 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                     .filter(|id| unique.insert(*id))
                     .map(|id| self.get(id))
                     .collect::<Result<Vec<_>>>()?;
-                let mut plan = copy_out::prepare_with_budget(&self.root, &events,self.quota)
+                let mut plan = copy_out::prepare_with_budget(&self.root, &events, self.quota)
                     .map_err(|e| ApiError::new("copy_error", e))?;
-                let references={let mut statement=self.db.prepare("SELECT path FROM events WHERE blob_hash IS NULL")?;statement.query_map([],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?};
-                plan.protect_references(&references.into_iter().map(PathBuf::from).collect::<Vec<_>>()).map_err(|e|ApiError::new("copy_error",e))?;
+                let references = {
+                    let mut statement = self
+                        .db
+                        .prepare("SELECT path FROM events WHERE blob_hash IS NULL")?;
+                    statement
+                        .query_map([], |r| r.get::<_, String>(0))?
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                };
+                plan.protect_references(
+                    &references
+                        .into_iter()
+                        .map(PathBuf::from)
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(|e| ApiError::new("copy_error", e))?;
                 let receipt = copy_out::commit(&plan, &mut copy_out::NativeClipboard)
                     .map_err(|e| ApiError::new("clipboard_error", e))?;
-                if receipt.failures.is_empty() {self.record_selection_publication(receipt.sequence,&events.iter().map(|event|event.id).collect::<Vec<_>>());}
-                else {self.record_clipboard_publication(receipt.sequence);}
+                if receipt.failures.is_empty() {
+                    self.record_selection_publication(
+                        receipt.sequence,
+                        &events.iter().map(|event| event.id).collect::<Vec<_>>(),
+                    );
+                } else {
+                    self.record_clipboard_publication(receipt.sequence);
+                }
                 Ok(
                     serde_json::json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}),
                 )
@@ -765,7 +1105,12 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::IngestWithOrigin { origin, command } => {
                 if !matches!(
                     *command,
-                    Command::IngestPath { .. } | Command::IngestBytes { .. } | Command::IngestText {..} | Command::IngestTable {..} | Command::IngestTableTsv {..} | Command::IngestTableHtml {..}
+                    Command::IngestPath { .. }
+                        | Command::IngestBytes { .. }
+                        | Command::IngestText { .. }
+                        | Command::IngestTable { .. }
+                        | Command::IngestTableTsv { .. }
+                        | Command::IngestTableHtml { .. }
                 ) {
                     return Err(ApiError::new(
                         "invalid_argument",
@@ -773,18 +1118,36 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                     ));
                 }
                 let clipboard_source = match command.as_ref() {
-                    Command::IngestPath { source, .. } | Command::IngestBytes { source, .. } | Command::IngestText {source,..} | Command::IngestTable {source,..} | Command::IngestTableTsv {source,..} | Command::IngestTableHtml {source,..} => source.starts_with("clipboard_"),
+                    Command::IngestPath { source, .. }
+                    | Command::IngestBytes { source, .. }
+                    | Command::IngestText { source, .. }
+                    | Command::IngestTable { source, .. }
+                    | Command::IngestTableTsv { source, .. }
+                    | Command::IngestTableHtml { source, .. } => source.starts_with("clipboard_"),
                     _ => false,
                 };
-                if clipboard_source && origin.source_app.as_deref().is_some_and(|app| app.eq_ignore_ascii_case("sharex")) {
-                    return Ok(serde_json::json!({"ignored":true,"reason":"sharex_uses_folder_source"}));
+                if clipboard_source
+                    && origin
+                        .source_app
+                        .as_deref()
+                        .is_some_and(|app| app.eq_ignore_ascii_case("sharex"))
+                {
+                    return Ok(
+                        serde_json::json!({"ignored":true,"reason":"sharex_uses_folder_source"}),
+                    );
                 }
                 self.ingest_origin = origin;
                 let result = self.dispatch(*command);
                 self.ingest_origin = origin::Origin::default();
                 result
             }
-            Command::DeleteSelection { ids, confirmed } => if ids.iter().any(|id|*id<0) {self.delete_folder_selection(ids,confirmed)}else{self.delete_selection(ids, confirmed)},
+            Command::DeleteSelection { ids, confirmed } => {
+                if ids.iter().any(|id| *id < 0) {
+                    self.delete_folder_selection(ids, confirmed)
+                } else {
+                    self.delete_selection(ids, confirmed)
+                }
+            }
             Command::DeleteEvents { ids, confirmed } => {
                 let result =
                     delete_shelf::delete_events(&mut self.db, &self.root, &ids, confirmed)?;
@@ -815,32 +1178,74 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 .map_err(|e| ApiError::new(&e.code, e.message)),
             Command::EmojiFonts => emoji_fonts::catalogue(&self.root, &self.settings.emoji_font),
             Command::ResolveEmojiFont { id } => emoji_fonts::resolve(&self.root, &id),
-            Command::ImportEmojiFont { path } => emoji_fonts::commit(&self.root, emoji_fonts::prepare(&path)?),
+            Command::ImportEmojiFont { path } => {
+                emoji_fonts::commit(&self.root, emoji_fonts::prepare(&path)?)
+            }
             Command::GetSettings => Ok(serde_json::json!(self.settings)),
             Command::SetSettings { mut settings } => {
                 // Older clients omit the new map. Preserve existing per-tab settings.
                 for (tab, profile) in &self.settings.tab_preferences {
-                    settings.tab_preferences.entry(*tab).or_insert_with(|| profile.clone());
+                    settings
+                        .tab_preferences
+                        .entry(*tab)
+                        .or_insert_with(|| profile.clone());
                 }
                 settings.materialize_tab_preferences();
                 // Legacy field edits affect the active tab unless that profile was explicitly edited.
                 let tab = self.interaction.tab;
                 let old = self.settings.tab_preferences(tab);
-                let profile = settings.tab_preferences.get_mut(&tab).expect("tab preferences initialized");
-                if settings.sort != self.settings.sort && profile.sort == old.sort { profile.sort = settings.sort.normalized(); }
-                if settings.default_view != self.settings.default_view && profile.view == old.view { profile.view = settings.default_view; }
-                if settings.gallery_columns != self.settings.gallery_columns && profile.gallery_columns == old.gallery_columns { profile.gallery_columns = settings.gallery_columns; }
-                if settings.stream_rows != self.settings.stream_rows && profile.stream_rows == old.stream_rows { profile.stream_rows = settings.stream_rows; }
-                if tab == interaction::ShelfTab::Pods && settings.pods_columns != self.settings.pods_columns && profile.compact_columns == old.compact_columns { profile.compact_columns = settings.pods_columns; }
-                if tab == interaction::ShelfTab::Links && settings.links_columns != self.settings.links_columns && profile.compact_columns == old.compact_columns { profile.compact_columns = settings.links_columns; }
+                let profile = settings
+                    .tab_preferences
+                    .get_mut(&tab)
+                    .expect("tab preferences initialized");
+                if settings.sort != self.settings.sort && profile.sort == old.sort {
+                    profile.sort = settings.sort.normalized();
+                }
+                if settings.default_view != self.settings.default_view && profile.view == old.view {
+                    profile.view = settings.default_view;
+                }
+                if settings.gallery_columns != self.settings.gallery_columns
+                    && profile.gallery_columns == old.gallery_columns
+                {
+                    profile.gallery_columns = settings.gallery_columns;
+                }
+                if settings.stream_rows != self.settings.stream_rows
+                    && profile.stream_rows == old.stream_rows
+                {
+                    profile.stream_rows = settings.stream_rows;
+                }
+                if tab == interaction::ShelfTab::Pods
+                    && settings.pods_columns != self.settings.pods_columns
+                    && profile.compact_columns == old.compact_columns
+                {
+                    profile.compact_columns = settings.pods_columns;
+                }
+                if tab == interaction::ShelfTab::Links
+                    && settings.links_columns != self.settings.links_columns
+                    && profile.compact_columns == old.compact_columns
+                {
+                    profile.compact_columns = settings.links_columns;
+                }
                 if settings.emoji_font != "apple" && settings.emoji_font != "system" {
                     let font = emoji_fonts::resolve(&self.root, &settings.emoji_font)?;
-                    if font["available"] != true { return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен")); }
+                    if font["available"] != true {
+                        return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен"));
+                    }
                 }
-                if let Some(id)=&settings.theme.custom_background {theme_backgrounds::get(&self.root,id)?;}
-                if let Some(id)=&settings.theme.video_background {
-                    if !video_backgrounds::valid_id(id) {return Err(ApiError::new("invalid_video","Invalid video background ID"));}
-                    if settings.theme.video_is_enabled() {video_backgrounds::get(&self.root,id).map_err(|e|ApiError::new("video_background_error",e))?;}
+                if let Some(id) = &settings.theme.custom_background {
+                    theme_backgrounds::get(&self.root, id)?;
+                }
+                if let Some(id) = &settings.theme.video_background {
+                    if !video_backgrounds::valid_id(id) {
+                        return Err(ApiError::new(
+                            "invalid_video",
+                            "Invalid video background ID",
+                        ));
+                    }
+                    if settings.theme.video_is_enabled() {
+                        video_backgrounds::get(&self.root, id)
+                            .map_err(|e| ApiError::new("video_background_error", e))?;
+                    }
                 }
                 settings
                     .validate(self.usage()?)
@@ -848,15 +1253,40 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 let document = serde_json::to_string(&settings)
                     .map_err(|e| ApiError::new("settings_error", e))?;
                 self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
-                if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
-                if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
-                let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder || self.settings.hidden_tabs!=settings.hidden_tabs;
-                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) || self.settings.tab_enabled(interaction::ShelfTab::Pods)!=settings.tab_enabled(interaction::ShelfTab::Pods) || self.settings.tab_enabled(interaction::ShelfTab::Files)!=settings.tab_enabled(interaction::ShelfTab::Files) {self.capture_events.cancel();}
+                if self.settings.sharex_folder != settings.sharex_folder {
+                    self.sharex_scanner = Default::default();
+                }
+                if self.settings.downloads_folder != settings.downloads_folder
+                    || self.settings.downloads_enabled != settings.downloads_enabled
+                {
+                    self.downloads_scanner = Default::default();
+                }
+                let sources_changed = self.settings.sharex_folder != settings.sharex_folder
+                    || self.settings.downloads_enabled != settings.downloads_enabled
+                    || self.settings.downloads_folder != settings.downloads_folder
+                    || self.settings.hidden_tabs != settings.hidden_tabs;
+                if self.settings.tab_enabled(interaction::ShelfTab::Images)
+                    != settings.tab_enabled(interaction::ShelfTab::Images)
+                    || self.settings.tab_enabled(interaction::ShelfTab::Text)
+                        != settings.tab_enabled(interaction::ShelfTab::Text)
+                    || self.settings.tab_enabled(interaction::ShelfTab::Links)
+                        != settings.tab_enabled(interaction::ShelfTab::Links)
+                    || self.settings.tab_enabled(interaction::ShelfTab::Tables)
+                        != settings.tab_enabled(interaction::ShelfTab::Tables)
+                    || self.settings.tab_enabled(interaction::ShelfTab::Pods)
+                        != settings.tab_enabled(interaction::ShelfTab::Pods)
+                    || self.settings.tab_enabled(interaction::ShelfTab::Files)
+                        != settings.tab_enabled(interaction::ShelfTab::Files)
+                {
+                    self.capture_events.cancel();
+                }
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
                 self.interaction.apply_tab_preferences(&self.settings);
                 self.normalize_tabs();
-                if sources_changed {self.source_configured = false;}
+                if sources_changed {
+                    self.source_configured = false;
+                }
                 self.configure_sources(self.source_runtime_started)?;
                 Ok(serde_json::json!(self.settings))
             }
@@ -869,8 +1299,28 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.interaction.settings_open = false;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::Search{query,limit}=>{let events=storage::query_events(&self.db,&query,limit,None)?;let cursor=if events.len()==limit as usize{events.last().map(|e|e.id)}else{None};Ok(serde_json::json!({"events":events,"next_cursor":cursor}))},
-            Command::SearchPage{query,limit,after_id}=>{let events=storage::query_events(&self.db,&query,limit,after_id)?;let cursor=if events.len()==limit as usize{events.last().map(|e|e.id)}else{None};Ok(serde_json::json!({"events":events,"next_cursor":cursor}))},
+            Command::Search { query, limit } => {
+                let events = storage::query_events(&self.db, &query, limit, None)?;
+                let cursor = if events.len() == limit as usize {
+                    events.last().map(|e| e.id)
+                } else {
+                    None
+                };
+                Ok(serde_json::json!({"events":events,"next_cursor":cursor}))
+            }
+            Command::SearchPage {
+                query,
+                limit,
+                after_id,
+            } => {
+                let events = storage::query_events(&self.db, &query, limit, after_id)?;
+                let cursor = if events.len() == limit as usize {
+                    events.last().map(|e| e.id)
+                } else {
+                    None
+                };
+                Ok(serde_json::json!({"events":events,"next_cursor":cursor}))
+            }
             Command::Interaction => Ok(serde_json::json!(self.interaction)),
             Command::SetVisible { ids } => {
                 self.interaction.visible(ids);
@@ -885,17 +1335,31 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 Ok(serde_json::json!(self.interaction))
             }
             Command::SelectAll => {
-                if self.interaction.tab == interaction::ShelfTab::All && self.work_folder.current().is_none() {
+                if self.interaction.tab == interaction::ShelfTab::All
+                    && self.work_folder.current().is_none()
+                {
                     self.interaction.select_all(Vec::new());
                 } else {
                     let mut ids = Vec::new();
                     let mut cursor: Option<String> = None;
                     loop {
-                        let page = self.browse_shelf_sorted(&self.interaction.browse_query, 1000, cursor.as_deref())?;
-                        let events = page["events"].as_array().ok_or_else(|| ApiError::new("invalid_page", "Shelf page has no events"))?;
-                        for event in events { ids.push(event["id"].as_i64().ok_or_else(|| ApiError::new("invalid_page", "Shelf event has no ID"))?); }
+                        let page = self.browse_shelf_sorted(
+                            &self.interaction.browse_query,
+                            1000,
+                            cursor.as_deref(),
+                        )?;
+                        let events = page["events"].as_array().ok_or_else(|| {
+                            ApiError::new("invalid_page", "Shelf page has no events")
+                        })?;
+                        for event in events {
+                            ids.push(event["id"].as_i64().ok_or_else(|| {
+                                ApiError::new("invalid_page", "Shelf event has no ID")
+                            })?);
+                        }
                         cursor = page["next_cursor"].as_str().map(str::to_owned);
-                        if cursor.is_none() { break; }
+                        if cursor.is_none() {
+                            break;
+                        }
                     }
                     self.interaction.select_all(ids);
                 }
@@ -907,14 +1371,20 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             }
             Command::SetView { view } => {
                 let mut settings = self.settings.clone();
-                settings.tab_preferences.get_mut(&self.interaction.tab).expect("tab preferences initialized").view = view;
+                settings
+                    .tab_preferences
+                    .get_mut(&self.interaction.tab)
+                    .expect("tab preferences initialized")
+                    .view = view;
                 self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
             }
             Command::OpenCurrent => {
-                if let Some(id)=self.interaction.cursor {
-                    let event=self.get(id)?;
-                    if !file_types::has_internal_preview(&event) { return self.preview_external(event.id); }
+                if let Some(id) = self.interaction.cursor {
+                    let event = self.get(id)?;
+                    if !file_types::has_internal_preview(&event) {
+                        return self.preview_external(event.id);
+                    }
                 }
                 self.interaction.set_preview(self.interaction.cursor);
                 Ok(serde_json::json!(self.interaction))
@@ -923,10 +1393,35 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::Actions => Ok(serde_json::Value::Array(actions::DEFS.iter().filter(|d|d.in_palette && self.action_available(d.id)).map(|d|serde_json::json!({"id":d.id,"label":self.action_label(d.id,d.label),"group":d.group,"shortcut":self.shortcuts.binding(d.id)})).collect())),
-            Command::RunAction{id}=>match actions::resolve(&id,&self.interaction,self.capture_enabled) {Some(actions::Dispatch::Command(command))=>self.dispatch(*command),Some(actions::Dispatch::Intent(value))=>Ok(value),None=>Err(ApiError::new("unknown_action","Unknown action"))},
-            Command::PreviewImage{id,max_edge}=>preview::render(&self.root,&self.get(id)?,max_edge),
-            Command::PreviewFile{id,max_edge}=>file_visual::render(&self.root,&self.get(id)?,max_edge),
+            Command::Actions => {
+                let mut definitions: Vec<_> = actions::DEFS
+                    .iter()
+                    .filter(|d| d.in_palette && self.action_available(d.id))
+                    .collect();
+                definitions.sort_by_key(|d| actions::palette_order(d.id));
+                Ok(serde_json::Value::Array(definitions.into_iter().map(|d| {
+                    serde_json::json!({
+                        "id": d.id,
+                        "label": self.action_label(d.id, actions::palette_label(d.id, d.label)),
+                        "group": actions::palette_group(d.id, d.group),
+                        "shortcut": self.shortcuts.binding(d.id),
+                        "search_terms": actions::palette_terms(d.id),
+                    })
+                }).collect()))
+            }
+            Command::RunAction { id } => {
+                match actions::resolve(&id, &self.interaction, self.capture_enabled) {
+                    Some(actions::Dispatch::Command(command)) => self.dispatch(*command),
+                    Some(actions::Dispatch::Intent(value)) => Ok(value),
+                    None => Err(ApiError::new("unknown_action", "Unknown action")),
+                }
+            }
+            Command::PreviewImage { id, max_edge } => {
+                preview::render(&self.root, &self.get(id)?, max_edge)
+            }
+            Command::PreviewFile { id, max_edge } => {
+                file_visual::render(&self.root, &self.get(id)?, max_edge)
+            }
             Command::SetCaptureEnabled { enabled } => {
                 self.capture_events.cancel();
                 self.capture_enabled = enabled;
@@ -942,13 +1437,20 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::Status => Ok(
                 serde_json::json!({"cached_bytes":self.usage()?,"quota_bytes":self.quota,"capture_enabled":self.capture_enabled,"quota_policy":"reject_new","session_cleanup":"not_implemented","diagnostics":self.diagnostics.as_ref().map(|l|l.status())}),
             ),
-            Command::List{limit}=>Ok(serde_json::json!({"events":storage::query_events(&self.db,"",limit,None)?})),
+            Command::List { limit } => {
+                Ok(serde_json::json!({"events":storage::query_events(&self.db,"",limit,None)?}))
+            }
             Command::Get { id } => Ok(serde_json::json!(self.get(id)?)),
             Command::IngestPath { path, source } => {
                 self.check_ingest_enabled(&path.to_string_lossy())?;
                 validate_source(&source)?;
                 let path = fs::canonicalize(path)?;
-                if path.starts_with(&self.root){return Err(ApiError::new("managed_source","Katran's managed files cannot be ingested as external references"));}
+                if path.starts_with(&self.root) {
+                    return Err(ApiError::new(
+                        "managed_source",
+                        "Katran's managed files cannot be ingested as external references",
+                    ));
+                }
                 let meta = fs::metadata(&path)?;
                 if !meta.is_file() {
                     return Err(ApiError::new("invalid_argument", "Expected regular file"));
@@ -961,7 +1463,27 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 let id = self.insert(&name, &source, &path, meta.len(), None)?;
                 Ok(serde_json::json!(self.get(id)?))
             }
-            Command::IngestBytes{name,bytes,source}=>{self.check_ingest_enabled(&name)?;validate_name(&name)?;validate_source(&source)?;let id=storage::ingest_bytes(&mut self.db,&self.root,self.quota,storage::ByteIngest{name:&name,source:&source,bytes:&bytes,origin:&self.ingest_origin})?;Ok(serde_json::json!(self.get(id)?))},
+            Command::IngestBytes {
+                name,
+                bytes,
+                source,
+            } => {
+                self.check_ingest_enabled(&name)?;
+                validate_name(&name)?;
+                validate_source(&source)?;
+                let id = storage::ingest_bytes(
+                    &mut self.db,
+                    &self.root,
+                    self.quota,
+                    storage::ByteIngest {
+                        name: &name,
+                        source: &source,
+                        bytes: &bytes,
+                        origin: &self.ingest_origin,
+                    },
+                )?;
+                Ok(serde_json::json!(self.get(id)?))
+            }
             Command::Import { ids, destination } => {
                 if ids.is_empty() || ids.len() > 1000 {
                     return Err(ApiError::new(

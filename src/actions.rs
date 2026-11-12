@@ -12,6 +12,103 @@ pub struct Definition {
     pub group: &'static str,
     pub in_palette: bool,
 }
+
+/// Stable presentation order for Actions. Command IDs and shortcut defaults
+/// remain independent of menu layout.
+pub fn palette_order(id: &str) -> usize {
+    const ORDER: &[&str] = &[
+        "paste_previous",
+        "copy",
+        "copy_text",
+        "preview",
+        "open",
+        "open_with",
+        "quicklook",
+        "reveal",
+        "save",
+        "delete",
+        "transfer_copy",
+        "transfer_selection",
+        "add_to_katran",
+        "shelf_search",
+        "select_all",
+        "tab_toggle",
+        "toggle_pinned_view",
+        "refresh",
+        "gallery",
+        "list",
+        "density_less",
+        "density_more",
+        "pinned_move_up",
+        "pinned_move_down",
+        "use_as_background",
+        "use_as_video_background",
+        "settings",
+        "tabs_settings",
+        "capture",
+        "cleanup",
+        "restart",
+        "quit",
+    ];
+    ORDER
+        .iter()
+        .position(|candidate| *candidate == id)
+        .unwrap_or(ORDER.len())
+}
+
+pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
+    match id {
+        "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
+        | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
+        "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
+        "shelf_search" | "select_all" | "tab_toggle" | "toggle_pinned_view" | "refresh" => {
+            "Навигация и выделение"
+        }
+        "gallery" | "list" | "density_less" | "density_more" => "Отображение",
+        "pinned_move_up" | "pinned_move_down" => "Закреплённые",
+        "use_as_background" | "use_as_video_background" => "Оформление",
+        "settings" | "tabs_settings" | "capture" | "cleanup" | "restart" | "quit" => "Приложение",
+        _ => fallback,
+    }
+}
+
+pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
+    match id {
+        "paste_previous" => "Вставить в предыдущее окно",
+        "copy" => "Копировать выбранное",
+        "preview" => "Открыть просмотр / вернуться на полку",
+        "open" => "Открыть выбранное",
+        "quicklook" => "Просмотреть через QuickLook",
+        "save" => "Сохранить выбранное в папку…",
+        "delete" => "Удалить выбранное…",
+        "refresh" => "Обновить содержимое",
+        "gallery" => "Галерея",
+        "list" => "Поток",
+        "density_less" => "Увеличить карточки",
+        "density_more" => "Уменьшить карточки",
+        "pinned_move_up" => "Поднять в порядке закреплённых",
+        "pinned_move_down" => "Опустить в порядке закреплённых",
+        "use_as_background" => "Использовать как фон Катрана",
+        "use_as_video_background" => "Использовать как видеофон Катрана",
+        "cleanup" => "Повторить очистку кэша",
+        _ => fallback,
+    }
+}
+
+pub fn palette_terms(id: &str) -> &'static str {
+    match id {
+        "copy" | "copy_text" | "paste_previous" => "буфер clipboard копия вставить",
+        "transfer_copy" | "transfer_selection" | "add_to_katran" | "save" => {
+            "папка folder импорт перенос копия"
+        }
+        "use_as_background" | "use_as_video_background" => "фон background обои видео",
+        "quit" => "выход закрыть",
+        "restart" => "перезапуск перезагрузить",
+        "quicklook" | "preview" => "просмотр превью preview",
+        "toggle_pinned_view" | "pinned_move_up" | "pinned_move_down" => "pin pinned закрепить",
+        _ => "",
+    }
+}
 pub const DEFS: &[Definition] = &[
     Definition {
         id: "pinned_move_up",

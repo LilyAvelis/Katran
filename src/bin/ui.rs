@@ -2082,7 +2082,7 @@ mod tests {
             app.refresh();
             app.state = app.call(Command::SetVisible { ids: vec![id] });
             app.actions = palette;
-            app.action_query = "Открыть через QuickLook".into();
+            app.action_query = "Просмотреть через QuickLook".into();
             let ctx = egui::Context::default();
             ui_style::install(&ctx);
             frame(
@@ -4007,7 +4007,7 @@ mod tests {
         assert!(app.state["preview"].is_null());
         frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL);
         assert!(app.actions);
-        app.action_query = "Вид: поток".into();
+        app.action_query = "Поток".into();
         frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert!(!app.actions);
         assert_eq!(app.call(Command::Interaction)["view"], "list");

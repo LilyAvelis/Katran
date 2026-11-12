@@ -77,11 +77,35 @@ impl Service {
             )
         } else if id == "capture" {
             if self.capture_enabled {
-                "Приостановить захват"
+                "Приостановить захват буфера"
             } else {
-                "Включить захват"
+                "Включить захват буфера"
             }
             .into()
+        } else if id == "tab_toggle" {
+            if self.interaction.tab == ShelfTab::All {
+                format!("Вернуться в {}", label(self.interaction.last_tab))
+            } else {
+                "Перейти в Folder".into()
+            }
+        } else if id == "toggle_pinned_view" {
+            if self.interaction.pinned_only {
+                "Показать все в категории".into()
+            } else {
+                "Показать закреплённые".into()
+            }
+        } else if id == "transfer_copy" {
+            if self.interaction.tab == ShelfTab::All {
+                "Копировать из Folder в Катран".into()
+            } else {
+                "Копировать в Folder".into()
+            }
+        } else if id == "transfer_selection" {
+            if self.interaction.tab == ShelfTab::All {
+                "Перенести из Folder в Катран".into()
+            } else {
+                "Перенести в Folder".into()
+            }
         } else {
             fallback.into()
         }
