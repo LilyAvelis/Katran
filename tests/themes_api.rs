@@ -4,6 +4,33 @@ use katran::{
 };
 use serde_json::Value;
 #[test]
+fn window_animation_preferences_round_trip_through_theme_api() {
+    let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert_eq!(legacy.animation_show_style, "slide_down");
+    assert_eq!(legacy.animation_show_ms, 220);
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    let theme = ThemePreferences {
+        animation_show_style: "none".into(),
+        animation_hide_style: "slide_left".into(),
+        animation_show_ms: 80,
+        animation_hide_ms: 350,
+        ..Default::default()
+    };
+    call(
+        &mut api,
+        Command::SetTheme {
+            theme: theme.clone(),
+        },
+    );
+    drop(api);
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"],
+        serde_json::to_value(theme).unwrap()
+    );
+}
+#[test]
 fn scrollbar_preferences_default_and_persist_independently() {
     let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
     assert!(!legacy.scrollbar_glass);

@@ -106,6 +106,24 @@ impl Settings {
         {
             return Err("Плавная прокрутка: скорость 25–300%, инерция 50–1000 мс".into());
         }
+        for (style, duration) in [
+            (
+                &self.theme.animation_show_style,
+                self.theme.animation_show_ms,
+            ),
+            (
+                &self.theme.animation_hide_style,
+                self.theme.animation_hide_ms,
+            ),
+        ] {
+            if !matches!(
+                style.as_str(),
+                "none" | "slide_down" | "slide_up" | "slide_left" | "slide_right"
+            ) || !(50..=800).contains(&duration)
+            {
+                return Err("Анимация окна: выберите доступный стиль и время 50–800 мс".into());
+            }
+        }
         if self.theme.optical_strength > 100 {
             return Err("Сила оптического стекла: от 0 до 100".into());
         }

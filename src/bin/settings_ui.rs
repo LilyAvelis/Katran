@@ -878,6 +878,25 @@ impl State {
            });
           });
          }
+         SettingsSection::group(ui,"Анимации окна",|ui|{
+          let styles = [("none","Без анимации"),("slide_down","Сдвиг вниз"),("slide_up","Сдвиг вверх"),("slide_left","Сдвиг влево"),("slide_right","Сдвиг вправо")];
+          SettingsRow::show(ui,"Появление","Как окно появляется при вызове.",|ui|{
+           egui::ComboBox::from_id_salt("animation-show-style")
+            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_show_style).map_or("Выбрать",|(_,label)|*label))
+            .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_show_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
+          });
+          SettingsRow::show(ui,"Время появления","От 50 до 800 мс; при режиме без анимации не используется.",|ui|{
+           if ui.add_enabled(theme.animation_show_style!="none",egui::Slider::new(&mut theme.animation_show_ms,50..=800).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+          });
+          SettingsRow::show(ui,"Исчезновение","Как окно скрывается.",|ui|{
+           egui::ComboBox::from_id_salt("animation-hide-style")
+            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_hide_style).map_or("Выбрать",|(_,label)|*label))
+            .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_hide_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
+          });
+          SettingsRow::show(ui,"Время исчезновения","От 50 до 800 мс; при режиме без анимации не используется.",|ui|{
+           if ui.add_enabled(theme.animation_hide_style!="none",egui::Slider::new(&mut theme.animation_hide_ms,50..=800).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+          });
+         });
          SettingsSection::group(ui,"Прокрутка",|ui|{
           SettingsRow::show(ui,"Стеклянная полоса прокрутки","Прозрачное оформление полосы прокрутки полки.",|ui|{
            if ui.checkbox(&mut theme.scrollbar_glass,"Включить").changed(){theme_intent=Some(theme.clone());}

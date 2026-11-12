@@ -33,7 +33,17 @@ impl Shelf {
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
         self.call(Command::SetWindowVisibility { visible });
-        if !visible && self.overlay_ui.animation.start_hide(self.native_window) {
+        let theme = serde_json::from_value::<katran::theme::ThemePreferences>(
+            self.call(Command::GetSettings)["theme"].clone(),
+        )
+        .unwrap_or_default();
+        if !visible
+            && self.overlay_ui.animation.start_hide_with(
+                self.native_window,
+                &theme.animation_hide_style,
+                theme.animation_hide_ms.into(),
+            )
+        {
             self.overlay_ui.summoned = false;
             ctx.request_repaint();
             return;
@@ -209,10 +219,17 @@ impl Shelf {
                             area,
                         ) {
                             Ok(()) => {
-                                self.overlay_ui.animation.start(
+                                let theme =
+                                    serde_json::from_value::<katran::theme::ThemePreferences>(
+                                        self.call(Command::GetSettings)["theme"].clone(),
+                                    )
+                                    .unwrap_or_default();
+                                self.overlay_ui.animation.start_with(
                                     self.native_window,
                                     self.video_background.frame_serial(),
                                     self.video_background_source.is_some(),
+                                    &theme.animation_show_style,
+                                    theme.animation_show_ms.into(),
                                 );
                                 self.overlay_ui.summoned = true;
                                 self.message.clear();

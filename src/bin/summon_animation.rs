@@ -16,6 +16,47 @@ struct Rect {
     height: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Style {
+    None,
+    Down,
+    Up,
+    Left,
+    Right,
+}
+impl Style {
+    fn parse(value: &str) -> Self {
+        match value {
+            "none" => Self::None,
+            "slide_up" => Self::Up,
+            "slide_left" => Self::Left,
+            "slide_right" => Self::Right,
+            _ => Self::Down,
+        }
+    }
+    fn displaced(self, original: Rect, delta: i32) -> Rect {
+        match self {
+            Self::None => original,
+            Self::Down => Rect {
+                y: original.y.saturating_add(delta),
+                ..original
+            },
+            Self::Up => Rect {
+                y: original.y.saturating_sub(delta),
+                ..original
+            },
+            Self::Left => Rect {
+                x: original.x.saturating_sub(delta),
+                ..original
+            },
+            Self::Right => Rect {
+                x: original.x.saturating_add(delta),
+                ..original
+            },
+        }
+    }
+}
+
 struct Motion {
     original: Rect,
     expected: Rect,
@@ -24,6 +65,9 @@ struct Motion {
     waits_for_video: bool,
     ready_since: Option<Instant>,
     hiding: bool,
+    style: Style,
+    duration: Duration,
+    deadline: Duration,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -33,22 +77,39 @@ pub(super) struct State {
 
 // Most movement takes 220 ms; the last few pixels cover decoder startup until
 // a fresh frame arrives, with a hard deadline so failed media cannot hold it.
-fn offset(elapsed: Duration, ready: bool) -> i32 {
-    (OFFSET as f32 * avilon_egui::transition::reveal_remaining(elapsed, ready, MIN, CAP)).ceil()
-        as i32
+fn offset(elapsed: Duration, ready: bool, duration: Duration, deadline: Duration) -> i32 {
+    (OFFSET as f32 * avilon_egui::transition::reveal_remaining(elapsed, ready, duration, deadline))
+        .ceil() as i32
 }
 impl State {
+    #[allow(dead_code)]
     pub(super) fn start(&mut self, hwnd: u64, serial: u64, waits_for_video: bool) {
+        self.start_with(hwnd, serial, waits_for_video, "slide_down", 220);
+    }
+    pub(super) fn start_with(
+        &mut self,
+        hwnd: u64,
+        serial: u64,
+        waits_for_video: bool,
+        style: &str,
+        duration_ms: u64,
+    ) {
         self.cancel(hwnd);
         self.hidden = false;
-        if !native::animations_enabled() {
+        let style = Style::parse(style);
+        if style == Style::None || duration_ms == 0 || !native::animations_enabled() {
             return;
         }
+        let duration = Duration::from_millis(duration_ms.clamp(50, 800));
+        // Preserve the existing bounded video-frame wait for the default motion.
+        let waits_for_video = waits_for_video && style == Style::Down && duration == MIN;
+        let deadline = if waits_for_video {
+            CAP
+        } else {
+            duration + Duration::from_millis(1)
+        };
         if let Some(original) = native::rect(hwnd) {
-            let expected = Rect {
-                y: original.y + OFFSET,
-                ..original
-            };
+            let expected = style.displaced(original, OFFSET);
             if native::move_to(hwnd, expected) {
                 self.motion = Some(Motion {
                     original,
@@ -58,6 +119,9 @@ impl State {
                     waits_for_video,
                     ready_since: None,
                     hiding: false,
+                    style,
+                    duration,
+                    deadline,
                 });
             }
         }
@@ -79,21 +143,19 @@ impl State {
         }
         let settled = frame_settled(m.waits_for_video, m.ready_since.map(|t| t.elapsed()));
         let delta = if m.hiding {
-            (OFFSET as f32 * avilon_egui::transition::dismiss_progress(elapsed, MIN)).floor() as i32
+            (OFFSET as f32 * avilon_egui::transition::dismiss_progress(elapsed, m.duration)).floor()
+                as i32
         } else {
-            offset(elapsed, settled)
+            offset(elapsed, settled, m.duration, m.deadline)
         };
-        let next = Rect {
-            y: m.original.y + delta,
-            ..m.original
-        };
+        let next = m.style.displaced(m.original, delta);
         if next != m.expected && !native::move_to(hwnd, next) {
             self.hidden |= m.hiding;
             self.motion = None;
             return false;
         }
         m.expected = next;
-        if m.hiding && elapsed >= MIN {
+        if m.hiding && elapsed >= m.duration {
             native::hide(hwnd);
             native::move_to(hwnd, m.original);
             self.motion = None;
@@ -110,10 +172,17 @@ impl State {
     pub(super) fn take_hidden(&mut self) -> bool {
         std::mem::take(&mut self.hidden)
     }
+    #[allow(dead_code)]
     pub(super) fn start_hide(&mut self, hwnd: u64) -> bool {
+        self.start_hide_with(hwnd, "slide_down", 220)
+    }
+    pub(super) fn start_hide_with(&mut self, hwnd: u64, style: &str, duration_ms: u64) -> bool {
         self.cancel(hwnd);
         self.hidden = false;
-        if native::animations_enabled()
+        let style = Style::parse(style);
+        if style != Style::None
+            && duration_ms != 0
+            && native::animations_enabled()
             && let Some(original) = native::rect(hwnd)
         {
             self.motion = Some(Motion {
@@ -124,6 +193,9 @@ impl State {
                 waits_for_video: false,
                 ready_since: None,
                 hiding: true,
+                style,
+                duration: Duration::from_millis(duration_ms.clamp(50, 800)),
+                deadline: Duration::ZERO,
             });
             true
         } else {
@@ -245,6 +317,33 @@ mod native {
 mod tests {
     use super::*;
     #[test]
+    fn styles_move_along_the_requested_axis_and_unknown_uses_default() {
+        let r = Rect {
+            x: 100,
+            y: 200,
+            width: 300,
+            height: 400,
+        };
+        assert_eq!(Style::parse("none").displaced(r, 16), r);
+        assert_eq!(Style::parse("slide_down").displaced(r, 16).y, 216);
+        assert_eq!(Style::parse("slide_up").displaced(r, 16).y, 184);
+        assert_eq!(Style::parse("slide_left").displaced(r, 16).x, 84);
+        assert_eq!(Style::parse("slide_right").displaced(r, 16).x, 116);
+        assert_eq!(Style::parse("unknown"), Style::Down);
+    }
+    #[test]
+    fn custom_duration_finishes_on_schedule() {
+        for ms in [50, 100, 400, 800] {
+            let d = Duration::from_millis(ms);
+            assert_eq!(
+                offset(Duration::ZERO, true, d, d + Duration::from_millis(1)),
+                16
+            );
+            assert_eq!(offset(d, true, d, d + Duration::from_millis(1)), 0);
+            assert_eq!(avilon_egui::transition::dismiss_progress(d, d), 1.0);
+        }
+    }
+    #[test]
     fn fresh_video_gets_one_hundred_milliseconds_to_advance() {
         assert!(!frame_settled(true, None));
         assert!(!frame_settled(true, Some(Duration::from_millis(99))));
@@ -258,12 +357,12 @@ mod tests {
     }
     #[test]
     fn motion_waits_for_frame_but_has_a_deadline() {
-        assert_eq!(offset(Duration::ZERO, false), 16);
-        assert!(offset(MIN, false) > 0);
-        assert_eq!(offset(MIN, true), 0);
-        assert_eq!(offset(CAP, false), 0);
+        assert_eq!(offset(Duration::ZERO, false, MIN, CAP), 16);
+        assert!(offset(MIN, false, MIN, CAP) > 0);
+        assert_eq!(offset(MIN, true, MIN, CAP), 0);
+        assert_eq!(offset(CAP, false, MIN, CAP), 0);
         let values: Vec<_> = (0..=650)
-            .map(|ms| offset(Duration::from_millis(ms), false))
+            .map(|ms| offset(Duration::from_millis(ms), false, MIN, CAP))
             .collect();
         assert!(values.windows(2).all(|w| w[0] >= w[1]));
     }
