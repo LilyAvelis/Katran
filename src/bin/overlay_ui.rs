@@ -13,6 +13,7 @@ pub(super) struct State {
     summoned: bool,
     registration_status: String,
     recorder_suspended: bool,
+    registration_retry_at: Option<Instant>,
     quitting: bool,
 }
 impl Shelf {
@@ -147,7 +148,12 @@ impl Shelf {
             .trim()
             .to_owned();
         let retry = self.settings_ui.take_overlay_retry();
-        if retry || self.overlay_ui.configured.as_deref() != Some(&binding) {
+        let timed_retry = self
+            .overlay_ui
+            .registration_retry_at
+            .is_some_and(|at| Instant::now() >= at);
+        if retry || timed_retry || self.overlay_ui.configured.as_deref() != Some(&binding) {
+            self.overlay_ui.registration_retry_at = None;
             self.overlay_ui.configured = Some(binding.clone());
             #[cfg(windows)]
             {
@@ -163,8 +169,19 @@ impl Shelf {
                         Ok(listener) => {
                             self.overlay_ui.listener = Some(listener);
                             self.overlay_ui.registration_status = format!("Активно: {binding}");
+                            if let Some(log) = &self.logger {
+                                log.record(
+                                    "hotkey_registered",
+                                    serde_json::json!({"binding":binding}),
+                                );
+                            }
                         }
                         Err(error) => {
+                            self.overlay_ui.registration_retry_at =
+                                Some(Instant::now() + Duration::from_secs(3));
+                            if let Some(log) = &self.logger {
+                                log.record("hotkey_registration_failed",serde_json::json!({"binding":binding,"code":error.code,"message":error.message}));
+                            }
                             self.message = format!(
                                 "Глобальная клавиша: {}. Возможно, сочетание занято другим приложением.",
                                 error.message
@@ -239,11 +256,22 @@ impl Shelf {
                     }
                 }
                 Err(error) => {
+                    self.overlay_ui.registration_retry_at =
+                        Some(Instant::now() + Duration::from_secs(3));
+                    if let Some(log) = &self.logger {
+                        log.record(
+                            "hotkey_listener_stopped",
+                            serde_json::json!({"code":error.code,"message":error.message}),
+                        );
+                    }
                     self.message = error.message;
                     self.overlay_ui.registration_status = self.message.clone();
                     self.overlay_ui.listener = None;
                 }
             }
+        }
+        if self.overlay_ui.registration_retry_at.is_some() {
+            ctx.request_repaint_after(Duration::from_secs(3));
         }
         self.settings_ui
             .set_overlay_status(self.overlay_ui.registration_status.clone());

@@ -46,8 +46,13 @@ pub struct Editor {
     replaceable: bool,
     selected: Option<usize>,
     release: bool,
+    physical_keys: bool,
 }
 impl Editor {
+    pub fn with_physical_keys(mut self) -> Self {
+        self.physical_keys = true;
+        self
+    }
     pub fn new(
         id: impl Into<String>,
         label: impl Into<String>,
@@ -107,9 +112,15 @@ impl Editor {
         ctx.input_mut(|input| {
             if self.release {
                 let released = input.keys_down.is_empty() && input.modifiers.is_none();
-                discard(input);
-                self.release = !released;
-                return None;
+                let fresh = input.events.iter().any(|event| {
+                    matches!(event,
+                    egui::Event::Key {key, pressed:true, repeat:false, ..} if !modifier_key(*key))
+                });
+                self.release = !released && !fresh;
+                if !fresh {
+                    discard(input);
+                    return None;
+                }
             }
             let captured = input.events.iter().find_map(|e| match e {
                 egui::Event::Key {
@@ -117,8 +128,15 @@ impl Editor {
                     pressed: true,
                     repeat: false,
                     modifiers,
-                    ..
-                } if !modifier_key(*key) => Some((*key, *modifiers)),
+                    physical_key,
+                } if !modifier_key(*key) => Some((
+                    if self.physical_keys {
+                        physical_key.unwrap_or(*key)
+                    } else {
+                        *key
+                    },
+                    *modifiers,
+                )),
                 _ => None,
             });
             discard(input);
@@ -314,6 +332,34 @@ pub fn take_action_with_editing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn global_recorder_accepts_fresh_physical_chord_without_idle_frame() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new("overlay_hotkey", "Overlay", "").with_physical_keys();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::SuperLeft,
+                    physical_key: Some(Key::SuperLeft),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                assert!(editor.input(ui.ctx()).is_none());
+            },
+        );
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(egui::RawInput {events: vec![egui::Event::Key {
+            key:Key::K,physical_key:Some(Key::R),pressed:true,repeat:false,modifiers:egui::Modifiers::ALT,
+        }], ..Default::default()}, |ui| {
+            assert!(matches!(editor.input(ui.ctx()),Some(Intent::Set {binding,..}) if binding=="Alt R"));
+            assert!(ui.ctx().input(|i|i.events.is_empty()));
+        });
+        output.textures_delta.clear();
+    }
     #[test]
     fn enter_pastes_alt_enter_opens_and_text_fields_keep_both_keys() {
         let ctx = egui::Context::default();

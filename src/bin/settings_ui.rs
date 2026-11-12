@@ -644,8 +644,8 @@ impl State {
         SettingsSection::show(ui,|ui|{
          let binding=if draft.overlay_hotkey.is_empty(){"Не назначена"}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,"Вызов Katran поверх окна",binding,|ui|{
-          if ui.button("Изменить").clicked(){self.global_editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()));root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
-          if ui.button("Очистить").clicked(){self.global_editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()));global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
+          if ui.button("Изменить").clicked(){self.global_editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+          if ui.button("Очистить").clicked(){self.global_editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()).with_physical_keys());global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
           if ui.button("Повторить").clicked(){self.overlay_retry=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
