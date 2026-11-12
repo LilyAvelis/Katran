@@ -410,7 +410,7 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        10
+        11
     );
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();

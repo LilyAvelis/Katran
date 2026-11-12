@@ -1,4 +1,7 @@
-use katran::{Command, Request, Service, interaction::ShelfTab};
+use katran::{
+    Command, Request, Service,
+    interaction::{ShelfTab, View},
+};
 use serde_json::Value;
 fn call(api: &mut Service, c: Command) -> Value {
     let r = api.execute(Request {
@@ -66,6 +69,12 @@ fn names_codepoints_and_density_are_domain_owned() {
         &mut api,
         Command::SetTab {
             tab: ShelfTab::Links,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetView {
+            view: View::Gallery,
         },
     );
     call(&mut api, Command::AdjustDensity { delta: -1 });
