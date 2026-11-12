@@ -884,7 +884,7 @@ impl State {
           });
          }
          SettingsSection::group(ui,"Анимации окна",|ui|{
-          let styles = [("none","Без анимации"),("slide_down","Сдвиг вниз"),("slide_up","Сдвиг вверх"),("slide_left","Сдвиг влево"),("slide_right","Сдвиг вправо")];
+          let styles = [("none","Без анимации"),("slide_down","Сдвиг вниз"),("slide_up","Сдвиг вверх"),("slide_left","Сдвиг влево"),("slide_right","Сдвиг вправо"),("zoom","Масштабирование"),("fade","Растворение"),("zoom_fade","Масштабирование и растворение")];
           SettingsRow::show(ui,"Появление","Как окно появляется при вызове.",|ui|{
            egui::ComboBox::from_id_salt("animation-show-style")
             .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_show_style).map_or("Выбрать",|(_,label)|*label))

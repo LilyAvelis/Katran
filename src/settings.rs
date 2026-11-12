@@ -162,7 +162,14 @@ impl Settings {
         ] {
             if !matches!(
                 style.as_str(),
-                "none" | "slide_down" | "slide_up" | "slide_left" | "slide_right"
+                "none"
+                    | "slide_down"
+                    | "slide_up"
+                    | "slide_left"
+                    | "slide_right"
+                    | "zoom"
+                    | "fade"
+                    | "zoom_fade"
             ) || !(50..=800).contains(&duration)
             {
                 return Err("Анимация окна: выберите доступный стиль и время 50–800 мс".into());

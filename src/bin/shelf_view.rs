@@ -87,6 +87,28 @@ fn stream_row_height(viewport: f32, rows: u8, gap: f32) -> f32 {
     ((viewport - gap * f32::from(rows.saturating_sub(1))) / f32::from(rows.max(1))).max(72.0)
 }
 
+fn shelf_scrollbar_style(gap: f32) -> egui::style::ScrollStyle {
+    let mut scroll = egui::style::ScrollStyle::solid();
+    scroll.bar_width = gap;
+    scroll.bar_inner_margin = gap;
+    scroll.bar_outer_margin = gap;
+    scroll.handle_min_length = gap * 3.0;
+    scroll.floating = true;
+    scroll.floating_width = gap;
+    // Keep space for the card gap, scrollbar and matching window-edge gap.
+    scroll.floating_allocated_width =
+        scroll.bar_inner_margin + scroll.bar_width + scroll.bar_outer_margin;
+    scroll.dormant_handle_opacity = 1.0;
+    scroll.active_handle_opacity = 1.0;
+    scroll.dormant_background_opacity = 1.0;
+    scroll.active_background_opacity = 1.0;
+    scroll
+}
+
+fn shelf_content_width(available_width: f32, reserved_scrollbar_width: f32) -> f32 {
+    (available_width - reserved_scrollbar_width).max(1.0)
+}
+
 impl Shelf {
     pub(super) fn shelf_view(
         &mut self,
@@ -345,22 +367,12 @@ impl Shelf {
                         })
                         .unwrap_or_default();
                     // Reserve a separate lane for the handle so it never covers a card.
+                    ui.style_mut().spacing.scroll = shelf_scrollbar_style(gap);
                     let scroll = &mut ui.style_mut().spacing.scroll;
-                    *scroll = egui::style::ScrollStyle::solid();
-                    scroll.bar_width = 12.0;
-                    scroll.bar_inner_margin = 8.0;
-                    scroll.bar_outer_margin = 2.0;
-                    scroll.handle_min_length = 36.0;
                     // The floating bar uses a full, fixed lane when visible.
                     // Its handle has the same width on hover, so neither the
                     // cards nor the handle move sideways during scrolling.
-                    scroll.floating = true;
-                    scroll.floating_width = 12.0;
-                    scroll.floating_allocated_width = 22.0;
-                    scroll.dormant_handle_opacity = 1.0;
-                    scroll.active_handle_opacity = 1.0;
-                    scroll.dormant_background_opacity = 1.0;
-                    scroll.active_background_opacity = 1.0;
+                    let reserved_scrollbar_width = scroll.floating_allocated_width;
                     if theme.scrollbar_glass || theme_ui::is_blue(ctx) {
                         scroll.foreground_color = true;
                         let visuals = &mut ui.style_mut().visuals;
@@ -444,12 +456,9 @@ impl Shelf {
                         (layout, cell_width, height)
                     };
                     let rows = visible.len().div_ceil(columns);
-                    let (_, _, full_height) = dimensions(full_width);
-                    let content_height =
-                        rows as f32 * full_height + rows.saturating_sub(1) as f32 * gap;
-                    // Keep the scrollbar lane stable while its handle fades in/out.
-                    let bar_shown = content_height > ui.available_height();
-                    let inner_width = (full_width - if bar_shown { 22.0 } else { 0.0 }).max(1.0);
+                    // Keep card geometry stable across filters; egui still draws the thumb only
+                    // when this reserved lane is needed for overflow.
+                    let inner_width = shelf_content_width(full_width, reserved_scrollbar_width);
                     let (compact_layout, cell_width, height) = dimensions(inner_width);
                     let banana = scroll_inertia_ui::begin(ui, scroll_id, &theme, self.scroll);
                     let mut area = egui::ScrollArea::vertical()
@@ -471,7 +480,7 @@ impl Shelf {
                         ));
                     }
                     self.scroll = false;
-                    area.show_rows(ui, height, rows, |ui, range| {
+                    let _area_output = area.show_rows(ui, height, rows, |ui, range| {
                         ui.set_max_width(inner_width);
                         for row in range {
                             ui.horizontal(|ui| {
@@ -503,6 +512,19 @@ impl Shelf {
                                         egui::vec2(cell_width, height),
                                         egui::Sense::click_and_drag(),
                                     );
+                                    #[cfg(test)]
+                                    ctx.data_mut(|data| {
+                                        let mut rects = data
+                                            .get_temp::<Vec<egui::Rect>>(egui::Id::new(
+                                                "test-shelf-card-rects",
+                                            ))
+                                            .unwrap_or_default();
+                                        rects.push(rect);
+                                        data.insert_temp(
+                                            egui::Id::new("test-shelf-card-rects"),
+                                            rects,
+                                        );
+                                    });
                                     #[cfg(test)]
                                     if compact {
                                         ctx.data_mut(|data| {
@@ -863,6 +885,13 @@ impl Shelf {
                             );
                         }
                     });
+                    #[cfg(test)]
+                    ctx.data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new("test-shelf-scroll-overflow"),
+                            _area_output.content_size.y > _area_output.inner_rect.height(),
+                        );
+                    });
                 }
             });
         self.images.end_frame(ctx);
@@ -1107,6 +1136,69 @@ mod tests {
             "left={left}, right={right}, row={row:?}"
         );
     }
+
+    #[test]
+    fn image_cards_keep_geometry_between_full_and_pinned_filters() {
+        fn render_cards(events: &[Value]) -> (Vec<egui::Rect>, bool) {
+            let root = tempfile::tempdir().unwrap();
+            let mut app = super::super::tests::test_shelf(root.path());
+            app.state = serde_json::json!({
+                "tab":"images",
+                "selected":[],
+                "cursor":1,
+                "preview":null,
+                "sort":{"mode":"arrival"}
+            });
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 680.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.shelf_view(ui, &ctx, events, true, 4),
+            );
+            output.textures_delta.clear();
+            let rects = ctx
+                .data(|data| {
+                    data.get_temp::<Vec<egui::Rect>>(egui::Id::new("test-shelf-card-rects"))
+                })
+                .expect("image cards allocated");
+            let overflow = ctx
+                .data(|data| data.get_temp::<bool>(egui::Id::new("test-shelf-scroll-overflow")))
+                .expect("scroll overflow measured");
+            (rects, overflow)
+        }
+
+        let all_events: Vec<_> = (1..=24)
+            .map(|id| {
+                serde_json::json!({
+                    "id":id,
+                    "kind":"image",
+                    "name":format!("synthetic-{id}.png"),
+                    "revision":"synthetic-revision",
+                    "properties":{"pinned":id == 1 || id == 13},
+                    "origin":{}
+                })
+            })
+            .collect();
+        let pinned_events: Vec<_> = all_events
+            .iter()
+            .filter(|event| event["properties"]["pinned"] == true)
+            .cloned()
+            .collect();
+
+        let (full_rects, full_overflows) = render_cards(&all_events);
+        let (pinned_rects, pinned_overflows) = render_cards(&pinned_events);
+
+        assert!(full_overflows, "full list should need scrolling");
+        assert!(!pinned_overflows, "small pinned list should fit");
+        assert_eq!(pinned_rects.len(), 2);
+        assert_eq!(&full_rects[..pinned_rects.len()], pinned_rects.as_slice());
+    }
+
     #[test]
     fn selected_cards_have_independent_outline_even_without_cursor() {
         let ctx = egui::Context::default();
@@ -1309,7 +1401,23 @@ mod tests {
 
 #[cfg(test)]
 mod density_geometry_tests {
-    use super::stream_row_height;
+    use super::{shelf_content_width, shelf_scrollbar_style, stream_row_height};
+
+    #[test]
+    fn scrollbar_and_card_have_matching_inner_and_outer_gaps() {
+        let gap = super::gallery_card::GAP;
+        let scroll = shelf_scrollbar_style(gap);
+        let outer_width = 1000.0;
+        let card_right = shelf_content_width(outer_width, scroll.floating_allocated_width);
+        let scrollbar_left = outer_width - scroll.bar_outer_margin - scroll.bar_width;
+        let scrollbar_right = outer_width - scroll.bar_outer_margin;
+
+        assert_eq!(scroll.bar_inner_margin, gap);
+        assert_eq!(scroll.bar_outer_margin, gap);
+        assert_eq!(scrollbar_left - card_right, gap);
+        assert_eq!(outer_width - scrollbar_right, gap);
+    }
+
     #[test]
     fn stream_rows_fill_viewport_at_each_density() {
         for rows in 1..=7 {

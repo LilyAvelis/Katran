@@ -1,4 +1,4 @@
-//! Small, nonblocking native slide for a summoned window.
+//! Nonblocking native window transitions for a summoned window.
 use std::time::{Duration, Instant};
 
 const MIN: Duration = Duration::from_millis(220);
@@ -23,6 +23,9 @@ enum Style {
     Up,
     Left,
     Right,
+    Zoom,
+    Fade,
+    ZoomFade,
 }
 impl Style {
     fn parse(value: &str) -> Self {
@@ -31,12 +34,21 @@ impl Style {
             "slide_up" => Self::Up,
             "slide_left" => Self::Left,
             "slide_right" => Self::Right,
+            "zoom" => Self::Zoom,
+            "fade" => Self::Fade,
+            "zoom_fade" => Self::ZoomFade,
             _ => Self::Down,
         }
     }
+    fn uses_fade(self) -> bool {
+        matches!(self, Self::Fade | Self::ZoomFade)
+    }
+    fn uses_zoom(self) -> bool {
+        matches!(self, Self::Zoom | Self::ZoomFade)
+    }
     fn displaced(self, original: Rect, delta: i32) -> Rect {
         match self {
-            Self::None => original,
+            Self::None | Self::Zoom | Self::Fade | Self::ZoomFade => original,
             Self::Down => Rect {
                 y: original.y.saturating_add(delta),
                 ..original
@@ -55,6 +67,22 @@ impl Style {
             },
         }
     }
+}
+
+// A progress of one is the hidden endpoint; zero is the original window.
+fn zoom_rect(original: Rect, progress: f32) -> Rect {
+    let scale = 1.0 - 0.15 * progress.clamp(0.0, 1.0);
+    let width = ((original.width as f32 * scale).round() as i32).max(1);
+    let height = ((original.height as f32 * scale).round() as i32).max(1);
+    Rect {
+        x: original.x.saturating_add((original.width - width) / 2),
+        y: original.y.saturating_add((original.height - height) / 2),
+        width,
+        height,
+    }
+}
+fn alpha(progress: f32) -> u8 {
+    (255.0 * (1.0 - progress.clamp(0.0, 1.0))).round() as u8
 }
 
 struct Motion {
@@ -77,6 +105,7 @@ pub(super) struct State {
 
 // Most movement takes 220 ms; the last few pixels cover decoder startup until
 // a fresh frame arrives, with a hard deadline so failed media cannot hold it.
+#[cfg(test)]
 fn offset(elapsed: Duration, ready: bool, duration: Duration, deadline: Duration) -> i32 {
     (OFFSET as f32 * avilon_egui::transition::reveal_remaining(elapsed, ready, duration, deadline))
         .ceil() as i32
@@ -109,8 +138,30 @@ impl State {
             duration + Duration::from_millis(1)
         };
         if let Some(original) = native::rect(hwnd) {
-            let expected = style.displaced(original, OFFSET);
-            if native::move_to(hwnd, expected) {
+            let expected = match style {
+                Style::Zoom | Style::ZoomFade => zoom_rect(original, 1.0),
+                _ => style.displaced(original, OFFSET),
+            };
+            let fade_ready = !style.uses_fade() || native::begin_fade(hwnd, 0);
+            let prepared = if !fade_ready {
+                false
+            } else if style.uses_zoom() {
+                let moved = native::resize_to(hwnd, expected);
+                if moved && native::rect(hwnd) != Some(expected) {
+                    native::resize_to(hwnd, original);
+                    false
+                } else {
+                    moved
+                }
+            } else if style.uses_fade() {
+                true
+            } else {
+                native::move_to(hwnd, expected)
+            };
+            if !prepared && fade_ready && style.uses_fade() {
+                native::end_fade(hwnd);
+            }
+            if prepared {
                 self.motion = Some(Motion {
                     original,
                     expected,
@@ -133,6 +184,9 @@ impl State {
         // Do not fight a user drag, resize, or another window manager operation.
         if native::rect(hwnd) != Some(m.expected) {
             self.hidden |= m.hiding;
+            if m.style.uses_fade() {
+                native::end_fade(hwnd);
+            }
             self.motion = None;
             return false;
         }
@@ -142,28 +196,68 @@ impl State {
             m.ready_since = Some(Instant::now());
         }
         let settled = frame_settled(m.waits_for_video, m.ready_since.map(|t| t.elapsed()));
-        let delta = if m.hiding {
-            (OFFSET as f32 * avilon_egui::transition::dismiss_progress(elapsed, m.duration)).floor()
-                as i32
+        let progress = if m.hiding {
+            avilon_egui::transition::dismiss_progress(elapsed, m.duration)
         } else {
-            offset(elapsed, settled, m.duration, m.deadline)
+            avilon_egui::transition::reveal_remaining(elapsed, settled, m.duration, m.deadline)
         };
-        let next = m.style.displaced(m.original, delta);
-        if next != m.expected && !native::move_to(hwnd, next) {
+        let next = match m.style {
+            Style::Zoom | Style::ZoomFade => zoom_rect(m.original, progress),
+            Style::Fade => m.original,
+            _ => {
+                let delta = if m.hiding {
+                    (OFFSET as f32 * progress).floor() as i32
+                } else {
+                    (OFFSET as f32 * progress).ceil() as i32
+                };
+                m.style.displaced(m.original, delta)
+            }
+        };
+        let updated = (!m.style.uses_fade() || native::set_alpha(hwnd, alpha(progress)))
+            && (next == m.expected
+                || if m.style.uses_zoom() {
+                    native::resize_to(hwnd, next) && {
+                        let actual = native::rect(hwnd);
+                        if actual != Some(next) {
+                            native::resize_to(hwnd, m.original);
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                } else {
+                    native::move_to(hwnd, next)
+                });
+        if !updated {
             self.hidden |= m.hiding;
+            if m.style.uses_fade() {
+                native::end_fade(hwnd);
+            }
+            if m.style.uses_zoom() && native::rect(hwnd) == Some(m.expected) {
+                native::resize_to(hwnd, m.original);
+            }
             self.motion = None;
             return false;
         }
         m.expected = next;
         if m.hiding && elapsed >= m.duration {
             native::hide(hwnd);
-            native::move_to(hwnd, m.original);
+            if m.style.uses_fade() {
+                native::end_fade(hwnd);
+            }
+            if m.style.uses_zoom() {
+                native::resize_to(hwnd, m.original);
+            } else if !m.style.uses_fade() {
+                native::move_to(hwnd, m.original);
+            }
             self.motion = None;
             self.hidden = true;
             return false;
         }
-        if !m.hiding && delta == 0 {
-            self.hidden |= m.hiding;
+        if !m.hiding && progress <= 0.0 {
+            if m.style.uses_fade() {
+                native::end_fade(hwnd);
+            }
             self.motion = None;
             return false;
         }
@@ -185,6 +279,10 @@ impl State {
             && native::animations_enabled()
             && let Some(original) = native::rect(hwnd)
         {
+            if style.uses_fade() && !native::begin_fade(hwnd, 255) {
+                native::hide(hwnd);
+                return false;
+            }
             self.motion = Some(Motion {
                 original,
                 expected: original,
@@ -205,10 +303,17 @@ impl State {
     }
     pub(super) fn cancel(&mut self, hwnd: u64) {
         self.hidden = false;
-        if let Some(m) = self.motion.take()
-            && native::rect(hwnd) == Some(m.expected)
-        {
-            native::move_to(hwnd, m.original);
+        if let Some(m) = self.motion.take() {
+            if m.style.uses_fade() {
+                native::end_fade(hwnd);
+            }
+            if native::rect(hwnd) == Some(m.expected) {
+                if m.style.uses_zoom() {
+                    native::resize_to(hwnd, m.original);
+                } else if !m.style.uses_fade() {
+                    native::move_to(hwnd, m.original);
+                }
+            }
         }
     }
 }
@@ -284,6 +389,48 @@ mod native {
             height: r.bottom - r.top,
         })
     }
+    // Do not take over a window already controlled by another layered or
+    // no-redirection composition path: SetLayeredWindowAttributes changes it.
+    pub fn begin_fade(raw: u64, initial_alpha: u8) -> bool {
+        unsafe {
+            let current = GetWindowLongPtrW(hwnd(raw), GWL_EXSTYLE);
+            if current & (WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP) as isize != 0 {
+                return false;
+            }
+            SetWindowLongPtrW(hwnd(raw), GWL_EXSTYLE, current | WS_EX_LAYERED as isize);
+            if GetWindowLongPtrW(hwnd(raw), GWL_EXSTYLE) & WS_EX_LAYERED as isize == 0 {
+                return false;
+            }
+            if set_alpha(raw, initial_alpha) {
+                true
+            } else {
+                end_fade(raw);
+                false
+            }
+        }
+    }
+    pub fn set_alpha(raw: u64, value: u8) -> bool {
+        unsafe { SetLayeredWindowAttributes(hwnd(raw), 0, value, LWA_ALPHA) != 0 }
+    }
+    pub fn end_fade(raw: u64) {
+        unsafe {
+            let current = GetWindowLongPtrW(hwnd(raw), GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd(raw), GWL_EXSTYLE, current & !(WS_EX_LAYERED as isize));
+        }
+    }
+    pub fn resize_to(raw: u64, r: Rect) -> bool {
+        unsafe {
+            SetWindowPos(
+                hwnd(raw),
+                std::ptr::null_mut(),
+                r.x,
+                r.y,
+                r.width,
+                r.height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            ) != 0
+        }
+    }
     pub fn move_to(raw: u64, r: Rect) -> bool {
         unsafe {
             SetWindowPos(
@@ -308,6 +455,16 @@ mod native {
     pub fn rect(_: u64) -> Option<Rect> {
         None
     }
+    pub fn begin_fade(_: u64, _: u8) -> bool {
+        false
+    }
+    pub fn set_alpha(_: u64, _: u8) -> bool {
+        false
+    }
+    pub fn end_fade(_: u64) {}
+    pub fn resize_to(_: u64, _: Rect) -> bool {
+        false
+    }
     pub fn move_to(_: u64, _: Rect) -> bool {
         false
     }
@@ -330,6 +487,34 @@ mod tests {
         assert_eq!(Style::parse("slide_left").displaced(r, 16).x, 84);
         assert_eq!(Style::parse("slide_right").displaced(r, 16).x, 116);
         assert_eq!(Style::parse("unknown"), Style::Down);
+    }
+    #[test]
+    fn zoom_and_fade_have_distinct_bounded_endpoints() {
+        assert_eq!(Style::parse("zoom"), Style::Zoom);
+        assert_eq!(Style::parse("fade"), Style::Fade);
+        assert!(Style::parse("zoom_fade").uses_fade());
+        assert!(Style::parse("zoom_fade").uses_zoom());
+        let original = Rect {
+            x: 100,
+            y: 200,
+            width: 1000,
+            height: 600,
+        };
+        assert_eq!(zoom_rect(original, 0.0), original);
+        assert_eq!(
+            zoom_rect(original, 1.0),
+            Rect {
+                x: 175,
+                y: 245,
+                width: 850,
+                height: 510
+            }
+        );
+        assert_eq!(alpha(0.0), 255);
+        assert_eq!(alpha(0.5), 128);
+        assert_eq!(alpha(1.0), 0);
+        assert_eq!(alpha(-1.0), 255);
+        assert_eq!(alpha(2.0), 0);
     }
     #[test]
     fn custom_duration_finishes_on_schedule() {

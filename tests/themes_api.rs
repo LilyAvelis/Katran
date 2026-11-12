@@ -31,6 +31,23 @@ fn window_animation_preferences_round_trip_through_theme_api() {
     );
 }
 #[test]
+fn new_window_animation_styles_validate_through_theme_api() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    for style in ["zoom", "fade", "zoom_fade"] {
+        let theme = ThemePreferences {
+            animation_show_style: style.into(),
+            animation_hide_style: style.into(),
+            ..Default::default()
+        };
+        call(&mut api, Command::SetTheme { theme });
+        assert_eq!(
+            call(&mut api, Command::Themes)["current"]["animation_show_style"],
+            style
+        );
+    }
+}
+#[test]
 fn scrollbar_preferences_default_and_persist_independently() {
     let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
     assert!(!legacy.scrollbar_glass);
