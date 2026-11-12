@@ -187,6 +187,7 @@ struct Shelf {
     job: Option<UiJob>,
     capture_job: Option<katran::domain_jobs::JobId>,
     preview_warmup: Option<katran::domain_jobs::JobId>,
+    pending_preview: Option<(String, Value)>,
     pending_drops: Vec<PathBuf>,
     pending_copy: Option<Vec<katran::SelectionRef>>,
     pending_copy_ids: Option<Vec<i64>>,
@@ -591,7 +592,7 @@ impl Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
-        self.preview_warmup_tick();
+        self.preview_warmup_tick(&ctx);
         if self.api.is_some() {
             self.open_apps_tick(&ctx);
         }
@@ -1138,7 +1139,7 @@ impl eframe::App for Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
-        self.preview_warmup_tick();
+        self.preview_warmup_tick(ctx);
         if self.api.is_some() {
             self.open_apps_tick(ctx);
         }
@@ -1304,6 +1305,16 @@ fn main() -> eframe::Result {
         }
         execute(Command::SetCaptureEnabled { enabled: false });
     }
+    let warmup = api.execute(Request {
+        api_version: 1,
+        request_id: "startup-preview".into(),
+        command: Command::BeginJob {
+            command: Box::new(Command::EnsurePreviewBackend),
+        },
+    });
+    let preview_warmup = warmup["result"]["job_id"]
+        .as_u64()
+        .map(katran::domain_jobs::JobId);
     // Materialize bundled emoji once before the first frame, preserving a user font.
     let _ = katran::emoji_fonts::resolve(&root, "apple");
     let logger = katran::diagnostics::Logger::start(&root).ok();
@@ -1341,7 +1352,8 @@ fn main() -> eframe::Result {
         api: Some(api),
         job: None,
         capture_job: None,
-        preview_warmup: None,
+        preview_warmup,
+        pending_preview: None,
         pending_drops: Vec::new(),
         pending_copy: None,
         pending_copy_ids: None,
@@ -1381,10 +1393,6 @@ fn main() -> eframe::Result {
         scroll: false,
     };
     app.refresh();
-    let warmup = app.call(Command::BeginJob {
-        command: Box::new(Command::EnsurePreviewBackend),
-    });
-    app.preview_warmup = warmup["job_id"].as_u64().map(katran::domain_jobs::JobId);
     let theme: katran::theme::ThemePreferences =
         serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
     let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
@@ -1542,6 +1550,7 @@ mod tests {
             job: None,
             capture_job: None,
             preview_warmup: None,
+            pending_preview: None,
             pending_drops: Vec::new(),
             pending_copy: None,
             pending_copy_ids: None,
@@ -1636,6 +1645,60 @@ mod tests {
                 .any(|c| matches!(c.as_str(), "interaction" | "status")),
             "hot successful reads should not flood diagnostics"
         );
+    }
+    #[test]
+    fn startup_preview_clicks_coalesce_and_stale_selection_is_discarded() {
+        struct Preview(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl katran::quicklook::Launcher for Preview {
+            fn launch(&self, _: &std::path::Path) -> katran::api::Result<()> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_preview_launcher(Box::new(Preview(count.clone())));
+        let id = app.call(Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        app.preview_warmup = Some(katran::domain_jobs::JobId(u64::MAX));
+        for _ in 0..20 {
+            app.run("quicklook".into(), &ctx);
+        }
+        assert!(app.pending_preview.is_some());
+        assert!(app.job.is_none());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        app.preview_warmup = None;
+        app.preview_warmup_tick(&ctx);
+        let until = Instant::now() + Duration::from_secs(3);
+        while app.job.is_some() && Instant::now() < until {
+            app.finish_job();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        app.preview_warmup = Some(katran::domain_jobs::JobId(u64::MAX));
+        app.run("quicklook".into(), &ctx);
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Downloads,
+        });
+        app.preview_warmup = None;
+        app.preview_warmup_tick(&ctx);
+        assert!(app.job.is_none());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

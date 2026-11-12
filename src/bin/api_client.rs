@@ -96,24 +96,42 @@ impl Shelf {
         ctx.request_repaint();
         true
     }
-    pub(super) fn preview_warmup_tick(&mut self) {
-        let Some(job_id) = self.preview_warmup else {
-            return;
-        };
-        let status = self.call(Command::PollJob { job_id });
-        if matches!(
-            status["state"].as_str(),
-            Some("succeeded" | "failed" | "cancelled")
-        ) {
+    fn preview_request_context(&mut self) -> Value {
+        let state = self.call(Command::Interaction);
+        serde_json::json!({"selected":state["selected"],"cursor":state["cursor"],"tab":state["tab"],"pinned_only":state["pinned_only"],"folder_path":state["folder_path"]})
+    }
+    pub(super) fn preview_warmup_tick(&mut self, ctx: &egui::Context) {
+        if let Some(job_id) = self.preview_warmup {
+            let status = self.call(Command::PollJob { job_id });
+            if !matches!(
+                status["state"].as_str(),
+                Some("succeeded" | "failed" | "cancelled")
+            ) {
+                return;
+            }
             self.preview_warmup = None;
-            if status["state"] == "failed" {
+            if let Some(log) = &self.logger {
+                log.record(
+                    "preview_backend_startup",
+                    serde_json::json!({"state":status["state"],"error":status["error"]}),
+                );
+            }
+            if status["state"] != "succeeded" {
+                self.pending_preview = None;
                 self.message = format!(
                     "QuickLook: {}",
                     status["error"]["message"]
                         .as_str()
                         .unwrap_or("Не удалось подготовить просмотр")
                 );
+                return;
             }
+        }
+        if self.job.is_none()
+            && let Some((id, context)) = self.pending_preview.take()
+            && self.preview_request_context() == context
+        {
+            self.start_job(Command::RunAction { id }, false, ctx.clone());
         }
     }
     fn finish_capture_job(&mut self) {
@@ -500,6 +518,13 @@ impl Shelf {
             "open" | "preview" | "quicklook" | "reveal" | "open_with"
         );
         if preview_action {
+            if self.preview_warmup.is_some() && matches!(id.as_str(), "open" | "quicklook") {
+                let context = self.preview_request_context();
+                self.pending_preview = Some((id, context));
+                self.actions = false;
+                ctx.request_repaint();
+                return;
+            }
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
             }

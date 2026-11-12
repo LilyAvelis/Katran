@@ -75,6 +75,17 @@ fn hello(endpoint: &str) -> std::result::Result<Value, transport::TransportError
         IO_TIMEOUT,
     )
 }
+// The shared QuickLook mutex does not identify the process holding it. When
+// a maintained package is configured, an absent bridge may simply mean that
+// its process has not created the endpoint yet; sending a CLI toggle then is
+// unsafe. An adjacent manifest is enough to make that state ambiguous, even if
+// the package subsequently fails verification.
+fn maintained_package_configured() -> bool {
+    fork_path().ok().is_some_and(|p| {
+        p.parent()
+            .is_some_and(|dir| dir.join("katran-bridge-manifest.json").is_file())
+    })
+}
 /// Read-only; reports stock compatibility without probing the legacy pipe.
 pub fn status() -> Result<Value> {
     let endpoint = transport::endpoint().map_err(api_error)?;
@@ -106,6 +117,11 @@ pub fn status() -> Result<Value> {
                 return Err(api_error(e));
             }
             if transport::instance_exists().map_err(api_error)? {
+                if maintained_package_configured() {
+                    return Ok(
+                        json!({"backend":"quicklook","ready":false,"state":"bridge_pending"}),
+                    );
+                }
                 Ok(
                     json!({"backend":"quicklook","transport":"desktop_cli","ready":true,"compatibility":"running_stock_or_bridge_unavailable"}),
                 )
@@ -133,9 +149,10 @@ trait StartupIo {
     fn pause(&mut self);
 }
 fn is_initializing(value: &Value) -> bool {
-    value["transport"] == "fast_bridge_v1"
+    (value["transport"] == "fast_bridge_v1"
         && value["state"] == "initializing"
-        && value["ready"] == false
+        && value["ready"] == false)
+        || (value["state"] == "bridge_pending" && value["ready"] == false)
 }
 fn ensure_with(io: &mut impl StartupIo) -> Result<Value> {
     let current = io.current()?;
@@ -613,6 +630,25 @@ mod tests {
         io.ready_after = None;
         io.limit = 2;
         io.states = std::collections::VecDeque::from([initializing.clone(), initializing]);
+        assert_eq!(
+            ensure_with(&mut io).unwrap_err().code,
+            "quicklook_start_timeout"
+        );
+        assert_eq!(io.starts, 0);
+    }
+    #[test]
+    fn existing_mutex_before_bridge_waits_and_never_uses_stock_cli() {
+        let pending = json!({"ready":false,"state":"bridge_pending"});
+        let mut io = FakeStartup::absent();
+        io.allow_start = false;
+        io.states = std::collections::VecDeque::from([pending.clone(), pending.clone()]);
+        assert_eq!(ensure_with(&mut io).unwrap()["transport"], "fast_bridge_v1");
+        assert_eq!(io.starts, 0);
+        let mut io = FakeStartup::absent();
+        io.allow_start = false;
+        io.ready_after = None;
+        io.limit = 2;
+        io.states = std::collections::VecDeque::from([pending.clone(), pending]);
         assert_eq!(
             ensure_with(&mut io).unwrap_err().code,
             "quicklook_start_timeout"

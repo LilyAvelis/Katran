@@ -75,3 +75,11 @@ Use BeginJob for GUI startup warmup and external preview. The initial queued rep
 Use the returned job_id rather than assuming the example's1. PollJob returns a job status with job_id, lane, state, result and error. The outer API `ok:true` confirms the poll itself succeeded; inspect the job state/error before using result. A succeeded preview result contains its initiation receipt under `result.receipt`. Job success and `acknowledgement:accepted` still do not assert painted content. Immediate commands can return `state:succeeded` and result without a job_id. Cancellation after an external effect starts cannot claim that a QuickLook request was undone.
 
 The installed backend is already active. The next owner check is launching Katran1.3.0 Test and checking Explorer Space, Katran TXT/PDF/image previews and command-palette geometry. No manual switch to a different QuickLook installation is required. The stock CLI compatibility branch remains for other installations; this host uses fast_bridge_v1.
+
+## Startup readiness and repeated requests · 2026-11-12
+
+Katran submits EnsurePreviewBackend immediately after opening its service, before font materialization and shelf setup. Warmup remains asynchronous; the GUI does not wait for QuickLook to construct its first frame.
+
+A normal QuickLook mutex with no bridge is ambiguous. When the configured installation includes a maintained-package manifest, status reports bridge_pending and waits for the ready handshake instead of treating the mutex as stock-ready and spawning another CLI invocation. If a genuinely stock instance is running alongside that maintained installation, readiness times out explicitly; no process is terminated. Without a maintained manifest the stock compatibility path remains available.
+
+While startup warmup is pending, repeated UI open/QuickLook requests are reduced to the most recent request. Selection/tab/folder context must still match before it runs. Warmup failure clears that pending request and reports one error. Startup completion/error is recorded in diagnostics. Synthetic tests cover mutex-before-pipe, readiness timeout, click coalescing and stale selection; no real preview window is opened by these tests.
