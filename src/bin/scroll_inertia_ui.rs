@@ -22,14 +22,13 @@ impl Motion {
             self.remaining = 0.0;
         }
         self.remaining += input * speed;
-        let delta = if self.remaining.abs() < 0.05 {
+        if self.remaining.abs() < 0.05 {
             std::mem::take(&mut self.remaining)
         } else {
             let delta = self.remaining * (1.0 - (-dt / tau).exp());
             self.remaining -= delta;
             delta
-        };
-        delta
+        }
     }
 }
 
