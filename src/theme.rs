@@ -20,6 +20,8 @@ pub struct ThemePreferences {
     pub video_background: Option<String>,
     pub video_enabled: Option<bool>,
     pub video_seam_smoothing: bool,
+    /// Keep decoding while the window is hidden or minimized.
+    pub video_play_hidden: bool,
     pub scrollbar_glass: bool,
     pub scrollbar_always_visible: bool,
     /// Opt-in extra wheel smoothing, including trackpad wheel events.
@@ -54,6 +56,7 @@ impl Default for ThemePreferences {
             video_background: None,
             video_enabled: None,
             video_seam_smoothing: true,
+            video_play_hidden: false,
             scrollbar_glass: false,
             scrollbar_always_visible: true,
             banana_scroll: false,

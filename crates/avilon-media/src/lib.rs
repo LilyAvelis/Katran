@@ -135,6 +135,7 @@ struct Worker {
     child: Arc<Mutex<Option<Child>>>,
     stopped: Arc<AtomicBool>,
     rx: Receiver<Message>,
+    latest: Arc<Mutex<Option<Message>>>,
     #[cfg(test)]
     finished: Arc<AtomicBool>,
 }
@@ -233,9 +234,32 @@ impl State {
             }
         }
         if let Some(worker) = self.worker.as_ref() {
+            let mut messages = Vec::new();
             loop {
                 match worker.rx.try_recv() {
-                    Ok(Message::Frame { pixels, index }) => {
+                    Ok(message) => messages.push(message),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        messages.push(Message::Error("Video decoder stopped unexpectedly".into()));
+                        break;
+                    }
+                }
+            }
+            if let Ok(mut latest) = worker.latest.lock()
+                && let Some(message) = latest.take()
+            {
+                // The queued first frame preserves seam state; the newest
+                // hidden frame then replaces it before the window is painted.
+                messages.push(message);
+            }
+            let mut last_index = None;
+            for message in messages {
+                match message {
+                    Message::Frame { pixels, index } => {
+                        if last_index.is_some_and(|previous| index < previous) {
+                            continue;
+                        }
+                        last_index = Some(index);
                         if index == 0 && self.first_frame.is_none() {
                             self.first_frame = Some(Arc::new(pixels.clone()));
                         }
@@ -253,13 +277,8 @@ impl State {
                             ));
                         }
                     }
-                    Ok(Message::Error(e)) => {
+                    Message::Error(e) => {
                         self.error = Some(e);
-                        break;
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
-                        self.error = Some("Video decoder stopped unexpectedly".into());
                         break;
                     }
                 }
@@ -302,6 +321,8 @@ fn start(
     command_factory: impl FnOnce() -> Result<Command, String> + Send + 'static,
 ) -> Worker {
     let (tx, rx) = mpsc::sync_channel(1);
+    let latest = Arc::new(Mutex::new(None));
+    let latest_writer = latest.clone();
     let child = Arc::new(Mutex::new(None::<Child>));
     let shared = child.clone();
     let stopped = Arc::new(AtomicBool::new(false));
@@ -429,7 +450,11 @@ fn start(
                 index,
             }) {
                 Ok(()) => ctx.request_repaint(),
-                Err(mpsc::TrySendError::Full(_)) => {}
+                Err(mpsc::TrySendError::Full(message)) => {
+                    if let Ok(mut slot) = latest_writer.lock() {
+                        *slot = Some(message);
+                    }
+                }
                 Err(mpsc::TrySendError::Disconnected(_)) => break,
             }
         }
@@ -449,6 +474,7 @@ fn start(
         child,
         stopped,
         rx,
+        latest,
         #[cfg(test)]
         finished,
     }
@@ -468,6 +494,48 @@ mod tests {
     use super::*;
     use std::process::Command;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn hidden_playback_presenter_uses_latest_frame_after_queued_first() {
+        let source = VideoSource {
+            path: PathBuf::from("synthetic.mp4"),
+            width: 2,
+            height: 2,
+            duration_ms: 1000,
+            smooth_loop: false,
+        };
+        let (tx, rx) = mpsc::sync_channel(1);
+        tx.send(Message::Frame {
+            pixels: vec![10; 16],
+            index: 0,
+        })
+        .unwrap();
+        let latest = Arc::new(Mutex::new(Some(Message::Frame {
+            pixels: vec![90; 16],
+            index: 12,
+        })));
+        let mut state = State {
+            source: Some(source.clone()),
+            worker: Some(Worker {
+                child: Arc::new(Mutex::new(None)),
+                stopped: Arc::new(AtomicBool::new(false)),
+                rx,
+                latest,
+                finished: Arc::new(AtomicBool::new(false)),
+            }),
+            size: [2, 2],
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        assert!(
+            state
+                .tick(&ctx, Some(source), true, || unreachable!())
+                .is_some()
+        );
+        assert_eq!(state.frame_serial(), 2);
+        assert_eq!(state.next_frame, 13);
+        assert_eq!(state.first_frame.as_deref().unwrap()[0], 10);
+    }
 
     #[test]
     fn seam_blends_first_four_repeated_frames_without_black_frame() {
@@ -743,6 +811,7 @@ mod tests {
                 child: Arc::new(Mutex::new(None)),
                 stopped: stopped.clone(),
                 rx,
+                latest: Arc::new(Mutex::new(None)),
                 finished: Arc::new(AtomicBool::new(false)),
             }),
             ..State::default()

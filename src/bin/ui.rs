@@ -178,6 +178,7 @@ struct Shelf {
     video_background_id: Option<String>,
     video_background_source: Option<video_background_ui::VideoSource>,
     video_visible: bool,
+    video_play_hidden: bool,
     native_window: u64,
     logger: Option<katran::diagnostics::Logger>,
     pending_delete: Vec<i64>,
@@ -366,7 +367,8 @@ impl Shelf {
         if self.api.is_some() {
             self.video_visible = self.call(Command::WindowVisibility)["visible"] == true;
         }
-        let active = self.video_visible && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let active = self.video_play_hidden
+            || (self.video_visible && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)));
         // Headless GUI tests never start a real media process; decoder tests opt in separately.
         let active = active && !cfg!(test);
         let texture = self
@@ -436,6 +438,7 @@ impl Shelf {
             if let Ok(theme) =
                 serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone())
             {
+                self.video_play_hidden = theme.video_play_hidden;
                 if self.glass_active
                     && (!theme.glass || theme.preset != katran::theme::Preset::BlueExperimental)
                 {
@@ -1595,6 +1598,7 @@ fn main() -> eframe::Result {
         video_background_id: None,
         video_background_source: None,
         video_visible: true,
+        video_play_hidden: false,
         native_window: 0,
         logger,
         pending_delete: Vec::new(),
@@ -1665,6 +1669,7 @@ fn main() -> eframe::Result {
     app.refresh();
     let theme: katran::theme::ThemePreferences =
         serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
+    app.video_play_hidden = theme.video_play_hidden;
     let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
     app.transparent_viewport = glass_start;
     eframe::run_native(
@@ -1805,6 +1810,7 @@ mod tests {
             video_background_id: None,
             video_background_source: None,
             video_visible: true,
+            video_play_hidden: false,
             native_window: 77,
             logger: None,
             pending_delete: Vec::new(),

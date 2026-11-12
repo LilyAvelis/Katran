@@ -110,6 +110,24 @@ fn video_seam_smoothing_defaults_on_and_persists_independently() {
     );
 }
 #[test]
+fn background_video_playback_is_opt_in_and_persists() {
+    let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert!(!legacy.video_play_hidden);
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    let theme = ThemePreferences {
+        video_play_hidden: true,
+        ..Default::default()
+    };
+    call(&mut api, Command::SetTheme { theme });
+    drop(api);
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["video_play_hidden"],
+        true
+    );
+}
+#[test]
 fn selection_color_is_independent_persistent_and_validated() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 10000).unwrap();

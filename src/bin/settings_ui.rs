@@ -862,6 +862,9 @@ impl State {
            SettingsRow::show(ui,"Сглаживать стык","Короткое смешивание кадров на границе кэшированного цикла.",|ui|{
             if ui.checkbox(&mut theme.video_seam_smoothing,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
+           SettingsRow::show(ui,"Воспроизводить в фоне","Сохранять декодер активным, когда окно скрыто или свёрнуто. Увеличивает расход CPU и GPU.",|ui|{
+            if ui.checkbox(&mut theme.video_play_hidden,"Включить").changed(){theme_intent=Some(theme.clone());}
+           });
            ui.weak("Короткие ролики кэшируются до 512 МиБ; длинные воспроизводятся потоком.");
            SettingsRow::show(ui,"Файл видео","Выберите сохранённое видео или добавьте файл.",|ui|{
             let list=self.video_backgrounds.get_or_insert_with(||call(api,Command::VideoBackgrounds)).clone();
