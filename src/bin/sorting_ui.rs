@@ -1,4 +1,5 @@
 //! Read-only sort presentation. Domain keys and file metadata arrive through API.
+use super::i18n::tr;
 use serde_json::Value;
 
 pub fn sequence_hint(id: &str) -> Option<&'static str> {
@@ -26,61 +27,88 @@ pub fn confirmation(sort: &Value) -> String {
     let reverse = sort["reverse"] == true;
     let (name, direction) = match sort["mode"].as_str().unwrap_or("arrival") {
         "size" => (
-            "размеру",
+            tr("размеру", "size"),
             if reverse {
-                "большие → маленькие"
+                tr("большие → маленькие", "large → small")
             } else {
-                "маленькие → большие"
+                tr("маленькие → большие", "small → large")
             },
         ),
         "modified" => (
-            "дате изменения",
+            tr("дате изменения", "date modified"),
             if reverse {
-                "новые → старые"
+                tr("новые → старые", "newest → oldest")
             } else {
-                "старые → новые"
+                tr("старые → новые", "oldest → newest")
             },
         ),
         "arrival" => (
-            "поступлению",
+            tr("поступлению", "arrival"),
             if reverse {
-                "старые → новые"
+                tr("старые → новые", "oldest → newest")
             } else {
-                "новые → старые"
+                tr("новые → старые", "newest → oldest")
             },
         ),
-        "pinned" => return "Сортировка: закреплённые в своём порядке, затем по поступлению".into(),
-        "origin" => ("источнику", if reverse { "Я → А" } else { "А → Я" }),
-        "extension" => ("расширению", if reverse { "Я → А" } else { "А → Я" }),
+        "pinned" => {
+            return tr(
+                "Сортировка: закреплённые в своём порядке, затем по поступлению",
+                "Sort: pinned in their own order, then by arrival",
+            )
+            .into();
+        }
+        "origin" => (
+            tr("источнику", "source"),
+            if reverse {
+                tr("Я → А", "Z → A")
+            } else {
+                tr("А → Я", "A → Z")
+            },
+        ),
+        "extension" => (
+            tr("расширению", "extension"),
+            if reverse {
+                tr("Я → А", "Z → A")
+            } else {
+                tr("А → Я", "A → Z")
+            },
+        ),
         "natural" => (
-            "естественному имени",
+            tr("естественному имени", "natural name"),
             if reverse {
-                "убывание"
+                tr("убывание", "descending")
             } else {
-                "возрастание"
+                tr("возрастание", "ascending")
             },
         ),
-        "name" => ("имени", if reverse { "Я → А" } else { "А → Я" }),
-        "shuffle" => return "Сортировка: случайный порядок".into(),
-        _ => return "Сортировка изменена".into(),
+        "name" => (
+            tr("имени", "name"),
+            if reverse {
+                tr("Я → А", "Z → A")
+            } else {
+                tr("А → Я", "A → Z")
+            },
+        ),
+        "shuffle" => return tr("Сортировка: случайный порядок", "Sort: random order").into(),
+        _ => return tr("Сортировка изменена", "Sort changed").into(),
     };
-    format!("Сортировка по {name} · {direction}")
+    format!("{} {name} · {direction}", tr("Сортировка по", "Sort by"))
 }
 pub fn criterion(event: &Value, sort: &Value) -> Option<String> {
     Some(match sort["mode"].as_str()? {
         "size" => event["size"]
             .as_u64()
             .map(size)
-            .unwrap_or_else(|| "Размер неизвестен".into()),
+            .unwrap_or_else(|| tr("Размер неизвестен", "Size unknown").into()),
         "modified" => event["modified_at_ms"]
             .as_i64()
             .map(date)
-            .map(|date| format!("Изменён: {date}"))
-            .unwrap_or_else(|| "Дата изменения неизвестна".into()),
+            .map(|date| format!("{}: {date}", tr("Изменён", "Modified")))
+            .unwrap_or_else(|| tr("Дата изменения неизвестна", "Modification date unknown").into()),
         "extension" => {
             let extension = katran::sorting::extension_key(event["name"].as_str().unwrap_or(""));
             if extension.is_empty() {
-                "Без расширения".into()
+                tr("Без расширения", "No extension").into()
             } else {
                 format!(".{extension}")
             }
@@ -90,13 +118,17 @@ pub fn criterion(event: &Value, sort: &Value) -> Option<String> {
             event["origin"]["source_app"].as_str(),
             event["source"].as_str().unwrap_or(""),
         )
-        .map(|value| format!("Источник: {value}"))
-        .unwrap_or_else(|| "Источник неизвестен".into()),
+        .map(|value| format!("{}: {value}", tr("Источник", "Source")))
+        .unwrap_or_else(|| tr("Источник неизвестен", "Source unknown").into()),
         _ => return None,
     })
 }
 fn size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
+    let units = if super::i18n::is_english() {
+        ["B", "KiB", "MiB", "GiB", "TiB"]
+    } else {
+        ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"]
+    };
     let mut value = bytes as f64;
     let mut unit = 0;
     while value >= 1024. && unit < 4 {
@@ -104,9 +136,9 @@ fn size(bytes: u64) -> String {
         unit += 1;
     }
     if unit == 0 {
-        format!("{bytes} Б")
+        format!("{bytes} {}", units[0])
     } else {
-        format!("{value:.1} {}", UNITS[unit])
+        format!("{value:.1} {}", units[unit])
     }
 }
 // Gregorian civil date from epoch days. UTC is explicit; no filesystem/local

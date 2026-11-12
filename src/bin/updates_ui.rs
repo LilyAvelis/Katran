@@ -1,4 +1,5 @@
 //! Manual update controls. The dispatcher owns network and installation work.
+use super::i18n::tr;
 use eframe::egui;
 use katran::{Command, Request, Service, domain_jobs::JobId};
 use serde_json::Value;
@@ -38,11 +39,23 @@ fn status_value(value: &Value) -> Option<Value> {
 
 fn request_error(response: &Value, installing: bool) -> String {
     if installing {
-        "Не удалось установить обновление. Попробуйте ещё раз.".into()
+        tr(
+            "Не удалось установить обновление. Попробуйте ещё раз.",
+            "Could not install the update. Try again.",
+        )
+        .into()
     } else if response["error"]["code"] == "update_network_error" {
-        "Не удалось проверить обновления. Проверьте подключение и попробуйте ещё раз.".into()
+        tr(
+            "Не удалось проверить обновления. Проверьте подключение и попробуйте ещё раз.",
+            "Could not check for updates. Check your connection and try again.",
+        )
+        .into()
     } else {
-        "Не удалось проверить обновления. Попробуйте ещё раз.".into()
+        tr(
+            "Не удалось проверить обновления. Попробуйте ещё раз.",
+            "Could not check for updates. Try again.",
+        )
+        .into()
     }
 }
 
@@ -53,7 +66,11 @@ impl State {
         if response["ok"] == true {
             self.status = response["result"].clone();
         } else {
-            self.error = "Не удалось прочитать состояние обновлений.".into();
+            self.error = tr(
+                "Не удалось прочитать состояние обновлений.",
+                "Could not read update status.",
+            )
+            .into();
         }
     }
 
@@ -92,9 +109,17 @@ impl State {
             return;
         }
         self.error = if installing {
-            "Не удалось запустить установку обновления.".into()
+            tr(
+                "Не удалось запустить установку обновления.",
+                "Could not start installing the update.",
+            )
+            .into()
         } else {
-            "Не удалось запустить проверку обновлений.".into()
+            tr(
+                "Не удалось запустить проверку обновлений.",
+                "Could not start checking for updates.",
+            )
+            .into()
         };
     }
 
@@ -106,9 +131,17 @@ impl State {
         let response = call(api, Command::PollJob { job_id });
         if response["ok"] != true {
             self.error = if self.installing {
-                "Не удалось получить результат установки.".into()
+                tr(
+                    "Не удалось получить результат установки.",
+                    "Could not retrieve the installation result.",
+                )
+                .into()
             } else {
-                "Не удалось получить результат проверки.".into()
+                tr(
+                    "Не удалось получить результат проверки.",
+                    "Could not retrieve the update check result.",
+                )
+                .into()
             };
             self.job = None;
             return;
@@ -123,27 +156,43 @@ impl State {
                     self.status = status;
                     self.error.clear();
                 } else {
-                    self.error = "Операция завершилась без состояния обновлений.".into();
+                    self.error = tr(
+                        "Операция завершилась без состояния обновлений.",
+                        "The operation finished without an update status.",
+                    )
+                    .into();
                 }
                 self.job = None;
                 self.installing = false;
             }
             Some("cancelled") => {
-                self.error = "Операция отменена.".into();
+                self.error = tr("Операция отменена.", "Operation cancelled.").into();
                 self.job = None;
                 self.installing = false;
             }
             Some("failed") => {
                 self.error = if self.installing {
-                    "Не удалось установить обновление. Попробуйте ещё раз.".into()
+                    tr(
+                        "Не удалось установить обновление. Попробуйте ещё раз.",
+                        "Could not install the update. Try again.",
+                    )
+                    .into()
                 } else {
-                    "Не удалось проверить обновления. Попробуйте ещё раз.".into()
+                    tr(
+                        "Не удалось проверить обновления. Попробуйте ещё раз.",
+                        "Could not check for updates. Try again.",
+                    )
+                    .into()
                 };
                 self.job = None;
                 self.installing = false;
             }
             _ => {
-                self.error = "Не удалось прочитать состояние операции обновления.".into();
+                self.error = tr(
+                    "Не удалось прочитать состояние операции обновления.",
+                    "Could not read the update operation status.",
+                )
+                .into();
                 self.job = None;
                 self.installing = false;
             }
@@ -156,7 +205,11 @@ impl State {
         };
         let response = call(api, Command::CancelJob { job_id });
         if response["ok"] != true {
-            self.error = "Операция уже выполняется и не была отменена.".into();
+            self.error = tr(
+                "Операция уже выполняется и не была отменена.",
+                "The operation is already running and was not cancelled.",
+            )
+            .into();
         } else {
             self.error.clear();
         }
@@ -167,29 +220,60 @@ impl State {
 
     fn status_label(&self) -> String {
         match self.status["state"].as_str().unwrap_or("") {
-            "not_checked" => "Проверка обновлений ещё не выполнялась.".into(),
+            "not_checked" => tr(
+                "Проверка обновлений ещё не выполнялась.",
+                "Updates have not been checked yet.",
+            )
+            .into(),
             "available" => format!(
-                "Доступна версия {}.",
-                self.status["latest_version"].as_str().unwrap_or("новая")
+                "{} {}.",
+                tr("Доступна версия", "Available version:"),
+                self.status["latest_version"]
+                    .as_str()
+                    .unwrap_or(tr("новая", "new"))
             ),
             "up_to_date" => format!(
-                "Установлена актуальная версия {}.",
+                "{} {}.",
+                tr(
+                    "Установлена актуальная версия",
+                    "Up to date; installed version:"
+                ),
                 self.status["current_version"].as_str().unwrap_or("")
             ),
-            "unavailable" => "Сейчас нет доступной публичной версии.".into(),
-            "unsupported" => "Эта установка не поддерживает обновление.".into(),
+            "unavailable" => tr(
+                "Сейчас нет доступной публичной версии.",
+                "No public version is currently available.",
+            )
+            .into(),
+            "unsupported" => tr(
+                "Эта установка не поддерживает обновление.",
+                "This installation does not support updates.",
+            )
+            .into(),
             "installed" => {
                 let version = self.status["installed"]["version"]
                     .as_str()
                     .or_else(|| self.status["current_version"].as_str())
                     .unwrap_or("");
                 if self.status["installed"]["restart_required"] == true {
-                    format!("Версия {version} установлена. Перезапустите Katran вручную.")
+                    if super::i18n::is_english() {
+                        format!("Version {version} installed. Restart Katran manually.")
+                    } else {
+                        format!("Версия {version} установлена. Перезапустите Katran вручную.")
+                    }
                 } else {
-                    format!("Версия {version} установлена.")
+                    if super::i18n::is_english() {
+                        format!("Version {version} installed.")
+                    } else {
+                        format!("Версия {version} установлена.")
+                    }
                 }
             }
-            _ => "Состояние обновлений пока неизвестно.".into(),
+            _ => tr(
+                "Состояние обновлений пока неизвестно.",
+                "Update status is not yet known.",
+            )
+            .into(),
         }
     }
 
@@ -197,7 +281,7 @@ impl State {
         if !self.initialized {
             self.read_status(api);
         }
-        ui.heading("Обновления");
+        ui.heading(tr("Обновления", "Updates"));
         ui.label(self.status_label());
 
         let busy = self.job.is_some();
@@ -205,19 +289,26 @@ impl State {
         if busy {
             ui.horizontal(|ui| {
                 ui.label(if self.installing {
-                    "Скачивание и установка…"
+                    tr("Скачивание и установка…", "Downloading and installing…")
                 } else {
-                    "Проверка обновлений…"
+                    tr("Проверка обновлений…", "Checking for updates…")
                 });
-                if ui.button("Отменить").clicked() {
+                if ui.button(tr("Отменить", "Cancel")).clicked() {
                     self.cancel(api, ctx);
                 }
             });
         } else {
-            if !installed && ui.button("Проверить обновления").clicked() {
+            if !installed
+                && ui
+                    .button(tr("Проверить обновления", "Check for updates"))
+                    .clicked()
+            {
                 self.begin(api, ctx, false);
             }
-            if self.status["state"] == "available" && ui.button("Скачать и установить").clicked()
+            if self.status["state"] == "available"
+                && ui
+                    .button(tr("Скачать и установить", "Download and install"))
+                    .clicked()
             {
                 self.begin(api, ctx, true);
             }

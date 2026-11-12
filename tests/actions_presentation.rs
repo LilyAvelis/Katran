@@ -1,4 +1,8 @@
-use katran::{Command, Request, Service, interaction::ShelfTab};
+use katran::{
+    Command, Request, Service,
+    interaction::ShelfTab,
+    settings::{Language, Settings},
+};
 use serde_json::Value;
 
 fn call(api: &mut Service, command: Command) -> Value {
@@ -24,6 +28,10 @@ fn find<'a>(actions: &'a Value, id: &str) -> &'a Value {
 fn actions_have_contiguous_human_readable_groups_and_stable_bindings() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 10_000).unwrap();
+    let mut settings: Settings =
+        serde_json::from_value(call(&mut api, Command::GetSettings)).unwrap();
+    settings.language = Language::Russian;
+    call(&mut api, Command::SetSettings { settings });
     call(&mut api, Command::SetTab { tab: ShelfTab::All });
     let actions = call(&mut api, Command::Actions);
     let mut seen = std::collections::HashSet::new();
@@ -57,4 +65,40 @@ fn actions_have_contiguous_human_readable_groups_and_stable_bindings() {
         find(&images, "transfer_copy")["label"],
         "Копировать в Folder"
     );
+}
+
+#[test]
+fn actions_translate_labels_without_changing_ids_or_shortcuts() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    let english = call(&mut api, Command::Actions);
+    assert_eq!(find(&english, "copy")["label"], "Copy selection");
+    assert_eq!(find(&english, "copy")["group"], "Selection");
+    assert_eq!(find(&english, "copy")["shortcut"], "Ctrl C");
+    assert_eq!(find(&english, "tab_toggle")["label"], "Go to Folder");
+    for action in english.as_array().unwrap() {
+        for key in ["label", "group"] {
+            assert!(
+                !action[key]
+                    .as_str()
+                    .unwrap()
+                    .chars()
+                    .any(|c| ('\u{0400}'..='\u{04ff}').contains(&c)),
+                "untranslated {key}: {action}"
+            );
+        }
+    }
+    let mut settings: Settings =
+        serde_json::from_value(call(&mut api, Command::GetSettings)).unwrap();
+    settings.language = Language::Russian;
+    call(&mut api, Command::SetSettings { settings });
+    let russian = call(&mut api, Command::Actions);
+    assert_eq!(find(&russian, "copy")["label"], "Копировать выбранное");
+    assert_eq!(find(&russian, "copy")["shortcut"], "Ctrl C");
 }

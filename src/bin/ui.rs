@@ -8,6 +8,7 @@ mod clipboard_events_ui;
 mod files_file_picker;
 mod gallery_card;
 mod glass_lab;
+mod i18n;
 mod images;
 mod info_bar;
 mod input_log;
@@ -86,13 +87,17 @@ fn item_failures(items: &Value) -> String {
                 .as_str()
                 .map(str::to_owned)
                 .or_else(|| item["id"].as_i64().map(|id| format!("#{id}")))
-                .unwrap_or_else(|| "Объект".into());
+                .unwrap_or_else(|| i18n::tr("Объект", "Item").into());
             let error = item["error"]
                 .as_str()
                 .or_else(|| item["error"]["message"].as_str())
-                .unwrap_or("Ошибка");
+                .unwrap_or(i18n::tr("Ошибка", "Error"));
             if let Some(path) = item["recovery_path"].as_str() {
-                format!("{name}: {error} · Файл сохранён: {path}")
+                if i18n::is_english() {
+                    format!("{name}: {error} · File saved: {path}")
+                } else {
+                    format!("{name}: {error} · Файл сохранён: {path}")
+                }
             } else {
                 format!("{name}: {error}")
             }
@@ -136,10 +141,14 @@ fn cleanup_message(result: &Value) -> String {
     if pending.is_empty() {
         String::new()
     } else {
-        format!(
-            " · Не удалось очистить временные данные: {}",
-            pending.join("; ")
-        )
+        if i18n::is_english() {
+            format!(" · Could not clean temporary data: {}", pending.join("; "))
+        } else {
+            format!(
+                " · Не удалось очистить временные данные: {}",
+                pending.join("; ")
+            )
+        }
     }
 }
 // Reveal only the part beyond a viewport edge; never recenter a visible row.
@@ -369,7 +378,13 @@ impl Shelf {
                     log.record("folder_launch",serde_json::json!({"received":received,"opened":opened,"failed":received-opened}));
                 }
             }
-            Err(error) => self.message = format!("Не удалось принять папку: {error}"),
+            Err(error) => {
+                self.message = if i18n::is_english() {
+                    format!("Could not add folder: {error}")
+                } else {
+                    format!("Не удалось принять папку: {error}")
+                }
+            }
         }
     }
     fn video_background_tick(&mut self, ctx: &egui::Context) {
@@ -387,7 +402,11 @@ impl Shelf {
             theme_ui::set_video_texture(ctx, id, texture);
         }
         if let Some(error) = self.video_background.error() {
-            self.message = format!("Видеофон: {error}");
+            self.message = if i18n::is_english() {
+                format!("Video background: {error}")
+            } else {
+                format!("Видеофон: {error}")
+            };
         }
     }
     /// Shared input ownership includes overlays before any early command handler.
@@ -417,6 +436,11 @@ impl Shelf {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
+            i18n::set(if settings["language"] == "en" {
+                katran::settings::Language::English
+            } else {
+                katran::settings::Language::Russian
+            });
             self.search_keyboard_only = settings["search_keyboard_only"] == true;
             self.link_cards
                 .set_online(settings["link_favicons_online"] == true);
@@ -437,7 +461,11 @@ impl Shelf {
                 };
                 let error = (!available).then(|| {
                     let label = resolved["label"].as_str().unwrap_or(&font_id);
-                    format!("Шрифт эмодзи {label} недоступен; используется системный.")
+                    if i18n::is_english() {
+                        format!("Emoji font {label} unavailable; using the system font.")
+                    } else {
+                        format!("Шрифт эмодзи {label} недоступен; используется системный.")
+                    }
                 });
                 if let Some(error) = &error {
                     self.message = error.clone();
@@ -681,7 +709,11 @@ impl Shelf {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.files_picker = None;
-                    self.message = "Не удалось получить выбранные файлы".into();
+                    self.message = i18n::tr(
+                        "Не удалось получить выбранные файлы",
+                        "Could not get selected files",
+                    )
+                    .into();
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     ctx.request_repaint_after(Duration::from_millis(200));
@@ -899,7 +931,7 @@ impl Shelf {
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
                         if self.query.is_empty() {
-                            "Поиск на полке…"
+                            i18n::tr("Поиск на полке…", "Search shelf…")
                         } else {
                             &self.query
                         },
@@ -909,12 +941,15 @@ impl Shelf {
                     if response.drag_started() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
-                    response.on_hover_text("Ctrl+T — включить поиск");
+                    response.on_hover_text(i18n::tr(
+                        "Ctrl+T — включить поиск",
+                        "Ctrl+T — activate search",
+                    ));
                 } else {
                     let search = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(search_id)
-                            .hint_text("Поиск на полке…")
+                            .hint_text(i18n::tr("Поиск на полке…", "Search shelf…"))
                             .font(egui::FontId::proportional(22.0))
                             .frame(egui::Frame::NONE)
                             .desired_width(ui.available_width()),
@@ -969,7 +1004,7 @@ impl Shelf {
                     self.apply_tab_bar_command(command, &ctx);
                 }
                 if (self.next_cursor.is_some() || self.preloaded_has_more)
-                    && ui.button("Загрузить ещё").clicked()
+                    && ui.button(i18n::tr("Загрузить ещё", "Load more")).clicked()
                 {
                     if self.preloaded_has_more {
                         self.preloaded_has_more = false;
@@ -994,12 +1029,19 @@ impl Shelf {
                     self.info_bar(ui);
                     let selected = self.state["selected"].as_array().map_or(0, Vec::len);
                     if selected > 0 {
-                        ui.weak(format!("{selected} выбрано"));
+                        ui.weak(if i18n::is_english() {
+                            format!("{selected} selected")
+                        } else {
+                            format!("{selected} выбрано")
+                        });
                     }
                     if self.state["tab"] == "files" {
                         let picking = self.files_picker.is_some();
                         if ui
-                            .add_enabled(!picking, egui::Button::new("＋ Файлы"))
+                            .add_enabled(
+                                !picking,
+                                egui::Button::new(i18n::tr("＋ Файлы", "＋ Files")),
+                            )
                             .clicked()
                         {
                             match files_file_picker::start_pick_files() {
@@ -1020,7 +1062,11 @@ impl Shelf {
                             self.focus_actions = self.actions;
                             self.action_query.clear();
                         }
-                        let tags = ui_style::status_icon(ui, egui_lucide::Lucide::Tag, "Теги · / ");
+                        let tags = ui_style::status_icon(
+                            ui,
+                            egui_lucide::Lucide::Tag,
+                            i18n::tr("Теги · / ", "Tags · / "),
+                        );
                         ctx.data_mut(|d| {
                             d.insert_temp(egui::Id::new("tags-button-rect"), tags.rect)
                         });
@@ -1037,7 +1083,7 @@ impl Shelf {
                         let sort = ui_style::status_icon(
                             ui,
                             egui_lucide::Lucide::ArrowUpDown,
-                            "Сортировка · запятая",
+                            i18n::tr("Сортировка · запятая", "Sort · comma"),
                         );
                         ctx.data_mut(|d| {
                             d.insert_temp(egui::Id::new("sorting-button-rect"), sort.rect)
@@ -1242,7 +1288,11 @@ impl Shelf {
                     limit: 500,
                 });
                 if !page["ids"].is_array() {
-                    self.message = "Не удалось получить список сохранённых ссылок".into();
+                    self.message = i18n::tr(
+                        "Не удалось получить список сохранённых ссылок",
+                        "Could not list saved links",
+                    )
+                    .into();
                     ids.clear();
                     break;
                 }
@@ -1257,7 +1307,11 @@ impl Shelf {
                     break;
                 };
                 if next <= after_id {
-                    self.message = "Не удалось продолжить список ссылок".into();
+                    self.message = i18n::tr(
+                        "Не удалось продолжить список ссылок",
+                        "Could not continue listing links",
+                    )
+                    .into();
                     ids.clear();
                     break;
                 }
@@ -1266,7 +1320,7 @@ impl Shelf {
             if !ids.is_empty() {
                 self.link_cards.refresh_all(ids, &ctx);
             } else if self.message.is_empty() {
-                self.message = "Сохранённых ссылок пока нет".into();
+                self.message = i18n::tr("Сохранённых ссылок пока нет", "No saved links yet").into();
             }
         }
         let progress = self.link_cards.progress(&ctx);
@@ -1274,9 +1328,21 @@ impl Shelf {
             self.link_refresh_last = progress;
             if let Some((done, total, unavailable)) = progress {
                 self.message = if done < total {
-                    format!("Значки ссылок: {done}/{total}")
+                    if i18n::is_english() {
+                        format!("Link icons: {done}/{total}")
+                    } else {
+                        format!("Значки ссылок: {done}/{total}")
+                    }
                 } else {
-                    format!("Значки ссылок обновлены: {done}/{total}, без favicon: {unavailable}")
+                    if i18n::is_english() {
+                        format!(
+                            "Link icons updated: {done}/{total}, without favicon: {unavailable}"
+                        )
+                    } else {
+                        format!(
+                            "Значки ссылок обновлены: {done}/{total}, без favicon: {unavailable}"
+                        )
+                    }
                 };
             }
         }
@@ -1302,22 +1368,22 @@ impl Shelf {
         if self.api.is_some() && !self.pending_delete.is_empty() {
             let result=egui::Modal::new(egui::Id::new("delete-confirmation")).show(&ctx,|ui| {
                 if self.pending_delete_originals {
-                    ui.heading(if self.pending_delete_recycle && !self.pending_delete_permanent { "Переместить файлы в корзину?" } else { "Удалить оригиналы с диска?" });
-                    ui.label(format!("Выбрано объектов: {}.", self.pending_delete.len()));
-                    if self.pending_delete_permanent { ui.label("Оригиналы снимков ShareX будут удалены безвозвратно, без корзины."); }
-                    if self.pending_delete_recycle { ui.label("Выбранные оригиналы будут перемещены в корзину Windows."); }
-                    ui.label("Остальные выбранные объекты будут убраны с полки.");
+                    ui.heading(if self.pending_delete_recycle && !self.pending_delete_permanent { i18n::tr("Переместить файлы в корзину?", "Move files to Recycle Bin?") } else { i18n::tr("Удалить оригиналы с диска?", "Delete originals from disk?") });
+                    ui.label(if i18n::is_english() { format!("Selected items: {}.", self.pending_delete.len()) } else { format!("Выбрано объектов: {}.", self.pending_delete.len()) });
+                    if self.pending_delete_permanent { ui.label(i18n::tr("Оригиналы снимков ShareX будут удалены безвозвратно, без корзины.", "Original ShareX screenshots will be deleted permanently, without the Recycle Bin.")); }
+                    if self.pending_delete_recycle { ui.label(i18n::tr("Выбранные оригиналы будут перемещены в корзину Windows.", "Selected originals will be moved to the Windows Recycle Bin.")); }
+                    ui.label(i18n::tr("Остальные выбранные объекты будут убраны с полки.", "Other selected items will be removed from the shelf."));
                 } else {
-                    ui.heading(format!("Убрать с полки {} объектов?",self.pending_delete.len()));
-                    ui.label("Исходные файлы останутся на месте. Временные копии без других ссылок будут удалены.");
+                    ui.heading(if i18n::is_english() { format!("Remove {} items from shelf?",self.pending_delete.len()) } else { format!("Убрать с полки {} объектов?",self.pending_delete.len()) });
+                    ui.label(i18n::tr("Исходные файлы останутся на месте. Временные копии без других ссылок будут удалены.", "Source files stay in place. Temporary copies with no other references will be deleted."));
                 }
                 let enter=ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
-                let label = if self.pending_delete_recycle && !self.pending_delete_permanent {"В корзину · Enter"} else if self.pending_delete_originals {"Удалить оригиналы · Enter"} else {"Убрать · Enter"};
+                let label = if self.pending_delete_recycle && !self.pending_delete_permanent { i18n::tr("В корзину · Enter", "Recycle · Enter") } else if self.pending_delete_originals { i18n::tr("Удалить оригиналы · Enter", "Delete originals · Enter") } else { i18n::tr("Убрать · Enter", "Remove · Enter") };
                 if ui.button(label).clicked()||enter {
                     let ids=self.pending_delete.clone();
                     if self.start_job(Command::DeleteSelection{ids,confirmed:true},false,ctx.clone()) {self.pending_delete.clear();}
                 }
-                if ui.button("Отмена · Esc").clicked(){self.pending_delete.clear();}
+                if ui.button(i18n::tr("Отмена · Esc", "Cancel · Esc")).clicked(){self.pending_delete.clear();}
             });
             if result.should_close() {
                 self.pending_delete.clear();
@@ -1329,12 +1395,17 @@ impl Shelf {
         }
         if self.api.is_some() && self.save {
             let result = egui::Modal::new(egui::Id::new("destination")).show(&ctx, |ui| {
-                ui.heading("Сохранить копии");
-                ui.label("Существующая папка назначения");
+                ui.heading(i18n::tr("Сохранить копии", "Save copies"));
+                ui.label(i18n::tr(
+                    "Существующая папка назначения",
+                    "Existing destination folder",
+                ));
                 let r =
                     ui.add(egui::TextEdit::singleline(&mut self.destination).desired_width(420.0));
                 r.request_focus();
-                if ui.button("Сохранить · Enter").clicked()
+                if ui
+                    .button(i18n::tr("Сохранить · Enter", "Save · Enter"))
+                    .clicked()
                     || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
                 {
                     let ids = self.call(Command::RunAction { id: "save".into() })["ids"]
@@ -1346,7 +1417,7 @@ impl Shelf {
                     let destination = PathBuf::from(&self.destination);
                     if self.start_job(Command::Import { ids, destination }, false, ctx.clone()) {
                         self.save = false;
-                        self.message = "Сохранение копий…".into();
+                        self.message = i18n::tr("Сохранение копий…", "Saving copies…").into();
                     }
                 }
             });
@@ -1540,6 +1611,16 @@ fn main() -> eframe::Result {
     let mut api = Service::open(&root, DEFAULT_QUOTA).unwrap_or_else(|e| {
         eprintln!("{}", e.message);
         std::process::exit(1)
+    });
+    let initial_settings = api.execute(Request {
+        api_version: 1,
+        request_id: "startup-language".into(),
+        command: Command::GetSettings,
+    });
+    i18n::set(if initial_settings["result"]["language"] == "en" {
+        katran::settings::Language::English
+    } else {
+        katran::settings::Language::Russian
     });
     if optical_demo {
         let mut execute = |command| {
@@ -1781,6 +1862,22 @@ mod tests {
             }
         }
         let mut api = Service::open(root, 10000).unwrap();
+        let mut settings: katran::settings::Settings = serde_json::from_value(
+            api.execute(Request {
+                api_version: 1,
+                request_id: "test-settings".into(),
+                command: Command::GetSettings,
+            })["result"]
+                .clone(),
+        )
+        .unwrap();
+        settings.language = katran::settings::Language::Russian;
+        api.execute(Request {
+            api_version: 1,
+            request_id: "test-language".into(),
+            command: Command::SetSettings { settings },
+        });
+        i18n::set(katran::settings::Language::Russian);
         api.set_app_provider(Box::new(FakeApps));
         api.set_file_launcher(Box::new(NoExternalFile));
         api.set_preview_launcher(Box::new(NoExternalPreview));

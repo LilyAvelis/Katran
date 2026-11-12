@@ -1,3 +1,4 @@
+use super::i18n::tr;
 use crate::ui_foundation::tokens;
 use eframe::egui::{self, Color32};
 
@@ -134,7 +135,11 @@ pub(super) fn status_icon(
 pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(116.0, 28.0), egui::Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Действия · Ctrl+K")
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            tr("Действия · Ctrl+K", "Actions · Ctrl+K"),
+        )
     });
     if open || response.hovered() || response.has_focus() {
         ui.painter().rect_filled(
@@ -154,5 +159,5 @@ pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
         egui::FontId::proportional(12.0),
         ui.visuals().text_color(),
     );
-    response.on_hover_text("Действия · Ctrl+K")
+    response.on_hover_text(tr("Действия · Ctrl+K", "Actions · Ctrl+K"))
 }

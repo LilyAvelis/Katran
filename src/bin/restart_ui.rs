@@ -1,4 +1,5 @@
 //! Explicit successor startup: never terminates or manipulates the predecessor.
+use super::i18n::tr;
 use std::{
     ffi::{OsStr, OsString},
     io::Read,
@@ -10,7 +11,11 @@ const MARKER: &str = "--restart-after";
 /// Remove only a trailing restart marker, preserving all application arguments.
 fn split_args(args: &[OsString]) -> Result<(Vec<OsString>, Option<u32>), String> {
     if args.last().is_some_and(|arg| arg == OsStr::new(MARKER)) {
-        return Err("Маркер перезапуска не содержит PID".into());
+        return Err(tr(
+            "Маркер перезапуска не содержит PID",
+            "Restart marker has no PID",
+        )
+        .into());
     }
     if args.len() >= 2 && args[args.len() - 2] == OsStr::new(MARKER) {
         let pid = args
@@ -18,7 +23,7 @@ fn split_args(args: &[OsString]) -> Result<(Vec<OsString>, Option<u32>), String>
             .and_then(|s| s.to_str())
             .and_then(|s| s.parse::<u32>().ok())
             .filter(|pid| *pid != 0)
-            .ok_or("Некорректный PID перезапуска")?;
+            .ok_or(tr("Некорректный PID перезапуска", "Invalid restart PID"))?;
         return Ok((args[..args.len() - 2].to_vec(), Some(pid)));
     }
     Ok((args.to_vec(), None))
@@ -48,25 +53,46 @@ fn successor_target(current: &Path) -> Result<PathBuf, String> {
         return Ok(current.to_owned());
     }
     let mut pointer = String::new();
-    let file = std::fs::File::open(runtime.join("current-version.txt"))
-        .map_err(|e| format!("Не удалось прочитать текущую версию Katran: {e}"))?;
-    file.take(65)
-        .read_to_string(&mut pointer)
-        .map_err(|e| format!("Некорректная текущая версия Katran: {e}"))?;
+    let file = std::fs::File::open(runtime.join("current-version.txt")).map_err(|e| {
+        format!(
+            "{}: {e}",
+            tr(
+                "Не удалось прочитать текущую версию Katran",
+                "Could not read current Katran version"
+            )
+        )
+    })?;
+    file.take(65).read_to_string(&mut pointer).map_err(|e| {
+        format!(
+            "{}: {e}",
+            tr(
+                "Некорректная текущая версия Katran",
+                "Invalid current Katran version"
+            )
+        )
+    })?;
     let id = pointer.trim();
     if pointer.len() > 64 || id.len() != 12 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("Некорректный указатель текущей версии Katran".into());
+        return Err(tr(
+            "Некорректный указатель текущей версии Katran",
+            "Invalid current Katran version pointer",
+        )
+        .into());
     }
     let target = versions.join(id).join("katran-ui.exe");
     if !target.is_file() {
-        return Err("Файл текущей версии Katran отсутствует".into());
+        return Err(tr(
+            "Файл текущей версии Katran отсутствует",
+            "Current Katran version file is missing",
+        )
+        .into());
     }
     Ok(target)
 }
 
 fn successor_args(args: &[OsString], pid: u32) -> Result<Vec<OsString>, String> {
     if pid == 0 {
-        return Err("Некорректный PID перезапуска".into());
+        return Err(tr("Некорректный PID перезапуска", "Invalid restart PID").into());
     }
     let (args, _) = split_args(args)?;
     let flag = OsStr::new("--open-folder");
@@ -81,12 +107,26 @@ fn successor_args(args: &[OsString], pid: u32) -> Result<Vec<OsString>, String> 
         {
             Some(profile.clone())
         }
-        _ => return Err("Некорректные аргументы запуска Katran".into()),
+        _ => {
+            return Err(tr(
+                "Некорректные аргументы запуска Katran",
+                "Invalid Katran launch arguments",
+            )
+            .into());
+        }
     };
     let profile = match profile {
         Some(profile) => profile,
         None => std::env::current_dir()
-            .map_err(|e| format!("Не удалось определить профиль: {e}"))?
+            .map_err(|e| {
+                format!(
+                    "{}: {e}",
+                    tr(
+                        "Не удалось определить профиль",
+                        "Could not determine profile"
+                    )
+                )
+            })?
             .join("katran-data")
             .into_os_string(),
     };
@@ -111,9 +151,15 @@ pub(super) fn spawn_successor() -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    command
-        .spawn()
-        .map_err(|e| format!("Не удалось запустить новую копию Katran: {e}"))?;
+    command.spawn().map_err(|e| {
+        format!(
+            "{}: {e}",
+            tr(
+                "Не удалось запустить новую копию Katran",
+                "Could not launch a new Katran process"
+            )
+        )
+    })?;
     Ok(())
 }
 
@@ -126,7 +172,11 @@ pub(super) fn wait_for_predecessor() -> Result<(), String> {
         return Ok(());
     };
     if pid == std::process::id() {
-        return Err("Невозможно ждать собственный процесс".into());
+        return Err(tr(
+            "Невозможно ждать собственный процесс",
+            "Cannot wait for the current process",
+        )
+        .into());
     }
     wait_for_pid(pid)
 }
@@ -140,7 +190,15 @@ fn wait_for_pid(pid: u32) -> Result<(), String> {
     let handle = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
         Ok(handle) => handle,
         Err(error) if error.code().0 as u32 == 0x80070057 => return Ok(()), // ERROR_INVALID_PARAMETER: PID exited.
-        Err(error) => return Err(format!("Не удалось дождаться предыдущего Katran: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "{}: {error}",
+                tr(
+                    "Не удалось дождаться предыдущего Katran",
+                    "Could not wait for previous Katran process"
+                )
+            ));
+        }
     };
     let status = unsafe { WaitForSingleObject(handle, 30_000) };
     let error = std::io::Error::last_os_error();
@@ -150,14 +208,28 @@ fn wait_for_pid(pid: u32) -> Result<(), String> {
     if status == WAIT_OBJECT_0 {
         Ok(())
     } else if status == WAIT_TIMEOUT {
-        Err("Предыдущий Katran не завершился за 30 секунд".into())
+        Err(tr(
+            "Предыдущий Katran не завершился за 30 секунд",
+            "Previous Katran process did not exit within 30 seconds",
+        )
+        .into())
     } else {
-        Err(format!("Ошибка ожидания предыдущего Katran: {error}"))
+        Err(format!(
+            "{}: {error}",
+            tr(
+                "Ошибка ожидания предыдущего Katran",
+                "Error waiting for previous Katran process"
+            )
+        ))
     }
 }
 #[cfg(not(windows))]
 fn wait_for_pid(_: u32) -> Result<(), String> {
-    Err("Автоматический перезапуск доступен только в Windows".into())
+    Err(tr(
+        "Автоматический перезапуск доступен только в Windows",
+        "Automatic restart is available only on Windows",
+    )
+    .into())
 }
 
 #[cfg(test)]

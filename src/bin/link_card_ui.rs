@@ -287,7 +287,10 @@ impl State {
                 Color32::WHITE,
             );
         }
-        let site = caption(event, visual.map_or("Ссылка", |v| v.site.as_str()));
+        let site = caption(
+            event,
+            visual.map_or(super::i18n::tr("Ссылка", "Link"), |v| v.site.as_str()),
+        );
         let available = (rect.width() - 8.0).max(1.0);
         let galley = ui.fonts_mut(|fonts| {
             for size in [12.0, 11.0, 10.0, 9.0] {

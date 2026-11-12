@@ -1,4 +1,5 @@
 //! Explicit multi-file picker for adding reference-only Files pointers.
+use super::i18n::tr;
 use std::{path::PathBuf, sync::mpsc::Receiver};
 
 pub(super) type PickResult = Result<Option<Vec<PathBuf>>, String>;
@@ -13,7 +14,15 @@ fn start_worker(
         .spawn(move || {
             let _ = sender.send(worker());
         })
-        .map_err(|error| format!("Не удалось открыть выбор файлов: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                tr(
+                    "Не удалось открыть выбор файлов",
+                    "Could not open file picker"
+                )
+            )
+        })?;
     Ok(receiver)
 }
 
@@ -25,7 +34,11 @@ pub(super) fn start_pick_files() -> Result<Receiver<PickResult>, String> {
 
 #[cfg(not(windows))]
 pub(super) fn start_pick_files() -> Result<Receiver<PickResult>, String> {
-    Err("Выбор файлов доступен только в Windows".into())
+    Err(tr(
+        "Выбор файлов доступен только в Windows",
+        "File selection is available only on Windows",
+    )
+    .into())
 }
 
 #[cfg(windows)]
@@ -47,17 +60,33 @@ fn pick_on_sta() -> PickResult {
             unsafe { CoUninitialize() };
         }
     }
-    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }
-        .map_err(|error| format!("Не удалось инициализировать диалог: {error}"))?;
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }.map_err(|error| {
+        format!(
+            "{}: {error}",
+            tr(
+                "Не удалось инициализировать диалог",
+                "Could not initialize dialog"
+            )
+        )
+    })?;
     let _guard = ComGuard;
     (|| {
         let dialog: IFileOpenDialog =
-            unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
-                .map_err(|error| format!("Не удалось создать диалог: {error}"))?;
+            unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }.map_err(
+                |error| {
+                    format!(
+                        "{}: {error}",
+                        tr("Не удалось создать диалог", "Could not create dialog")
+                    )
+                },
+            )?;
         unsafe {
-            let options = dialog
-                .GetOptions()
-                .map_err(|error| format!("Не удалось настроить диалог: {error}"))?;
+            let options = dialog.GetOptions().map_err(|error| {
+                format!(
+                    "{}: {error}",
+                    tr("Не удалось настроить диалог", "Could not configure dialog")
+                )
+            })?;
             dialog
                 .SetOptions(
                     options
@@ -66,32 +95,66 @@ fn pick_on_sta() -> PickResult {
                         | FOS_FILEMUSTEXIST
                         | FOS_PATHMUSTEXIST,
                 )
-                .map_err(|error| format!("Не удалось настроить диалог: {error}"))?;
+                .map_err(|error| {
+                    format!(
+                        "{}: {error}",
+                        tr("Не удалось настроить диалог", "Could not configure dialog")
+                    )
+                })?;
             if let Err(error) = dialog.Show(None) {
                 if error.code().0 as u32 == 0x800704c7 {
                     return Ok(None);
                 }
-                return Err(format!("Не удалось выбрать файлы: {error}"));
+                return Err(format!(
+                    "{}: {error}",
+                    tr("Не удалось выбрать файлы", "Could not select files")
+                ));
             }
-            let items = dialog
-                .GetResults()
-                .map_err(|error| format!("Не удалось получить файлы: {error}"))?;
-            let count = items
-                .GetCount()
-                .map_err(|error| format!("Не удалось получить количество файлов: {error}"))?;
+            let items = dialog.GetResults().map_err(|error| {
+                format!(
+                    "{}: {error}",
+                    tr("Не удалось получить файлы", "Could not retrieve files")
+                )
+            })?;
+            let count = items.GetCount().map_err(|error| {
+                format!(
+                    "{}: {error}",
+                    tr(
+                        "Не удалось получить количество файлов",
+                        "Could not retrieve file count"
+                    )
+                )
+            })?;
             if count > 1000 {
-                return Err("Можно выбрать не более 1000 файлов за раз".into());
+                return Err(tr(
+                    "Можно выбрать не более 1000 файлов за раз",
+                    "You can select at most 1000 files at once",
+                )
+                .into());
             }
             let mut paths = Vec::with_capacity(count as usize);
             for index in 0..count {
-                let item = items
-                    .GetItemAt(index)
-                    .map_err(|error| format!("Не удалось получить файл: {error}"))?;
-                let name = item
-                    .GetDisplayName(SIGDN_FILESYSPATH)
-                    .map_err(|error| format!("Не удалось получить путь файла: {error}"))?;
+                let item = items.GetItemAt(index).map_err(|error| {
+                    format!(
+                        "{}: {error}",
+                        tr("Не удалось получить файл", "Could not retrieve file")
+                    )
+                })?;
+                let name = item.GetDisplayName(SIGDN_FILESYSPATH).map_err(|error| {
+                    format!(
+                        "{}: {error}",
+                        tr(
+                            "Не удалось получить путь файла",
+                            "Could not retrieve file path"
+                        )
+                    )
+                })?;
                 if name.0.is_null() {
-                    return Err("Не удалось получить путь файла".into());
+                    return Err(tr(
+                        "Не удалось получить путь файла",
+                        "Could not retrieve file path",
+                    )
+                    .into());
                 }
                 let path = PathBuf::from(std::ffi::OsString::from_wide(name.as_wide()));
                 CoTaskMemFree(Some(name.0.cast()));

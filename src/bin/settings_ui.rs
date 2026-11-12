@@ -59,7 +59,22 @@ fn apply_global_hotkey(
     if !binding.is_empty()
         && let Err(error) = katran::overlay::Hotkey::parse(&binding)
     {
-        editor.failed(binding, error.message, false);
+        let message = match error.message.as_str() {
+            "Use Ctrl, Alt, Shift and one letter or F key" => super::i18n::tr(
+                "Укажите Ctrl, Alt, Shift и одну букву или клавишу F",
+                "Use Ctrl, Alt, Shift and one letter or F key",
+            ),
+            "Duplicate or invalid hotkey component" => super::i18n::tr(
+                "Повторный или недопустимый компонент сочетания",
+                "Duplicate or invalid hotkey component",
+            ),
+            "Hotkey needs a modifier and a key" => super::i18n::tr(
+                "В сочетании нужны модификатор и клавиша",
+                "Hotkey needs a modifier and a key",
+            ),
+            _ => error.message.as_str(),
+        };
+        editor.failed(binding, message.to_owned(), false);
         return false;
     }
     let current = call(api, Command::GetSettings);
@@ -70,7 +85,7 @@ fn apply_global_hotkey(
                 call(api, Command::SetSettings { settings: current })
             }
             Err(_) => {
-                serde_json::json!({"ok":false,"error":{"message":"Не удалось прочитать текущие настройки"}})
+                serde_json::json!({"ok":false,"error":{"message":super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings")}})
             }
         }
     } else {
@@ -86,7 +101,7 @@ fn apply_global_hotkey(
             binding,
             result["error"]["message"]
                 .as_str()
-                .unwrap_or("Ошибка сохранения")
+                .unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed"))
                 .into(),
             false,
         );
@@ -97,15 +112,15 @@ fn apply_global_hotkey(
 fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
     let terms = match index {
         0 => {
-            "запуск управление вызов katran захват поиск сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш квота история folder"
+            "general language язык запуск startup controls управление вызов katran захват capture поиск search сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш quota квота история folder"
         }
-        1 => "команда клавиатура сочетание shortcut hotkey",
-        2 => "доступные вкладки включить выключить сбор данных",
-        3 => "версия установка обновить",
+        1 => "shortcuts команда клавиатура сочетание shortcut hotkey",
+        2 => "tabs доступные вкладки включить выключить сбор данных",
+        3 => "updates версия установка обновить",
         4 => {
-            "тема цвета акцент выделение интенсивность окно компактное стекло оптика gpu преломление размытие фон лилии изображение видео компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
+            "themes тема цвета акцент выделение интенсивность окно compact компактное стекло оптика gpu преломление размытие фон background лилии изображение видео components компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
         }
-        5 => "метки теги tag",
+        5 => "tags метки теги tag",
         _ => "",
     };
     let query = query.trim().to_lowercase();
@@ -114,12 +129,73 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
         .all(|word| label.to_lowercase().contains(word) || terms.contains(word))
 }
 
+fn localized_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
+    if super::i18n::is_english() {
+        let direct = match id {
+            "pods" => "Tab: Pods",
+            "files" => "Tab: Files",
+            "tables" => "Tab: Tables",
+            "text" => "Tab: Text",
+            "links" => "Tab: Links",
+            "downloads" => "Tab: Downloads",
+            "all" => "Tab: Folder",
+            "images" => "Tab: Images",
+            "screenshots" => "Tab: Screenshots",
+            "tab_toggle" => "Folder / previous tab",
+            "toggle_pinned_view" => "All / pinned in category",
+            "capture" => "Toggle capture",
+            "commands" => "Open commands",
+            _ => "",
+        };
+        if !direct.is_empty() {
+            return direct;
+        }
+        let english = katran::actions::english_label(id, "");
+        if english.is_empty() { russian } else { english }
+    } else {
+        russian
+    }
+}
+
+fn localized_tab_label(label: &str) -> &str {
+    match label {
+        "Folder" => super::i18n::tr("Folder", "Folder"),
+        "Images" => super::i18n::tr("Изображения", "Images"),
+        "Screenshots" => super::i18n::tr("Снимки экрана", "Screenshots"),
+        "Downloads" => super::i18n::tr("Загрузки", "Downloads"),
+        "Text" => super::i18n::tr("Текст", "Text"),
+        "Links" => super::i18n::tr("Ссылки", "Links"),
+        "Tables" => super::i18n::tr("Таблицы", "Tables"),
+        "Pods" => super::i18n::tr("Символы", "Pods"),
+        "Files" => super::i18n::tr("Файлы", "Files"),
+        other => other,
+    }
+}
+
+fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'static str {
+    use katran::interaction::ShelfTab;
+    match tab {
+        ShelfTab::All => super::i18n::tr("Folder", "Folder"),
+        ShelfTab::Images => super::i18n::tr("Изображения", "Images"),
+        ShelfTab::Screenshots => super::i18n::tr("Снимки экрана", "Screenshots"),
+        ShelfTab::Downloads => super::i18n::tr("Загрузки", "Downloads"),
+        ShelfTab::Text => super::i18n::tr("Текст", "Text"),
+        ShelfTab::Links => super::i18n::tr("Ссылки", "Links"),
+        ShelfTab::Tables => super::i18n::tr("Таблицы", "Tables"),
+        ShelfTab::Pods => super::i18n::tr("Символы", "Pods"),
+        ShelfTab::Files => super::i18n::tr("Файлы", "Files"),
+    }
+}
+
 fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
     let mut changed = false;
     SettingsRow::show(
         ui,
-        "Цвет выделения",
-        "Отдельный цвет выбранных карточек. По умолчанию — цвет темы.",
+        super::i18n::tr("Цвет выделения", "Selection color"),
+        super::i18n::tr(
+            "Отдельный цвет выбранных карточек. По умолчанию — цвет темы.",
+            "Custom color for selected cards. Defaults to the theme color.",
+        ),
         |ui| {
             let fallback = if theme.preset == katran::theme::Preset::BlueExperimental {
                 theme.accent.unwrap_or([107, 174, 255])
@@ -134,8 +210,11 @@ fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePrefere
                     changed = true;
                 }
                 if ui
-                    .button("Цвет темы")
-                    .on_hover_text("Сбросить собственный цвет выделения")
+                    .button(super::i18n::tr("Цвет темы", "Theme color"))
+                    .on_hover_text(super::i18n::tr(
+                        "Сбросить собственный цвет выделения",
+                        "Reset custom selection color",
+                    ))
                     .clicked()
                 {
                     theme.selection = None;
@@ -146,8 +225,11 @@ fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePrefere
     );
     SettingsRow::show(
         ui,
-        "Интенсивность выделения",
-        "Оттенок заливки и света в оптике. При 0 остаётся контур.",
+        super::i18n::tr("Интенсивность выделения", "Selection intensity"),
+        super::i18n::tr(
+            "Оттенок заливки и света в оптике. При 0 остаётся контур.",
+            "Controls fill and optical lighting. At 0, only the outline remains.",
+        ),
         |ui| {
             let available = ui.available_width();
             ui.spacing_mut().slider_width = (available - 64.0).clamp(80.0, 180.0);
@@ -211,10 +293,16 @@ fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferenc
     let mut enabled = theme.optical_strength > 0;
     SettingsRow::show(
         ui,
-        "Оптика элементов · GPU",
-        "Преломление фона под карточками и меню. Нужны лилии или собственный фон.",
+        super::i18n::tr("Оптика элементов · GPU", "Element optics · GPU"),
+        super::i18n::tr(
+            "Преломление фона под карточками и меню. Нужны лилии или собственный фон.",
+            "Refract the background beneath cards and menus. Requires a lily or custom background.",
+        ),
         |ui| {
-            if ui.checkbox(&mut enabled, "Включить").changed() {
+            if ui
+                .checkbox(&mut enabled, super::i18n::tr("Включить", "Enable"))
+                .changed()
+            {
                 theme.optical_strength = if enabled { 65 } else { 0 };
                 changed = true;
             }
@@ -223,32 +311,47 @@ fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferenc
     if enabled {
         for (title, description, value, max) in [
             (
-                "Сила эффекта",
-                "Общая выраженность оптики.",
+                super::i18n::tr("Сила эффекта", "Effect strength"),
+                super::i18n::tr(
+                    "Общая выраженность оптики.",
+                    "Overall strength of the optical effect.",
+                ),
                 &mut theme.optical_strength,
                 100,
             ),
             (
-                "Преломление",
-                "Искажение фона у краёв элемента.",
+                super::i18n::tr("Преломление", "Refraction"),
+                super::i18n::tr(
+                    "Искажение фона у краёв элемента.",
+                    "Background distortion at the element's edges.",
+                ),
                 &mut theme.optical_refraction,
                 200,
             ),
             (
-                "Размытие",
-                "Мягкость фона внутри стекла.",
+                super::i18n::tr("Размытие", "Blur"),
+                super::i18n::tr(
+                    "Мягкость фона внутри стекла.",
+                    "Softness of the background inside the glass.",
+                ),
                 &mut theme.optical_blur,
                 200,
             ),
             (
-                "Краевые блики",
-                "Яркость направленного света на границах.",
+                super::i18n::tr("Краевые блики", "Edge highlights"),
+                super::i18n::tr(
+                    "Яркость направленного света на границах.",
+                    "Brightness of directional light at the edges.",
+                ),
                 &mut theme.optical_highlight,
                 200,
             ),
             (
-                "Разделение цветов",
-                "Цветовые края преломления.",
+                super::i18n::tr("Разделение цветов", "Chromatic separation"),
+                super::i18n::tr(
+                    "Цветовые края преломления.",
+                    "Color fringing at refracted edges.",
+                ),
                 &mut theme.optical_chromatic,
                 200,
             ),
@@ -291,11 +394,19 @@ fn apply_theme(
     if response["ok"] != true {
         return Err(response["error"]["message"]
             .as_str()
-            .unwrap_or("Не удалось применить тему")
+            .unwrap_or(super::i18n::tr(
+                "Не удалось применить тему",
+                "Could not apply theme",
+            ))
             .into());
     }
-    let current = serde_json::from_value(response["result"]["current"].clone())
-        .map_err(|_| "Не удалось прочитать применённую тему".to_string())?;
+    let current = serde_json::from_value(response["result"]["current"].clone()).map_err(|_| {
+        super::i18n::tr(
+            "Не удалось прочитать применённую тему",
+            "Could not read applied theme",
+        )
+        .to_string()
+    })?;
     if let Some(draft) = draft.as_mut() {
         draft.theme = current;
     }
@@ -346,7 +457,10 @@ impl State {
                             if response["ok"] != true {
                                 self.error = response["error"]["message"]
                                     .as_str()
-                                    .unwrap_or("Не удалось импортировать фон")
+                                    .unwrap_or(super::i18n::tr(
+                                        "Не удалось импортировать фон",
+                                        "Could not import background",
+                                    ))
                                     .into();
                             }
                         }
@@ -359,7 +473,11 @@ impl State {
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.picker = None;
-                    self.error = "Диалог выбора изображения завершился без результата".into();
+                    self.error = super::i18n::tr(
+                        "Диалог выбора изображения завершился без результата",
+                        "The image picker closed without a result",
+                    )
+                    .into();
                 }
             }
         }
@@ -396,7 +514,10 @@ impl State {
                     self.error = status["error"]["message"]
                         .as_str()
                         .or_else(|| response["error"]["message"].as_str())
-                        .unwrap_or("Импорт фона отменён или не выполнен")
+                        .unwrap_or(super::i18n::tr(
+                            "Импорт фона отменён или не выполнен",
+                            "Background import was canceled or failed",
+                        ))
                         .into();
                 }
             }
@@ -421,7 +542,10 @@ impl State {
                             if response["ok"] != true || self.video_job.is_none() {
                                 self.error = response["error"]["message"]
                                     .as_str()
-                                    .unwrap_or("Не удалось начать импорт видео")
+                                    .unwrap_or(super::i18n::tr(
+                                        "Не удалось начать импорт видео",
+                                        "Could not start video import",
+                                    ))
                                     .into();
                             } else {
                                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -436,7 +560,11 @@ impl State {
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.video_picker = None;
-                    self.error = "Диалог выбора видео завершился без результата".into();
+                    self.error = super::i18n::tr(
+                        "Диалог выбора видео завершился без результата",
+                        "The video picker closed without a result",
+                    )
+                    .into();
                 }
             }
         }
@@ -465,10 +593,18 @@ impl State {
                                 .unwrap_or_default();
                             self.video_backgrounds = None;
                         } else {
-                            self.error = "Не удалось прочитать текущую тему".into();
+                            self.error = super::i18n::tr(
+                                "Не удалось прочитать текущую тему",
+                                "Could not read current theme",
+                            )
+                            .into();
                         }
                     } else {
-                        self.error = "Импорт видео не вернул идентификатор".into();
+                        self.error = super::i18n::tr(
+                            "Импорт видео не вернул идентификатор",
+                            "Video import returned no identifier",
+                        )
+                        .into();
                     }
                     ctx.request_repaint();
                 }
@@ -477,7 +613,10 @@ impl State {
                     self.error = status["error"]["message"]
                         .as_str()
                         .or_else(|| response["error"]["message"].as_str())
-                        .unwrap_or("Импорт видео отменён или не выполнен")
+                        .unwrap_or(super::i18n::tr(
+                            "Импорт видео отменён или не выполнен",
+                            "Video import was canceled or failed",
+                        ))
                         .into();
                 }
             }
@@ -502,7 +641,10 @@ impl State {
                     self.error = status["error"]["message"]
                         .as_str()
                         .or_else(|| response["error"]["message"].as_str())
-                        .unwrap_or("Не удалось подготовить компоненты видео")
+                        .unwrap_or(super::i18n::tr(
+                            "Не удалось подготовить компоненты видео",
+                            "Could not prepare video components",
+                        ))
                         .into();
                     ctx.request_repaint();
                 }
@@ -528,7 +670,10 @@ impl State {
                             if response["ok"] != true || self.font_job.is_none() {
                                 self.error = response["error"]["message"]
                                     .as_str()
-                                    .unwrap_or("Не удалось начать импорт шрифта")
+                                    .unwrap_or(super::i18n::tr(
+                                        "Не удалось начать импорт шрифта",
+                                        "Could not start font import",
+                                    ))
                                     .into();
                             } else {
                                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -543,7 +688,11 @@ impl State {
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.font_picker = None;
-                    self.error = "Диалог выбора шрифта завершился без результата".into();
+                    self.error = super::i18n::tr(
+                        "Диалог выбора шрифта завершился без результата",
+                        "The font picker closed without a result",
+                    )
+                    .into();
                 }
             }
         }
@@ -561,10 +710,17 @@ impl State {
                             draft.emoji_font = id.to_owned();
                         }
                         self.emoji_fonts = None;
-                        self.error =
-                            "Шрифт добавлен. Сохраните настройки, чтобы применить его.".into();
+                        self.error = super::i18n::tr(
+                            "Шрифт добавлен. Сохраните настройки, чтобы применить его.",
+                            "Font added. Save settings to apply it.",
+                        )
+                        .into();
                     } else {
-                        self.error = "Импорт шрифта не вернул идентификатор".into();
+                        self.error = super::i18n::tr(
+                            "Импорт шрифта не вернул идентификатор",
+                            "Font import returned no identifier",
+                        )
+                        .into();
                     }
                     ctx.request_repaint();
                 }
@@ -573,7 +729,10 @@ impl State {
                     self.error = status["error"]["message"]
                         .as_str()
                         .or_else(|| response["error"]["message"].as_str())
-                        .unwrap_or("Импорт шрифта отменён или не выполнен")
+                        .unwrap_or(super::i18n::tr(
+                            "Импорт шрифта отменён или не выполнен",
+                            "Font import was canceled or failed",
+                        ))
                         .into();
                 }
             }
@@ -639,14 +798,17 @@ impl State {
         let mut global_intent = None;
         let mut theme_intent = None;
         let root_ctx = ctx.clone();
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title("Katran Settings").with_decorations(false).with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title(super::i18n::tr("Настройки Katran", "Katran Settings")).with_decorations(false).with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
    if self.restart_confirmation {
     let prompt=egui::Modal::new(egui::Id::new("restart-confirmation")).show(ctx,|ui|{
-     ui.heading("Перезапустить Katran?");
-     ui.label("Настройка стекла сохранена. Новое окно откроется с теми же данными.");
+            ui.heading(super::i18n::tr("Перезапустить Katran?", "Restart Katran?"));
+            ui.label(super::i18n::tr(
+                "Настройка стекла сохранена. Новое окно откроется с теми же данными.",
+                "The glass setting was saved. The new window will use the same data.",
+            ));
      ui.horizontal(|ui|{
-      if ui.button("Перезапустить сейчас").clicked(){self.restart_requested=true;self.restart_confirmation=false;}
-      if ui.button("Позже").clicked(){self.restart_confirmation=false;}
+                if ui.button(super::i18n::tr("Перезапустить сейчас", "Restart now")).clicked(){self.restart_requested=true;self.restart_confirmation=false;}
+                if ui.button(super::i18n::tr("Позже", "Later")).clicked(){self.restart_confirmation=false;}
      });
     });
     if prompt.should_close(){self.restart_confirmation=false;}
@@ -672,119 +834,128 @@ impl State {
      super::theme_ui::decorate(ui,ui.max_rect());
      ui.add_space(8.0);
      ui.vertical_centered(|ui|{
-      if ui.add_sized([ui.available_width(),28.0],egui::Button::new(RichText::new("Settings").size(19.0).strong()).frame(false)).on_hover_text("Закрыть настройки").clicked(){close=true;}
-      ui.label(RichText::new("Ctrl+, или нажмите Settings, чтобы закрыть").size(11.0).color(Color32::from_gray(185)));
+      if ui.add_sized([ui.available_width(),28.0],egui::Button::new(RichText::new(super::i18n::tr("Настройки", "Settings")).size(19.0).strong()).frame(false)).on_hover_text(super::i18n::tr("Закрыть настройки", "Close settings")).clicked(){close=true;}
+      ui.label(RichText::new(super::i18n::tr("Ctrl+, или нажмите «Настройки», чтобы закрыть", "Press Ctrl+, or click Settings to close")).size(11.0).color(Color32::from_gray(185)));
      });
      ui.add_space(16.0);
-     ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
-     ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы","Теги"].iter().enumerate(){if section_matches_query(index,label,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
-     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text("Ctrl+, — закрыть настройки");});
+     ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")).margin(egui::vec2(10.0,9.0)));
+     ui.add_space(24.0);ui.label(RichText::new(super::i18n::tr("РАЗДЕЛЫ", "WORKSPACE")).size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
+     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
      egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui|{
       if self.section==0 {
-       ui.heading("Основные");ui.add_space(16.0);
+       ui.heading(super::i18n::tr("Основные", "General"));ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
-        SettingsSection::group(ui,"Запуск и управление",|ui|{
-         let binding=if draft.overlay_hotkey.is_empty(){"Не назначена"}else{draft.overlay_hotkey.as_str()};
-         SettingsRow::show(ui,"Вызов Katran поверх окна",binding,|ui|{
-          if ui.button("Изменить").clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
-          if ui.button("Очистить").clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey","Вызов Katran",draft.overlay_hotkey.clone()).with_physical_keys());global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
-          if ui.button("Повторить").clicked(){self.overlay_retry=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+        SettingsSection::group(ui,super::i18n::tr("Язык интерфейса", "Interface language"),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Язык", "Language"),super::i18n::tr("Изменение вступит в силу после сохранения.", "Changes take effect after saving."),|ui|{
+          egui::ComboBox::from_id_salt("settings-language").selected_text(match draft.language{katran::settings::Language::English=>"English",katran::settings::Language::Russian=>"Русский"}).show_ui(ui,|ui|{
+           ui.selectable_value(&mut draft.language,katran::settings::Language::English,"English");
+           ui.selectable_value(&mut draft.language,katran::settings::Language::Russian,"Русский");
+          });
+         });
+        });
+        SettingsSection::group(ui,super::i18n::tr("Запуск и управление", "Startup and controls"),|ui|{
+         let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
+         SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{
+          if ui.button(super::i18n::tr("Изменить", "Change")).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+          if ui.button(super::i18n::tr("Очистить", "Clear")).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
+          if ui.button(super::i18n::tr("Повторить", "Retry")).clicked(){self.overlay_retry=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
-         SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
-         SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
-         SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
+         SettingsRow::show(ui,super::i18n::tr("Захват при запуске", "Capture on startup"),super::i18n::tr("По умолчанию включён. Текущий захват переключается через Actions.", "On by default. Toggle the current capture from Actions."),|ui|{ui.checkbox(&mut draft.capture_on_start,super::i18n::tr("Включать", "Enable"));});
+         SettingsRow::show(ui,super::i18n::tr("Подсказка сортировки", "Sort hint"),super::i18n::tr("Показывать выбранный порядок на две секунды.", "Show the selected sort order for two seconds."),|ui|{ui.checkbox(&mut draft.sort_notifications,super::i18n::tr("Показывать", "Show"));});
+         SettingsRow::show(ui,super::i18n::tr("Поиск на полке", "Shelf search"),super::i18n::tr("Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.", "Usually, use the search field with the mouse or Ctrl+T. In keyboard-only mode, the mouse moves the window and Ctrl+T opens search."),|ui|{ui.checkbox(&mut draft.search_keyboard_only,super::i18n::tr("Только через Ctrl+T", "Ctrl+T only"));});
         });
-        SettingsSection::group(ui,"Ссылки",|ui|{
-         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran запрашивает значки и объявленные сайтом иконки с публичных HTTPS-адресов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
-         SettingsRow::show(ui,"Обновление значков","После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.",|ui|{
+        SettingsSection::group(ui,super::i18n::tr("Ссылки", "Links"),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Значки ссылок", "Link icons"),super::i18n::tr("Локальные символы работают без сети. При включении Katran запрашивает значки и объявленные сайтом иконки с публичных HTTPS-адресов; если значок недоступен, остаётся локальный символ.", "Local symbols work offline. When enabled, Katran fetches favicons and site-declared icons from public HTTPS addresses. If an icon is unavailable, the local symbol remains."),|ui|{ui.checkbox(&mut draft.link_favicons_online,super::i18n::tr("Загружать favicon сайтов", "Load website favicons"));});
+         SettingsRow::show(ui,super::i18n::tr("Обновление значков", "Refresh icons"),super::i18n::tr("После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.", "After saving the network setting, manually checks all saved links. Progress appears on the shelf."),|ui|{
           let online=call(api,Command::GetSettings)["result"]["link_favicons_online"]==true;
-          if ui.add_enabled(online,egui::Button::new("Обновить значки сохранённых ссылок")).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+          if ui.add_enabled(online,egui::Button::new(super::i18n::tr("Обновить значки сохранённых ссылок", "Refresh icons for saved links"))).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
          });
         });
-        SettingsSection::group(ui,"Представление карточек",|ui|{
+        SettingsSection::group(ui,super::i18n::tr("Представление карточек", "Card appearance"),|ui|{
          let font_list=self.emoji_fonts.get_or_insert_with(||call(api,Command::EmojiFonts)).clone();
          let entries=font_list["result"]["fonts"].as_array();
          let selected_font=entries.and_then(|items|items.iter().find(|item|item["id"].as_str()==Some(draft.emoji_font.as_str())));
-         let font_label=selected_font.and_then(|item|item["label"].as_str()).unwrap_or("Шрифт недоступен");
+         let font_label=selected_font.and_then(|item|item["label"].as_str()).unwrap_or(super::i18n::tr("Шрифт недоступен", "Font unavailable"));
          let font_available=selected_font.is_some_and(|item|item["available"]==true);
-         SettingsRow::show(ui,"Шрифт эмодзи",if font_available {"Применяется после сохранения настроек."} else {"Шрифт недоступен; используется системный."},|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Шрифт эмодзи", "Emoji font"),if font_available {super::i18n::tr("Применяется после сохранения настроек.", "Applied after saving settings.")} else {super::i18n::tr("Шрифт недоступен; используется системный.", "Font unavailable; using the system font.")},|ui|{
           egui::ComboBox::from_id_salt("emoji-font-picker").width(180.0).selected_text(font_label).show_ui(ui,|ui|{
-           for item in entries.into_iter().flatten(){if let Some(id)=item["id"].as_str(){let label=item["label"].as_str().unwrap_or(id);let display=if item["available"]==true {label.to_owned()} else {format!("{label} · недоступен")};ui.selectable_value(&mut draft.emoji_font,id.to_owned(),display);}}
+           for item in entries.into_iter().flatten(){if let Some(id)=item["id"].as_str(){let label=item["label"].as_str().unwrap_or(id);let display=if item["available"]==true {label.to_owned()} else {format!("{label}{}",super::i18n::tr(" · недоступен", " · unavailable"))};ui.selectable_value(&mut draft.emoji_font,id.to_owned(),display);}}
           });
-          if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
+          if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),super::i18n::tr("Добавить шрифт…", "Add font…"))).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
          });
          let tab = serde_json::from_value::<katran::interaction::ShelfTab>(call(api,Command::Interaction)["result"]["tab"].clone()).unwrap_or_default();
          if let Some(profile)=draft.tab_preferences.get_mut(&tab) {
-          ui.strong(format!("Текущая вкладка: {}",serde_json::to_value(tab).ok().and_then(|v|v.as_str().map(str::to_owned)).unwrap_or_default()));
-          SettingsRow::show(ui,"Вид вкладки","Сохраняется отдельно для этой вкладки.",|ui|{ui.selectable_value(&mut profile.view,View::Gallery,"Галерея");ui.selectable_value(&mut profile.view,View::List,"Поток");});
-          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: число карточек в строке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.gallery_columns,1..=12));});
-          SettingsRow::show(ui,"Строки потока","Число видимых строк в потоке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.stream_rows,1..=12));});
+          ui.strong(format!("{}: {}",super::i18n::tr("Текущая вкладка", "Current tab"),localized_shelf_tab(tab)));
+          SettingsRow::show(ui,super::i18n::tr("Вид вкладки", "Tab view"),super::i18n::tr("Сохраняется отдельно для этой вкладки.", "Saved separately for this tab."),|ui|{ui.selectable_value(&mut profile.view,View::Gallery,super::i18n::tr("Галерея", "Gallery"));ui.selectable_value(&mut profile.view,View::List,super::i18n::tr("Поток", "Stream"));});
+          SettingsRow::show(ui,super::i18n::tr("Столбцы галереи", "Gallery columns"),super::i18n::tr("Ctrl− / Ctrl+: число карточек в строке этой вкладки.", "Ctrl− / Ctrl+: cards per row on this tab."),|ui|{ui.add(egui::Slider::new(&mut profile.gallery_columns,1..=12));});
+          SettingsRow::show(ui,super::i18n::tr("Строки потока", "Stream rows"),super::i18n::tr("Число видимых строк в потоке этой вкладки.", "Number of visible rows in this tab's stream."),|ui|{ui.add(egui::Slider::new(&mut profile.stream_rows,1..=12));});
           if matches!(tab,katran::interaction::ShelfTab::Pods|katran::interaction::ShelfTab::Links) {
-           SettingsRow::show(ui,"Компактные плитки","Число карточек в строке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.compact_columns,1..=12));});
+           SettingsRow::show(ui,super::i18n::tr("Компактные плитки", "Compact tiles"),super::i18n::tr("Число карточек в строке этой вкладки.", "Number of cards per row on this tab."),|ui|{ui.add(egui::Slider::new(&mut profile.compact_columns,1..=12));});
           }
          }
         });
-        SettingsSection::group(ui,"Папки и хранение",|ui|{
-         SettingsRow::show(ui,"Папка ShareX","Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.",|ui|{
+        SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
           if ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")).changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
          });
-         SettingsRow::show(ui,"Папка Downloads","Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.",|ui|{
-          if ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text("Системная папка Downloads")).changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
+         SettingsRow::show(ui,super::i18n::tr("Папка Downloads", "Downloads folder"),super::i18n::tr("Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.", "Leave empty to use the Windows Downloads folder, or enter another absolute path."),|ui|{
+          if ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder"))).changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
          });
          let mut mib=draft.quota_bytes as f64/(1024.0*1024.0);
-         SettingsRow::show(ui,"Квота кэша · МиБ","Снижение ниже текущего объёма отклоняется. Исходники не удаляются.",|ui|{if ui.add(egui::DragValue::new(&mut mib).range(1.0..=1048576.0)).changed(){draft.quota_bytes=(mib*1024.0*1024.0)as u64;}});
+         SettingsRow::show(ui,super::i18n::tr("Квота кэша · МиБ", "Cache quota · MiB"),super::i18n::tr("Снижение ниже текущего объёма отклоняется. Исходники не удаляются.", "Values below current usage are rejected. Source files are not deleted."),|ui|{if ui.add(egui::DragValue::new(&mut mib).range(1.0..=1048576.0)).changed(){draft.quota_bytes=(mib*1024.0*1024.0)as u64;}});
         });
        }
        ui.add_space(16.0);
-       SettingsSection::group(ui,"История Folder",|ui|{
-       if ui.button("Очистить историю Folder").clicked() {
+       SettingsSection::group(ui,super::i18n::tr("История Folder", "Folder history"),|ui|{
+       if ui.button(super::i18n::tr("Очистить историю Folder", "Clear Folder history")).clicked() {
         let r=call(api,Command::ClearFolderHistory{confirmed:false});
-        if r["result"]["confirmation_required"]==true {self.confirm_history=true;} else if r["ok"]==false {self.error=r["error"]["message"].as_str().unwrap_or("Ошибка").into();}
+        if r["result"]["confirmation_required"]==true {self.confirm_history=true;} else if r["ok"]==false {self.error=r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}
        }
        if self.confirm_history {
-        ui.label(RichText::new("Действительно удалить историю?").strong());
-        ui.label("Избранные папки и файлы сохранятся.");
+        ui.label(RichText::new(super::i18n::tr("Действительно удалить историю?", "Clear the history?")).strong());
+        ui.label(super::i18n::tr("Избранные папки и файлы сохранятся.", "Pinned folders and files will be kept."));
         ui.horizontal(|ui|{
-         if ui.button("Удалить историю").clicked(){let r=call(api,Command::ClearFolderHistory{confirmed:true});self.confirm_history=false;self.error=if r["result"]["cleared"]==true {"История очищена".into()} else {r["error"]["message"].as_str().unwrap_or("Ошибка").into()};}
-         if ui.button("Отмена").clicked(){self.confirm_history=false;}
+         if ui.button(super::i18n::tr("Удалить историю", "Delete history")).clicked(){let r=call(api,Command::ClearFolderHistory{confirmed:true});self.confirm_history=false;self.error=if r["result"]["cleared"]==true {super::i18n::tr("История очищена", "History cleared").into()} else {r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into()};}
+         if ui.button(super::i18n::tr("Отмена", "Cancel")).clicked(){self.confirm_history=false;}
         });
        }
        });
        ui.add_space(16.0);
-       if ui.button("Сохранить настройки").clicked()&&let Some(mut settings)=self.draft.clone(){
+       if ui.button(super::i18n::tr("Сохранить настройки", "Save settings")).clicked()&&let Some(mut settings)=self.draft.clone(){
         let current=call(api,Command::GetSettings);
         if current["ok"]==true {
          if let Ok(saved)=serde_json::from_value::<Settings>(current["result"].clone()) {
           merge_tab_settings(&mut settings,&saved);
-          let r=call(api,Command::SetSettings{settings});self.error=if r["ok"]==true{"Настройки сохранены".into()}else{r["error"]["message"].as_str().unwrap_or("Ошибка сохранения").into()};
-         } else {self.error="Не удалось прочитать текущие настройки".into();}
-        } else {self.error=current["error"]["message"].as_str().unwrap_or("Не удалось прочитать текущие настройки").into();}
+          let language = settings.language;
+          let r=call(api,Command::SetSettings{settings});self.error=if r["ok"]==true{super::i18n::set(language);super::i18n::tr("Настройки сохранены", "Settings saved").into()}else{r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed")).into()};
+         } else {self.error=super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings").into();}
+        } else {self.error=current["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings")).into();}
        }
       } else if self.section==2 {
-       ui.heading("Вкладки");ui.add_space(8.0);
-       ui.label("Выключенная вкладка скрывается и останавливает сбор связанных данных. Сохранённые данные остаются на месте.");ui.add_space(16.0);
+       ui.heading(super::i18n::tr("Вкладки", "Tabs"));ui.add_space(8.0);
+       ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Saved data stays in place."));ui.add_space(16.0);
        let result=call(api,Command::Tabs);
        if let Some(tabs)=result["result"]["tabs"].as_array() {
-        SettingsSection::group(ui,"Доступные вкладки",|ui|{
+        SettingsSection::group(ui,super::i18n::tr("Доступные вкладки", "Available tabs"),|ui|{
          for entry in tabs {
-          let label=entry["label"].as_str().unwrap_or("");
+          let label=localized_tab_label(entry["label"].as_str().unwrap_or(""));
           let enabled=entry["enabled"]==true;
           let can_toggle=entry["can_toggle"]==true;
           if let Ok(tab)=serde_json::from_value(entry["tab"].clone()) {
-           SettingsRow::show(ui,label,if can_toggle {if enabled {"Включена"} else {"Выключена"}} else {"Всегда включена"},|ui|{
-            if ui.add_enabled(can_toggle,egui::Button::image(if enabled {egui_lucide::Lucide::Eye.size(18.0).image()} else {egui_lucide::Lucide::EyeOff.size(18.0).image()})).on_hover_text(if enabled {"Выключить вкладку"} else {"Включить вкладку"}).clicked() {
+           SettingsRow::show(ui,label,if can_toggle {if enabled {super::i18n::tr("Включена", "Enabled")} else {super::i18n::tr("Выключена", "Disabled")}} else {super::i18n::tr("Всегда включена", "Always enabled")},|ui|{
+            if ui.add_enabled(can_toggle,egui::Button::image(if enabled {egui_lucide::Lucide::Eye.size(18.0).image()} else {egui_lucide::Lucide::EyeOff.size(18.0).image()})).on_hover_text(if enabled {super::i18n::tr("Выключить вкладку", "Disable tab")} else {super::i18n::tr("Включить вкладку", "Enable tab")}).clicked() {
              let response=call(api,Command::SetTabEnabled{tab,enabled:!enabled});
              if response["ok"]==true {
               tabs_changed=true;
               if let Ok(saved)=serde_json::from_value::<Settings>(call(api,Command::GetSettings)["result"].clone()) && let Some(draft)=self.draft.as_mut() {merge_tab_settings(draft,&saved);}
               self.error.clear();
-             } else {self.error=response["error"]["message"].as_str().unwrap_or("Ошибка").into();}
+             } else {self.error=response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}
             }
            });
           }
@@ -794,159 +965,161 @@ impl State {
       } else if self.section==3 {
        self.updates.show(ui,api,&updates_ctx);
       } else if self.section==4 {
-       ui.heading("Темы");ui.add_space(8.0);
-       ui.label("Тема применяется сразу. Стандартный вид остаётся доступен.");ui.add_space(16.0);
+       ui.heading(super::i18n::tr("Темы", "Themes"));ui.add_space(8.0);
+       ui.label(super::i18n::tr("Тема применяется сразу. Стандартный вид остаётся доступен.", "The theme applies immediately. The standard appearance remains available."));ui.add_space(16.0);
        let response=call(api,Command::Themes);
        if response["ok"]==true {
         if let Ok(mut theme)=serde_json::from_value::<katran::theme::ThemePreferences>(response["result"]["current"].clone()) {
-         SettingsSection::group(ui,"Тема и цвета",|ui|{
-          SettingsRow::show(ui,"Стандартная","Привычный внешний вид Katran.",|ui|{
-           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::Standard,"Выбрать").changed(){theme_intent=Some(theme.clone());}
+         SettingsSection::group(ui,super::i18n::tr("Тема и цвета", "Theme and colors"),|ui|{
+          SettingsRow::show(ui,super::i18n::tr("Стандартная", "Standard"),super::i18n::tr("Привычный внешний вид Katran.", "The familiar Katran appearance."),|ui|{
+           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::Standard,super::i18n::tr("Выбрать", "Select")).changed(){theme_intent=Some(theme.clone());}
           });
-          SettingsRow::show(ui,"Синяя","Экспериментальная тема с голубыми акцентами.",|ui|{
-           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::BlueExperimental,"Выбрать").changed(){theme_intent=Some(theme.clone());}
+          SettingsRow::show(ui,super::i18n::tr("Синяя", "Blue"),super::i18n::tr("Экспериментальная тема с голубыми акцентами.", "Experimental theme with blue accents."),|ui|{
+           if ui.selectable_value(&mut theme.preset,katran::theme::Preset::BlueExperimental,super::i18n::tr("Выбрать", "Select")).changed(){theme_intent=Some(theme.clone());}
           });
           if selection_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
           if theme.preset==katran::theme::Preset::BlueExperimental {
-           SettingsRow::show(ui,"Цвет акцента","Выберите свой цвет или верните исходный.",|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Цвет акцента", "Accent color"),super::i18n::tr("Выберите свой цвет или верните исходный.", "Choose a custom color or restore the default."),|ui|{
             let mut accent=theme.accent.unwrap_or([75,139,210]);
             if ui.color_edit_button_srgb(&mut accent).changed(){theme.accent=Some(accent);theme_intent=Some(theme.clone());}
-            if ui.button("Сбросить цвет").clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
+            if ui.button(super::i18n::tr("Сбросить цвет", "Reset color")).clicked(){theme.accent=None;theme_intent=Some(theme.clone());}
            });
           }
          });
          if theme.preset==katran::theme::Preset::BlueExperimental {
-          SettingsSection::group(ui,"Окно и эффекты",|ui|{
-           SettingsRow::show(ui,"Компактное окно","Убрать название и крестик. Перемещение — за узкую полосу над поиском.",|ui|{
-            if ui.checkbox(&mut theme.compact_header,"Без шапки").changed(){theme_intent=Some(theme.clone());}
+          SettingsSection::group(ui,super::i18n::tr("Окно и эффекты", "Window and effects"),|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Компактное окно", "Compact window"),super::i18n::tr("Убрать название и крестик. Перемещение — за узкую полосу над поиском.", "Hide the title and close button. Drag the narrow strip above search to move the window."),|ui|{
+            if ui.checkbox(&mut theme.compact_header,super::i18n::tr("Без шапки", "Hide title bar")).changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
-            if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Стекло · эксперимент", "Glass · experimental"),super::i18n::tr("Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.", "Windows 11 Acrylic. After enabling, quit Katran from the tray and start it again. A solid background is used if Acrylic is unavailable."),|ui|{
+            if ui.checkbox(&mut theme.glass,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Стеклянные вкладки · эксперимент","Отдельные объёмные кнопки и движущееся выделение вашего цвета. Базовая полоска остаётся доступной; оптика может потребовать больше ресурсов.",|ui|{
-            if ui.checkbox(&mut theme.experimental_glass_tabs,"Включить").changed(){theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Стеклянные вкладки · эксперимент", "Glass tabs · experimental"),super::i18n::tr("Отдельные объёмные кнопки и движущееся выделение вашего цвета. Базовая полоска остаётся доступной; оптика может потребовать больше ресурсов.", "Separate raised buttons with a moving selection in your color. The basic tab strip remains available; optical effects may use more resources."),|ui|{
+            if ui.checkbox(&mut theme.experimental_glass_tabs,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
           });
-          SettingsSection::group(ui,"Фон",|ui|{
-           SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{
-            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.active_video().is_none(),"Сплошной").clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
+          SettingsSection::group(ui,super::i18n::tr("Фон", "Background"),|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Фон", "Background"),super::i18n::tr("Лилии от дизайнера. Изображение загружается один раз.", "Designer lily backgrounds. The image is loaded once."),|ui|{
+            if ui.selectable_label(theme.lily_background.is_none() && theme.custom_background.is_none() && theme.active_video().is_none(),super::i18n::tr("Сплошной", "Solid")).clicked(){theme.lily_background=None;theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
             for i in 1..=5 {if ui.selectable_value(&mut theme.lily_background,Some(i),format!("{i}")).changed(){theme.custom_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}}
            });
-           SettingsRow::show(ui,"Собственные фоны","Копия сохраняется в Katran. Пресеты лилий остаются доступны.",|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Собственные фоны", "Custom backgrounds"),super::i18n::tr("Копия сохраняется в Katran. Пресеты лилий остаются доступны.", "A copy is saved in Katran. Lily presets remain available."),|ui|{
             let list=self.custom_backgrounds.get_or_insert_with(||call(api,Command::ListThemeBackgrounds)).clone();
-            egui::ComboBox::from_id_salt("custom-background-picker").width(180.0_f32.min(ui.available_width())).selected_text(if theme.custom_background.is_some(){"Собственный фон"}else{"Выбрать сохранённый"}).show_ui(ui,|ui|{
+            egui::ComboBox::from_id_salt("custom-background-picker").width(180.0_f32.min(ui.available_width())).selected_text(if theme.custom_background.is_some(){super::i18n::tr("Собственный фон", "Custom background")}else{super::i18n::tr("Выбрать сохранённый", "Choose saved background")}).show_ui(ui,|ui|{
              for item in list["result"]["backgrounds"].as_array().into_iter().flatten(){
-              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Изображение")).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
+              if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.custom_background.as_deref()==Some(id),item["name"].as_str().unwrap_or(super::i18n::tr("Изображение", "Image"))).clicked(){theme.custom_background=Some(id.to_owned());theme.lily_background=None;theme.video_background=None;theme.video_enabled=Some(false);theme_intent=Some(theme.clone());}
              }
             });
-            if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать файл…")).clicked(){
+            if ui.add_enabled(self.picker.is_none() && self.background_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),super::i18n::tr("Выбрать файл…", "Choose file…"))).clicked(){
                 match super::theme_file_picker::start_pick_image(){Ok(receiver)=>self.picker=Some(receiver),Err(error)=>self.error=error}
             }
            });
           });
-          SettingsSection::group(ui,"Видеофон",|ui|{
+          SettingsSection::group(ui,super::i18n::tr("Видеофон", "Video background"),|ui|{
            let mut video_enabled = theme.video_is_enabled();
-           SettingsRow::show(ui,"Видеофон","Управляемая копия; звук не воспроизводится.",|ui|{
-            if ui.checkbox(&mut video_enabled,"Включить").changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Видеофон", "Video background"),super::i18n::tr("Управляемая копия; звук не воспроизводится.", "A managed copy; audio is not played."),|ui|{
+            if ui.checkbox(&mut video_enabled,super::i18n::tr("Включить", "Enable")).changed(){theme.video_enabled=Some(video_enabled);if video_enabled {theme.lily_background=None;theme.custom_background=None;}theme_intent=Some(theme.clone());}
            });
            if video_enabled {
            let media=self.media_runtime.get_or_insert_with(||call(api,Command::MediaRuntimeStatus)).clone();
            let media_available=media["ok"] == true && media["result"]["available"] == true;
            if media["ok"] == true && !media_available {
-            SettingsRow::show(ui,"Компоненты видео","Для работы видео требуется загрузка около 73 МиБ.",|ui|{
-             if ui.add_enabled(!self.background_busy(),egui::Button::new(if self.media_job.is_some(){"Подготовка…"}else{"Подготовить компоненты видео"})).clicked(){
+            SettingsRow::show(ui,super::i18n::tr("Компоненты видео", "Video components"),super::i18n::tr("Для работы видео требуется загрузка около 73 МиБ.", "Video playback requires a download of about 73 MiB."),|ui|{
+             if ui.add_enabled(!self.background_busy(),egui::Button::new(if self.media_job.is_some(){super::i18n::tr("Подготовка…", "Preparing…")}else{super::i18n::tr("Подготовить компоненты видео", "Prepare video components")})).clicked(){
               let response=call(api,Command::BeginJob{command:Box::new(Command::EnsureMediaRuntime)});
               self.media_job=response["result"]["job_id"].as_u64().map(katran::domain_jobs::JobId);
-              if response["ok"] != true || self.media_job.is_none(){self.error=response["error"]["message"].as_str().unwrap_or("Не удалось начать подготовку компонентов видео").into();}else{self.error.clear();ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));}
+              if response["ok"] != true || self.media_job.is_none(){self.error=response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось начать подготовку компонентов видео", "Could not start preparing video components")).into();}else{self.error.clear();ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));}
              }
             });
            } else if media["ok"] != true {
-            ui.weak("Не удалось проверить компоненты видео. Откройте настройки повторно.");
+           ui.weak(super::i18n::tr("Не удалось проверить компоненты видео. Откройте настройки повторно.", "Could not check video components. Reopen Settings."));
            }
-           SettingsRow::show(ui,"Сглаживать стык","Короткое смешивание кадров на границе кэшированного цикла.",|ui|{
-            if ui.checkbox(&mut theme.video_seam_smoothing,"Включить").changed(){theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Сглаживать стык", "Smooth loop seam"),super::i18n::tr("Короткое смешивание кадров на границе кэшированного цикла.", "Briefly blend frames at the cached loop boundary."),|ui|{
+            if ui.checkbox(&mut theme.video_seam_smoothing,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Воспроизводить в фоне","Сохранять декодер активным, когда окно скрыто или свёрнуто. Увеличивает расход CPU и GPU.",|ui|{
-            if ui.checkbox(&mut theme.video_play_hidden,"Включить").changed(){theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Воспроизводить в фоне", "Play in background"),super::i18n::tr("Сохранять декодер активным, когда окно скрыто или свёрнуто. Увеличивает расход CPU и GPU.", "Keep the decoder active while the window is hidden or minimized. Uses more CPU and GPU."),|ui|{
+            if ui.checkbox(&mut theme.video_play_hidden,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
            });
-           ui.weak("Короткие ролики кэшируются до 512 МиБ; длинные воспроизводятся потоком.");
-           SettingsRow::show(ui,"Файл видео","Выберите сохранённое видео или добавьте файл.",|ui|{
+           ui.weak(super::i18n::tr("Короткие ролики кэшируются до 512 МиБ; длинные воспроизводятся потоком.", "Short videos are cached up to 512 MiB; longer videos stream."));
+           SettingsRow::show(ui,super::i18n::tr("Файл видео", "Video file"),super::i18n::tr("Выберите сохранённое видео или добавьте файл.", "Choose a saved video or add a file."),|ui|{
             let list=self.video_backgrounds.get_or_insert_with(||call(api,Command::VideoBackgrounds)).clone();
-            let selected=list["result"]["items"].as_array().and_then(|items|items.iter().find(|item|item["id"].as_str()==theme.video_background.as_deref())).and_then(|item|item["name"].as_str()).unwrap_or("Выбрать сохранённое");
+            let selected=list["result"]["items"].as_array().and_then(|items|items.iter().find(|item|item["id"].as_str()==theme.video_background.as_deref())).and_then(|item|item["name"].as_str()).unwrap_or(super::i18n::tr("Выбрать сохранённое", "Choose saved video"));
             ui.horizontal_wrapped(|ui|{
              egui::ComboBox::from_id_salt("video-background-picker").truncate().width(180.0_f32.min(ui.available_width())).selected_text(selected).show_ui(ui,|ui|{
               for item in list["result"]["items"].as_array().into_iter().flatten(){
-               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or("Видео")).clicked(){theme.video_background=Some(id.to_owned());theme.video_enabled=Some(true);theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
+               if let Some(id)=item["id"].as_str() && ui.selectable_label(theme.video_background.as_deref()==Some(id),item["name"].as_str().unwrap_or(super::i18n::tr("Видео", "Video"))).clicked(){theme.video_background=Some(id.to_owned());theme.video_enabled=Some(true);theme.lily_background=None;theme.custom_background=None;theme_intent=Some(theme.clone());}
               }
              });
-             if ui.add_enabled(!self.background_busy() && media_available,egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Выбрать видео…")).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
+             if ui.add_enabled(!self.background_busy() && media_available,egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),super::i18n::tr("Выбрать видео…", "Choose video…"))).clicked(){match super::theme_file_picker::start_pick_video(){Ok(receiver)=>self.video_picker=Some(receiver),Err(error)=>self.error=error}}
             });
            });
            }
           });
-          SettingsSection::group(ui,"Декор",|ui|{
-           SettingsRow::show(ui,"Декоративные линии","Мягкий рисунок на фоне синей темы.",|ui|{
-            if ui.checkbox(&mut theme.decoration,"Показывать").changed(){theme_intent=Some(theme.clone());}
+          SettingsSection::group(ui,super::i18n::tr("Декор", "Decoration"),|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Декоративные линии", "Decorative lines"),super::i18n::tr("Мягкий рисунок на фоне синей темы.", "A subtle pattern on the blue theme background."),|ui|{
+            if ui.checkbox(&mut theme.decoration,super::i18n::tr("Показывать", "Show")).changed(){theme_intent=Some(theme.clone());}
            });
           });
          }
-         SettingsSection::group(ui,"Анимации окна",|ui|{
-          let styles = [("none","Без анимации"),("slide_down","Сдвиг вниз"),("slide_up","Сдвиг вверх"),("slide_left","Сдвиг влево"),("slide_right","Сдвиг вправо"),("zoom","Масштабирование"),("fade","Растворение"),("zoom_fade","Масштабирование и растворение")];
-          SettingsRow::show(ui,"Появление","Как окно появляется при вызове.",|ui|{
+         SettingsSection::group(ui,super::i18n::tr("Анимации окна", "Window animations"),|ui|{
+          let styles = [("none",super::i18n::tr("Без анимации", "None")),("slide_down",super::i18n::tr("Сдвиг вниз", "Slide down")),("slide_up",super::i18n::tr("Сдвиг вверх", "Slide up")),("slide_left",super::i18n::tr("Сдвиг влево", "Slide left")),("slide_right",super::i18n::tr("Сдвиг вправо", "Slide right")),("zoom",super::i18n::tr("Масштабирование", "Zoom")),("fade",super::i18n::tr("Растворение", "Fade")),("zoom_fade",super::i18n::tr("Масштабирование и растворение", "Zoom and fade"))];
+          SettingsRow::show(ui,super::i18n::tr("Появление", "Show animation"),super::i18n::tr("Как окно появляется при вызове.", "How the window appears when summoned."),|ui|{
            egui::ComboBox::from_id_salt("animation-show-style")
-            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_show_style).map_or("Выбрать",|(_,label)|*label))
+            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_show_style).map_or(super::i18n::tr("Выбрать", "Select"),|(_,label)|*label))
             .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_show_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
           });
-          SettingsRow::show(ui,"Время появления","От 50 до 800 мс; при режиме без анимации не используется.",|ui|{
-           if ui.add_enabled(theme.animation_show_style!="none",egui::Slider::new(&mut theme.animation_show_ms,50..=800).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+          SettingsRow::show(ui,super::i18n::tr("Время появления", "Show duration"),super::i18n::tr("От 50 до 800 мс; при режиме без анимации не используется.", "From 50 to 800 ms; unused when animation is disabled."),|ui|{
+           if ui.add_enabled(theme.animation_show_style!="none",egui::Slider::new(&mut theme.animation_show_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
           });
-          SettingsRow::show(ui,"Исчезновение","Как окно скрывается.",|ui|{
+          SettingsRow::show(ui,super::i18n::tr("Исчезновение", "Hide animation"),super::i18n::tr("Как окно скрывается.", "How the window is hidden."),|ui|{
            egui::ComboBox::from_id_salt("animation-hide-style")
-            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_hide_style).map_or("Выбрать",|(_,label)|*label))
+            .selected_text(styles.iter().find(|(id,_)|*id==theme.animation_hide_style).map_or(super::i18n::tr("Выбрать", "Select"),|(_,label)|*label))
             .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_hide_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
           });
-          SettingsRow::show(ui,"Время исчезновения","От 50 до 800 мс; при режиме без анимации не используется.",|ui|{
-           if ui.add_enabled(theme.animation_hide_style!="none",egui::Slider::new(&mut theme.animation_hide_ms,50..=800).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+          SettingsRow::show(ui,super::i18n::tr("Время исчезновения", "Hide duration"),super::i18n::tr("От 50 до 800 мс; при режиме без анимации не используется.", "From 50 to 800 ms; unused when animation is disabled."),|ui|{
+           if ui.add_enabled(theme.animation_hide_style!="none",egui::Slider::new(&mut theme.animation_hide_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
           });
          });
-         SettingsSection::group(ui,"Прокрутка",|ui|{
-          SettingsRow::show(ui,"Стеклянная полоса прокрутки","Прозрачное оформление полосы прокрутки полки.",|ui|{
-           if ui.checkbox(&mut theme.scrollbar_glass,"Включить").changed(){theme_intent=Some(theme.clone());}
+         SettingsSection::group(ui,super::i18n::tr("Прокрутка", "Scrolling"),|ui|{
+          SettingsRow::show(ui,super::i18n::tr("Стеклянная полоса прокрутки", "Glass scrollbar"),super::i18n::tr("Прозрачное оформление полосы прокрутки полки.", "Transparent styling for the shelf scrollbar."),|ui|{
+           if ui.checkbox(&mut theme.scrollbar_glass,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
           });
-          SettingsRow::show(ui,"Всегда показывать полосу прокрутки","Полоса остаётся видимой, когда содержимое можно прокручивать.",|ui|{
-           if ui.checkbox(&mut theme.scrollbar_always_visible,"Показывать").changed(){theme_intent=Some(theme.clone());}
+          SettingsRow::show(ui,super::i18n::tr("Всегда показывать полосу прокрутки", "Always show scrollbar"),super::i18n::tr("Полоса остаётся видимой, когда содержимое можно прокручивать.", "Keep the scrollbar visible whenever content can scroll."),|ui|{
+           if ui.checkbox(&mut theme.scrollbar_always_visible,super::i18n::tr("Показывать", "Show")).changed(){theme_intent=Some(theme.clone());}
           });
-          SettingsRow::show(ui,"Мягкая прокрутка · эксперимент","Дополнительная инерция колесика на полке. При выключении действует обычная прокрутка egui.",|ui|{
-           if ui.checkbox(&mut theme.banana_scroll,"Включить").changed(){theme_intent=Some(theme.clone());}
+          SettingsRow::show(ui,super::i18n::tr("Мягкая прокрутка · эксперимент", "Smooth scrolling · experimental"),super::i18n::tr("Дополнительная инерция колесика на полке. При выключении действует обычная прокрутка egui.", "Extra wheel inertia on the shelf. When disabled, standard egui scrolling is used."),|ui|{
+           if ui.checkbox(&mut theme.banana_scroll,super::i18n::tr("Включить", "Enable")).changed(){theme_intent=Some(theme.clone());}
           });
           if theme.banana_scroll {
-           SettingsRow::show(ui,"Скорость прокрутки","Длина движения от одного шага колесика.",|ui|{
+           SettingsRow::show(ui,super::i18n::tr("Скорость прокрутки", "Scroll speed"),super::i18n::tr("Длина движения от одного шага колесика.", "Distance moved per wheel step."),|ui|{
             if ui.add(egui::Slider::new(&mut theme.banana_scroll_speed,25..=300).suffix("%")).changed(){theme_intent=Some(theme.clone());}
            });
-           SettingsRow::show(ui,"Инерция прокрутки","Время мягкого затухания после движения.",|ui|{
-            if ui.add(egui::Slider::new(&mut theme.banana_scroll_inertia_ms,50..=1000).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+           SettingsRow::show(ui,super::i18n::tr("Инерция прокрутки", "Scroll inertia"),super::i18n::tr("Время мягкого затухания после движения.", "How long movement continues to ease out."),|ui|{
+            if ui.add(egui::Slider::new(&mut theme.banana_scroll_inertia_ms,50..=1000).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
            });
           }
          });
-        } else {ui.label("Не удалось прочитать текущую тему.");}
-       } else {ui.label(response["error"]["message"].as_str().unwrap_or("Не удалось загрузить темы"));}
+        } else {ui.label(super::i18n::tr("Не удалось прочитать текущую тему.", "Could not read current theme."));}
+       } else {ui.label(response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось загрузить темы", "Could not load themes")));}
       } else if self.section==5 {
        if self.tags.show(ui,api){tabs_changed=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
       } else {
-       ui.heading("Горячие клавиши");ui.add_space(16.0);
-       if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text("Поиск команды…").desired_width(ui.available_width())).changed(){self.editor=None;}
+       ui.heading(super::i18n::tr("Горячие клавиши", "Shortcuts"));ui.add_space(16.0);
+       if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}
        let shortcuts:Vec<katran::shortcuts::ShortcutInfo>=serde_json::from_value(call(api,Command::Shortcuts)["result"].clone()).unwrap_or_default();
        let mut edit=None;
        SettingsSection::show(ui,|ui|{
-        for shortcut in shortcuts.iter().filter(|s|!s.id.starts_with("sort_") && s.label.to_lowercase().contains(&self.shortcut_filter.to_lowercase())) {
+        for shortcut in shortcuts.iter().filter(|s| !s.id.starts_with("sort_")) {
+         let shortcut_label = localized_shortcut_label(&shortcut.id, &shortcut.label);
+         if !shortcut_label.to_lowercase().contains(&self.shortcut_filter.to_lowercase()) { continue; }
          ui.push_id(&shortcut.id,|ui|{
-          SettingsRow::show(ui,&shortcut.label,shortcut.binding.as_deref().unwrap_or("Не назначено"),|ui|{
+          SettingsRow::show(ui,shortcut_label,shortcut.binding.as_deref().unwrap_or(super::i18n::tr("Не назначено", "Not assigned")),|ui|{
            ui.add(super::action_icons::icon(&shortcut.id).size(16.0).image());
            if shortcut.rebindable {
-            if ui.button("Изменить").clicked(){edit=Some(shortcut.clone());}
-            if ui.button("Сбросить").clicked(){let r=call(api,Command::SetShortcut{id:shortcut.id.clone(),binding:None,replace:false,reset:true});if r["ok"]==false{self.error=r["error"]["message"].as_str().unwrap_or("Ошибка").into();}}
-           }else{ui.weak("Системное сочетание");}
+            if ui.button(super::i18n::tr("Изменить", "Change")).clicked(){edit=Some(shortcut.clone());}
+            if ui.button(super::i18n::tr("Сбросить", "Reset")).clicked(){let r=call(api,Command::SetShortcut{id:shortcut.id.clone(),binding:None,replace:false,reset:true});if r["ok"]==false{self.error=r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}}
+           }else{ui.weak(super::i18n::tr("Системное сочетание", "System shortcut"));}
           });
           if self.editor.as_ref().is_some_and(|e|e.id==shortcut.id) && let Some(editor)=self.editor.as_mut() {
            ui.separator();if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft){self.editor=None;}ui.separator();
@@ -954,7 +1127,7 @@ impl State {
          });
         }
        });
-       if let Some(s)=edit {self.editor=Some(super::shortcuts_ui::Editor::new(s.id,s.label,s.binding.unwrap_or_default()));}
+       if let Some(s)=edit {let label=localized_shortcut_label(&s.id,&s.label).to_owned();self.editor=Some(super::shortcuts_ui::Editor::new(s.id,label,s.binding.unwrap_or_default()));}
       }
       if !self.error.is_empty(){super::ui_foundation::message(ui,&self.error,false);}
      });

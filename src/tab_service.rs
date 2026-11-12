@@ -54,6 +54,7 @@ impl Service {
     }
 
     pub(crate) fn action_label(&self, id: &str, fallback: &str) -> String {
+        let english = self.settings.language == crate::settings::Language::English;
         let tab = match id {
             "toggle_images" => Some(ShelfTab::Images),
             "toggle_screenshots" => Some(ShelfTab::Screenshots),
@@ -69,14 +70,26 @@ impl Service {
             format!(
                 "{} {}",
                 if self.settings.tab_enabled(tab) {
-                    "Отключить"
+                    if english {
+                        "Disable"
+                    } else {
+                        "Отключить"
+                    }
                 } else {
-                    "Включить"
+                    if english {
+                        "Enable"
+                    } else {
+                        "Включить"
+                    }
                 },
                 label(tab)
             )
         } else if id == "capture" {
-            if self.capture_enabled {
+            if english && self.capture_enabled {
+                "Pause clipboard capture"
+            } else if english {
+                "Enable clipboard capture"
+            } else if self.capture_enabled {
                 "Приостановить захват буфера"
             } else {
                 "Включить захват буфера"
@@ -84,27 +97,66 @@ impl Service {
             .into()
         } else if id == "tab_toggle" {
             if self.interaction.tab == ShelfTab::All {
-                format!("Вернуться в {}", label(self.interaction.last_tab))
+                if english {
+                    format!("Return to {}", label(self.interaction.last_tab))
+                } else {
+                    format!("Вернуться в {}", label(self.interaction.last_tab))
+                }
             } else {
-                "Перейти в Folder".into()
+                if english {
+                    "Go to Folder"
+                } else {
+                    "Перейти в Folder"
+                }
+                .into()
             }
         } else if id == "toggle_pinned_view" {
             if self.interaction.pinned_only {
-                "Показать все в категории".into()
+                if english {
+                    "Show all in category"
+                } else {
+                    "Показать все в категории"
+                }
+                .into()
             } else {
-                "Показать закреплённые".into()
+                if english {
+                    "Show pinned items"
+                } else {
+                    "Показать закреплённые"
+                }
+                .into()
             }
         } else if id == "transfer_copy" {
             if self.interaction.tab == ShelfTab::All {
-                "Копировать из Folder в Катран".into()
+                if english {
+                    "Copy from Folder to Katran"
+                } else {
+                    "Копировать из Folder в Катран"
+                }
+                .into()
             } else {
-                "Копировать в Folder".into()
+                if english {
+                    "Copy to Folder"
+                } else {
+                    "Копировать в Folder"
+                }
+                .into()
             }
         } else if id == "transfer_selection" {
             if self.interaction.tab == ShelfTab::All {
-                "Перенести из Folder в Катран".into()
+                if english {
+                    "Move from Folder to Katran"
+                } else {
+                    "Перенести из Folder в Катран"
+                }
+                .into()
             } else {
-                "Перенести в Folder".into()
+                if english {
+                    "Move to Folder"
+                } else {
+                    "Перенести в Folder"
+                }
+                .into()
             }
         } else {
             fallback.into()

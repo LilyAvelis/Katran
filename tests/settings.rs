@@ -11,6 +11,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
+        language: katran::settings::Language::English,
         theme: Default::default(),
         sort_notifications: true,
         pods_enabled: false,

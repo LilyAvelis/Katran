@@ -1,4 +1,5 @@
 //! Thin source API client. The domain owns workers, generations and classification.
+use super::i18n::tr;
 use super::*;
 
 #[derive(Default)]
@@ -53,7 +54,7 @@ impl Shelf {
             self.refresh();
         }
         if !errors.is_empty() {
-            self.message = format!("Папки: {}", errors.join("; "));
+            self.message = format!("{}: {}", tr("Папки", "Folders"), errors.join("; "));
         }
     }
 }

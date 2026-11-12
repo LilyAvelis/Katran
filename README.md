@@ -1,7 +1,7 @@
 # Katran
 
-**Katran 3.3** organizes Actions, improves startup and keeps Settings easy to
-close. See [3.3.1 release notes](docs/releases/3.3.1.md) and the
+**Katran 3.4** adds English interface language support and gives new profiles a
+blue theme with Lily background 1. See [3.4.0 release notes](docs/releases/3.4.0.md) and the
 [3.2 milestone](docs/releases/3.2.0.md).
 
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
@@ -15,11 +15,11 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Обновления checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 3.3.1
+## Current release · 3.4.0
 
 Close the previous window yourself once after this update, then use **Katran** in
 the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-reports **3.3.1** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
+reports **3.4.0** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
 
 Video backgrounds use your own file. Portable/setup include FFmpeg components;
 users upgrading through the in-app updater can prepare them explicitly in

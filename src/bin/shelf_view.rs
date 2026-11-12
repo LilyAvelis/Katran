@@ -1,3 +1,4 @@
+use super::i18n::tr;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,11 +167,15 @@ impl Shelf {
                                                 description["name"].as_str().unwrap_or("Pods"),
                                             );
                                             if description.is_null() {
-                                                ui.label("Метаданные недоступны");
+                                                ui.label(tr(
+                                                    "Метаданные недоступны",
+                                                    "Metadata unavailable",
+                                                ));
                                             } else {
                                                 ui.label(format!(
-                                                    "UTF-8: {} байт · UTF-16: {}",
+                                                    "UTF-8: {} {} · UTF-16: {}",
                                                     description["utf8_bytes"],
+                                                    tr("байт", "bytes"),
                                                     description["utf16_units"]
                                                 ));
                                                 if let Some(points) =
@@ -190,7 +195,10 @@ impl Shelf {
                                                     }
                                                 }
                                                 if description["metadata_truncated"] == true {
-                                                    ui.weak("Показана часть метаданных");
+                                                    ui.weak(tr(
+                                                        "Показана часть метаданных",
+                                                        "Only part of the metadata is shown",
+                                                    ));
                                                 }
                                             }
                                         });
@@ -212,7 +220,7 @@ impl Shelf {
                             let height = ui.available_height();
                             let (title, _) = ui
                                 .allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
-                            let name = event["name"].as_str().unwrap_or("Изображение");
+                            let name = event["name"].as_str().unwrap_or(tr("Изображение", "Image"));
                             let mut job = egui::text::LayoutJob::simple_singleline(
                                 name.into(),
                                 egui::FontId::proportional(16.0),
@@ -351,9 +359,10 @@ impl Shelf {
                 } else {
                     self.images.clear_preview_geometry();
                     if visible.is_empty() {
-                        ui.label(
+                        ui.label(tr(
                             "Полка пуста. Ctrl K → Включить захват, затем скопируйте изображение.",
-                        );
+                            "The shelf is empty. Ctrl K → Enable capture, then copy an image.",
+                        ));
                     }
                     let gap = gallery_card::GAP;
                     ui.spacing_mut().item_spacing = Vec2::splat(gap);
@@ -600,7 +609,10 @@ impl Shelf {
                                         ) {
                                             text_preview_ui::card_title(event)
                                         } else {
-                                            event["name"].as_str().unwrap_or("Файл").to_owned()
+                                            event["name"]
+                                                .as_str()
+                                                .unwrap_or(tr("Файл", "File"))
+                                                .to_owned()
                                         };
                                         gallery_card::text(
                                             ui,
@@ -622,9 +634,9 @@ impl Shelf {
                                         let origin: katran::origin::Origin =
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
-                                        let origin_label = origin
-                                            .label()
-                                            .unwrap_or_else(|| "Источник не определён".into());
+                                        let origin_label = origin.label().unwrap_or_else(|| {
+                                            tr("Источник не определён", "Unknown source").into()
+                                        });
                                         let mut label = criterion.as_ref().map_or_else(
                                             || origin_label.clone(),
                                             |criterion| {
@@ -711,7 +723,9 @@ impl Shelf {
                                                                 url.host_str().map(str::to_owned)
                                                             })
                                                     })
-                                                    .unwrap_or_else(|| "Ссылка".to_owned())
+                                                    .unwrap_or_else(|| {
+                                                        tr("Ссылка", "Link").to_owned()
+                                                    })
                                             } else if let Some(name) =
                                                 event["properties"]["display_name"].as_str()
                                             {
@@ -724,7 +738,10 @@ impl Shelf {
                                             ) {
                                                 text_preview_ui::card_title(event)
                                             } else {
-                                                event["name"].as_str().unwrap_or("Файл").to_owned()
+                                                event["name"]
+                                                    .as_str()
+                                                    .unwrap_or(tr("Файл", "File"))
+                                                    .to_owned()
                                             },
                                             if links {
                                                 event["text_preview"]
@@ -741,7 +758,8 @@ impl Shelf {
                                             },
                                             {
                                                 let origin = origin.label().unwrap_or_else(|| {
-                                                    "Источник не определён".into()
+                                                    tr("Источник не определён", "Unknown source")
+                                                        .into()
                                                 });
                                                 self.tag_material_cache
                                                     .assignments
@@ -758,11 +776,11 @@ impl Shelf {
                                                     .unwrap_or(origin)
                                             },
                                             if event["available"] == false {
-                                                "Исходник недоступен"
+                                                tr("Исходник недоступен", "Original unavailable")
                                             } else if event["storage"] == "cached" {
-                                                "Временная копия"
+                                                tr("Временная копия", "Temporary copy")
                                             } else {
-                                                "Исходный файл"
+                                                tr("Исходный файл", "Original file")
                                             }
                                             .to_owned(),
                                         ];
@@ -837,14 +855,16 @@ impl Shelf {
                                                 .iter()
                                                 .find(|slot| slot.number == *n)
                                         })
-                                        .map(|slot| format!("Тег: {}", slot.name))
+                                        .map(|slot| format!("{}: {}", tr("Тег", "Tag"), slot.name))
                                         .unwrap_or_default();
                                     let response = response.on_hover_text(format!(
                                         "{}\n{}\n{}\n{}",
-                                        event["name"].as_str().unwrap_or("Файл"),
-                                        origin
-                                            .label()
-                                            .unwrap_or_else(|| "Источник не определён".into()),
+                                        event["name"].as_str().unwrap_or(tr("Файл", "File")),
+                                        origin.label().unwrap_or_else(|| tr(
+                                            "Источник не определён",
+                                            "Unknown source"
+                                        )
+                                        .into()),
                                         criterion.as_deref().unwrap_or(""),
                                         tag_name
                                     ));

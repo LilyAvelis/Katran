@@ -1,4 +1,5 @@
 //! Single-writer dispatcher jobs and UI result handling.
+use super::i18n::tr;
 use super::*;
 impl Shelf {
     pub(super) fn direct_transfer_input(&mut self, ctx: &egui::Context) {
@@ -20,7 +21,11 @@ impl Shelf {
             .collect();
         if let Some(action) = shortcuts_ui::take_action_with_editing(ctx, &catalogue, false) {
             if self.job.is_some() {
-                self.message = "Дождитесь завершения текущей операции".into();
+                self.message = tr(
+                    "Дождитесь завершения текущей операции",
+                    "Wait for the current operation to finish",
+                )
+                .into();
                 return;
             }
             if let Some(id) = ctx.memory(|memory| memory.focused()) {
@@ -35,11 +40,15 @@ impl Shelf {
         }
         let items = self.snapshot_ids(ids);
         let Some(items) = items else {
-            self.message = "Выбор устарел; обновите полку".into();
+            self.message = tr(
+                "Выбор устарел; обновите полку",
+                "Selection is out of date; refresh the shelf",
+            )
+            .into();
             return;
         };
         if self.start_job(Command::DragEventsChecked { items }, false, ctx.clone()) {
-            self.message = "Перетаскивание файлов…".into();
+            self.message = tr("Перетаскивание файлов…", "Dragging files…").into();
         }
     }
     pub(super) fn call(&mut self, command: Command) -> Value {
@@ -55,7 +64,10 @@ impl Shelf {
             command,
         });
         if r["ok"] == false {
-            self.message = r["error"]["message"].as_str().unwrap_or("Ошибка").into();
+            self.message = r["error"]["message"]
+                .as_str()
+                .unwrap_or(tr("Ошибка", "Error"))
+                .into();
         }
         r["result"].clone()
     }
@@ -120,9 +132,10 @@ impl Shelf {
                 self.pending_preview = None;
                 self.message = format!(
                     "QuickLook: {}",
-                    status["error"]["message"]
-                        .as_str()
-                        .unwrap_or("Не удалось подготовить просмотр")
+                    status["error"]["message"].as_str().unwrap_or(tr(
+                        "Не удалось подготовить просмотр",
+                        "Could not prepare preview"
+                    ))
                 );
                 return;
             }
@@ -168,7 +181,7 @@ impl Shelf {
                         capture,
                     ),
                     _ => (
-                        serde_json::json!({"ok":false,"error":{"message":"Потерян статус фоновой операции"}}),
+                        serde_json::json!({"ok":false,"error":{"message":tr("Потерян статус фоновой операции", "Background operation status lost")}}),
                         capture,
                     ),
                 }
@@ -193,7 +206,7 @@ impl Shelf {
         if reply["ok"] == false {
             self.message = reply["error"]["message"]
                 .as_str()
-                .unwrap_or("Ошибка")
+                .unwrap_or(tr("Ошибка", "Error"))
                 .into();
             return;
         }
@@ -218,21 +231,27 @@ impl Shelf {
             self.clipboard_events.completed(result, Instant::now());
             if result["capture_schedule"]["retry_after_ms"].is_null() {
                 if let Some(error) = result["capture_error"]["message"].as_str() {
-                    self.message = format!("Не удалось захватить Clipboard: {error}");
+                    self.message = format!(
+                        "{}: {error}",
+                        tr(
+                            "Не удалось захватить Clipboard",
+                            "Could not capture Clipboard"
+                        )
+                    );
                 } else if result["capture_schedule"]["exhausted"] == true {
-                    self.message = "Clipboard оставался занят или менялся; повторы исчерпаны. Скопируйте объект ещё раз.".into();
+                    self.message = tr("Clipboard оставался занят или менялся; повторы исчерпаны. Скопируйте объект ещё раз.", "Clipboard stayed busy or changed; retries exhausted. Copy the item again.").into();
                 }
             }
         }
         if let Some(token) = result["drag_token"].as_str() {
             self.native_drag = Some(token.to_owned());
-            self.message = "Файлы готовы к перетаскиванию…".into();
+            self.message = tr("Файлы готовы к перетаскиванию…", "Files are ready to drag…").into();
             return;
         }
         if result["scanned"] == true {
             let errors = item_failures(&result["items"]);
             if !errors.is_empty() {
-                self.message = format!("Папки: {errors}");
+                self.message = format!("{}: {errors}", tr("Папки", "Folders"));
             }
             if result["items"]
                 .as_array()
@@ -248,7 +267,10 @@ impl Shelf {
         if capture {
             let errors = item_failures(&result["items"]);
             if !errors.is_empty() {
-                self.message = format!("Не удалось захватить: {errors}");
+                self.message = format!(
+                    "{}: {errors}",
+                    tr("Не удалось захватить", "Could not capture")
+                );
             }
             if clipboard_changed(result) {
                 self.sources.match_dirty = true;
@@ -337,7 +359,7 @@ impl Shelf {
     }
     pub(super) fn copy_request(&mut self, ctx: &egui::Context) {
         if self.pending_copy.is_some() || self.pending_copy_ids.is_some() {
-            self.message = "Копирование уже в очереди".into();
+            self.message = tr("Копирование уже в очереди", "Copy is already queued").into();
             return;
         }
         if self.api.is_none()
@@ -350,11 +372,15 @@ impl Shelf {
             })
         {
             self.pending_copy_ids = Some(self.selected_ids());
-            self.message = "Копирование в очереди".into();
+            self.message = tr("Копирование в очереди", "Copy queued").into();
             return;
         }
         let Some(items) = self.selection_snapshot() else {
-            self.message = "Выбор устарел. Обновите полку и выберите объекты заново.".into();
+            self.message = tr(
+                "Выбор устарел. Обновите полку и выберите объекты заново.",
+                "Selection is out of date. Refresh the shelf and select the items again.",
+            )
+            .into();
             return;
         };
         if self.api.is_some() {
@@ -368,16 +394,20 @@ impl Shelf {
         }
         if self.job.is_some() {
             self.pending_copy = Some(items);
-            self.message = "Копирование в очереди".into();
+            self.message = tr("Копирование в очереди", "Copy queued").into();
         } else if self.api.is_some() {
             if self.start_job(Command::CopySelectedObjects, false, ctx.clone()) {
                 self.actions = false;
             }
         } else if self.job.is_some() {
             self.pending_copy = Some(items);
-            self.message = "Копирование в очереди".into();
+            self.message = tr("Копирование в очереди", "Copy queued").into();
         } else {
-            self.message = "Не скопировано. Перезапустите Katran.".into();
+            self.message = tr(
+                "Не скопировано. Перезапустите Katran.",
+                "Not copied. Restart Katran.",
+            )
+            .into();
         }
     }
     pub(super) fn take_queued_copy(&mut self) -> Option<Command> {
@@ -385,7 +415,11 @@ impl Shelf {
             match self.snapshot_ids(ids) {
                 Some(items) => items,
                 None => {
-                    self.message = "Выбор устарел; копирование не выполнено".into();
+                    self.message = tr(
+                        "Выбор устарел; копирование не выполнено",
+                        "Selection is out of date; nothing was copied",
+                    )
+                    .into();
                     return None;
                 }
             }
@@ -470,13 +504,21 @@ impl Shelf {
                 .join("; ");
             self.message = if from_folder {
                 format!(
-                    "Добавлено в Катран: {} · Ошибок: {failures}. {details}",
-                    items.len() - failures
+                    "{}: {} · {}: {failures}. {details}",
+                    tr("Добавлено в Катран", "Added to Katran"),
+                    items.len() - failures,
+                    tr("Ошибок", "Failures")
                 )
             } else {
-                format!(
-                    "В Folder: перемещено {moved} · скопировано {copied} · Закреплённых скопировано {pinned} · Ошибок: {failures}. {details}"
-                )
+                if super::i18n::is_english() {
+                    format!(
+                        "To Folder: moved {moved} · copied {copied} · pinned copied {pinned} · failures: {failures}. {details}"
+                    )
+                } else {
+                    format!(
+                        "В Folder: перемещено {moved} · скопировано {copied} · Закреплённых скопировано {pinned} · Ошибок: {failures}. {details}"
+                    )
+                }
             };
             self.refresh();
             return;
@@ -487,8 +529,10 @@ impl Shelf {
             if let Some(items) = result["items"].as_array() {
                 let failed = items.iter().filter(|item| item["ok"] != true).count();
                 self.message = format!(
-                    "Добавлено в Катран: {}. Ошибок: {failed}. {}",
+                    "{}: {}. {}: {failed}. {}",
+                    tr("Добавлено в Катран", "Added to Katran"),
                     items.len() - failed,
+                    tr("Ошибок", "Failures"),
                     item_failures(&result["items"])
                 );
             }
@@ -573,19 +617,36 @@ impl Shelf {
         if let Some(copied) = r["table_copied"].as_bool() {
             self.message = if copied {
                 format!(
-                    "Скопировано таблиц: {} · {} × {}",
+                    "{}: {} · {} × {}",
+                    tr("Скопировано таблиц", "Tables copied"),
                     r["table_count"].as_u64().unwrap_or(1),
                     r["row_count"].as_u64().unwrap_or(0),
                     r["column_count"].as_u64().unwrap_or(0)
                 )
             } else if r["text_written"] == true {
-                "Скопированы значения с табуляциями; HTML таблицы записать не удалось".into()
+                tr(
+                    "Скопированы значения с табуляциями; HTML таблицы записать не удалось",
+                    "Tab-separated values copied; table HTML could not be written",
+                )
+                .into()
             } else if r["html_written"] == true {
-                "Скопирована HTML-таблица; текстовый формат записать не удалось".into()
+                tr(
+                    "Скопирована HTML-таблица; текстовый формат записать не удалось",
+                    "HTML table copied; text format could not be written",
+                )
+                .into()
             } else if r["merged"] == false {
-                format!("Таблицы не скопированы: {}", item_failures(&r["items"]))
+                format!(
+                    "{}: {}",
+                    tr("Таблицы не скопированы", "Tables not copied"),
+                    item_failures(&r["items"])
+                )
             } else {
-                "Не удалось записать таблицы в буфер обмена".into()
+                tr(
+                    "Не удалось записать таблицы в буфер обмена",
+                    "Could not write tables to the clipboard",
+                )
+                .into()
             };
             if let Some(warnings) = r["warnings"].as_array() {
                 for warning in warnings.iter().filter_map(Value::as_str) {
@@ -595,48 +656,84 @@ impl Shelf {
             }
         }
         if r["background_applied"] == true {
-            self.message = "Изображение сохранено и установлено на фон".into();
+            self.message = tr(
+                "Изображение сохранено и установлено на фон",
+                "Image saved and set as background",
+            )
+            .into();
         }
         if r["sort"].is_object() {
             self.message = sorting_ui::confirmation(&r["sort"]);
         }
         if let Some(copied) = r["text_copied"].as_bool() {
             self.message = if copied && r["kind"] == "link_fragment" {
-                "Ссылки скопированы текстом".into()
+                tr("Ссылки скопированы текстом", "Links copied as text").into()
             } else if copied {
-                "Текстовые фрагменты скопированы одним текстом".into()
+                tr(
+                    "Текстовые фрагменты скопированы одним текстом",
+                    "Text fragments copied as one text",
+                )
+                .into()
             } else {
-                format!("Текст не скопирован: {}", item_failures(&r["items"]))
+                format!(
+                    "{}: {}",
+                    tr("Текст не скопирован", "Text not copied"),
+                    item_failures(&r["items"])
+                )
             };
         }
         if r["requested"] == true {
             match r["operation"].as_str() {
                 Some("open") => {
                     self.message = if r["link"] == true {
-                        "Ссылка передана браузеру по умолчанию".into()
+                        tr(
+                            "Ссылка передана браузеру по умолчанию",
+                            "Link sent to the default browser",
+                        )
+                        .into()
                     } else {
-                        "Файл передан приложению по умолчанию".into()
+                        tr(
+                            "Файл передан приложению по умолчанию",
+                            "File sent to the default app",
+                        )
+                        .into()
                     }
                 }
-                Some("reveal") => self.message = "Файл показан в Проводнике".into(),
+                Some("reveal") => {
+                    self.message = tr("Файл показан в Проводнике", "File shown in Explorer").into()
+                }
                 Some("open_with") => {
                     self.message = if r["application_id"].is_string() {
-                        "Файл передан выбранному приложению".into()
+                        tr(
+                            "Файл передан выбранному приложению",
+                            "File sent to the selected app",
+                        )
+                        .into()
                     } else {
-                        "Запрошен выбор приложения Windows".into()
+                        tr(
+                            "Запрошен выбор приложения Windows",
+                            "Windows app picker requested",
+                        )
+                        .into()
                     }
                 }
                 _ => {}
             }
         }
         if r["cancelled"] == true {
-            self.message = "Перетаскивание отменено".into();
+            self.message = tr("Перетаскивание отменено", "Drag cancelled").into();
         }
         if let Some(count) = r["dragged"].as_u64() {
-            self.message = format!("Перетаскивание завершено: {count}");
+            self.message = format!(
+                "{}: {count}",
+                tr("Перетаскивание завершено", "Drag completed")
+            );
             let errors = item_failures(&r["failures"]);
             if !errors.is_empty() {
-                self.message.push_str(&format!(" · не передано: {errors}"));
+                self.message.push_str(&format!(
+                    " · {}: {errors}",
+                    tr("не передано", "not transferred")
+                ));
             }
             if let Some(warnings) = r["warnings"].as_array() {
                 for warning in warnings.iter().filter_map(Value::as_str) {
@@ -645,7 +742,11 @@ impl Shelf {
             }
         }
         if let Some(bytes) = r["reclaimed_blob_bytes"].as_u64() {
-            self.message = format!("Очищено временных данных: {bytes} байт");
+            self.message = format!(
+                "{}: {bytes} {}",
+                tr("Очищено временных данных", "Temporary data cleared"),
+                tr("байт", "bytes")
+            );
         }
         if r["confirmation_required"] == true {
             self.pending_delete_originals = r["original_files"] == true;
@@ -662,22 +763,32 @@ impl Shelf {
             && r["confirmation_required"] != true
         {
             self.message = if r["original_files"] == true {
-                format!("Удалено объектов: {count}{}", cleanup_message(&r))
+                format!(
+                    "{}: {count}{}",
+                    tr("Удалено объектов", "Items deleted"),
+                    cleanup_message(&r)
+                )
             } else {
-                format!("Убрано с полки: {count}{}", cleanup_message(&r))
+                format!(
+                    "{}: {count}{}",
+                    tr("Убрано с полки", "Removed from shelf"),
+                    cleanup_message(&r)
+                )
             };
             let errors = item_failures(&r["items"]);
             if !errors.is_empty() {
-                self.message.push_str(&format!(" · не удалено: {errors}"));
+                self.message
+                    .push_str(&format!(" · {}: {errors}", tr("не удалено", "not deleted")));
             }
         }
         if let Some(count) = r["copied"].as_u64() {
-            self.message = format!("Скопировано: {count}");
+            self.message = format!("{}: {count}", tr("Скопировано", "Copied"));
             if let Some(failures) = r["failures"].as_array()
                 && !failures.is_empty()
             {
                 self.message.push_str(&format!(
-                    " · не скопировано: {}",
+                    " · {}: {}",
+                    tr("не скопировано", "not copied"),
                     item_failures(&Value::Array(failures.clone()))
                 ));
             }
@@ -699,13 +810,15 @@ impl Shelf {
             && r.get("atomic").is_some()
         {
             self.message = format!(
-                "Сохранено {}/{}",
+                "{} {}/{}",
+                tr("Сохранено", "Saved"),
                 items.iter().filter(|i| i["ok"] == true).count(),
                 items.len()
             );
             let errors = item_failures(&r["items"]);
             if !errors.is_empty() {
-                self.message.push_str(&format!(" · Ошибки: {errors}"));
+                self.message
+                    .push_str(&format!(" · {}: {errors}", tr("Ошибки", "Errors")));
             }
         }
         if r["intent"] == "choose_destination" {

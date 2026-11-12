@@ -24,11 +24,24 @@ pub fn menu_event(command: u32) -> Option<Event> {
     }
 }
 
+/// Presentation only; these positions correspond to the stable menu IDs 1–3.
+pub fn menu_labels(language: crate::settings::Language) -> [&'static str; 3] {
+    match language {
+        crate::settings::Language::English => ["Show", "Hide", "Quit"],
+        crate::settings::Language::Russian => ["Показать", "Скрыть", "Выйти"],
+    }
+}
+
 #[cfg(windows)]
 mod native {
-    use super::{Event, callback_event, menu_event};
+    use super::{Event, callback_event, menu_event, menu_labels};
+    use crate::settings::Language;
     use std::{
-        sync::mpsc::{self, Receiver, Sender, TryRecvError},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc::{self, Receiver, Sender, TryRecvError},
+        },
         thread::{self, JoinHandle},
     };
     use windows::{
@@ -56,6 +69,7 @@ mod native {
         wake: Box<dyn Fn() + Send>,
         taskbar: u32,
         icon: HICON,
+        english: Arc<AtomicBool>,
     }
     impl State {
         fn send(&self, event: Result<Event, String>) {
@@ -134,12 +148,25 @@ mod native {
     }
     unsafe fn show_menu(window: HWND, state: &State) -> Result<(), String> {
         let menu = unsafe { CreatePopupMenu() }.map_err(|e| e.to_string())?;
+        let language = if state.english.load(Ordering::Relaxed) {
+            Language::English
+        } else {
+            Language::Russian
+        };
+        let labels = menu_labels(language).map(|text| {
+            text.encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>()
+        });
         let result = (|| -> Result<(), String> {
             unsafe {
-                AppendMenuW(menu, MF_STRING, 1, w!("Показать")).map_err(|e| e.to_string())?;
-                AppendMenuW(menu, MF_STRING, 2, w!("Скрыть")).map_err(|e| e.to_string())?;
+                AppendMenuW(menu, MF_STRING, 1, PCWSTR(labels[0].as_ptr()))
+                    .map_err(|e| e.to_string())?;
+                AppendMenuW(menu, MF_STRING, 2, PCWSTR(labels[1].as_ptr()))
+                    .map_err(|e| e.to_string())?;
                 AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()).map_err(|e| e.to_string())?;
-                AppendMenuW(menu, MF_STRING, 3, w!("Выйти")).map_err(|e| e.to_string())?;
+                AppendMenuW(menu, MF_STRING, 3, PCWSTR(labels[2].as_ptr()))
+                    .map_err(|e| e.to_string())?;
                 let mut point = POINT::default();
                 GetCursorPos(&mut point).map_err(|e| e.to_string())?;
                 let _ = SetForegroundWindow(window);
@@ -169,11 +196,14 @@ mod native {
         window: usize,
         receiver: Receiver<Result<Event, String>>,
         worker: Option<JoinHandle<()>>,
+        english: Arc<AtomicBool>,
     }
     impl Listener {
-        pub fn start(wake: impl Fn() + Send + 'static) -> Result<Self, String> {
+        pub fn start(language: Language, wake: impl Fn() + Send + 'static) -> Result<Self, String> {
             let (events, receiver) = mpsc::channel();
             let (ready, start) = mpsc::sync_channel(1);
+            let english = Arc::new(AtomicBool::new(language == Language::English));
+            let worker_language = english.clone();
             let worker = thread::Builder::new()
                 .name("katran-system-tray".into())
                 .spawn(move || {
@@ -203,6 +233,7 @@ mod native {
                                 wake: Box::new(wake),
                                 taskbar,
                                 icon,
+                                english: worker_language,
                             });
                             // A hidden top-level window receives Explorer's broadcast;
                             // a message-only window would not receive TaskbarCreated.
@@ -272,12 +303,18 @@ mod native {
                     window,
                     receiver,
                     worker: Some(worker),
+                    english,
                 }),
                 Err(error) => {
                     let _ = worker.join();
                     Err(error)
                 }
             }
+        }
+        /// The next menu reads this without waiting for the tray thread.
+        pub fn set_language(&self, language: Language) {
+            self.english
+                .store(language == Language::English, Ordering::Relaxed);
         }
         pub fn try_recv(&self) -> Result<Option<Event>, String> {
             match self.receiver.try_recv() {
@@ -311,10 +348,34 @@ pub use native::Listener;
 pub struct Listener;
 #[cfg(not(windows))]
 impl Listener {
-    pub fn start(_: impl Fn() + Send + 'static) -> Result<Self, String> {
+    pub fn start(
+        _: crate::settings::Language,
+        _: impl Fn() + Send + 'static,
+    ) -> Result<Self, String> {
         Err("System tray requires Windows".into())
     }
+    pub fn set_language(&self, _: crate::settings::Language) {}
     pub fn try_recv(&self) -> Result<Option<Event>, String> {
         Err("System tray requires Windows".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Language;
+
+    #[test]
+    fn translated_menu_keeps_command_ids() {
+        assert_eq!(menu_labels(Language::English), ["Show", "Hide", "Quit"]);
+        assert_eq!(
+            menu_labels(Language::Russian),
+            ["Показать", "Скрыть", "Выйти"]
+        );
+        assert_eq!(
+            [menu_event(1), menu_event(2), menu_event(3)],
+            [Some(Event::Show), Some(Event::Hide), Some(Event::Quit)]
+        );
+        assert_eq!(menu_event(0), None);
     }
 }

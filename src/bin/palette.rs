@@ -1,3 +1,4 @@
+use super::i18n::{is_english, tr};
 use super::*;
 
 fn action_matches(action: &Value, query: &str) -> bool {
@@ -87,16 +88,16 @@ impl Shelf {
                 optical_slot=Some((ui.painter().clone(),ui.painter().add(egui::Shape::Noop)));
                 ui.set_width(width);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Действия").strong().size(14.0));
+                    ui.label(RichText::new(tr("Действия", "Actions")).strong().size(14.0));
                     ui.weak(if self.state["selected"].as_array().is_some_and(|selected| !selected.is_empty()) {
-                        "Есть выделение"
+                        tr("Есть выделение", "Selection active")
                     } else {
-                        "Ничего не выделено"
+                        tr("Ничего не выделено", "Nothing selected")
                     });
                 });
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.action_query)
-                        .hint_text("Найти действие…")
+                        .hint_text(tr("Найти действие…", "Find an action…"))
                         .desired_width(width - 12.0),
                 );
                 if self.focus_actions {
@@ -126,7 +127,7 @@ impl Shelf {
                             // Sequence hints are presentation, never persisted chord bindings.
                             let hint=sorting_ui::sequence_hint(a["id"].as_str().unwrap_or(""));
                             let display=if shortcut.is_empty(){hint.unwrap_or("")}else{crate::action_row::primary_shortcut(shortcut)};
-                            let tooltip=hint.map(|hint|format!("Последовательность: {hint} · сначала запятая, затем клавиша")).unwrap_or_else(||shortcut.to_owned());
+                            let tooltip=hint.map(|hint|if is_english() { format!("Sequence: {hint} · comma first, then the key") } else { format!("Последовательность: {hint} · сначала запятая, затем клавиша") }).unwrap_or_else(||shortcut.to_owned());
                             let response = crate::action_row::ActionRow::new(
                                 crate::action_row::ActionPresentation {
                                     label: a["label"].as_str().unwrap_or(""),
@@ -145,11 +146,11 @@ impl Shelf {
                             }
                         }
                         if actions.is_empty() {
-                            ui.label("Ничего не найдено");
+                            ui.label(tr("Ничего не найдено", "Nothing found"));
                         }
                     });
                 ui.separator();
-                ui.weak("↑↓ выбрать · Enter выполнить · Esc закрыть");
+                ui.weak(tr("↑↓ выбрать · Enter выполнить · Esc закрыть", "↑↓ select · Enter run · Esc close"));
             });
         if let Some((painter, index)) = optical_slot
             && let Some(shape) = theme_ui::optical_shape(ctx, result.response.rect, 12.0)
@@ -202,8 +203,11 @@ impl Shelf {
             .show(ctx, |ui| {
                 optical_slot = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
                 ui.set_width((ctx.content_rect().width() - 40.0).clamp(200.0, 420.0));
-                ui.heading("Сортировка");
-                ui.weak("Клавиша — выбрать · Shift — обратный порядок · Esc — назад");
+                ui.heading(tr("Сортировка", "Sorting"));
+                ui.weak(tr(
+                    "Клавиша — выбрать · Shift — обратный порядок · Esc — назад",
+                    "Key — select · Shift — reverse order · Esc — back",
+                ));
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 160.0).clamp(80.0, 420.0))
                     .show(ui, |ui| {

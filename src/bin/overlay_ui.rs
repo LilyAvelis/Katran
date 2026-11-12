@@ -1,4 +1,5 @@
 //! Presentation-only global summon client; copy/paste policy lives in Service.
+use super::i18n::tr;
 use super::*;
 #[derive(Default)]
 pub(super) struct State {
@@ -67,9 +68,16 @@ impl Shelf {
             #[cfg(all(windows, not(test)))]
             {
                 let wake = ctx.clone();
-                match katran::tray::Listener::start(move || wake.request_repaint()) {
+                let language = if super::i18n::is_english() {
+                    katran::settings::Language::English
+                } else {
+                    katran::settings::Language::Russian
+                };
+                match katran::tray::Listener::start(language, move || wake.request_repaint()) {
                     Ok(tray) => self.overlay_ui.tray = Some(tray),
-                    Err(error) => self.message = format!("Трей Katran: {error}"),
+                    Err(error) => {
+                        self.message = format!("{}: {error}", tr("Трей Katran", "Katran tray"))
+                    }
                 }
             }
         }
@@ -77,6 +85,11 @@ impl Shelf {
         {
             let mut events = Vec::new();
             if let Some(tray) = &self.overlay_ui.tray {
+                tray.set_language(if super::i18n::is_english() {
+                    katran::settings::Language::English
+                } else {
+                    katran::settings::Language::Russian
+                });
                 for _ in 0..8 {
                     match tray.try_recv() {
                         Ok(Some(event)) => events.push(event),
@@ -143,8 +156,9 @@ impl Shelf {
                 self.overlay_ui.listener = None;
             }
             self.overlay_ui.recorder_suspended = true;
-            self.settings_ui
-                .set_overlay_status("Нажмите новое сочетание клавиш".into());
+            self.settings_ui.set_overlay_status(
+                tr("Нажмите новое сочетание клавиш", "Press a new shortcut").into(),
+            );
             return;
         }
         if self.overlay_ui.recorder_suspended {
@@ -167,7 +181,8 @@ impl Shelf {
             #[cfg(windows)]
             {
                 self.overlay_ui.listener = None;
-                self.overlay_ui.registration_status = "Глобальная клавиша выключена".into();
+                self.overlay_ui.registration_status =
+                    tr("Глобальная клавиша выключена", "Global shortcut disabled").into();
                 if !binding.is_empty() {
                     let wake = ctx.clone();
                     match katran::overlay::Hotkey::parse(&binding).and_then(|key| {
@@ -177,7 +192,8 @@ impl Shelf {
                     }) {
                         Ok(listener) => {
                             self.overlay_ui.listener = Some(listener);
-                            self.overlay_ui.registration_status = format!("Активно: {binding}");
+                            self.overlay_ui.registration_status =
+                                format!("{}: {binding}", tr("Активно", "Active"));
                             if let Some(log) = &self.logger {
                                 log.record(
                                     "hotkey_registered",
@@ -192,8 +208,13 @@ impl Shelf {
                                 log.record("hotkey_registration_failed",serde_json::json!({"binding":binding,"code":error.code,"message":error.message}));
                             }
                             self.message = format!(
-                                "Глобальная клавиша: {}. Возможно, сочетание занято другим приложением.",
-                                error.message
+                                "{}: {}. {}",
+                                tr("Глобальная клавиша", "Global shortcut"),
+                                error.message,
+                                tr(
+                                    "Возможно, сочетание занято другим приложением.",
+                                    "The shortcut may be in use by another app."
+                                )
                             );
                             self.overlay_ui.registration_status = self.message.clone();
                         }
@@ -247,8 +268,11 @@ impl Shelf {
                                 if let Some(log) = &self.logger {
                                     log.record("overlay_show_failed",serde_json::json!({"code":error.code,"message":error.message}));
                                 }
-                                self.message =
-                                    format!("Не удалось вызвать Katran: {}", error.message);
+                                self.message = format!(
+                                    "{}: {}",
+                                    tr("Не удалось вызвать Katran", "Could not show Katran"),
+                                    error.message
+                                );
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                                 self.call(Command::SetWindowVisibility { visible: true });
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -268,7 +292,8 @@ impl Shelf {
                             self.apply_window_visibility(ctx, false);
                         }
                     } else {
-                        self.message = format!("Вызов Katran: {}", error.message);
+                        self.message =
+                            format!("{}: {}", tr("Вызов Katran", "Show Katran"), error.message);
                     }
                 }
                 Err(error) => {
@@ -313,7 +338,11 @@ impl Shelf {
     }
     pub(super) fn paste_previous(&mut self, ctx: &egui::Context) {
         if self.job.is_some() || self.overlay_ui.pending {
-            self.message = "Дождитесь завершения текущей операции".into();
+            self.message = tr(
+                "Дождитесь завершения текущей операции",
+                "Wait for the current operation to finish",
+            )
+            .into();
             return;
         }
         let reply = self.call(Command::BeginPastePrevious {

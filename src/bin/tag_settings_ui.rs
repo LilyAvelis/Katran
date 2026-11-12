@@ -1,4 +1,5 @@
 //! Slot editor is a client of the tag commands; drafts are never persisted implicitly.
+use super::i18n::tr;
 use super::ui_foundation::{SettingsRow, SettingsSection};
 use eframe::egui::{self, Color32};
 use katran::{
@@ -35,17 +36,24 @@ impl State {
             if response["ok"] == true {
                 self.slots = serde_json::from_value(response["result"]["slots"].clone()).ok();
                 if self.slots.is_none() {
-                    self.error = "Не удалось прочитать слоты тегов".into();
+                    self.error = tr(
+                        "Не удалось прочитать слоты тегов",
+                        "Could not read tag slots",
+                    )
+                    .into();
                 }
             } else {
                 self.error = response["error"]["message"]
                     .as_str()
-                    .unwrap_or("Не удалось загрузить теги")
+                    .unwrap_or(tr("Не удалось загрузить теги", "Could not load tags"))
                     .into();
             }
         }
-        ui.heading("Теги");
-        ui.weak("Теги назначаются только закреплённым объектам.");
+        ui.heading(tr("Теги", "Tags"));
+        ui.weak(tr(
+            "Теги назначаются только закреплённым объектам.",
+            "Tags can only be assigned to pinned items.",
+        ));
         ui.add_space(12.0);
         if let Some(slots) = &self.slots {
             let mut edit = None;
@@ -66,7 +74,7 @@ impl State {
                                     4.0,
                                     super::tag_material_ui::color(slot),
                                 );
-                                if ui.button("Изменить").clicked() {
+                                if ui.button(tr("Изменить", "Edit")).clicked() {
                                     edit = Some(slot.clone());
                                 }
                             },
@@ -83,13 +91,13 @@ impl State {
         let mut cancel = false;
         if let Some(slot) = self.draft.as_mut() {
             ui.add_space(14.0);
-            ui.heading(format!("Тег {}", slot.number));
-            ui.label("Название");
+            ui.heading(format!("{} {}", tr("Тег", "Tag"), slot.number));
+            ui.label(tr("Название", "Name"));
             ui.text_edit_singleline(&mut slot.name);
             let c = super::tag_material_ui::color(slot);
             let mut rgb = [c.r(), c.g(), c.b()];
             ui.horizontal(|ui| {
-                ui.label("Цвет");
+                ui.label(tr("Цвет", "Color"));
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     slot.color = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
                 }
@@ -97,30 +105,36 @@ impl State {
             let previous_material = slot.material;
             egui::ComboBox::from_id_salt("tag-material")
                 .selected_text(match slot.material {
-                    Material::Solid => "Цвет",
-                    Material::Dots => "Точки",
-                    Material::Lines => "Линии",
-                    Material::Grain => "Зерно",
+                    Material::Solid => tr("Цвет", "Color"),
+                    Material::Dots => tr("Точки", "Dots"),
+                    Material::Lines => tr("Линии", "Lines"),
+                    Material::Grain => tr("Зерно", "Grain"),
                 })
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut slot.material, Material::Solid, "Цвет");
-                    ui.selectable_value(&mut slot.material, Material::Dots, "Точки");
-                    ui.selectable_value(&mut slot.material, Material::Lines, "Линии");
-                    ui.selectable_value(&mut slot.material, Material::Grain, "Зерно");
+                    ui.selectable_value(&mut slot.material, Material::Solid, tr("Цвет", "Color"));
+                    ui.selectable_value(&mut slot.material, Material::Dots, tr("Точки", "Dots"));
+                    ui.selectable_value(&mut slot.material, Material::Lines, tr("Линии", "Lines"));
+                    ui.selectable_value(&mut slot.material, Material::Grain, tr("Зерно", "Grain"));
                 });
             default_texture_strength(slot, previous_material);
-            ui.add(egui::Slider::new(&mut slot.opacity, 0..=100).text("Непрозрачность цвета"));
+            ui.add(
+                egui::Slider::new(&mut slot.opacity, 0..=100)
+                    .text(tr("Непрозрачность цвета", "Color opacity")),
+            );
             if slot.material != Material::Solid {
-                ui.add(egui::Slider::new(&mut slot.intensity, 0..=100).text("Сила фактуры"));
-                ui.add(egui::Slider::new(&mut slot.scale, 1..=100).text("Масштаб"));
+                ui.add(
+                    egui::Slider::new(&mut slot.intensity, 0..=100)
+                        .text(tr("Сила фактуры", "Texture intensity")),
+                );
+                ui.add(egui::Slider::new(&mut slot.scale, 1..=100).text(tr("Масштаб", "Scale")));
                 if slot.material == Material::Lines {
-                    ui.add(egui::Slider::new(&mut slot.angle, 0..=359).text("Угол"));
+                    ui.add(egui::Slider::new(&mut slot.angle, 0..=359).text(tr("Угол", "Angle")));
                 }
             }
-            ui.label("Предпросмотр материала");
+            ui.label(tr("Предпросмотр материала", "Material preview"));
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.preview_selected, "Выбрано");
-                ui.checkbox(&mut self.preview_cursor, "Курсор");
+                ui.checkbox(&mut self.preview_selected, tr("Выбрано", "Selected"));
+                ui.checkbox(&mut self.preview_cursor, tr("Курсор", "Cursor"));
             });
             for image in [false, true] {
                 let (rect, _) = ui.allocate_exact_size(
@@ -136,9 +150,9 @@ impl State {
                     content.center(),
                     egui::Align2::CENTER_CENTER,
                     if image {
-                        "Пример изображения"
+                        tr("Пример изображения", "Image example")
                     } else {
-                        "Пример текста"
+                        tr("Пример текста", "Text example")
                     },
                     egui::FontId::proportional(14.0),
                     super::tag_material_ui::title_color(slot),
@@ -164,10 +178,13 @@ impl State {
                 }
                 ui.add_space(4.0);
             }
-            ui.weak("Оптическое стекло в предпросмотре недоступно; проверьте его в основном окне.");
+            ui.weak(tr(
+                "Оптическое стекло в предпросмотре недоступно; проверьте его в основном окне.",
+                "Optical glass is unavailable in the preview; check it in the main window.",
+            ));
             ui.horizontal(|ui| {
-                save = ui.button("Применить").clicked();
-                cancel = ui.button("Отмена").clicked();
+                save = ui.button(tr("Применить", "Apply")).clicked();
+                cancel = ui.button(tr("Отмена", "Cancel")).clicked();
             });
         }
         if cancel {
@@ -188,7 +205,7 @@ impl State {
             } else {
                 self.error = response["error"]["message"]
                     .as_str()
-                    .unwrap_or("Не удалось сохранить тег")
+                    .unwrap_or(tr("Не удалось сохранить тег", "Could not save tag"))
                     .into();
             }
         }

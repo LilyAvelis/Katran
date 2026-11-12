@@ -1,4 +1,5 @@
 //! Input and presentation adapter shared by Actions and Settings.
+use super::i18n::tr;
 use eframe::egui::{self, Key};
 use katran::shortcuts::{ShortcutInfo, normalize};
 pub fn apply(api: &mut katran::Service, editor: &mut Editor, intent: Intent) -> bool {
@@ -22,7 +23,7 @@ pub fn apply(api: &mut katran::Service, editor: &mut Editor, intent: Intent) -> 
                     binding,
                     r["error"]["message"]
                         .as_str()
-                        .unwrap_or("Ошибка назначения")
+                        .unwrap_or(tr("Ошибка назначения", "Could not assign shortcut"))
                         .into(),
                     r["error"]["code"] == "shortcut_conflict",
                 );
@@ -77,15 +78,21 @@ impl Editor {
     fn choices(&self) -> Vec<(&'static str, usize)> {
         let mut c = vec![];
         if self.replaceable {
-            c.push(("Заменить назначение", 0));
+            c.push((tr("Заменить назначение", "Replace binding"), 0));
         }
         if self.binding.is_some() {
-            c.push(("Другая клавиша", 1));
+            c.push((tr("Другая клавиша", "Another key"), 1));
         }
         if !self.current_binding.is_empty() {
-            c.push(("Снять назначение · Ctrl Backspace", 2));
+            c.push((
+                tr(
+                    "Снять назначение · Ctrl Backspace",
+                    "Clear binding · Ctrl Backspace",
+                ),
+                2,
+            ));
         }
-        c.push(("Отмена · Esc", 3));
+        c.push((tr("Отмена · Esc", "Cancel · Esc"), 3));
         c
     }
     fn choice(&mut self, choice: usize) -> Option<Intent> {
@@ -211,11 +218,12 @@ impl Editor {
         })
     }
     pub fn render(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
-        ui.strong(format!("Клавиша · {}", self.label));
+        ui.strong(format!("{} · {}", tr("Клавиша", "Shortcut"), self.label));
         ui.label(format!(
-            "Текущее сочетание: {}",
+            "{}: {}",
+            tr("Текущее сочетание", "Current shortcut"),
             if self.current_binding.is_empty() {
-                "не назначено"
+                tr("не назначено", "not assigned")
             } else {
                 &self.current_binding
             }
@@ -223,7 +231,10 @@ impl Editor {
         if let Some(e) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, e);
         } else {
-            ui.label("Нажмите сочетание клавиш. Оно сохранится сразу.");
+            ui.label(tr(
+                "Нажмите сочетание клавиш. Оно сохранится сразу.",
+                "Press a shortcut. It will be saved immediately.",
+            ));
         }
         let mut choice = None;
         ui.horizontal_wrapped(|ui| {
@@ -240,7 +251,10 @@ impl Editor {
                 }
             }
         });
-        ui.weak("Tab — к кнопкам · стрелки — выбор · Enter — подтвердить");
+        ui.weak(tr(
+            "Tab — к кнопкам · стрелки — выбор · Enter — подтвердить",
+            "Tab — buttons · arrows — select · Enter — confirm",
+        ));
         choice.and_then(|c| self.choice(c))
     }
 }

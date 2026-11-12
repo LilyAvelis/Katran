@@ -1,4 +1,5 @@
 //! Application picker: a client of the domain's bound discovery session.
+use super::i18n::tr;
 use super::*;
 use base64::Engine;
 use katran::{app_handlers::AppHandler, domain_jobs::JobId};
@@ -54,7 +55,11 @@ impl Shelf {
     }
     fn open_apps_accept(&mut self, result: &Value, ctx: &egui::Context) {
         let Some(token) = result["token"].as_str() else {
-            self.message = "Не удалось получить список приложений".into();
+            self.message = tr(
+                "Не удалось получить список приложений",
+                "Could not retrieve the app list",
+            )
+            .into();
             self.close_open_apps();
             return;
         };
@@ -107,7 +112,7 @@ impl Shelf {
                     self.open_apps.job = None;
                     self.message = result["error"]["message"]
                         .as_str()
-                        .unwrap_or("Не удалось найти приложения")
+                        .unwrap_or(tr("Не удалось найти приложения", "Could not find apps"))
                         .into();
                     self.close_open_apps();
                 }
@@ -128,7 +133,9 @@ impl Shelf {
             .map(|(i, _)| i)
             .collect();
         matches.sort_by_key(|index| !state.apps[*index].recommended);
-        let fallback = "Другое приложение…".to_lowercase().contains(&query);
+        let fallback = tr("Другое приложение…", "Another app…")
+            .to_lowercase()
+            .contains(&query);
         let count = matches.len() + usize::from(fallback && state.token.is_some());
         state.selected = state.selected.min(count.saturating_sub(1));
         let previous = state.selected;
@@ -153,14 +160,14 @@ impl Shelf {
             .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width(width);
-                let title = format!("Открыть с помощью · {}", state.name);
+                let title = format!("{} · {}", tr("Открыть с помощью", "Open with"), state.name);
                 ui.add(egui::Label::new(RichText::new(&title).strong().size(13.0)).truncate())
                     .on_hover_text(title);
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
                     .show(ui, |ui| {
                         if state.job.is_some() {
-                            ui.label("Поиск приложений…");
+                            ui.label(tr("Поиск приложений…", "Search apps…"));
                         }
                         let mut previous_group = None;
                         for (row, index) in matches.iter().copied().enumerate() {
@@ -170,9 +177,9 @@ impl Shelf {
                                 ui.add_space(3.0);
                                 ui.label(
                                     RichText::new(if app.recommended {
-                                        "Рекомендуемые"
+                                        tr("Рекомендуемые", "Recommended")
                                     } else {
-                                        "Другие приложения"
+                                        tr("Другие приложения", "Other apps")
                                     })
                                     .size(11.0)
                                     .color(Color32::from_gray(185)),
@@ -206,10 +213,13 @@ impl Shelf {
                             let row = matches.len();
                             let response = crate::action_row::ActionRow::new(
                                 crate::action_row::ActionPresentation {
-                                    label: "Другое приложение…",
+                                    label: tr("Другое приложение…", "Another app…"),
                                     icon: egui_lucide::Lucide::AppWindow,
                                     primary_shortcut: "",
-                                    full_shortcut_tooltip: "Выбрать приложение в Windows",
+                                    full_shortcut_tooltip: tr(
+                                        "Выбрать приложение в Windows",
+                                        "Choose an app in Windows",
+                                    ),
                                 },
                             )
                             .show(ui, row == state.selected);
@@ -221,14 +231,14 @@ impl Shelf {
                                 chosen = Some(None);
                             }
                         } else if count == 0 && state.job.is_none() {
-                            ui.label("Ничего не найдено");
+                            ui.label(tr("Ничего не найдено", "Nothing found"));
                         }
                     });
                 ui.separator();
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut state.query)
-                            .hint_text("Поиск приложений…")
+                            .hint_text(tr("Поиск приложений…", "Search apps…"))
                             .frame(egui::Frame::NONE)
                             .desired_width(width - 65.0),
                     );

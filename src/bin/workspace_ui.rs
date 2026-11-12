@@ -1,4 +1,5 @@
 //! Working-folder picker: presentation and dispatcher jobs only.
+use super::i18n::tr;
 use super::*;
 use katran::domain_jobs::JobId;
 
@@ -107,21 +108,25 @@ impl Shelf {
             let id = item["id"].as_i64().unwrap_or_default();
             let status = if import {
                 if item["ok"] == true {
-                    "добавлено"
+                    tr("добавлено", "added")
                 } else {
-                    "ошибка"
+                    tr("ошибка", "error")
                 }
             } else {
                 match item["status"].as_str().unwrap_or("failed") {
-                    "copied" => "скопировано",
-                    "moved" => "перемещено",
-                    "pinned_copy" => "закреплено: создана копия",
-                    "same_folder" => "уже в этой папке",
-                    "source_not_moved" => "копия создана, источник сохранён",
-                    "source_removed_shelf_retained" => {
-                        "копия создана, исходный файл удалён; запись осталась на полке"
-                    }
-                    _ => "ошибка",
+                    "copied" => tr("скопировано", "copied"),
+                    "moved" => tr("перемещено", "moved"),
+                    "pinned_copy" => tr("закреплено: создана копия", "pinned: copy created"),
+                    "same_folder" => tr("уже в этой папке", "already in this folder"),
+                    "source_not_moved" => tr(
+                        "копия создана, источник сохранён",
+                        "copy created, source retained",
+                    ),
+                    "source_removed_shelf_retained" => tr(
+                        "копия создана, исходный файл удалён; запись осталась на полке",
+                        "copy created, original deleted; shelf entry retained",
+                    ),
+                    _ => tr("ошибка", "error"),
                 }
             };
             let detail = item["error"]["message"]
@@ -168,12 +173,20 @@ impl Shelf {
             if let Some(items) = self.selection_snapshot() {
                 let result = self.call(Command::StageTransfer { items, cut: true });
                 if let Some(count) = result["staged"].as_u64() {
-                    self.message = format!(
-                        "Подготовлено к перемещению: {count} · откройте Folder и нажмите Ctrl V"
-                    );
+                    self.message = if super::i18n::is_english() {
+                        format!("Staged for moving: {count} · open Folder and press Ctrl V")
+                    } else {
+                        format!(
+                            "Подготовлено к перемещению: {count} · откройте Folder и нажмите Ctrl V"
+                        )
+                    };
                 }
             } else {
-                self.message = "Выбор устарел; обновите полку".into();
+                self.message = tr(
+                    "Выбор устарел; обновите полку",
+                    "Selection is out of date; refresh the shelf",
+                )
+                .into();
             }
         } else if self.state["tab"] == "folder"
             && ctx.input_mut(|i| {
@@ -217,9 +230,9 @@ impl Shelf {
                 let result = self.call(Command::ToggleFavoriteFolderPath { path });
                 if let Some(favorite) = result["favorite"].as_bool() {
                     let text = if favorite {
-                        "Добавлено в избранное"
+                        tr("Добавлено в избранное", "Added to favorites")
                     } else {
-                        "Удалено из избранного"
+                        tr("Удалено из избранного", "Removed from favorites")
                     };
                     self.favorite_notice = Some((text.into(), Instant::now()));
                     if self.workspace.mode == Mode::Favorites {
@@ -248,9 +261,9 @@ impl Shelf {
                 if let Some(favorite) = result["favorite"].as_bool() {
                     self.favorite_notice = Some((
                         if favorite {
-                            "Добавлено в избранное"
+                            tr("Добавлено в избранное", "Added to favorites")
                         } else {
-                            "Удалено из избранного"
+                            tr("Удалено из избранного", "Removed from favorites")
                         }
                         .into(),
                         Instant::now(),
@@ -279,9 +292,12 @@ impl Shelf {
                     .filter(|item| !item["error"].is_null())
                     .count();
                 self.message = if failures > 0 {
-                    format!("Не удалось изменить закрепление: {failures}")
+                    format!(
+                        "{}: {failures}",
+                        tr("Не удалось изменить закрепление", "Could not change pins")
+                    )
                 } else {
-                    "Закрепление обновлено".into()
+                    tr("Закрепление обновлено", "Pins updated").into()
                 };
                 self.refresh();
             }
@@ -311,7 +327,7 @@ impl Shelf {
                         self.workspace.error = Some(
                             result["error"]["message"]
                                 .as_str()
-                                .unwrap_or("Поиск недоступен")
+                                .unwrap_or(tr("Поиск недоступен", "Search unavailable"))
                                 .into(),
                         );
                     }
@@ -367,7 +383,7 @@ impl Shelf {
             .area(egui::Modal::default_area(egui::Id::new("workspace-picker")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx, |ui| {
                 ui.set_width(width);
-                ui.label(RichText::new(match state.mode { Mode::Search => "Найти папку · Everything", Mode::History => "История папок", Mode::Favorites => "Избранные папки" }).strong().size(15.0));
+                ui.label(RichText::new(match state.mode { Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders") }).strong().size(15.0));
                 ui.add_space(6.0);
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 220.0).clamp(80.0, 360.0)).show(ui, |ui| {
                     for (index, path) in state.items.iter().enumerate() {
@@ -383,14 +399,14 @@ impl Shelf {
                         if response.clicked() && !state.loading { chosen = Some(path.clone()); }
                         response.on_hover_text(text);
                     }
-                    if state.loading { ui.weak("Поиск папок…"); }
+                    if state.loading { ui.weak(tr("Поиск папок…", "Searching folders…")); }
                     else if let Some(error) = &state.error { ui.colored_label(Color32::LIGHT_RED, error); }
-                    else if state.items.is_empty() { ui.weak(if state.mode == Mode::Search && query.trim().is_empty() { "Введите имя или путь папки" } else { "Папки не найдены" }); }
+                    else if state.items.is_empty() { ui.weak(if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
                 });
                 ui.separator();
-                let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text("Имя или полный путь папки…").desired_width(f32::INFINITY));
+                let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(tr("Имя или полный путь папки…", "Folder name or full path…")).desired_width(f32::INFINITY));
                 if state.focus { field.request_focus(); state.focus = false; }
-                ui.weak("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть");
+                ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
             });
         let mut direct = false;
         let mut direct_error = None;

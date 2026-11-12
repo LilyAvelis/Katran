@@ -1,4 +1,5 @@
 //! Bounded, asynchronous read-only client for text preview.
+use super::i18n::tr;
 use super::*;
 use crate::theme_ui::{Role, color as theme_color};
 use std::sync::{Arc, Condvar, Mutex};
@@ -191,7 +192,10 @@ impl TextPreview {
                     } else {
                         Err(result["error"]["message"]
                             .as_str()
-                            .unwrap_or("Текст изменился или недоступен")
+                            .unwrap_or(tr(
+                                "Текст изменился или недоступен",
+                                "Text changed or is unavailable",
+                            ))
                             .into())
                     },
                 );
@@ -227,7 +231,10 @@ impl TextPreview {
                     }
                     if event["size"].as_u64().unwrap_or(0) > text.len() as u64 {
                         ui.add_space(12.0);
-                        ui.weak("Показана только часть текста; исходный текст сохранён полностью.");
+                        ui.weak(tr(
+                            "Показана только часть текста; исходный текст сохранён полностью.",
+                            "Only part of the text is shown; the original is saved in full.",
+                        ));
                     }
                 }
                 Some(Err(message)) => {
@@ -241,7 +248,7 @@ fn link_heading(event: &Value) -> &str {
     event["properties"]["display_name"]
         .as_str()
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Ссылка")
+        .unwrap_or(tr("Ссылка", "Link"))
 }
 fn preview_header(
     ui: &mut egui::Ui,
@@ -251,7 +258,7 @@ fn preview_header(
 ) -> (egui::Rect, Option<egui::Rect>) {
     ui.vertical_centered(|ui| {
         let title = ui.heading(if title.is_empty() {
-            "Текст"
+            tr("Текст", "Text")
         } else {
             title
         });
@@ -259,7 +266,7 @@ fn preview_header(
             let font = egui::TextStyle::Button.resolve(ui.style());
             let padding = ui.spacing().button_padding.x * 2.0;
             let minimum = ui.spacing().interact_size.x;
-            let widths = ["Markdown", "Исходный текст"].map(|text| {
+            let widths = ["Markdown", tr("Исходный текст", "Source text")].map(|text| {
                 let width = ui.fonts_mut(|fonts| {
                     fonts
                         .layout_no_wrap(text.into(), font.clone(), Color32::WHITE)
@@ -280,7 +287,7 @@ fn preview_header(
                     );
                     let second = ui.add_sized(
                         [widths[1], ui.spacing().interact_size.y],
-                        egui::Button::new("Исходный текст").selected(!*rendered),
+                        egui::Button::new(tr("Исходный текст", "Source text")).selected(!*rendered),
                     );
                     if first.clicked() {
                         *rendered = true;
@@ -300,7 +307,7 @@ fn preview_header(
                     );
                     let second = ui.add_sized(
                         [widths[1].min(width), ui.spacing().interact_size.y],
-                        egui::Button::new("Исходный текст").selected(!*rendered),
+                        egui::Button::new(tr("Исходный текст", "Source text")).selected(!*rendered),
                     );
                     if first.clicked() {
                         *rendered = true;
@@ -352,7 +359,7 @@ pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
 pub(super) fn card_title(event: &Value) -> String {
     let title = katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""));
     if title.is_empty() {
-        "Текст".into()
+        tr("Текст", "Text").into()
     } else {
         title
     }

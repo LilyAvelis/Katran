@@ -1,5 +1,6 @@
 //! Footer hints for the active preview. Event types are supplied by the shelf;
 //! Folder itself can contain several kinds of file.
+use super::i18n::tr;
 use serde_json::Value;
 
 pub(super) fn text(state: &Value, events: &[Value]) -> Option<&'static str> {
@@ -9,28 +10,44 @@ pub(super) fn text(state: &Value, events: &[Value]) -> Option<&'static str> {
         .find(|event| event["id"].as_i64() == Some(id))?;
     let kind = event["kind"].as_str().unwrap_or("");
     if state["tab"] == "pods" && kind == "text_fragment" {
-        return Some("Space — назад · ← → — листать");
+        return Some(tr(
+            "Space — назад · ← → — листать",
+            "Space — back · ← → — browse",
+        ));
     }
     if kind == "table_fragment" {
-        return Some(
+        return Some(tr(
             "Space — назад · ← → — листать · колесо — масштаб · тащить — переместить · Ctrl+← — Таблица · Ctrl+→ — CSV",
-        );
+            "Space — back · ← → — browse · wheel — zoom · drag — pan · Ctrl+← — Table · Ctrl+→ — CSV",
+        ));
     }
     if kind == "link_fragment" {
-        return Some("Space — назад · ← → — листать");
+        return Some(tr(
+            "Space — назад · ← → — листать",
+            "Space — back · ← → — browse",
+        ));
     }
     let markdown =
         katran::file_types::is_markdown(std::path::Path::new(event["name"].as_str().unwrap_or("")));
     if kind == "text_fragment" || markdown {
-        return Some("Space — назад · ← → — листать · Ctrl+← — Markdown · Ctrl+→ — Исходный текст");
+        return Some(tr(
+            "Space — назад · ← → — листать · Ctrl+← — Markdown · Ctrl+→ — Исходный текст",
+            "Space — back · ← → — browse · Ctrl+← — Markdown · Ctrl+→ — Source text",
+        ));
     }
     if state["preview_view"]["factor"]
         .as_f64()
         .is_some_and(|factor| factor > 1.0)
     {
-        Some("ЛКМ — сдвиг · колесо — масштаб · Space — назад · ← → — листать")
+        Some(tr(
+            "ЛКМ — сдвиг · колесо — масштаб · Space — назад · ← → — листать",
+            "Left mouse — pan · wheel — zoom · Space — back · ← → — browse",
+        ))
     } else {
-        Some("Тащить — экспорт · колесо — увеличить · Space — назад · ← → — листать")
+        Some(tr(
+            "Тащить — экспорт · колесо — увеличить · Space — назад · ← → — листать",
+            "Drag — export · wheel — zoom in · Space — back · ← → — browse",
+        ))
     }
 }
 

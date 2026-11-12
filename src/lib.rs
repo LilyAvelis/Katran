@@ -1402,8 +1402,8 @@ impl Service {
                 Ok(serde_json::Value::Array(definitions.into_iter().map(|d| {
                     serde_json::json!({
                         "id": d.id,
-                        "label": self.action_label(d.id, actions::palette_label(d.id, d.label)),
-                        "group": actions::palette_group(d.id, d.group),
+                        "label": self.action_label(d.id, if self.settings.language == settings::Language::English { actions::english_label(d.id, d.label) } else { actions::palette_label(d.id, d.label) }),
+                        "group": if self.settings.language == settings::Language::English { actions::english_group(d.id, d.group) } else { actions::palette_group(d.id, d.group) },
                         "shortcut": self.shortcuts.binding(d.id),
                         "search_terms": actions::palette_terms(d.id),
                     })

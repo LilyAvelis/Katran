@@ -1,3 +1,4 @@
+use super::i18n::tr;
 use super::*;
 use std::{
     collections::VecDeque,
@@ -341,7 +342,7 @@ impl Images {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 if self.textures.contains_key(&key) {
-                    "Нет превью"
+                    tr("Нет превью", "No preview")
                 } else {
                     "…"
                 },

@@ -1,4 +1,5 @@
 //! Opt-in visual lab: no shelf, clipboard listener, hotkeys or profile are opened.
+use super::i18n::tr;
 use avilon_egui::optics::{LensOptions, render_lens};
 use eframe::egui;
 
@@ -63,44 +64,65 @@ impl Lab {
 impl eframe::App for Lab {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         ui.heading("Avilon · Optical glass lab");
-        ui.label("Эксперимент над лилиями внутри окна. CPU reference; без захвата рабочего стола.");
+        ui.label(tr(
+            "Эксперимент над лилиями внутри окна. CPU reference; без захвата рабочего стола.",
+            "An experiment with lilies inside the window. CPU reference; no desktop capture.",
+        ));
         self.dirty |= ui
             .add(
                 egui::Slider::new(&mut self.options.refraction, 0.0..=64.0)
-                    .text("Преломление · px"),
+                    .text(tr("Преломление · px", "Refraction · px")),
             )
-            .changed();
-        self.dirty |= ui
-            .add(egui::Slider::new(&mut self.options.blur, 0.0..=8.0).text("Размытие · px"))
             .changed();
         self.dirty |= ui
             .add(
-                egui::Slider::new(&mut self.options.chromatic, 0.0..=1.0).text("Разделение цветов"),
+                egui::Slider::new(&mut self.options.blur, 0.0..=8.0)
+                    .text(tr("Размытие · px", "Blur · px")),
             )
             .changed();
         self.dirty |= ui
-            .add(egui::Slider::new(&mut self.options.highlight, 0.0..=1.0).text("Краевой свет"))
+            .add(
+                egui::Slider::new(&mut self.options.chromatic, 0.0..=1.0)
+                    .text(tr("Разделение цветов", "Chromatic separation")),
+            )
+            .changed();
+        self.dirty |= ui
+            .add(
+                egui::Slider::new(&mut self.options.highlight, 0.0..=1.0)
+                    .text(tr("Краевой свет", "Edge highlight")),
+            )
             .changed();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(self.dirty, egui::Button::new("Применить параметры"))
+                .add_enabled(
+                    self.dirty,
+                    egui::Button::new(tr("Применить параметры", "Apply settings")),
+                )
                 .clicked()
             {
                 self.refresh();
             }
-            if ui.button("Сбросить").clicked() {
+            if ui.button(tr("Сбросить", "Reset")).clicked() {
                 self.options = LensOptions::default();
                 self.refresh();
             }
             ui.label(format!(
-                "Расчёт: {:.1} ms · кэш до изменения",
-                self.elapsed.as_secs_f64() * 1000.0
+                "{}: {:.1} ms · {}",
+                tr("Расчёт", "Render"),
+                self.elapsed.as_secs_f64() * 1000.0,
+                tr("кэш до изменения", "cached until changed")
             ));
         });
         ui.label(if self.dirty {
-            "Изменения ещё не применены"
+            tr(
+                "Изменения ещё не применены",
+                "Changes have not been applied",
+            )
         } else {
-            "Исходник слева · оптическая линза справа"
+            tr(
+                "Исходник слева · оптическая линза справа",
+                "Source on the left · optical lens on the right",
+            )
         });
         ui.columns(2, |columns| {
             columns[0]

@@ -1,4 +1,5 @@
 //! Lazy, bounded read-only table preview. Rendering touches only visible cells.
+use super::i18n::tr;
 use super::*;
 use crate::theme_ui::{Role, color as theme_color};
 use katran::table_fragments::Table;
@@ -89,7 +90,7 @@ impl TablePreview {
                         table.validate()?;
                         let raw = reply["result"]["csv_text"]
                             .as_str()
-                            .ok_or("CSV preview missing")?;
+                            .ok_or(tr("Предпросмотр CSV недоступен", "CSV preview missing"))?;
                         let full = raw.strip_prefix('\u{feff}').unwrap_or(raw);
                         let mut chars = full.chars();
                         let csv: String = chars.by_ref().take(SOURCE_CHARS).collect();
@@ -102,7 +103,10 @@ impl TablePreview {
                 } else {
                     Err(reply["error"]["message"]
                         .as_str()
-                        .unwrap_or("Таблица изменилась или недоступна")
+                        .unwrap_or(tr(
+                            "Таблица изменилась или недоступна",
+                            "Table changed or is unavailable",
+                        ))
                         .into())
                 };
                 if tx.send((key, content)).is_err() {
@@ -177,9 +181,9 @@ impl TablePreview {
                 self.content = Some(content);
             }
         }
-        ui.heading("Таблица");
+        ui.heading(tr("Таблица", "Table"));
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.grid, true, "Таблица");
+            ui.selectable_value(&mut self.grid, true, tr("Таблица", "Table"));
             ui.selectable_value(&mut self.grid, false, "CSV");
         });
         ui.separator();
@@ -197,7 +201,10 @@ impl TablePreview {
                     .show(ui, |ui| {
                         ui.label(RichText::new(&content.csv).monospace().size(14.0));
                         if content.truncated {
-                            ui.weak("Показана только часть CSV; таблица сохранена полностью.");
+                            ui.weak(tr(
+                                "Показана только часть CSV; таблица сохранена полностью.",
+                                "Only part of the CSV is shown; the full table is saved.",
+                            ));
                         }
                     });
             }
@@ -279,7 +286,7 @@ fn table_call(api: &mut Service, command: Command) -> Result<Value, String> {
     } else {
         Err(response["error"]["message"]
             .as_str()
-            .unwrap_or("Ошибка просмотра таблицы")
+            .unwrap_or(tr("Ошибка просмотра таблицы", "Table preview error"))
             .into())
     }
 }
@@ -295,7 +302,11 @@ fn show_grid(ui: &mut egui::Ui, table: &Table, api: &mut Service) {
         .unwrap_or(1.0) as f32;
     let mut intent = 0i8;
     ui.horizontal(|ui| {
-        if ui.button("−").on_hover_text("Уменьшить").clicked() {
+        if ui
+            .button("−")
+            .on_hover_text(tr("Уменьшить", "Zoom out"))
+            .clicked()
+        {
             intent = -1;
         }
         let percent = factor * 100.0;
@@ -304,13 +315,21 @@ fn show_grid(ui: &mut egui::Ui, table: &Table, api: &mut Service) {
         } else {
             format!("{percent:.0}%")
         };
-        if ui.button(label).on_hover_text("Сбросить масштаб").clicked() {
+        if ui
+            .button(label)
+            .on_hover_text(tr("Сбросить масштаб", "Reset zoom"))
+            .clicked()
+        {
             intent = 2;
         }
-        if ui.button("+").on_hover_text("Увеличить").clicked() {
+        if ui
+            .button("+")
+            .on_hover_text(tr("Увеличить", "Zoom in"))
+            .clicked()
+        {
             intent = 1;
         }
-        if ui.button("Вписать").clicked() {
+        if ui.button(tr("Вписать", "Fit")).clicked() {
             intent = 3;
         }
     });
@@ -626,7 +645,7 @@ pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
     );
 }
 pub(super) fn card_title(_event: &Value) -> String {
-    "Таблица".into()
+    tr("Таблица", "Table").into()
 }
 
 #[cfg(test)]

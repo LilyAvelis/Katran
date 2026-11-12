@@ -1,4 +1,5 @@
 //! Actions-style tag picker. Domain operations remain dispatcher commands.
+use super::i18n::tr;
 use eframe::egui::{self, Color32, RichText};
 use katran::tag_slots::Slot;
 
@@ -48,11 +49,16 @@ impl State {
             self.fresh = false;
         }
         let mut rows: Vec<(String, Intent, bool)> = Vec::new();
-        rows.push(("Фильтр · Все".into(), Intent::Filter(None), true));
+        rows.push((
+            tr("Фильтр · Все", "Filter · All").into(),
+            Intent::Filter(None),
+            true,
+        ));
         for slot in &self.slots {
             rows.push((
                 format!(
-                    "Фильтр · {} · {}{}",
+                    "{} · {} · {}{}",
+                    tr("Фильтр", "Filter"),
                     slot.number,
                     slot.name,
                     if active == Some(slot.number) {
@@ -67,19 +73,27 @@ impl State {
         }
         for slot in &self.slots {
             rows.push((
-                format!("Назначить · {} · {}", slot.number, slot.name),
+                format!(
+                    "{} · {} · {}",
+                    tr("Назначить", "Assign"),
+                    slot.number,
+                    slot.name
+                ),
                 Intent::Assign(Some(slot.number)),
                 eligible,
             ));
         }
         rows.push((
-            format!("Снять теги · Ctrl 0 · {selection_count}"),
+            format!(
+                "{} · Ctrl 0 · {selection_count}",
+                tr("Снять теги", "Clear tags")
+            ),
             Intent::Assign(None),
             has_tag,
         ));
         if let Some((ids, _)) = &self.retry {
             rows.push((
-                format!("Повторить ошибки · {}", ids.len()),
+                format!("{} · {}", tr("Повторить ошибки", "Retry failed"), ids.len()),
                 Intent::Retry,
                 true,
             ));
@@ -130,7 +144,11 @@ impl State {
         if let Some((number, assign)) = shortcut {
             if number == 0 && assign {
                 if !has_tag {
-                    self.error = "У выбранных объектов нет тегов".into();
+                    self.error = tr(
+                        "У выбранных объектов нет тегов",
+                        "The selected items have no tags",
+                    )
+                    .into();
                 } else {
                     self.open = false;
                     return Some(Intent::Assign(None));
@@ -141,7 +159,11 @@ impl State {
             }
             if self.slots.iter().any(|slot| slot.number == number) {
                 if assign && !eligible {
-                    self.error = "Для назначения выделите только закреплённые объекты".into();
+                    self.error = tr(
+                        "Для назначения выделите только закреплённые объекты",
+                        "Select only pinned items to assign a tag",
+                    )
+                    .into();
                 } else {
                     self.open = false;
                     return Some(if assign {
@@ -183,7 +205,7 @@ impl State {
                 optical = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
                 ui.set_width(width);
                 ui.label(
-                    RichText::new("Теги · фильтр и назначение")
+                    RichText::new(tr("Теги · фильтр и назначение", "Tags · filter and assign"))
                         .strong()
                         .size(13.0),
                 );
@@ -192,7 +214,10 @@ impl State {
                     ui.colored_label(Color32::LIGHT_RED, &self.error);
                 }
                 if !eligible {
-                    ui.weak("Для назначения все выбранные объекты должны быть закреплены.");
+                    ui.weak(tr(
+                        "Для назначения все выбранные объекты должны быть закреплены.",
+                        "All selected items must be pinned to assign a tag.",
+                    ));
                 }
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
@@ -226,7 +251,7 @@ impl State {
                             }
                         }
                         if rows.is_empty() {
-                            ui.label("Ничего не найдено");
+                            ui.label(tr("Ничего не найдено", "Nothing found"));
                         }
                     });
                 ui.separator();
@@ -234,7 +259,7 @@ impl State {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(egui::Id::new("tag-menu-search"))
-                            .hint_text("Поиск тегов…")
+                            .hint_text(tr("Поиск тегов…", "Search tags…"))
                             .frame(egui::Frame::NONE)
                             .desired_width(width - 65.0),
                     );
@@ -276,7 +301,7 @@ impl super::Shelf {
             Ok(slots) => self.tag_menu.start(slots),
             Err(_) => {
                 if self.message.is_empty() {
-                    self.message = "Не удалось загрузить теги".into();
+                    self.message = tr("Не удалось загрузить теги", "Could not load tags").into();
                 }
             }
         }
@@ -303,9 +328,14 @@ impl super::Shelf {
             .map(|id| self.tag_material_cache.assignments.get(id).copied())
             .collect();
         let summary = if ids.is_empty() {
-            "Ничего не выбрано".to_owned()
+            tr("Ничего не выбрано", "Nothing selected").to_owned()
         } else if tags.len() > 1 {
-            format!("Выбрано: {} · разные теги", ids.len())
+            format!(
+                "{}: {} · {}",
+                tr("Выбрано", "Selected"),
+                ids.len(),
+                tr("разные теги", "different tags")
+            )
         } else if let Some(Some(number)) = tags.iter().next().copied() {
             let name = self
                 .tag_menu
@@ -313,10 +343,15 @@ impl super::Shelf {
                 .iter()
                 .find(|s| s.number == number)
                 .map(|s| s.name.as_str())
-                .unwrap_or("Тег");
-            format!("Выбрано: {} · {}", ids.len(), name)
+                .unwrap_or(tr("Тег", "Tag"));
+            format!("{}: {} · {}", tr("Выбрано", "Selected"), ids.len(), name)
         } else {
-            format!("Выбрано: {} · без тега", ids.len())
+            format!(
+                "{}: {} · {}",
+                tr("Выбрано", "Selected"),
+                ids.len(),
+                tr("без тега", "no tag")
+            )
         };
         if let Some(intent) =
             self.tag_menu
@@ -365,7 +400,13 @@ impl super::Shelf {
             let failed_ids = failures.iter().filter_map(|v| v["id"].as_i64()).collect();
             self.tag_menu.error = failures
                 .iter()
-                .map(|v| format!("{}: {}", v["id"], v["outcome"].as_str().unwrap_or("ошибка")))
+                .map(|v| {
+                    format!(
+                        "{}: {}",
+                        v["id"],
+                        v["outcome"].as_str().unwrap_or(tr("ошибка", "error"))
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             self.tag_menu.retry = Some((failed_ids, slot));

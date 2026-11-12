@@ -1,4 +1,5 @@
 //! Event inbox and timer adapter; retry decisions belong to CaptureClipboard API.
+use super::i18n::tr;
 use super::*;
 use katran::{capture_events::Trigger, clipboard_listener::Listener};
 
@@ -90,12 +91,24 @@ impl Shelf {
         self.clipboard_events.collect(self.capture);
         if let Some(error) = self.clipboard_events.failure.as_ref() {
             if self.api.is_some() && self.capture {
-                let message = format!("Подписка Clipboard недоступна; захват выключен: {error}");
+                let message = format!(
+                    "{}: {error}",
+                    tr(
+                        "Подписка Clipboard недоступна; захват выключен",
+                        "Clipboard listener unavailable; capture disabled"
+                    )
+                );
                 self.call(Command::SetCaptureEnabled { enabled: false });
                 self.capture = false;
                 self.message = message;
             } else if self.message.is_empty() {
-                self.message = format!("Подписка Clipboard недоступна: {error}");
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        "Подписка Clipboard недоступна",
+                        "Clipboard listener unavailable"
+                    )
+                );
             }
             return;
         }

@@ -1,4 +1,5 @@
 //! Compact status bar; detailed information stays in a bounded overlay.
+use super::i18n::tr;
 use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -69,10 +70,10 @@ impl Shelf {
         let path = self.state["folder_path"]
             .as_str()
             .map(friendly_path)
-            .unwrap_or_else(|| "Выбрать папку".to_owned());
+            .unwrap_or_else(|| tr("Выбрать папку", "Choose folder").to_owned());
         let sort = sorting_ui::confirmation(&self.state["sort"]);
         let status = if self.message.is_empty() {
-            "Готово".to_owned()
+            tr("Готово", "Ready").to_owned()
         } else {
             self.message.clone()
         };
@@ -80,9 +81,9 @@ impl Shelf {
         let context = if folder {
             format!("Folder · {path}")
         } else if self.state["pinned_only"] == true {
-            "Закреплённые".into()
+            tr("Закреплённые", "Pinned").into()
         } else {
-            "Категория".into()
+            tr("Категория", "Category").into()
         };
         for (icon, page, tooltip) in [
             (egui_lucide::Lucide::FolderOpen, Page::Folder, context),
@@ -95,7 +96,7 @@ impl Shelf {
             (
                 egui_lucide::Lucide::RefreshCw,
                 Page::Recovery,
-                "Восстановление файлов".into(),
+                tr("Восстановление файлов", "File recovery").into(),
             ),
         ] {
             if page == Page::Sort || (!folder && page == Page::Recovery) {
@@ -122,12 +123,12 @@ impl Shelf {
             .area(egui::Modal::default_area(egui::Id::new("information-bar")).anchor(egui::Align2::CENTER_BOTTOM,[0.0,-38.0]))
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx,|ui| {
                 ui.set_width(width);
-                ui.heading(match page {Page::Folder=>"Папка и категория",Page::Sort=>"Сортировка",Page::Status=>"Статус и операции",Page::Recovery=>"Восстановление файлов"});
+                ui.heading(match page {Page::Folder=>tr("Папка и категория", "Folder and category"),Page::Sort=>tr("Сортировка", "Sorting"),Page::Status=>tr("Статус и операции", "Status and operations"),Page::Recovery=>tr("Восстановление файлов", "File recovery")});
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-200.0).clamp(80.0,300.0)).show(ui,|ui| match page {
-                    Page::Folder=>{if self.state["tab"]=="folder" {ui.label(friendly_path(self.state["folder_path"].as_str().unwrap_or("Папка не выбрана")));ui.label("Ctrl Shift K · выбрать папку\nShift Tab · Добавить в Катран\nCtrl Shift C · добавить в Катран\nCtrl . · избранное");} else {ui.label(if self.state["pinned_only"]==true {"Закреплённые объекты"} else {"Поток категории"});ui.label("Shift Tab · Перенести в Folder");}},
+                    Page::Folder=>{if self.state["tab"]=="folder" {ui.label(friendly_path(self.state["folder_path"].as_str().unwrap_or(tr("Папка не выбрана", "No folder selected"))));ui.label(tr("Ctrl Shift K · выбрать папку\nShift Tab · Добавить в Катран\nCtrl Shift C · добавить в Катран\nCtrl . · избранное", "Ctrl Shift K · choose folder\nShift Tab · add to Katran\nCtrl Shift C · add to Katran\nCtrl . · favorite"));} else {ui.label(if self.state["pinned_only"]==true {tr("Закреплённые объекты", "Pinned items")} else {tr("Поток категории", "Category stream")});ui.label(tr("Shift Tab · Перенести в Folder", "Shift Tab · Move to Folder"));}},
                     Page::Sort=>{ui.label(sorting_ui::confirmation(&self.state["sort"]));},
-                    Page::Status=>{ui.label(if self.message.is_empty(){"Нет сообщений"}else{&self.message});},
-                    Page::Recovery=>{if let Some(items)=&self.workspace.recovery {if items.is_empty(){ui.label("Записей восстановления нет");} for item in items {let path=item["recovery_path"].as_str().or_else(||item["journal_path"].as_str()).unwrap_or("Путь недоступен");let error=item["error"]["message"].as_str().or_else(||item["error"].as_str()).unwrap_or("");ui.label(format!("{} {error}",friendly_path(path)));}}else{ui.label(if self.message.is_empty(){"Не удалось получить записи восстановления"}else{&self.message});}},
+                    Page::Status=>{ui.label(if self.message.is_empty(){tr("Нет сообщений", "No messages")}else{&self.message});},
+                    Page::Recovery=>{if let Some(items)=&self.workspace.recovery {if items.is_empty(){ui.label(tr("Записей восстановления нет", "No recovery records"));} for item in items {let path=item["recovery_path"].as_str().or_else(||item["journal_path"].as_str()).unwrap_or(tr("Путь недоступен", "Path unavailable"));let error=item["error"]["message"].as_str().or_else(||item["error"].as_str()).unwrap_or("");ui.label(format!("{} {error}",friendly_path(path)));}}else{ui.label(if self.message.is_empty(){tr("Не удалось получить записи восстановления", "Could not retrieve recovery records")}else{&self.message});}},
                 });
             });
         if modal.should_close() {

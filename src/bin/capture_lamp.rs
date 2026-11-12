@@ -1,4 +1,5 @@
 //! Read-only presentation of `Command::Status`'s `capture_enabled` value.
+use super::i18n::tr;
 use eframe::egui::{self, Color32, Sense, Shape, Vec2, WidgetInfo, WidgetType};
 
 const DIAMETER: f32 = 10.0;
@@ -13,9 +14,9 @@ fn color(enabled: bool) -> Color32 {
 
 fn description(enabled: bool) -> &'static str {
     if enabled {
-        "Захват включён"
+        tr("Захват включён", "Capture enabled")
     } else {
-        "Захват на паузе"
+        tr("Захват на паузе", "Capture paused")
     }
 }
 

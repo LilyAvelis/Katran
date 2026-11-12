@@ -2,6 +2,19 @@ use crate::interaction::{ShelfTab, View};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Interface language. Wire values are stable ISO language codes.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum Language {
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "ru")]
+    Russian,
+}
+
+fn legacy_language() -> Language {
+    Language::Russian
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TabPreferences {
@@ -15,6 +28,9 @@ pub struct TabPreferences {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    /// Old settings without this field retain the Russian interface.
+    #[serde(default = "legacy_language")]
+    pub language: Language,
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
     pub emoji_font: String,
@@ -59,6 +75,7 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
         let mut settings = Self {
+            language: Language::English,
             theme: crate::theme::ThemePreferences {
                 preset: crate::theme::Preset::BlueExperimental,
                 lily_background: Some(1),

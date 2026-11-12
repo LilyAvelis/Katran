@@ -1,3 +1,4 @@
+use super::i18n::tr;
 use super::*;
 use katran::domain_jobs::JobId;
 #[derive(Default)]
@@ -42,7 +43,11 @@ impl Shelf {
             };
             let result = self.call(Command::GetPinnedProperties { id });
             if result["properties"]["pinned"] != true {
-                self.message = "Свойства доступны закреплённым объектам".into();
+                self.message = tr(
+                    "Свойства доступны закреплённым объектам",
+                    "Properties are available for pinned items",
+                )
+                .into();
                 return;
             }
             self.pinned_ui = State {
@@ -101,7 +106,7 @@ impl Shelf {
                     self.pinned_ui.job = None;
                     self.pinned_ui.error = result["error"]["message"]
                         .as_str()
-                        .unwrap_or("Не удалось найти приложения")
+                        .unwrap_or(tr("Не удалось найти приложения", "Could not find apps"))
                         .into();
                 }
             }
@@ -117,35 +122,41 @@ impl Shelf {
             .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width((ctx.content_rect().width() - 28.0).clamp(240.0, 480.0));
-                ui.heading("Свойства закреплённого объекта");
-                ui.label("Имя");
+                ui.heading(tr(
+                    "Свойства закреплённого объекта",
+                    "Pinned item properties",
+                ));
+                ui.label(tr("Имя", "Name"));
                 ui.text_edit_singleline(&mut state.name);
-                ui.label("Приложение открытия");
+                ui.label(tr("Приложение открытия", "Open with"));
                 let label = state
                     .opener
                     .as_ref()
                     .and_then(|id| state.apps.iter().find(|a| &a.0 == id).map(|a| a.1.as_str()))
                     .unwrap_or(if state.opener.is_some() {
-                        "Сохранённое приложение"
+                        tr("Сохранённое приложение", "Saved app")
                     } else {
-                        "По умолчанию"
+                        tr("По умолчанию", "Default")
                     });
                 egui::ComboBox::from_id_salt("pinned-opener")
                     .selected_text(label)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut state.opener, None, "По умолчанию");
+                        ui.selectable_value(&mut state.opener, None, tr("По умолчанию", "Default"));
                         for (id, name) in &state.apps {
                             ui.selectable_value(&mut state.opener, Some(id.clone()), name);
                         }
                     });
                 if state.job.is_some() {
-                    ui.weak("Поиск приложений…");
+                    ui.weak(tr("Поиск приложений…", "Searching for apps…"));
                 }
                 if !state.error.is_empty() {
                     ui.colored_label(Color32::LIGHT_RED, &state.error);
                 }
-                ui.weak("Имя сохраняется после снятия закрепления.");
-                save = ui.button("Сохранить").clicked();
+                ui.weak(tr(
+                    "Имя сохраняется после снятия закрепления.",
+                    "The name is retained after unpinning.",
+                ));
+                save = ui.button(tr("Сохранить", "Save")).clicked();
             });
         if save {
             let id = self.pinned_ui.id.unwrap();
