@@ -20,6 +20,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         overlay_hotkey: String::new(),
         emoji_font: "apple".into(),
         sort: Default::default(),
+        tab_preferences: Default::default(),
         quota_bytes: 200,
         gallery_columns: 4,
         stream_rows: 3,

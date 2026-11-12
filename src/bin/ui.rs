@@ -1050,17 +1050,36 @@ impl Shelf {
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
         });
-        let gallery = self.state["view"] == "gallery" || self.state["tab"] == "pods";
+        let gallery = self.state["view"] == "gallery";
         let compact = gallery && matches!(self.state["tab"].as_str(), Some("pods" | "links"));
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
-            self.gallery_columns = settings["gallery_columns"]
+            let tab = self.state["tab"].as_str().unwrap_or("images");
+            let profile = &settings["tab_preferences"][tab];
+            self.gallery_columns = profile["gallery_columns"]
                 .as_u64()
+                .or_else(|| settings["gallery_columns"].as_u64())
                 .unwrap_or(4)
                 .clamp(1, 12) as u8;
-            self.stream_rows = settings["stream_rows"].as_u64().unwrap_or(3).clamp(1, 12) as u8;
-            self.pods_columns = settings["pods_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8;
-            self.links_columns = settings["links_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8;
+            self.stream_rows = profile["stream_rows"]
+                .as_u64()
+                .or_else(|| settings["stream_rows"].as_u64())
+                .unwrap_or(3)
+                .clamp(1, 12) as u8;
+            let compact_columns = profile["compact_columns"]
+                .as_u64()
+                .unwrap_or(9)
+                .clamp(1, 12) as u8;
+            self.pods_columns = if tab == "pods" {
+                compact_columns
+            } else {
+                settings["pods_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8
+            };
+            self.links_columns = if tab == "links" {
+                compact_columns
+            } else {
+                settings["links_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8
+            };
         }
         let columns = if compact {
             let desired = if self.state["tab"] == "pods" {
@@ -2000,6 +2019,9 @@ mod tests {
         });
         app.state = app.call(Command::SetTab {
             tab: katran::interaction::ShelfTab::Links,
+        });
+        app.state = app.call(Command::SetView {
+            view: katran::interaction::View::Gallery,
         });
         let ctx = egui::Context::default();
         frame(&mut app, &ctx, egui::Key::Minus, egui::Modifiers::CTRL);

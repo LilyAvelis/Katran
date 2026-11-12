@@ -229,16 +229,15 @@ impl Service {
                 |r| r.get(0),
             )
             .optional()?;
-        let settings: settings::Settings = match stored {
+        let mut settings: settings::Settings = match stored {
             Some(s) => serde_json::from_str(&s).map_err(|e| ApiError::new("settings_error", e))?,
             None => settings::Settings::defaults(quota),
         };
         settings
             .validate(0)
             .map_err(|e| ApiError::new("settings_error", e))?;
+        settings.materialize_tab_preferences();
         let mut interaction = Interaction::default();
-        interaction.view = settings.default_view;
-        interaction.sort = settings.sort.normalized();
         if !settings.tab_enabled(interaction.tab) {
             interaction.tab = interaction::ShelfTab::All;
         }
@@ -247,6 +246,7 @@ impl Service {
             .first()
             .copied()
             .unwrap_or(interaction::ShelfTab::All);
+        interaction.apply_tab_preferences(&settings);
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
@@ -552,15 +552,25 @@ impl Service {
             }
             Command::AdjustDensity { delta } => {
                 let mut settings = self.settings.clone();
-                if self.interaction.tab==interaction::ShelfTab::Pods {
-                    settings.pods_columns=density::adjust_density(settings.pods_columns,delta);
-                } else if self.interaction.tab==interaction::ShelfTab::Links {
-                    settings.links_columns=density::adjust_density(settings.links_columns,delta);
-                } else {match self.interaction.view {
-                    interaction::View::Gallery => settings.gallery_columns=density::adjust_density(settings.gallery_columns,delta),
-                    interaction::View::List => settings.stream_rows=density::adjust_density(settings.stream_rows,delta),
-                }}
-                self.dispatch(Command::SetSettings{settings})
+                let tab = self.interaction.tab;
+                let prefs = settings.tab_preferences.get_mut(&tab).expect("tab preferences initialized");
+                if (tab == interaction::ShelfTab::Pods || tab == interaction::ShelfTab::Links) && self.interaction.view == interaction::View::Gallery {
+                    prefs.compact_columns = density::adjust_density(prefs.compact_columns, delta);
+                    if tab == interaction::ShelfTab::Pods { settings.pods_columns = prefs.compact_columns; }
+                    else { settings.links_columns = prefs.compact_columns; }
+                } else {
+                    match self.interaction.view {
+                        interaction::View::Gallery => {
+                            prefs.gallery_columns = density::adjust_density(prefs.gallery_columns, delta);
+                            settings.gallery_columns = prefs.gallery_columns;
+                        },
+                        interaction::View::List => {
+                            prefs.stream_rows = density::adjust_density(prefs.stream_rows, delta);
+                            settings.stream_rows = prefs.stream_rows;
+                        },
+                    }
+                }
+                self.dispatch(Command::SetSettings { settings })
             },
             Command::CommitFolderCandidates { .. } => Err(ApiError::new("untrusted_worker_result","Prepared source results are accepted only from the domain supervisor")),
             Command::ScreenshotMatchInputs => self.screenshot_match_inputs(),
@@ -633,6 +643,7 @@ impl Service {
             Command::SetSort { mode, reverse, seed } => {
                 let mut settings = self.settings.clone();
                 settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();
+                settings.tab_preferences.get_mut(&self.interaction.tab).expect("tab preferences initialized").sort = settings.sort;
                 self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
             },
@@ -798,7 +809,22 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             Command::ResolveEmojiFont { id } => emoji_fonts::resolve(&self.root, &id),
             Command::ImportEmojiFont { path } => emoji_fonts::commit(&self.root, emoji_fonts::prepare(&path)?),
             Command::GetSettings => Ok(serde_json::json!(self.settings)),
-            Command::SetSettings { settings } => {
+            Command::SetSettings { mut settings } => {
+                // Older clients omit the new map. Preserve existing per-tab settings.
+                for (tab, profile) in &self.settings.tab_preferences {
+                    settings.tab_preferences.entry(*tab).or_insert_with(|| profile.clone());
+                }
+                settings.materialize_tab_preferences();
+                // Legacy field edits affect the active tab unless that profile was explicitly edited.
+                let tab = self.interaction.tab;
+                let old = self.settings.tab_preferences(tab);
+                let profile = settings.tab_preferences.get_mut(&tab).expect("tab preferences initialized");
+                if settings.sort != self.settings.sort && profile.sort == old.sort { profile.sort = settings.sort.normalized(); }
+                if settings.default_view != self.settings.default_view && profile.view == old.view { profile.view = settings.default_view; }
+                if settings.gallery_columns != self.settings.gallery_columns && profile.gallery_columns == old.gallery_columns { profile.gallery_columns = settings.gallery_columns; }
+                if settings.stream_rows != self.settings.stream_rows && profile.stream_rows == old.stream_rows { profile.stream_rows = settings.stream_rows; }
+                if tab == interaction::ShelfTab::Pods && settings.pods_columns != self.settings.pods_columns && profile.compact_columns == old.compact_columns { profile.compact_columns = settings.pods_columns; }
+                if tab == interaction::ShelfTab::Links && settings.links_columns != self.settings.links_columns && profile.compact_columns == old.compact_columns { profile.compact_columns = settings.links_columns; }
                 if settings.emoji_font != "apple" && settings.emoji_font != "system" {
                     let font = emoji_fonts::resolve(&self.root, &settings.emoji_font)?;
                     if font["available"] != true { return Err(ApiError::new("invalid_font", "Шрифт эмодзи недоступен")); }
@@ -820,7 +846,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) || self.settings.tab_enabled(interaction::ShelfTab::Pods)!=settings.tab_enabled(interaction::ShelfTab::Pods) || self.settings.tab_enabled(interaction::ShelfTab::Files)!=settings.tab_enabled(interaction::ShelfTab::Files) {self.capture_events.cancel();}
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
-                self.interaction.sort = self.settings.sort.normalized();
+                self.interaction.apply_tab_preferences(&self.settings);
                 self.normalize_tabs();
                 if sources_changed {self.source_configured = false;}
                 self.configure_sources(self.source_runtime_started)?;
@@ -872,7 +898,9 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 Ok(serde_json::json!(self.interaction))
             }
             Command::SetView { view } => {
-                self.interaction.view = view;
+                let mut settings = self.settings.clone();
+                settings.tab_preferences.get_mut(&self.interaction.tab).expect("tab preferences initialized").view = view;
+                self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
             }
             Command::OpenCurrent => {

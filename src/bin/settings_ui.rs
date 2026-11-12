@@ -714,11 +714,16 @@ impl State {
           });
           if ui.add_enabled(self.font_picker.is_none() && self.font_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.picker.is_none() && self.background_job.is_none() && self.video_picker.is_none() && self.video_job.is_none() && self.font_picker.is_none() && self.font_job.is_none(),egui::Button::image_and_text(egui_lucide::Lucide::FolderOpen.size(16.0).image(),"Добавить шрифт…")).clicked(){match super::theme_file_picker::start_pick_font(){Ok(receiver)=>self.font_picker=Some(receiver),Err(error)=>self.error=error}}
          });
-         SettingsRow::show(ui,"Плитки Pods","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.pods_columns,1..=12));});
-         SettingsRow::show(ui,"Плитки Links","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.links_columns,1..=12));});
-         SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
-         SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
-         SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});
+         let tab = serde_json::from_value::<katran::interaction::ShelfTab>(call(api,Command::Interaction)["result"]["tab"].clone()).unwrap_or_default();
+         if let Some(profile)=draft.tab_preferences.get_mut(&tab) {
+          ui.strong(format!("Текущая вкладка: {}",serde_json::to_value(tab).ok().and_then(|v|v.as_str().map(str::to_owned)).unwrap_or_default()));
+          SettingsRow::show(ui,"Вид вкладки","Сохраняется отдельно для этой вкладки.",|ui|{ui.selectable_value(&mut profile.view,View::Gallery,"Галерея");ui.selectable_value(&mut profile.view,View::List,"Поток");});
+          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: число карточек в строке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.gallery_columns,1..=12));});
+          SettingsRow::show(ui,"Строки потока","Число видимых строк в потоке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.stream_rows,1..=12));});
+          if matches!(tab,katran::interaction::ShelfTab::Pods|katran::interaction::ShelfTab::Links) {
+           SettingsRow::show(ui,"Компактные плитки","Число карточек в строке этой вкладки.",|ui|{ui.add(egui::Slider::new(&mut profile.compact_columns,1..=12));});
+          }
+         }
         });
         SettingsSection::group(ui,"Папки и хранение",|ui|{
          SettingsRow::show(ui,"Папка ShareX","Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.",|ui|{

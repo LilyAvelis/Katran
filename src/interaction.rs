@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ShelfTab {
     #[serde(rename = "folder", alias = "all")]
@@ -43,6 +43,8 @@ pub struct Interaction {
     pub settings_open: bool,
     pub settings_section: usize,
     pub view: View,
+    #[serde(skip)]
+    tab_preferences: std::collections::BTreeMap<ShelfTab, crate::settings::TabPreferences>,
     pub tab: ShelfTab,
     pub last_tab: ShelfTab,
     pub visible: Vec<i64>,
@@ -67,9 +69,19 @@ impl Interaction {
             self.reset_context();
         }
         self.tab = tab;
+        if let Some(preferences) = self.tab_preferences.get(&tab) {
+            self.view = preferences.view;
+            self.sort = preferences.sort.normalized();
+        }
         if tab != ShelfTab::All {
             self.last_tab = tab;
         }
+    }
+    pub fn apply_tab_preferences(&mut self, settings: &crate::settings::Settings) {
+        self.tab_preferences = settings.tab_preferences.clone();
+        let preferences = settings.tab_preferences(self.tab);
+        self.view = preferences.view;
+        self.sort = preferences.sort.normalized();
     }
     pub fn reset_context(&mut self) {
         self.pinned_only = false;

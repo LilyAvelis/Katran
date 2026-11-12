@@ -1,5 +1,16 @@
-use crate::interaction::View;
+use crate::interaction::{ShelfTab, View};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TabPreferences {
+    pub sort: crate::sorting::SortSpec,
+    pub view: View,
+    pub gallery_columns: u8,
+    pub stream_rows: u8,
+    pub compact_columns: u8,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -15,6 +26,8 @@ pub struct Settings {
     /// Desired count per row for the compact Links shelf, independent of Pods.
     pub links_columns: u8,
     pub sort: crate::sorting::SortSpec,
+    #[serde(default)]
+    pub tab_preferences: BTreeMap<ShelfTab, TabPreferences>,
     #[serde(
         default = "crate::tab_layout::default_order",
         deserialize_with = "crate::tab_layout::deserialize_order"
@@ -45,7 +58,7 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn defaults(quota: u64) -> Self {
-        Self {
+        let mut settings = Self {
             theme: crate::theme::ThemePreferences {
                 preset: crate::theme::Preset::BlueExperimental,
                 lily_background: Some(1),
@@ -58,6 +71,7 @@ impl Settings {
             pods_columns: 9,
             links_columns: 9,
             sort: Default::default(),
+            tab_preferences: BTreeMap::new(),
             quota_bytes: quota,
             gallery_columns: 4,
             stream_rows: 3,
@@ -75,6 +89,36 @@ impl Settings {
             capture_on_start: true,
             search_keyboard_only: false,
             link_favicons_online: false,
+        };
+        settings.materialize_tab_preferences();
+        for tab in [ShelfTab::Text, ShelfTab::Links] {
+            settings.tab_preferences.get_mut(&tab).unwrap().view = View::List;
+        }
+        settings
+    }
+    /// Missing entries inherit the legacy preferences, including for hidden tabs.
+    pub fn tab_preferences(&self, tab: ShelfTab) -> TabPreferences {
+        self.tab_preferences
+            .get(&tab)
+            .cloned()
+            .unwrap_or_else(|| TabPreferences {
+                sort: self.sort.normalized(),
+                view: self.default_view,
+                gallery_columns: self.gallery_columns,
+                stream_rows: self.stream_rows,
+                compact_columns: if tab == ShelfTab::Links {
+                    self.links_columns
+                } else {
+                    self.pods_columns
+                },
+            })
+    }
+    pub fn materialize_tab_preferences(&mut self) {
+        for tab in std::iter::once(ShelfTab::All).chain(crate::tab_layout::default_order()) {
+            if !self.tab_preferences.contains_key(&tab) {
+                let preferences = self.tab_preferences(tab);
+                self.tab_preferences.insert(tab, preferences);
+            }
         }
     }
     pub fn tab_enabled(&self, tab: crate::interaction::ShelfTab) -> bool {
@@ -168,6 +212,13 @@ impl Settings {
         }
         crate::tab_layout::validate_order(&self.tab_order)?;
         crate::tab_layout::validate_visible(&self.hidden_tabs)?;
+        if self.tab_preferences.values().any(|prefs| {
+            !(1..=12).contains(&prefs.gallery_columns)
+                || !(1..=12).contains(&prefs.stream_rows)
+                || !(1..=12).contains(&prefs.compact_columns)
+        }) {
+            return Err("Tab density must be in 1..12".into());
+        }
         if !(1..=12).contains(&self.gallery_columns) || !(1..=12).contains(&self.stream_rows) {
             return Err("Density must be in 1..12".into());
         }

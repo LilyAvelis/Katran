@@ -547,7 +547,7 @@ impl Shelf {
                                         // Texture remains on the card surface, outside the image and text content.
                                         super::tag_material_ui::paint(ui, rect, slot);
                                     }
-                                    if pods {
+                                    if pods && compact {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
                                     } else if links && compact {
                                         self.link_cards.paint(ui, event, rect.shrink(6.0));
