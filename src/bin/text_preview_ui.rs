@@ -206,7 +206,7 @@ impl TextPreview {
             }
         }
         let title = if is_link {
-            "Ссылка".into()
+            link_heading(event).to_owned()
         } else if event["kind"] == "text_fragment" {
             katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""))
         } else {
@@ -236,6 +236,12 @@ impl TextPreview {
                 None => {}
             });
     }
+}
+fn link_heading(event: &Value) -> &str {
+    event["properties"]["display_name"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("Ссылка")
 }
 fn preview_header(
     ui: &mut egui::Ui,
@@ -355,6 +361,12 @@ pub(super) fn card_title(event: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_link_uses_custom_space_heading() {
+        let named = serde_json::json!({"properties": {"pinned": true, "display_name": "Katran"}});
+        assert_eq!(link_heading(&named), "Katran");
+        assert_eq!(link_heading(&serde_json::json!({})), "Ссылка");
+    }
     #[test]
     fn preview_heading_and_controls_center_in_narrow_and_wide_regions() {
         for width in [140.0, 260.0, 800.0] {

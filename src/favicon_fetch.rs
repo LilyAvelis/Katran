@@ -4,6 +4,7 @@
 //! retaining the hostname for HTTPS certificate validation. Local routing rules
 //! outside this process can still route a public address to a private network.
 use image::{ImageFormat, ImageReader};
+use scraper::{Html, Selector};
 use std::{
     io::{Cursor, Read},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
@@ -13,6 +14,7 @@ use std::{
 use url::{Host, Url};
 
 const MAX_BYTES: usize = 256 * 1024;
+const MAX_HTML_BYTES: usize = 512 * 1024;
 const MAX_EDGE: u32 = 1024;
 const MAX_ALLOC: u64 = 8 * 1024 * 1024;
 
@@ -152,6 +154,136 @@ fn favicon_url(input: &str) -> Result<Url, Error> {
     Url::parse(&format!("https://{domain}/favicon.ico")).map_err(|_| Error::InvalidUrl)
 }
 
+fn safe_https_url(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.host(), Some(Host::Domain(domain)) if domain.contains('.')
+            && !domain.ends_with(".local") && !domain.ends_with(".internal"))
+}
+
+fn declared_icons(html: &str, origin: &Url) -> Vec<Url> {
+    let document = Html::parse_document(html);
+    let Ok(selector) = Selector::parse("link[rel][href]") else {
+        return Vec::new();
+    };
+    document
+        .select(&selector)
+        .filter_map(|element| {
+            let rel = element.value().attr("rel")?;
+            if !rel.split_ascii_whitespace().any(|part| {
+                part.eq_ignore_ascii_case("icon") || part.eq_ignore_ascii_case("apple-touch-icon")
+            }) {
+                return None;
+            }
+            if element
+                .value()
+                .attr("type")
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("image/svg+xml"))
+            {
+                return None;
+            }
+            let icon = origin.join(element.value().attr("href")?).ok()?;
+            (safe_https_url(&icon)
+                && icon.as_str().len() <= 2048
+                && !icon.path().to_ascii_lowercase().ends_with(".svg"))
+            .then_some(icon)
+        })
+        .take(4)
+        .collect()
+}
+
+fn download(url: &Url, limit: usize) -> Result<Option<Vec<u8>>, Error> {
+    if !safe_https_url(url) {
+        return Err(Error::InvalidUrl);
+    }
+    let started = Instant::now();
+    let timeout = Duration::from_secs(3);
+    let host = url.host_str().ok_or(Error::InvalidUrl)?;
+    let addresses = resolve(host, timeout)?;
+    let remaining = timeout
+        .checked_sub(started.elapsed())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| Error::Network("DNS lookup timed out".into()))?;
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &addresses)
+        .timeout(remaining)
+        .build()
+        .map_err(|e| Error::Network(e.to_string()))?;
+    let response = client
+        .get(url.clone())
+        .send()
+        .map_err(|e| Error::Network(e.to_string()))?;
+    if response.status().is_redirection() {
+        let destination = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|location| url.join(location).ok());
+        return destination
+            .filter(safe_https_url)
+            .map(|next| download_direct(&next, limit))
+            .unwrap_or(Ok(None));
+    }
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    if response
+        .content_length()
+        .is_some_and(|len| len > limit as u64)
+    {
+        return Err(Error::TooLarge);
+    }
+    read_bounded_limit(response, limit).map(Some)
+}
+
+// One validated redirect at most; never let the HTTP client follow an unchecked chain.
+fn download_direct(url: &Url, limit: usize) -> Result<Option<Vec<u8>>, Error> {
+    if !safe_https_url(url) {
+        return Err(Error::InvalidUrl);
+    }
+    let timeout = Duration::from_secs(3);
+    let host = url.host_str().ok_or(Error::InvalidUrl)?;
+    let addresses = resolve(host, timeout)?;
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &addresses)
+        .timeout(timeout)
+        .build()
+        .map_err(|e| Error::Network(e.to_string()))?;
+    let response = client
+        .get(url.clone())
+        .send()
+        .map_err(|e| Error::Network(e.to_string()))?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    if response
+        .content_length()
+        .is_some_and(|len| len > limit as u64)
+    {
+        return Err(Error::TooLarge);
+    }
+    read_bounded_limit(response, limit).map(Some)
+}
+
+fn read_bounded_limit(reader: impl Read, limit: usize) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    reader
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| Error::Read(e.to_string()))?;
+    if bytes.len() > limit {
+        return Err(Error::TooLarge);
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
 fn read_bounded(reader: impl Read) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
     reader
@@ -239,40 +371,44 @@ fn decode_image(bytes: &[u8]) -> bool {
 /// images return None so the caller can display its local domain symbol.
 pub fn fetch(input: &str) -> Result<Option<Vec<u8>>, Error> {
     let url = favicon_url(input)?;
-    let started = Instant::now();
-    let timeout = Duration::from_secs(3);
-    let host = url.host_str().ok_or(Error::InvalidUrl)?;
-    let addresses = resolve(host, timeout)?;
-    let remaining = timeout
-        .checked_sub(started.elapsed())
-        .filter(|remaining| !remaining.is_zero())
-        .ok_or_else(|| Error::Network("DNS lookup timed out".into()))?;
-    let client = reqwest::blocking::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .resolve_to_addrs(host, &addresses)
-        .timeout(remaining)
-        .build()
-        .map_err(|e| Error::Network(e.to_string()))?;
-    let response = client
-        .get(url)
-        .send()
-        .map_err(|e| Error::Network(e.to_string()))?;
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-    if response
-        .content_length()
-        .is_some_and(|len| len > MAX_BYTES as u64)
+    if let Ok(Some(bytes)) = download(&url, MAX_BYTES)
+        && let Some(icon) = image_bytes(&bytes)
     {
-        return Err(Error::TooLarge);
+        return Ok(Some(icon));
     }
-    Ok(image_bytes(&read_bounded(response)?))
+    let origin = url.join("/").map_err(|_| Error::InvalidUrl)?;
+    let Some(html) = download(&origin, MAX_HTML_BYTES)? else {
+        return Ok(None);
+    };
+    for icon_url in declared_icons(&String::from_utf8_lossy(&html), &origin) {
+        if let Ok(Some(bytes)) = download(&icon_url, MAX_BYTES)
+            && let Some(icon) = image_bytes(&bytes)
+        {
+            return Ok(Some(icon));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn discovers_declared_site_icon_without_reusing_link_path() {
+        let origin = Url::parse("https://app.notion.com/").unwrap();
+        let html = r#"<html><head><link rel="apple-touch-icon" href="https://static.notion.com/icon.png"></head></html>"#;
+        assert_eq!(
+            declared_icons(html, &origin)[0].as_str(),
+            "https://static.notion.com/icon.png"
+        );
+        assert!(
+            declared_icons(
+                r#"<link rel="icon" href="http://127.0.0.1/icon.png">"#,
+                &origin
+            )
+            .is_empty()
+        );
+    }
     #[test]
     fn public_address_policy_rejects_special_and_mixed_dns_results() {
         for address in [

@@ -23,6 +23,12 @@ struct Visual {
     color: Color32,
     icon: Option<egui::TextureHandle>,
 }
+fn caption<'a>(event: &'a Value, site: &'a str) -> &'a str {
+    event["properties"]["display_name"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(site)
+}
 pub(super) struct State {
     root: PathBuf,
     online: bool,
@@ -281,7 +287,7 @@ impl State {
                 Color32::WHITE,
             );
         }
-        let site = visual.map_or("Ссылка", |v| v.site.as_str());
+        let site = caption(event, visual.map_or("Ссылка", |v| v.site.as_str()));
         let available = (rect.width() - 8.0).max(1.0);
         let galley = ui.fonts_mut(|fonts| {
             for size in [12.0, 11.0, 10.0, 9.0] {
@@ -317,5 +323,17 @@ impl State {
 impl Drop for State {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_link_name_replaces_domain_caption() {
+        let named = serde_json::json!({"properties": {"pinned": true, "display_name": "Katran"}});
+        assert_eq!(caption(&named, "notion"), "Katran");
+        assert_eq!(caption(&serde_json::json!({}), "notion"), "notion");
     }
 }

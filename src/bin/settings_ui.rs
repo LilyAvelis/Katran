@@ -696,7 +696,7 @@ impl State {
          SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
         });
         SettingsSection::group(ui,"Ссылки",|ui|{
-         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran загружает favicon с публичных HTTPS-сайтов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
+         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran запрашивает значки и объявленные сайтом иконки с публичных HTTPS-адресов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
          SettingsRow::show(ui,"Обновление значков","После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.",|ui|{
           let online=call(api,Command::GetSettings)["result"]["link_favicons_online"]==true;
           if ui.add_enabled(online,egui::Button::new("Обновить значки сохранённых ссылок")).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
