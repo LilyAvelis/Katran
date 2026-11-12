@@ -1129,6 +1129,11 @@ impl Shelf {
                     .collect::<Vec<_>>()
             });
             for (key, modifiers) in keys {
+                // Pinned reordering is a single shortcut action. Key-repeat must
+                // not fall through to Ctrl+arrow selection/navigation.
+                if modifiers.ctrl && modifiers.alt {
+                    continue;
+                }
                 if ctx.egui_wants_keyboard_input()
                     && matches!(key, egui::Key::ArrowLeft | egui::Key::ArrowRight)
                 {
@@ -2980,6 +2985,32 @@ mod tests {
             egui::Key::ArrowUp,
             egui::Modifiers::CTRL | egui::Modifiers::ALT,
         );
+        let page = app.call(Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        });
+        assert_eq!(page["events"][0]["id"], ids[1]);
+        let selection = app.call(Command::Interaction);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(940.0, 680.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: egui::Key::ArrowUp,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: egui::Modifiers::CTRL | egui::Modifiers::ALT,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        let after = app.call(Command::Interaction);
+        assert_eq!(after["selected"], selection["selected"]);
+        assert_eq!(after["cursor"], selection["cursor"]);
         let page = app.call(Command::BrowseShelfSorted {
             query: String::new(),
             limit: 10,
