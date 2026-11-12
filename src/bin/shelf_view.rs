@@ -91,7 +91,8 @@ fn shelf_scrollbar_style(gap: f32) -> egui::style::ScrollStyle {
     let mut scroll = egui::style::ScrollStyle::solid();
     scroll.bar_width = gap;
     scroll.bar_inner_margin = gap;
-    scroll.bar_outer_margin = gap;
+    // The panel already provides the matching 12 pt window-edge inset.
+    scroll.bar_outer_margin = 0.0;
     scroll.handle_min_length = gap * 3.0;
     scroll.floating = true;
     scroll.floating_width = gap;
@@ -1413,9 +1414,9 @@ mod density_geometry_tests {
         let scrollbar_right = outer_width - scroll.bar_outer_margin;
 
         assert_eq!(scroll.bar_inner_margin, gap);
-        assert_eq!(scroll.bar_outer_margin, gap);
+        assert_eq!(scroll.bar_outer_margin, 0.0);
         assert_eq!(scrollbar_left - card_right, gap);
-        assert_eq!(outer_width - scrollbar_right, gap);
+        assert_eq!(outer_width - scrollbar_right, 0.0);
     }
 
     #[test]
