@@ -3,43 +3,7 @@ use eframe::egui;
 use katran::{Command, interaction::ShelfTab};
 use serde_json::Value;
 
-// The indicator follows the current measured rectangle, not a tab index. Reusing
-// the current position on each frame naturally redirects an interrupted motion.
-#[derive(Clone, Default)]
-struct Indicator {
-    rect: Option<egui::Rect>,
-    active: String,
-}
-
-impl Indicator {
-    fn update(&mut self, active: &str, target: Option<egui::Rect>, dt: f32, duration: f32) -> bool {
-        let Some(target) = target else {
-            self.rect = None;
-            self.active = active.to_owned();
-            return false;
-        };
-        let Some(current) = self.rect else {
-            self.rect = Some(target);
-            self.active = active.to_owned();
-            return false;
-        };
-        // Exponential interpolation keeps retargeting continuous and bounded.
-        let factor = if duration <= 0.0 {
-            1.0
-        } else {
-            1.0 - (-dt.max(0.0) * 5.0 / duration).exp()
-        };
-        let next = egui::Rect::from_min_max(
-            current.min + (target.min - current.min) * factor,
-            current.max + (target.max - current.max) * factor,
-        );
-        let moving = (next.min - target.min).length_sq() > 0.25
-            || (next.max - target.max).length_sq() > 0.25;
-        self.rect = Some(if moving { next } else { target });
-        self.active = active.to_owned();
-        moving
-    }
-}
+use avilon_egui::tabs::{Indicator, Pill};
 
 pub fn show(
     ui: &mut egui::Ui,
@@ -191,10 +155,11 @@ pub fn show_with_glass(
             enabled,
             egui::Button::new("Folder")
                 .frame(false)
-                .min_size(egui::vec2(label_width + 24.0, 32.0)),
+                .min_size(Pill::minimum_size(label_width, 12.0, 32.0)),
         );
-        let rect = response.rect.shrink(0.5);
-        let radius = rect.height() / 2.0;
+        let pill = Pill::new(response.rect);
+        let rect = pill.rect;
+        let radius = pill.radius;
         let selected = active.as_str() == Some("folder");
         let surface = crate::theme_ui::color(
             ui.ctx(),
@@ -222,28 +187,13 @@ pub fn show_with_glass(
                 egui::Color32::from_gray(100)
             },
         );
-        ui.painter()
-            .set(body, egui::Shape::rect_filled(rect, radius, surface));
+        ui.painter().set(body, pill.body(surface));
         if !selected && let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
             ui.painter().set(optical, shape);
         }
-        ui.painter().set(
-            rim,
-            egui::Shape::rect_stroke(
-                rect,
-                radius,
-                egui::Stroke::new(1.0, border),
-                egui::StrokeKind::Inside,
-            ),
-        );
-        let highlight = egui::Rect::from_min_max(
-            rect.min + egui::vec2(radius * 0.55, 2.0),
-            egui::pos2(rect.max.x - radius * 0.55, rect.min.y + 3.0),
-        );
-        ui.painter().set(
-            shine,
-            egui::Shape::rect_filled(highlight, 1.0, egui::Color32::from_white_alpha(42)),
-        );
+        ui.painter().set(rim, pill.rim(border));
+        ui.painter()
+            .set(shine, pill.shine(egui::Color32::from_white_alpha(42)));
         if response.clicked() {
             intent = Some(Command::SetTab { tab: ShelfTab::All });
         }
@@ -319,11 +269,12 @@ fn show_glass(
                         enabled,
                         egui::Button::new(label)
                             .frame(false)
-                            .min_size(egui::vec2(label_width + 24.0, 32.0))
+                            .min_size(Pill::minimum_size(label_width, 12.0, 32.0))
                             .sense(egui::Sense::click_and_drag()),
                     );
-                    let rect = response.rect.shrink(0.5);
-                    let radius = rect.height() / 2.0;
+                    let pill = Pill::new(response.rect);
+                    let rect = pill.rect;
+                    let radius = pill.radius;
                     let surface = crate::theme_ui::color(
                         ui.ctx(),
                         crate::theme_ui::Role::Raised,
@@ -335,32 +286,13 @@ fn show_glass(
                         egui::Color32::from_gray(100),
                     );
                     let (body, optical, rim, shine) = slots[index];
-                    ui.painter()
-                        .set(body, egui::Shape::rect_filled(rect, radius, surface));
+                    ui.painter().set(body, pill.body(surface));
                     if let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
                         ui.painter().set(optical, shape);
                     }
-                    ui.painter().set(
-                        rim,
-                        egui::Shape::rect_stroke(
-                            rect,
-                            radius,
-                            egui::Stroke::new(1.0, border),
-                            egui::StrokeKind::Inside,
-                        ),
-                    );
-                    let highlight = egui::Rect::from_min_max(
-                        rect.min + egui::vec2(radius * 0.55, 2.0),
-                        egui::pos2(rect.max.x - radius * 0.55, rect.min.y + 3.0),
-                    );
-                    ui.painter().set(
-                        shine,
-                        egui::Shape::rect_filled(
-                            highlight,
-                            1.0,
-                            egui::Color32::from_white_alpha(42),
-                        ),
-                    );
+                    ui.painter().set(rim, pill.rim(border));
+                    ui.painter()
+                        .set(shine, pill.shine(egui::Color32::from_white_alpha(42)));
                     #[cfg(test)]
                     button_geometry.push((response.rect, label_width));
                     if active == value {

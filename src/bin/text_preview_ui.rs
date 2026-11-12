@@ -212,17 +212,7 @@ impl TextPreview {
         } else {
             event["name"].as_str().unwrap_or("").to_owned()
         };
-        ui.heading(if title.is_empty() {
-            "Текст"
-        } else {
-            &title
-        });
-        if !is_link {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.rendered, true, "Markdown");
-                ui.selectable_value(&mut self.rendered, false, "Исходный текст");
-            });
-        }
+        preview_header(ui, &title, is_link, &mut self.rendered);
         ui.separator();
         egui::ScrollArea::vertical()
             .max_height(ui.available_height().max(40.0))
@@ -247,6 +237,81 @@ impl TextPreview {
             });
     }
 }
+fn preview_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    is_link: bool,
+    rendered: &mut bool,
+) -> (egui::Rect, Option<egui::Rect>) {
+    ui.vertical_centered(|ui| {
+        let title = ui.heading(if title.is_empty() {
+            "Текст"
+        } else {
+            title
+        });
+        let controls = (!is_link).then(|| {
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let padding = ui.spacing().button_padding.x * 2.0;
+            let minimum = ui.spacing().interact_size.x;
+            let widths = ["Markdown", "Исходный текст"].map(|text| {
+                let width = ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(text.into(), font.clone(), Color32::WHITE)
+                        .size()
+                        .x
+                });
+                (width + padding).max(minimum)
+            });
+            let spacing = ui.spacing().item_spacing.x;
+            let available = ui.available_width();
+            let total = widths[0] + spacing + widths[1];
+            if total <= available {
+                ui.horizontal(|ui| {
+                    ui.add_space((available - total) / 2.0);
+                    let first = ui.add_sized(
+                        [widths[0], ui.spacing().interact_size.y],
+                        egui::Button::new("Markdown").selected(*rendered),
+                    );
+                    let second = ui.add_sized(
+                        [widths[1], ui.spacing().interact_size.y],
+                        egui::Button::new("Исходный текст").selected(!*rendered),
+                    );
+                    if first.clicked() {
+                        *rendered = true;
+                    }
+                    if second.clicked() {
+                        *rendered = false;
+                    }
+                    first.rect.union(second.rect)
+                })
+                .inner
+            } else {
+                ui.vertical_centered(|ui| {
+                    let width = available.max(1.0);
+                    let first = ui.add_sized(
+                        [widths[0].min(width), ui.spacing().interact_size.y],
+                        egui::Button::new("Markdown").selected(*rendered),
+                    );
+                    let second = ui.add_sized(
+                        [widths[1].min(width), ui.spacing().interact_size.y],
+                        egui::Button::new("Исходный текст").selected(!*rendered),
+                    );
+                    if first.clicked() {
+                        *rendered = true;
+                    }
+                    if second.clicked() {
+                        *rendered = false;
+                    }
+                    first.rect.union(second.rect)
+                })
+                .inner
+            }
+        });
+        (title.rect, controls)
+    })
+    .inner
+}
+
 impl Drop for TextPreview {
     fn drop(&mut self) {
         self.stop();
@@ -290,6 +355,56 @@ pub(super) fn card_title(event: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_heading_and_controls_center_in_narrow_and_wide_regions() {
+        for width in [140.0, 260.0, 800.0] {
+            for is_link in [false, true] {
+                let ctx = egui::Context::default();
+                let mut header = None;
+                let mut rendered = true;
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 300.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_width(width);
+                        let center = ui.available_rect_before_wrap().center().x;
+                        let (heading, controls) = preview_header(
+                            ui,
+                            if is_link {
+                                "Ссылка"
+                            } else {
+                                "Текст"
+                            },
+                            is_link,
+                            &mut rendered,
+                        );
+                        header = Some((center, heading, controls));
+                    },
+                );
+                out.textures_delta.clear();
+                let (center, heading, controls) = header.unwrap();
+                assert!(
+                    (heading.center().x - center).abs() < 1.0,
+                    "heading at width {width}"
+                );
+                if is_link {
+                    assert!(controls.is_none());
+                } else {
+                    let controls = controls.unwrap();
+                    assert!(
+                        (controls.center().x - center).abs() < 1.0,
+                        "controls at width {width}"
+                    );
+                    assert!(controls.width() <= width);
+                }
+            }
+        }
+    }
     #[test]
     fn links_preview_without_text_feature_or_markdown_controls() {
         let root = tempfile::tempdir().unwrap();

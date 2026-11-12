@@ -680,6 +680,7 @@ impl State {
          SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
          SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
+         SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran загружает favicon с публичных HTTPS-сайтов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
          SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});

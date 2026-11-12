@@ -30,6 +30,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         default_view: View::List,
         capture_on_start: false,
         search_keyboard_only: true,
+        link_favicons_online: true,
         sharex_folder: None,
         downloads_folder: None,
         downloads_enabled: true,
@@ -56,6 +57,10 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         call(&mut api, Command::GetSettings)["result"]["search_keyboard_only"],
         true
     );
+    assert_eq!(
+        call(&mut api, Command::GetSettings)["result"]["link_favicons_online"],
+        true
+    );
     call(
         &mut api,
         Command::IngestBytes {
@@ -77,6 +82,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
 fn capture_defaults_on_and_explicit_pause_preference_survives() {
     assert!(Settings::default().capture_on_start);
     assert!(!Settings::default().search_keyboard_only);
+    assert!(!Settings::default().link_favicons_online);
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
     assert_eq!(

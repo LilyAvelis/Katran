@@ -83,13 +83,19 @@ impl Interaction {
     }
     pub fn select_position(&mut self, tab: ShelfTab) {
         if self.tab == tab && tab != ShelfTab::All {
-            let pinned =
-                !self.pinned_only && self.tag_filter.is_none() && self.tag_slot_filter.is_none();
-            self.reset_context();
-            self.pinned_only = pinned;
+            self.toggle_pinned_only();
         } else {
             self.set_tab(tab);
         }
+    }
+    pub fn toggle_pinned_only(&mut self) {
+        let pinned_only = !self.pinned_only;
+        let tag_filter = self.tag_filter.clone();
+        let tag_slot_filter = self.tag_slot_filter;
+        self.reset_context();
+        self.pinned_only = pinned_only;
+        self.tag_filter = tag_filter;
+        self.tag_slot_filter = tag_slot_filter;
     }
     pub fn toggle_tab(&mut self) {
         self.set_tab(if self.tab == ShelfTab::All {

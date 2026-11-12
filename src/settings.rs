@@ -30,6 +30,8 @@ pub struct Settings {
     pub default_view: View,
     pub capture_on_start: bool,
     pub search_keyboard_only: bool,
+    /// Opt-in network retrieval of site favicons for Links cards.
+    pub link_favicons_online: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -65,6 +67,7 @@ impl Settings {
             default_view: View::Gallery,
             capture_on_start: true,
             search_keyboard_only: false,
+            link_favicons_online: false,
         }
     }
     pub fn tab_enabled(&self, tab: crate::interaction::ShelfTab) -> bool {

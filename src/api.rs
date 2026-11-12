@@ -152,6 +152,10 @@ pub enum Command {
     GetTagSlots {
         ids: Vec<i64>,
     },
+    /// Read an exact link and optionally fetch a bounded favicon. Call on a worker.
+    GetLinkVisual {
+        id: i64,
+    },
     FilterTagSlot {
         slot: Option<u8>,
     },

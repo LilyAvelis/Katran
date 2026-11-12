@@ -54,3 +54,15 @@ styles. For example, `color(Role::Surface, legacy, PaletteOptions { blue: true,
 ..Default::default() })` selects the blue palette; the host supplies its own
 accent, selection, background and active-glass state. Standard mode retains the
 supplied legacy color except when a selection override is explicitly supplied.
+
+`tabs::Pill` provides measured capsule geometry and host-colored body, rim and
+shine shapes; `tabs::Indicator` interpolates measured target rectangles and
+clears on `None`. The host decides input, active identity, rendering order,
+optical callback and reduced motion. Supply a zero duration for immediate changes.
+
+`material::paint` draws a clipped solid surface and deterministic Dots, Lines or
+Grain using a host seed, scale, angle and colors. At most 512 marks are generated
+per area; zero intensity suppresses marks, while the host controls ink alpha and
+fill opacity. It intersects the caller's clip rectangle and never owns textures,
+settings, selection, persistence or tag identities. The host must paint it before
+foreground content and is responsible for contrast on its actual background.

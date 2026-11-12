@@ -1,8 +1,10 @@
 //! Host-styled action rows and shortcut keycaps. No actions are executed here.
+pub mod material;
 #[cfg(feature = "glow")]
 pub mod optical_gpu;
 pub mod optics;
 pub mod settings_layout;
+pub mod tabs;
 pub mod theme;
 pub mod transition;
 

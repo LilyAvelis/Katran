@@ -12,6 +12,7 @@ mod images;
 mod info_bar;
 mod input_log;
 mod launch_args;
+mod link_card_ui;
 mod markdown_ui;
 mod native_drag_ui;
 mod navigation_input;
@@ -210,6 +211,7 @@ struct Shelf {
     pending_density: Vec<String>,
     images: Images,
     text_preview: text_preview_ui::TextPreview,
+    link_cards: link_card_ui::State,
     table_preview: table_preview_ui::TablePreview,
     events: Vec<Value>,
     next_cursor: Option<String>,
@@ -399,6 +401,8 @@ impl Shelf {
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             self.search_keyboard_only = settings["search_keyboard_only"] == true;
+            self.link_cards
+                .set_online(settings["link_favicons_online"] == true);
             self.experimental_glass_tabs = settings["theme"]["experimental_glass_tabs"] == true
                 && settings["theme"]["preset"] == "blue_experimental";
             if let Some(font_id) = settings["emoji_font"].as_str()
@@ -1049,7 +1053,8 @@ impl Shelf {
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
         });
-        let gallery = self.state["view"] == "gallery" || self.state["tab"] == "pods";
+        let compact = matches!(self.state["tab"].as_str(), Some("pods" | "links"));
+        let gallery = self.state["view"] == "gallery" || compact;
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             self.gallery_columns = settings["gallery_columns"]
@@ -1062,7 +1067,7 @@ impl Shelf {
                 .unwrap_or(96)
                 .clamp(48, 192) as u16;
         }
-        let columns = if self.state["tab"] == "pods" {
+        let columns = if compact {
             pods_ui::columns(root.available_width() - 40.0, self.pods_tile_size)
         } else if gallery {
             effective_gallery_columns(root.available_width() - 40.0, self.gallery_columns)
@@ -1535,6 +1540,7 @@ fn main() -> eframe::Result {
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
         text_preview: text_preview_ui::TextPreview::new(root.clone()),
+        link_cards: link_card_ui::State::new(root.clone()),
         table_preview: table_preview_ui::TablePreview::new(root),
         events: vec![],
         next_cursor: None,
@@ -1738,6 +1744,7 @@ mod tests {
             pending_density: Vec::new(),
             images: Images::new(root.into()),
             text_preview: text_preview_ui::TextPreview::new(root.into()),
+            link_cards: link_card_ui::State::new(root.into()),
             table_preview: table_preview_ui::TablePreview::new(root.into()),
             events: vec![],
             next_cursor: None,

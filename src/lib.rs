@@ -17,6 +17,7 @@ pub mod downloads;
 pub mod drag_out;
 mod drag_session;
 pub mod everything;
+mod favicon_fetch;
 pub mod file_types;
 pub mod file_visual;
 mod files_pointer;
@@ -31,6 +32,7 @@ pub mod folder_watch;
 pub mod interaction;
 mod jobs_service;
 pub mod link_fragments;
+mod link_visual;
 pub mod markdown;
 pub mod media_runtime;
 pub mod open_file;
@@ -502,6 +504,7 @@ impl Service {
             Command::AssignTagSlot {ids,slot} => self.assign_tag_slot(ids,slot),
             Command::GetTagSlot {id} => self.get_tag_slot(id),
             Command::GetTagSlots {ids} => self.get_tag_slots(ids),
+            Command::GetLinkVisual {id} => self.get_link_visual(id),
             Command::FilterTagSlot {slot} => self.filter_tag_slot(slot),
             Command::GetUpdateStatus => Ok(self.update_status.clone()),
             Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
@@ -587,7 +590,7 @@ impl Service {
                 if self.interaction.tab == interaction::ShelfTab::All {
                     return Err(ApiError::new("folder_has_no_pins", "Folder has no pinned view"));
                 }
-                self.interaction.select_position(self.interaction.tab);
+                self.interaction.toggle_pinned_only();
                 Ok(serde_json::json!(self.interaction))
             },
             Command::NavigateTab { delta } => self.navigate_tab(delta),

@@ -105,6 +105,95 @@ fn existing_tag_slots_gain_opacity_without_losing_materials() {
 }
 
 #[test]
+fn pinned_view_and_tag_filter_are_independent_across_input_routes() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        },
+    );
+    let state = call(&mut api, Command::FilterTagSlot { slot: Some(2) });
+    assert_eq!(state["tag_slot_filter"], 2);
+    assert_eq!(state["pinned_only"], false);
+
+    let state = call(&mut api, Command::TogglePinnedView);
+    assert_eq!(state["tag_slot_filter"], 2);
+    assert_eq!(state["pinned_only"], true);
+    let state = call(
+        &mut api,
+        Command::RunAction {
+            id: "toggle_pinned_view".into(),
+        },
+    );
+    assert_eq!(state["tag_slot_filter"], 2);
+    assert_eq!(state["pinned_only"], false);
+    let state = call(&mut api, Command::SelectTabPosition { position: 1 });
+    assert_eq!(state["tag_slot_filter"], 2);
+    assert_eq!(state["pinned_only"], true);
+    let state = call(&mut api, Command::FilterTagSlot { slot: None });
+    assert!(state["tag_slot_filter"].is_null());
+    assert_eq!(state["pinned_only"], true);
+}
+
+#[test]
+fn tagged_search_still_finds_text_link_and_table_contents() {
+    use katran::interaction::ShelfTab;
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    for tab in [ShelfTab::Text, ShelfTab::Links, ShelfTab::Tables] {
+        call(&mut api, Command::SetTabEnabled { tab, enabled: true });
+    }
+    let needle = "HIDDENNEEDLEZXYZ";
+    let cases = [
+        (
+            ShelfTab::Text,
+            Command::IngestText {
+                text: format!("body {needle}"),
+                source: "synthetic".into(),
+            },
+        ),
+        (
+            ShelfTab::Links,
+            Command::IngestLink {
+                url: format!("https://example.com/{needle}"),
+                source: "synthetic".into(),
+            },
+        ),
+        (
+            ShelfTab::Tables,
+            Command::IngestTable {
+                rows: vec![vec![needle.into()]],
+                source: "synthetic".into(),
+            },
+        ),
+    ];
+    for (tab, command) in cases {
+        let id = call(&mut api, command)["id"].as_i64().unwrap();
+        call(&mut api, Command::TogglePins { ids: vec![id] });
+        call(
+            &mut api,
+            Command::AssignTagSlot {
+                ids: vec![id],
+                slot: Some(2),
+            },
+        );
+        call(&mut api, Command::SetTab { tab });
+        let query = || Command::BrowseShelfSorted {
+            query: needle.into(),
+            limit: 100,
+            cursor: None,
+        };
+        assert_eq!(call(&mut api, query())["events"][0]["id"], id);
+        call(&mut api, Command::FilterTagSlot { slot: Some(2) });
+        assert_eq!(call(&mut api, query())["events"][0]["id"], id);
+        call(&mut api, Command::TogglePinnedView);
+        assert_eq!(call(&mut api, query())["events"][0]["id"], id);
+    }
+}
+
+#[test]
 fn tag_filter_intersects_current_tab_and_batch_lookup_preserves_order() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();

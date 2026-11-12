@@ -335,7 +335,9 @@ impl Shelf {
                     let gap = gallery_card::GAP;
                     ui.spacing_mut().item_spacing = Vec2::splat(gap);
                     let pods = self.state["tab"] == "pods";
-                    let cell_width = if pods {
+                    let links = self.state["tab"] == "links";
+                    let compact = pods || links;
+                    let cell_width = if compact {
                         f32::from(self.pods_tile_size).min(
                             ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
                                 / columns as f32)
@@ -348,7 +350,7 @@ impl Shelf {
                     } else {
                         (ui.available_width() - 16.0).max(80.0)
                     };
-                    let height = if pods {
+                    let height = if compact {
                         cell_width
                     } else if gallery {
                         cell_width + 54.0
@@ -392,7 +394,7 @@ impl Shelf {
                                         egui::Sense::click_and_drag(),
                                     );
                                     #[cfg(test)]
-                                    if pods {
+                                    if compact {
                                         ctx.data_mut(|data| {
                                             data.insert_temp(
                                                 egui::Id::new("test-pod-tile-rect"),
@@ -423,7 +425,7 @@ impl Shelf {
                                         })
                                     {
                                         // Texture remains on the card surface, outside the image and text content.
-                                        let region = if gallery && !pods {
+                                        let region = if gallery && !compact {
                                             gallery_card::geometry(rect).name
                                         } else {
                                             egui::Rect::from_min_max(
@@ -438,6 +440,8 @@ impl Shelf {
                                     }
                                     if pods {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
+                                    } else if links {
+                                        self.link_cards.paint(ui, event, rect.shrink(6.0));
                                     } else if gallery {
                                         let zones = gallery_card::geometry(rect);
                                         if self.state["tab"] == "pods" {
@@ -635,7 +639,7 @@ impl Shelf {
                                     if cursor {
                                         paint_cursor(ui, rect);
                                     }
-                                    if pods
+                                    if compact
                                         && let Some(slot) =
                                             self.tag_material_cache.assignments.get(&id).and_then(
                                                 |n| {
@@ -862,6 +866,38 @@ mod tests {
             .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-pod-tile-rect")))
             .expect("Pods tile allocated");
         assert!(!labelled, "tile must not paint title or origin");
+        assert_eq!(tile.width(), tile.height());
+        assert!(tile.width() <= 96.0);
+    }
+    #[test]
+    fn links_tiles_are_compact_and_hide_raw_url() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"links","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
+        let event = serde_json::json!({"id":1,"kind":"link_fragment","name":"SENTINEL TITLE","text_preview":"https://example.com/SENTINEL-PATH","origin":{"source_app":"SENTINEL ORIGIN"},"source":"SENTINEL SOURCE","properties":{"pinned":false},"revision":"r1"});
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.shelf_view(ui, &ctx, std::slice::from_ref(&event), true, 9),
+        );
+        fn has_sentinel(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text().contains("SENTINEL"),
+                egui::Shape::Vec(shapes) => shapes.iter().any(has_sentinel),
+                _ => false,
+            }
+        }
+        assert!(!output.shapes.iter().any(|s| has_sentinel(&s.shape)));
+        output.textures_delta.clear();
+        let tile = ctx
+            .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-pod-tile-rect")))
+            .expect("compact Links tile allocated");
         assert_eq!(tile.width(), tile.height());
         assert!(tile.width() <= 96.0);
     }

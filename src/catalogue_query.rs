@@ -327,6 +327,12 @@ pub(crate) fn query_features(
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+fn search_predicate(app: &str, additional: &str) -> String {
+    format!(
+        "(?5='' OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE l.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR katran_contains(e.name,?5) OR katran_contains(e.source,?5) OR katran_contains({app},?5) OR katran_contains(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_domain'),'') ELSE '' END,?5) {additional})"
+    )
+}
+
 fn slice_projection(
     pinned: bool,
     tag: Option<&str>,
@@ -366,7 +372,7 @@ fn slice_projection(
       COALESCE((SELECT preview FROM text_fragments f WHERE f.event_id=e.id),(SELECT preview FROM link_fragments f WHERE f.event_id=e.id),(SELECT preview FROM table_fragments f WHERE f.event_id=e.id)) AS text_preview,
       EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AS is_table,e.modified_at_ms
       FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND e.id <= ?4 {tag_filter} {slot_filter}
-      AND (?1 OR ?2 OR ?3='' OR ?3!='') AND (?5='' OR katran_contains(e.name,?5) OR katran_contains(COALESCE(k.display_name,''),?5)) ORDER BY id DESC LIMIT ?6")
+      AND (?1 OR ?2 OR ?3='' OR ?3!='') AND {} ORDER BY id DESC LIMIT ?6", search_predicate("CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END", "OR katran_contains(COALESCE(k.display_name,''),?5)"))
 }
 
 fn projection_sql(
@@ -423,11 +429,6 @@ fn projection_sql(
 // Keep ORDER BY on the compound statement: wrapping this UNION in a SELECT
 // causes SQLite to materialize and sort the entire history before LIMIT.
 fn sql() -> String {
-    let search = |app: &str| {
-        format!(
-            "(?5='' OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE l.event_id=e.id AND katran_contains(c.content,?5)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_contains(c.content,?5)) OR katran_contains(e.name,?5) OR katran_contains(e.source,?5) OR katran_contains({app},?5) OR katran_contains(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_domain'),'') ELSE '' END,?5))"
-        )
-    };
     // Separate source branches bind all leading browse-index columns. CROSS
     // JOIN keeps projection first; an events-first plan scans ordinary history
     // just to discover that the live source has no rows.
@@ -446,7 +447,7 @@ fn sql() -> String {
           AND json_extract(e.delete_policy_json,'$.generation')=p.generation
           AND {search}
     "#,
-            search = search(&format!("'{app}'"))
+            search = search_predicate(&format!("'{app}'"), "")
         )
     };
     format!(
@@ -481,8 +482,9 @@ fn sql() -> String {
         ORDER BY id DESC LIMIT ?6
     "#,
         image = crate::file_types::sql_image_predicate(),
-        ordinary_search = search(
-            "CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END"
+        ordinary_search = search_predicate(
+            "CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END",
+            "",
         ),
         sharex = live("sharex", "ShareX folder"),
         downloads = live("downloads", "Downloads")
