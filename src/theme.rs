@@ -22,6 +22,12 @@ pub struct ThemePreferences {
     pub video_seam_smoothing: bool,
     pub scrollbar_glass: bool,
     pub scrollbar_always_visible: bool,
+    /// Opt-in extra wheel smoothing, including trackpad wheel events.
+    pub banana_scroll: bool,
+    /// Travel distance as a percentage of egui's normal wheel distance (25–300).
+    pub banana_scroll_speed: u16,
+    /// Time constant of the extra wheel smoothing, in milliseconds (50–1000).
+    pub banana_scroll_inertia_ms: u16,
     pub glass: bool,
     pub compact_header: bool,
     pub experimental_glass_tabs: bool,
@@ -46,6 +52,9 @@ impl Default for ThemePreferences {
             video_seam_smoothing: true,
             scrollbar_glass: false,
             scrollbar_always_visible: true,
+            banana_scroll: false,
+            banana_scroll_speed: 100,
+            banana_scroll_inertia_ms: 240,
             glass: false,
             compact_header: true,
             experimental_glass_tabs: false,

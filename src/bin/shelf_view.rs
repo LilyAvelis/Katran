@@ -381,7 +381,7 @@ impl Shelf {
                         visuals.widgets.hovered.fg_stroke.color = accent;
                         visuals.widgets.active.fg_stroke.color = accent;
                     }
-                    let scroll_id = ui.make_persistent_id("shelf-scroll");
+                    let scroll_id = ui.make_persistent_id(egui::IdSalt::new("shelf-scroll"));
                     let activity_id = scroll_id.with("activity");
                     let offset = egui::scroll_area::State::load(ctx, scroll_id)
                         .map_or(0.0, |state| state.offset.y);
@@ -450,6 +450,7 @@ impl Shelf {
                     let bar_shown = content_height > ui.available_height();
                     let inner_width = (full_width - if bar_shown { 22.0 } else { 0.0 }).max(1.0);
                     let (compact_layout, cell_width, height) = dimensions(inner_width);
+                    let banana = scroll_inertia_ui::begin(ui, scroll_id, &theme, self.scroll);
                     let mut area = egui::ScrollArea::vertical()
                         .id_salt("shelf-scroll")
                         .scroll_bar_visibility(visibility);
@@ -542,20 +543,7 @@ impl Shelf {
                                         })
                                     {
                                         // Texture remains on the card surface, outside the image and text content.
-                                        let region = if links {
-                                            rect
-                                        } else if gallery && !compact {
-                                            gallery_card::geometry(rect).name
-                                        } else {
-                                            egui::Rect::from_min_max(
-                                                rect.min,
-                                                egui::pos2(
-                                                    rect.right(),
-                                                    (rect.top() + 6.0).min(rect.bottom()),
-                                                ),
-                                            )
-                                        };
-                                        super::tag_material_ui::paint(ui, region, slot);
+                                        super::tag_material_ui::paint(ui, rect, slot);
                                     }
                                     if pods {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
@@ -833,6 +821,12 @@ impl Shelf {
                                     }
                                 }
                             });
+                        }
+                        if let Some(banana) = banana {
+                            banana.apply(
+                                ui,
+                                rows as f32 * height + rows.saturating_sub(1) as f32 * gap,
+                            );
                         }
                     });
                 }

@@ -626,8 +626,8 @@ impl Service {
             },
             Command::SetTab { tab } => self.select_tab(tab),
             Command::ToggleTab => { self.normalize_tabs(); self.interaction.toggle_tab(); Ok(serde_json::json!(self.interaction)) },
-            Command::BrowseShelf { query, limit, after_id } => self.browse_shelf(&query, limit, after_id),
-            Command::BrowseShelfSorted { query, limit, cursor } => self.browse_shelf_sorted(&query, limit, cursor.as_deref()),
+            Command::BrowseShelf { query, limit, after_id } => {let result=self.browse_shelf(&query, limit, after_id)?; self.interaction.browse_query=query; Ok(result)},
+            Command::BrowseShelfSorted { query, limit, cursor } => {let result=self.browse_shelf_sorted(&query, limit, cursor.as_deref())?; self.interaction.browse_query=query; Ok(result)},
             Command::SetSort { mode, reverse, seed } => {
                 let mut settings = self.settings.clone();
                 settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();
@@ -839,6 +839,23 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
             }
             Command::ClearSelection => {
                 self.interaction.clear_selection();
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::SelectAll => {
+                if self.interaction.tab == interaction::ShelfTab::All && self.work_folder.current().is_none() {
+                    self.interaction.select_all(Vec::new());
+                } else {
+                    let mut ids = Vec::new();
+                    let mut cursor: Option<String> = None;
+                    loop {
+                        let page = self.browse_shelf_sorted(&self.interaction.browse_query, 1000, cursor.as_deref())?;
+                        let events = page["events"].as_array().ok_or_else(|| ApiError::new("invalid_page", "Shelf page has no events"))?;
+                        for event in events { ids.push(event["id"].as_i64().ok_or_else(|| ApiError::new("invalid_page", "Shelf event has no ID"))?); }
+                        cursor = page["next_cursor"].as_str().map(str::to_owned);
+                        if cursor.is_none() { break; }
+                    }
+                    self.interaction.select_all(ids);
+                }
                 Ok(serde_json::json!(self.interaction))
             }
             Command::Navigate { delta, mode } => {

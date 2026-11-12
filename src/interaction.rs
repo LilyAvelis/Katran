@@ -46,6 +46,8 @@ pub struct Interaction {
     pub tab: ShelfTab,
     pub last_tab: ShelfTab,
     pub visible: Vec<i64>,
+    #[serde(skip)]
+    pub browse_query: String,
     pub cursor: Option<i64>,
     pub selected: Vec<i64>,
     pub preview: Option<i64>,
@@ -75,6 +77,7 @@ impl Interaction {
         self.tag_slot_filter = None;
         self.view_generation = self.view_generation.wrapping_add(1);
         self.visible.clear();
+        self.browse_query.clear();
         self.selected.clear();
         self.cursor = None;
         self.anchor = None;
@@ -178,6 +181,11 @@ impl Interaction {
     }
     pub fn clear_selection(&mut self) {
         self.selected.clear();
+        self.range_order = false;
+        self.anchor = self.cursor;
+    }
+    pub fn select_all(&mut self, ids: Vec<i64>) {
+        self.selected = ids;
         self.range_order = false;
         self.anchor = self.cursor;
     }

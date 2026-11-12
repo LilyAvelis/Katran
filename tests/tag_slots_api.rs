@@ -80,6 +80,43 @@ fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
 }
 
 #[test]
+fn assigning_another_slot_replaces_and_repeating_it_clears() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let id = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "retag.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "test".into(),
+        },
+    )["id"]
+        .as_i64()
+        .unwrap();
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    for (slot, expected) in [
+        (Some(1), Some(1)),
+        (Some(2), Some(2)),
+        (Some(2), None),
+        (Some(1), Some(1)),
+        (None, None),
+    ] {
+        let result = call(
+            &mut api,
+            Command::AssignTagSlot {
+                ids: vec![id],
+                slot,
+            },
+        );
+        assert_eq!(result["items"][0]["outcome"], "applied");
+        assert_eq!(
+            call(&mut api, Command::GetTagSlot { id })["slot"].as_u64(),
+            expected.map(|value| value as u64)
+        );
+    }
+}
+
+#[test]
 fn existing_tag_slots_gain_opacity_without_losing_materials() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();

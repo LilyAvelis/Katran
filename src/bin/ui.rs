@@ -24,6 +24,7 @@ mod pinned_ui;
 mod pods_ui;
 mod preview_hints;
 mod restart_ui;
+mod scroll_inertia_ui;
 mod settings_ui;
 mod shelf_view;
 mod shortcuts_ui;

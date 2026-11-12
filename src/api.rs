@@ -423,6 +423,7 @@ pub enum Command {
         mode: SelectionMode,
     },
     ClearSelection,
+    SelectAll,
     Navigate {
         delta: i32,
         #[serde(default)]

@@ -885,6 +885,17 @@ impl State {
           SettingsRow::show(ui,"Всегда показывать полосу прокрутки","Полоса остаётся видимой, когда содержимое можно прокручивать.",|ui|{
            if ui.checkbox(&mut theme.scrollbar_always_visible,"Показывать").changed(){theme_intent=Some(theme.clone());}
           });
+          SettingsRow::show(ui,"Мягкая прокрутка · эксперимент","Дополнительная инерция колесика на полке. При выключении действует обычная прокрутка egui.",|ui|{
+           if ui.checkbox(&mut theme.banana_scroll,"Включить").changed(){theme_intent=Some(theme.clone());}
+          });
+          if theme.banana_scroll {
+           SettingsRow::show(ui,"Скорость прокрутки","Длина движения от одного шага колесика.",|ui|{
+            if ui.add(egui::Slider::new(&mut theme.banana_scroll_speed,25..=300).suffix("%")).changed(){theme_intent=Some(theme.clone());}
+           });
+           SettingsRow::show(ui,"Инерция прокрутки","Время мягкого затухания после движения.",|ui|{
+            if ui.add(egui::Slider::new(&mut theme.banana_scroll_inertia_ms,50..=1000).suffix(" мс")).changed(){theme_intent=Some(theme.clone());}
+           });
+          }
          });
         } else {ui.label("Не удалось прочитать текущую тему.");}
        } else {ui.label(response["error"]["message"].as_str().unwrap_or("Не удалось загрузить темы"));}

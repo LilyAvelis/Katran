@@ -117,6 +117,17 @@ impl Shortcuts {
             value.migrate_enter_bindings();
             value.version = 1;
         }
+        // Preserve a user's existing assignment when adding a new default.
+        if !value.overrides.contains_key("select_all")
+            && value.overrides.iter().any(|(id, binding)| {
+                id != "select_all"
+                    && binding
+                        .as_deref()
+                        .is_some_and(|value| value.split(" / ").any(|part| part == "Ctrl A"))
+            })
+        {
+            value.overrides.insert("select_all".into(), None);
+        }
         Ok(value)
     }
     fn migrate_enter_bindings(&mut self) {

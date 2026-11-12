@@ -188,7 +188,18 @@ pub(crate) fn assign(
                 Some(false) => Outcome::NotPinned,
                 Some(true) => {
                     if let Some(number) = slot {
-                        tx.execute("INSERT INTO tag_slot_assignments(event_id,slot_number) VALUES(?1,?2) ON CONFLICT(event_id) DO UPDATE SET slot_number=excluded.slot_number", params![id,number])?;
+                        let current: Option<u8> = tx
+                            .query_row(
+                                "SELECT slot_number FROM tag_slot_assignments WHERE event_id=?1",
+                                [id],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+                        if current == Some(number) {
+                            tx.execute("DELETE FROM tag_slot_assignments WHERE event_id=?1", [id])?;
+                        } else {
+                            tx.execute("INSERT INTO tag_slot_assignments(event_id,slot_number) VALUES(?1,?2) ON CONFLICT(event_id) DO UPDATE SET slot_number=excluded.slot_number", params![id,number])?;
+                        }
                     } else {
                         tx.execute("DELETE FROM tag_slot_assignments WHERE event_id=?1", [id])?;
                     }

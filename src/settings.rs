@@ -101,6 +101,11 @@ impl Settings {
         if self.theme.selection_intensity > 100 {
             return Err("Интенсивность выделения: от 0 до 100".into());
         }
+        if !(25..=300).contains(&self.theme.banana_scroll_speed)
+            || !(50..=1000).contains(&self.theme.banana_scroll_inertia_ms)
+        {
+            return Err("Плавная прокрутка: скорость 25–300%, инерция 50–1000 мс".into());
+        }
         if self.theme.optical_strength > 100 {
             return Err("Сила оптического стекла: от 0 до 100".into());
         }

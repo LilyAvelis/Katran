@@ -14,6 +14,14 @@ pub struct Definition {
 }
 pub const DEFS: &[Definition] = &[
     Definition {
+        id: "select_all",
+        label: "Выделить всё",
+        default_binding: "Ctrl A",
+        rebindable: true,
+        group: "Выделение",
+        in_palette: true,
+    },
+    Definition {
         id: "use_as_video_background",
         label: "Сделать видеофоном",
         default_binding: "",
@@ -626,6 +634,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "files" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Files,
         }),
+        "select_all" => command(Command::SelectAll),
         "transfer_selection" => command(Command::TransferSelection),
         "add_to_katran" => command(Command::AddFolderFiles { ids: selected() }),
         "tables" => command(Command::SetTab {

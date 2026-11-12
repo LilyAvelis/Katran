@@ -19,6 +19,7 @@ pub fn icon(id: &str) -> Lucide {
         "cleanup" => Lucide::Trash2,
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,
         "copy" => Lucide::Copy,
+        "select_all" => Lucide::ListChecks,
         "add_to_katran" => Lucide::ClipboardPaste,
         "transfer_copy" | "transfer_selection" => Lucide::ArrowLeftRight,
         "delete" => Lucide::Trash2,

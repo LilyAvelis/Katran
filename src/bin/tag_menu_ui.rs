@@ -73,7 +73,7 @@ impl State {
             ));
         }
         rows.push((
-            format!("Снять теги · {selection_count}"),
+            format!("Снять теги · Ctrl 0 · {selection_count}"),
             Intent::Assign(None),
             has_tag,
         ));
@@ -100,17 +100,21 @@ impl State {
                         repeat: false,
                         modifiers,
                         ..
-                    } if modifiers.is_none() || *modifiers == egui::Modifiers::SHIFT => {
+                    } if modifiers.is_none()
+                        || *modifiers == egui::Modifiers::SHIFT
+                        || *modifiers == egui::Modifiers::CTRL =>
+                    {
                         match physical_key.unwrap_or(*key) {
-                            egui::Key::Num1 => Some((1, modifiers.shift)),
-                            egui::Key::Num2 => Some((2, modifiers.shift)),
-                            egui::Key::Num3 => Some((3, modifiers.shift)),
-                            egui::Key::Num4 => Some((4, modifiers.shift)),
-                            egui::Key::Num5 => Some((5, modifiers.shift)),
-                            egui::Key::Num6 => Some((6, modifiers.shift)),
-                            egui::Key::Num7 => Some((7, modifiers.shift)),
-                            egui::Key::Num8 => Some((8, modifiers.shift)),
-                            egui::Key::Num9 => Some((9, modifiers.shift)),
+                            egui::Key::Num0 if modifiers.ctrl || modifiers.shift => Some((0, true)),
+                            egui::Key::Num1 if !modifiers.ctrl => Some((1, modifiers.shift)),
+                            egui::Key::Num2 if !modifiers.ctrl => Some((2, modifiers.shift)),
+                            egui::Key::Num3 if !modifiers.ctrl => Some((3, modifiers.shift)),
+                            egui::Key::Num4 if !modifiers.ctrl => Some((4, modifiers.shift)),
+                            egui::Key::Num5 if !modifiers.ctrl => Some((5, modifiers.shift)),
+                            egui::Key::Num6 if !modifiers.ctrl => Some((6, modifiers.shift)),
+                            egui::Key::Num7 if !modifiers.ctrl => Some((7, modifiers.shift)),
+                            egui::Key::Num8 if !modifiers.ctrl => Some((8, modifiers.shift)),
+                            egui::Key::Num9 if !modifiers.ctrl => Some((9, modifiers.shift)),
                             egui::Key::Slash if modifiers.is_none() => Some((0, false)),
                             _ => None,
                         }
@@ -124,7 +128,14 @@ impl State {
             })
         };
         if let Some((number, assign)) = shortcut {
-            if number == 0 {
+            if number == 0 && assign {
+                if !has_tag {
+                    self.error = "У выбранных объектов нет тегов".into();
+                } else {
+                    self.open = false;
+                    return Some(Intent::Assign(None));
+                }
+            } else if number == 0 {
                 self.open = false;
                 return Some(Intent::Filter(None));
             }
@@ -429,6 +440,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn control_zero_clears_selected_tag() {
+        use eframe::egui::{self, Key, Modifiers};
+        let ctx = egui::Context::default();
+        let mut state = super::State::default();
+        state.start(vec![slot(1)]);
+        let mut intent = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Num0,
+                    physical_key: Some(Key::Num0),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |ui| intent = state.show(ui.ctx(), true, 1, true, "", None),
+        );
+        output.textures_delta.clear();
+        assert!(matches!(intent, Some(super::Intent::Assign(None))));
     }
 
     #[test]
