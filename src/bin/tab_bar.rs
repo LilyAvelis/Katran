@@ -160,9 +160,236 @@ pub fn show(
         .data_mut(|d| d.insert_temp(indicator_id, indicator));
     intent
 }
+
+/// Experimental presentation; the existing strip remains the exact default.
+pub fn show_with_glass(
+    ui: &mut egui::Ui,
+    order: &[ShelfTab],
+    active: &Value,
+    enabled: bool,
+    experimental_glass_tabs: bool,
+) -> Option<Command> {
+    if !experimental_glass_tabs {
+        return show(ui, order, active, enabled);
+    }
+    let mut intent = None;
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new("Folder").selected(active.as_str() == Some("folder")),
+            )
+            .clicked()
+        {
+            intent = Some(Command::SetTab { tab: ShelfTab::All });
+        }
+        ui.separator();
+        if let Some(command) = show_glass(ui, order, active, enabled) {
+            intent = Some(command);
+        }
+    });
+    intent
+}
+
+fn show_glass(
+    ui: &mut egui::Ui,
+    order: &[ShelfTab],
+    active: &Value,
+    enabled: bool,
+) -> Option<Command> {
+    let active = active.as_str().unwrap_or("");
+    let indicator_id = egui::Id::new("glass-category-strip-indicator");
+    let mut indicator = ui
+        .ctx()
+        .data(|d| d.get_temp::<Indicator>(indicator_id))
+        .unwrap_or_default();
+    let active_changed = indicator.active != active;
+    let mut intent = None;
+    // Reserve the background before the scroll area's clipped contents so the
+    // viewport remains one capsule even when the category list overflows.
+    let body_slot = ui.painter().add(egui::Shape::Noop);
+    let optics_slot = ui.painter().add(egui::Shape::Noop);
+    let rim_slot = ui.painter().add(egui::Shape::Noop);
+    let scroll = egui::ScrollArea::horizontal()
+        .id_salt("glass-category-strip-scroll")
+        .auto_shrink([true, true])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let indicator_slot = ui.painter().add(egui::Shape::Noop);
+                let mut target = None;
+                for (index, &tab) in order.iter().enumerate() {
+                    let (label, value) = match tab {
+                        ShelfTab::All => continue,
+                        ShelfTab::Images => ("Images", "images"),
+                        ShelfTab::Screenshots => ("Screenshots", "screenshots"),
+                        ShelfTab::Downloads => ("Downloads", "downloads"),
+                        ShelfTab::Text => ("Text", "text"),
+                        ShelfTab::Links => ("Links", "links"),
+                        ShelfTab::Tables => ("Tables", "tables"),
+                        ShelfTab::Pods => ("Pods", "pods"),
+                        ShelfTab::Files => ("Files", "files"),
+                    };
+                    let response = ui.add_enabled(
+                        enabled,
+                        egui::Button::new(format!("{} {label}", index + 1))
+                            .frame(false)
+                            .sense(egui::Sense::click_and_drag()),
+                    );
+                    if active == value {
+                        target = Some(response.rect);
+                        if active_changed {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                    }
+                    #[cfg(test)]
+                    if index == 0 {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("test-first-tab-rect"), response.rect)
+                        });
+                    }
+                    response.dnd_set_drag_payload(tab);
+                    if enabled
+                        && let Some(payload) = response.dnd_hover_payload::<ShelfTab>()
+                        && *payload != tab
+                    {
+                        ui.painter().rect_stroke(
+                            response.rect.shrink(1.0),
+                            response.rect.height() / 2.0,
+                            ui.visuals().selection.stroke,
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if enabled
+                        && let Some(payload) = response.dnd_release_payload::<ShelfTab>()
+                        && *payload != tab
+                    {
+                        intent = Some(Command::MoveTab {
+                            tab: *payload,
+                            index,
+                        });
+                    } else if response.clicked() {
+                        intent = Some(Command::SelectTabPosition {
+                            position: (index + 1) as u8,
+                        });
+                    }
+                }
+                let dt = ui.input(|i| i.stable_dt);
+                if indicator.update(active, target, dt, ui.style().animation_time) {
+                    ui.ctx().request_repaint();
+                }
+                if let Some(rect) = indicator.rect {
+                    let inset = rect.shrink2(egui::vec2(1.0, 2.0));
+                    ui.painter().set(
+                        indicator_slot,
+                        egui::Shape::rect_filled(
+                            inset,
+                            inset.height() / 2.0,
+                            egui::Color32::from_black_alpha(205),
+                        ),
+                    );
+                }
+            });
+        });
+    let rect = scroll.inner_rect;
+    let radius = rect.height() / 2.0;
+    let surface = crate::theme_ui::color(
+        ui.ctx(),
+        crate::theme_ui::Role::Surface,
+        egui::Color32::from_rgb(30, 30, 34),
+    );
+    ui.painter()
+        .set(body_slot, egui::Shape::rect_filled(rect, radius, surface));
+    if let Some(shape) = crate::theme_ui::optical_shape(ui.ctx(), rect, radius) {
+        ui.painter().set(optics_slot, shape);
+    }
+    let border = crate::theme_ui::color(
+        ui.ctx(),
+        crate::theme_ui::Role::Border,
+        egui::Color32::from_gray(95),
+    );
+    ui.painter().set(
+        rim_slot,
+        egui::Shape::rect_stroke(
+            rect.shrink(0.5),
+            radius,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        ),
+    );
+    #[cfg(test)]
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(egui::Id::new("test-glass-tab-body"), rect));
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(indicator_id, indicator));
+    intent
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn experimental_strip_is_opt_in_and_fits_narrow_viewports() {
+        let order = katran::tab_layout::default_order();
+        for (experimental, width) in [(false, 700.0), (true, 700.0), (true, 180.0)] {
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 100.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                show_with_glass(
+                    ui,
+                    &order,
+                    &Value::String("images".into()),
+                    true,
+                    experimental,
+                );
+            });
+            output.textures_delta.clear();
+            let body = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-glass-tab-body")));
+            assert_eq!(body.is_some(), experimental);
+            if let Some(body) = body {
+                assert!(body.is_positive());
+                assert!(body.right() <= width);
+            }
+        }
+    }
+
+    #[test]
+    fn experimental_folder_clears_indicator_and_return_starts_at_target() {
+        let ctx = egui::Context::default();
+        let order = katran::tab_layout::default_order();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(200.0, 100.0),
+            )),
+            ..Default::default()
+        };
+        let state = || {
+            ctx.data(|d| d.get_temp::<Indicator>(egui::Id::new("glass-category-strip-indicator")))
+                .unwrap()
+        };
+        let mut output = ctx.run_ui(input(), |ui| {
+            show_with_glass(ui, &order, &Value::String("images".into()), true, true);
+        });
+        output.textures_delta.clear();
+        assert!(state().rect.is_some());
+        let mut output = ctx.run_ui(input(), |ui| {
+            show_with_glass(ui, &order, &Value::String("folder".into()), true, true);
+        });
+        output.textures_delta.clear();
+        assert!(state().rect.is_none());
+        let mut output = ctx.run_ui(input(), |ui| {
+            show_with_glass(ui, &order, &Value::String("downloads".into()), true, true);
+        });
+        output.textures_delta.clear();
+        assert_eq!(state().active, "downloads");
+        assert!(state().rect.is_some());
+    }
     #[test]
     fn indicator_retargets_and_folder_breaks_the_path() {
         let rect = |x: f32, width: f32| {

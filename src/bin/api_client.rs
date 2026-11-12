@@ -402,6 +402,10 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "shelf_search" {
+            self.toggle_search_focus(ctx);
+            return;
+        }
         if id == "restart" {
             self.restart_pending = true;
             self.actions = false;

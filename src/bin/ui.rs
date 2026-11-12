@@ -221,6 +221,8 @@ struct Shelf {
     state: Value,
     query: String,
     loaded_query: String,
+    search_keyboard_only: bool,
+    experimental_glass_tabs: bool,
     actions: bool,
     action_query: String,
     action_selected: usize,
@@ -382,10 +384,23 @@ impl Shelf {
             || !self.pending_delete.is_empty()
             || self.state["settings_open"] == true
     }
+    fn toggle_search_focus(&mut self, ctx: &egui::Context) {
+        let search = egui::Id::new("shelf-search");
+        if ctx.memory(|m| m.has_focus(search)) {
+            ctx.memory_mut(|m| m.surrender_focus(search));
+        } else {
+            ctx.memory_mut(|m| m.request_focus(search));
+        }
+        self.actions = false;
+        ctx.request_repaint();
+    }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
+            self.search_keyboard_only = settings["search_keyboard_only"] == true;
+            self.experimental_glass_tabs = settings["theme"]["experimental_glass_tabs"] == true
+                && settings["theme"]["preset"] == "blue_experimental";
             if let Some(font_id) = settings["emoji_font"].as_str()
                 && self.pods_ui.font_selection() != Some(font_id)
             {
@@ -539,6 +554,21 @@ impl Shelf {
             self.shortcuts =
                 serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
             self.direct_transfer_input(&ctx);
+        }
+        let search_id = egui::Id::new("shelf-search");
+        let focused_id = ctx.memory(|m| m.focused());
+        let other_text_editing = focused_id
+            .is_some_and(|id| id != search_id && egui::TextEdit::load_state(&ctx, id).is_some());
+        if self.api.is_some() && !self.modal_owns_input() && !other_text_editing {
+            let search_binding: Vec<_> = self
+                .shortcuts
+                .iter()
+                .filter(|s| s.id == "shelf_search")
+                .cloned()
+                .collect();
+            if shortcuts_ui::take_action_with_editing(&ctx, &search_binding, false).is_some() {
+                self.toggle_search_focus(&ctx);
+            }
         }
         if self.api.is_some()
             && !self.modal_owns_input()
@@ -833,16 +863,38 @@ impl Shelf {
                         }
                     });
                 }
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.query)
-                        .id(egui::Id::new("shelf-search"))
-                        .hint_text("Поиск на полке…")
-                        .font(egui::FontId::proportional(22.0))
-                        .frame(egui::Frame::NONE)
-                        .desired_width(ui.available_width()),
-                );
-                if search.changed() {
-                    self.refresh();
+                if self.search_keyboard_only && !ctx.memory(|m| m.has_focus(search_id)) {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 31.0),
+                        egui::Sense::drag(),
+                    );
+                    ui.painter().text(
+                        rect.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        if self.query.is_empty() {
+                            "Поиск на полке…"
+                        } else {
+                            &self.query
+                        },
+                        egui::FontId::proportional(22.0),
+                        Color32::from_gray(145),
+                    );
+                    if response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    response.on_hover_text("Ctrl+T — включить поиск");
+                } else {
+                    let search = ui.add(
+                        egui::TextEdit::singleline(&mut self.query)
+                            .id(search_id)
+                            .hint_text("Поиск на полке…")
+                            .font(egui::FontId::proportional(22.0))
+                            .frame(egui::Frame::NONE)
+                            .desired_width(ui.available_width()),
+                    );
+                    if search.changed() {
+                        self.refresh();
+                    }
                 }
                 if self.api.is_some() {
                     let tabs = self.call(Command::Tabs);
@@ -880,9 +932,13 @@ impl Shelf {
                         self.tab_order = order;
                     }
                 }
-                if let Some(command) =
-                    tab_bar::show(ui, &self.tab_order, &self.state["tab"], self.api.is_some())
-                {
+                if let Some(command) = tab_bar::show_with_glass(
+                    ui,
+                    &self.tab_order,
+                    &self.state["tab"],
+                    self.api.is_some(),
+                    self.experimental_glass_tabs,
+                ) {
                     self.call(command);
                     self.state = self.call(Command::Interaction);
                     self.refresh();
@@ -1490,6 +1546,8 @@ fn main() -> eframe::Result {
         state: Value::Null,
         query: String::new(),
         loaded_query: String::new(),
+        search_keyboard_only: false,
+        experimental_glass_tabs: false,
         actions: false,
         action_query: String::new(),
         action_selected: 0,
@@ -1691,6 +1749,8 @@ mod tests {
             state: Value::Null,
             query: String::new(),
             loaded_query: String::new(),
+            search_keyboard_only: false,
+            experimental_glass_tabs: false,
             actions: false,
             action_query: String::new(),
             action_selected: 0,
@@ -2214,18 +2274,37 @@ mod tests {
         assert_eq!(actions, vec![Some("copy".into()), None]);
     }
     #[test]
-    fn legacy_ctrl_t_opens_the_shared_tag_menu() {
+    fn ctrl_t_toggles_shelf_search_focus_without_opening_tags() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
-        app.call(Command::SetTab {
-            tab: katran::interaction::ShelfTab::Images,
-        });
+        let mut settings: katran::settings::Settings =
+            serde_json::from_value(app.call(Command::GetSettings)).unwrap();
+        settings.search_keyboard_only = true;
+        app.call(Command::SetSettings { settings });
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL);
-        assert!(app.tag_menu.open);
+        assert!(ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search"))));
+        assert!(app.search_keyboard_only);
+        assert!(!app.tag_menu.open);
         assert!(!app.pinned_ui.open);
-        assert!(app.call(Command::Interaction)["tag_slot_filter"].is_null());
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::T,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        frame(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL);
+        assert!(!ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search"))));
+        assert!(!app.tag_menu.open);
     }
     #[test]
     fn folder_modal_history_and_keyboard_do_not_leak() {
@@ -2376,6 +2455,87 @@ mod tests {
         let state = app.call(Command::Interaction);
         assert_eq!(state["tab"], "images");
         assert_eq!(state["tag_slot_filter"], 1);
+        assert!(!app.tag_menu.open);
+    }
+
+    #[test]
+    fn ctrl_digit_assigns_selected_pin_and_second_slash_clears_only_tag_filter() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "tagged.png".into(),
+            bytes: vec![1],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::TogglePins { ids: vec![id] });
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(app.tag_menu.open);
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::CTRL);
+        assert_eq!(app.call(Command::GetTagSlot { id })["slot"], 1);
+        assert!(app.call(Command::Interaction)["tag_slot_filter"].is_null());
+        assert!(!app.tag_menu.open);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Num1,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        app.call(Command::TogglePinnedView);
+        let release_slash = |app: &mut Shelf| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Slash,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            output.textures_delta.clear();
+        };
+        release_slash(&mut app);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(
+            app.tag_menu.open,
+            "second open should keep the tag menu active"
+        );
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
+        let filtered = app.call(Command::Interaction);
+        assert_eq!(filtered["tag_slot_filter"], 1);
+        assert_eq!(filtered["pinned_only"], true);
+        release_slash(&mut app);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(app.tag_menu.open);
+        release_slash(&mut app);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        let cleared = app.call(Command::Interaction);
+        assert!(cleared["tag_slot_filter"].is_null());
+        assert_eq!(cleared["pinned_only"], true);
         assert!(!app.tag_menu.open);
     }
 

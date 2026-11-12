@@ -1,8 +1,9 @@
 # Katran 3.2 local preview
 
-This is an implementation checkpoint on `codex/katran-3.2`, not an accepted
-release. The installed/public version remains 3.1.1. No GitHub push, tag or
-distribution package is implied by this document.
+This checklist covers the local 3.2 preview, including the later search and
+experimental glass tab changes. It is not an accepted release. The package
+version remains 3.1.1 until the next release; no tag or distribution package
+is implied by this document.
 
 ## Manual Windows review
 
@@ -17,10 +18,11 @@ distribution package is implied by this document.
 3. Use `.` in any numbered tab to toggle its pinned-only view. Double-pressing
    the tab number still does the same. Type into a text field to check that
    punctuation stays in the editor.
-4. Pin a card, open the tag menu with `/` or the footer tag icon, and assign one
-   of nine slots. `Ctrl+T` opens that same menu. Filter by a slot and use All to
-   clear only the tag filter. Unpin the card: its assignment disappears, while
-   the slot definition remains. Re-pin does not restore the assignment.
+4. Pin a card and open the tag menu with `/` or the footer tag icon. Press a
+   digit `1`–`9` to filter by that slot, or `Ctrl+digit` to assign it to the
+   selected pinned cards. Press `/` again to clear only the tag filter; the
+   pinned-only view from `.` stays active. Unpin the card: its assignment
+   disappears, while the slot definition remains. Re-pin does not restore it.
 5. In `Ctrl+,` → Теги, edit a slot name, color and Color/Dots material. Check
    Apply/Cancel and the Standard/Blue preview. Inspect real cards in both
    themes, including a selected card and cursor. The settings preview does not
@@ -29,6 +31,14 @@ distribution package is implied by this document.
    retain one card. Copy a Text or Link card out of Katran: that publication
    should not add a card. Externally copied equal Tables retain their existing
    behavior. Test a mixed file/text Clipboard publication if available.
+7. Press `Ctrl+T` to focus the shelf search, and press it again to leave the
+   field. In `Ctrl+,` → Main, enable “Только через Ctrl+T”; then clicking the
+   search area must not focus it, while dragging that area moves the window.
+   With the option off, mouse search remains available.
+8. In `Ctrl+,` → Themes → Blue, enable “Стеклянная полоска вкладок · эксперимент”.
+   The numbered tabs form one capsule with a dark animated selection. Check
+   narrow and wide window sizes and tab drag/reorder. Disable the option to
+   restore the standard animated strip.
 
 Only synthetic files and data are used in automated checks. The owner performs
 native UI and Clipboard checks on her own desktop.

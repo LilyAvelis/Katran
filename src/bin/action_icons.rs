@@ -14,6 +14,7 @@ pub fn icon(id: &str) -> Lucide {
         "downloads" => Lucide::Download,
         "files" => Lucide::File,
         "toggle_pinned_view" => Lucide::Pin,
+        "shelf_search" => Lucide::Search,
         "tab_toggle" | "tab_previous" | "tab_next" => Lucide::ArrowLeftRight,
         "cleanup" => Lucide::Trash2,
         id if id.starts_with("tab_position_") => Lucide::PanelsTopLeft,

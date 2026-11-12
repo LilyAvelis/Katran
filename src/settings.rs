@@ -29,6 +29,7 @@ pub struct Settings {
     pub card_width: f32,
     pub default_view: View,
     pub capture_on_start: bool,
+    pub search_keyboard_only: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -63,6 +64,7 @@ impl Settings {
             card_width: 280.0,
             default_view: View::Gallery,
             capture_on_start: true,
+            search_keyboard_only: false,
         }
     }
     pub fn tab_enabled(&self, tab: crate::interaction::ShelfTab) -> bool {

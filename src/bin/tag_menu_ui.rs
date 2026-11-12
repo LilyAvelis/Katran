@@ -9,6 +9,7 @@ pub struct State {
     pub(super) query: String,
     selected: usize,
     focus: bool,
+    fresh: bool,
     scroll: bool,
     retry: Option<(Vec<i64>, Option<u8>)>,
     error: String,
@@ -25,6 +26,7 @@ impl State {
             open: true,
             slots,
             focus: false,
+            fresh: true,
             scroll: true,
             ..Default::default()
         };
@@ -40,6 +42,10 @@ impl State {
     ) -> Option<Intent> {
         if !self.open {
             return None;
+        }
+        if self.fresh {
+            ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("tag-menu-search")));
+            self.fresh = false;
         }
         let mut rows: Vec<(String, Intent, bool)> = Vec::new();
         rows.push(("Фильтр · Все".into(), Intent::Filter(None), true));
@@ -82,11 +88,11 @@ impl State {
         rows.retain(|(label, _, _)| label.to_lowercase().contains(&query));
         self.selected = self.selected.min(rows.len().saturating_sub(1));
         let search_focused = ctx.memory(|m| m.has_focus(egui::Id::new("tag-menu-search")));
-        let digit = if search_focused {
+        let shortcut = if search_focused {
             None
         } else {
             ctx.input_mut(|input| {
-                let digit = input.events.iter().find_map(|event| match event {
+                let shortcut = input.events.iter().find_map(|event| match event {
                     egui::Event::Key {
                         key,
                         physical_key,
@@ -94,31 +100,46 @@ impl State {
                         repeat: false,
                         modifiers,
                         ..
-                    } if modifiers.is_none() => match physical_key.unwrap_or(*key) {
-                        egui::Key::Num1 => Some(1),
-                        egui::Key::Num2 => Some(2),
-                        egui::Key::Num3 => Some(3),
-                        egui::Key::Num4 => Some(4),
-                        egui::Key::Num5 => Some(5),
-                        egui::Key::Num6 => Some(6),
-                        egui::Key::Num7 => Some(7),
-                        egui::Key::Num8 => Some(8),
-                        egui::Key::Num9 => Some(9),
-                        _ => None,
-                    },
+                    } if modifiers.is_none() || *modifiers == egui::Modifiers::CTRL => {
+                        match physical_key.unwrap_or(*key) {
+                            egui::Key::Num1 => Some((1, modifiers.ctrl)),
+                            egui::Key::Num2 => Some((2, modifiers.ctrl)),
+                            egui::Key::Num3 => Some((3, modifiers.ctrl)),
+                            egui::Key::Num4 => Some((4, modifiers.ctrl)),
+                            egui::Key::Num5 => Some((5, modifiers.ctrl)),
+                            egui::Key::Num6 => Some((6, modifiers.ctrl)),
+                            egui::Key::Num7 => Some((7, modifiers.ctrl)),
+                            egui::Key::Num8 => Some((8, modifiers.ctrl)),
+                            egui::Key::Num9 => Some((9, modifiers.ctrl)),
+                            egui::Key::Slash if modifiers.is_none() => Some((0, false)),
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 });
-                if digit.is_some() {
+                if shortcut.is_some() {
                     super::shortcuts_ui::discard(input);
                 }
-                digit
+                shortcut
             })
         };
-        if let Some(number) = digit
-            && self.slots.iter().any(|slot| slot.number == number)
-        {
-            self.open = false;
-            return Some(Intent::Filter(Some(number)));
+        if let Some((number, assign)) = shortcut {
+            if number == 0 {
+                self.open = false;
+                return Some(Intent::Filter(None));
+            }
+            if self.slots.iter().any(|slot| slot.number == number) {
+                if assign && !eligible {
+                    self.error = "Для назначения выделите только закреплённые объекты".into();
+                } else {
+                    self.open = false;
+                    return Some(if assign {
+                        Intent::Assign(Some(number))
+                    } else {
+                        Intent::Filter(Some(number))
+                    });
+                }
+            }
         }
         let before = self.selected;
         let enter = ctx.input_mut(|i| {
@@ -166,13 +187,19 @@ impl State {
                     .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
                     .show(ui, |ui| {
                         for (index, (label, intent, enabled)) in rows.iter().enumerate() {
+                            let shortcut_label = match intent {
+                                Intent::Filter(None) => "/".to_owned(),
+                                Intent::Filter(Some(number)) => number.to_string(),
+                                Intent::Assign(Some(number)) => format!("Ctrl+{number}"),
+                                _ => String::new(),
+                            };
                             let response = ui
                                 .add_enabled_ui(*enabled, |ui| {
                                     super::action_row::ActionRow::new(
                                         super::action_row::ActionPresentation {
                                             label,
                                             icon: egui_lucide::Lucide::Tag,
-                                            primary_shortcut: "",
+                                            primary_shortcut: &shortcut_label,
                                             full_shortcut_tooltip: "",
                                         },
                                     )

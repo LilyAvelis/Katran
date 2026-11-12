@@ -67,8 +67,6 @@ impl Shelf {
             } else {
                 self.pinned_ui.error = self.message.clone();
             }
-        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::T)) {
-            self.open_tag_menu();
         }
     }
     fn pinned_accept_apps(&mut self, result: &Value) {

@@ -4,6 +4,25 @@ use katran::{
 };
 use serde_json::Value;
 #[test]
+fn experimental_glass_tabs_are_opt_in_and_persist() {
+    let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
+    assert!(!legacy.experimental_glass_tabs);
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    let theme = ThemePreferences {
+        preset: Preset::BlueExperimental,
+        experimental_glass_tabs: true,
+        ..Default::default()
+    };
+    call(&mut api, Command::SetTheme { theme });
+    drop(api);
+    let mut api = Service::open(root.path(), 10_000).unwrap();
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["experimental_glass_tabs"],
+        true
+    );
+}
+#[test]
 fn video_seam_smoothing_defaults_on_and_persists_independently() {
     let legacy: ThemePreferences = serde_json::from_str("{}").unwrap();
     assert!(legacy.video_seam_smoothing);

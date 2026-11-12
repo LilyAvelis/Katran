@@ -29,6 +29,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         card_width: 280.0,
         default_view: View::List,
         capture_on_start: false,
+        search_keyboard_only: true,
         sharex_folder: None,
         downloads_folder: None,
         downloads_enabled: true,
@@ -51,6 +52,10 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         call(&mut api, Command::Interaction)["result"]["view"],
         "list"
     );
+    assert_eq!(
+        call(&mut api, Command::GetSettings)["result"]["search_keyboard_only"],
+        true
+    );
     call(
         &mut api,
         Command::IngestBytes {
@@ -71,6 +76,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
 #[test]
 fn capture_defaults_on_and_explicit_pause_preference_survives() {
     assert!(Settings::default().capture_on_start);
+    assert!(!Settings::default().search_keyboard_only);
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100).unwrap();
     assert_eq!(

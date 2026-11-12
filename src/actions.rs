@@ -518,6 +518,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "shelf_search",
+        label: "Поиск на полке",
+        default_binding: "Ctrl T",
+        rebindable: true,
+        group: "Вид",
+        in_palette: true,
+    },
+    Definition {
         id: "all",
         label: "Таб: Folder",
         default_binding: "",
@@ -614,6 +622,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
     }
     Some(match id {
         "toggle_pinned_view" => command(Command::TogglePinnedView),
+        "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
         "files" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Files,
         }),

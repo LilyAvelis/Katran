@@ -679,6 +679,7 @@ impl State {
          });
          SettingsRow::show(ui,"Захват при запуске","По умолчанию включён. Текущий захват переключается через Actions.",|ui|{ui.checkbox(&mut draft.capture_on_start,"Включать");});
          SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
+         SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
          SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});
@@ -767,6 +768,9 @@ impl State {
            });
            SettingsRow::show(ui,"Стекло · эксперимент","Windows 11 Acrylic. После включения полностью выйдите через трей и запустите Katran снова. При недоступности — сплошной фон.",|ui|{
             if ui.checkbox(&mut theme.glass,"Включить").changed(){theme_intent=Some(theme.clone());}
+           });
+           SettingsRow::show(ui,"Стеклянная полоска вкладок · эксперимент","Цельная капсула с анимированным выбором. Базовая полоска остаётся доступной; оптика зависит от настроек стекла и может потребовать больше ресурсов.",|ui|{
+            if ui.checkbox(&mut theme.experimental_glass_tabs,"Включить").changed(){theme_intent=Some(theme.clone());}
            });
            if optical_settings(ui,&mut theme){theme_intent=Some(theme.clone());}
            SettingsRow::show(ui,"Фон","Лилии от дизайнера. Изображение загружается один раз.",|ui|{

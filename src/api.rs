@@ -18,6 +18,9 @@ pub struct Request {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+// Keep Settings by value in the public command contract; boxing it would
+// change every dispatcher client just to reduce this enum's stack size.
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     MediaRuntimeStatus,
     EnsureMediaRuntime,
