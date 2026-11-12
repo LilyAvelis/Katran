@@ -19,6 +19,9 @@ mod drag_session;
 pub mod everything;
 pub mod file_types;
 pub mod file_visual;
+mod files_pointer;
+mod files_service;
+mod files_store;
 mod folder_commit;
 mod folder_delete;
 mod folder_import;
@@ -51,6 +54,8 @@ pub mod tab_service;
 pub mod table_clipboard;
 pub mod table_fragments;
 mod table_service;
+mod tag_service;
+pub mod tag_slots;
 pub mod text_fragments;
 mod text_service;
 mod transfer_service;
@@ -466,6 +471,7 @@ impl Service {
             Command::PasteFilesToFolder {paths} => self.paste_files_to_folder(paths),
             Command::PasteClipboardToFolder => self.paste_clipboard_to_folder(),
             Command::AddFolderFiles {ids} => self.import_from_folder(ids),
+            Command::AddFiles {paths} => self.add_files(paths),
             Command::ChooseFolder { path } => self.choose_folder(path),
             Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
             Command::SearchFolders {query,limit} => everything::search_folders(&query,limit as usize).map(|v|serde_json::json!(v)).map_err(|e|ApiError::new(&e.code,e.message)),
@@ -491,6 +497,12 @@ impl Service {
                 self.interaction.reset_context();self.interaction.pinned_only=true;self.interaction.tag_filter=next;
                 Ok(serde_json::json!(self.interaction))
             },
+            Command::ListTagSlots => self.list_tag_slots(),
+            Command::SaveTagSlot {slot} => self.save_tag_slot(slot),
+            Command::AssignTagSlot {ids,slot} => self.assign_tag_slot(ids,slot),
+            Command::GetTagSlot {id} => self.get_tag_slot(id),
+            Command::GetTagSlots {ids} => self.get_tag_slots(ids),
+            Command::FilterTagSlot {slot} => self.filter_tag_slot(slot),
             Command::GetUpdateStatus => Ok(self.update_status.clone()),
             Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
             Command::InstallUpdate => {
@@ -569,6 +581,13 @@ impl Service {
             Command::SelectTabPosition { position } => {
                 let tab = tab_layout::tab_at_visible(&self.settings.visible_tabs(),position)?;
                 self.interaction.select_position(tab);
+                Ok(serde_json::json!(self.interaction))
+            },
+            Command::TogglePinnedView => {
+                if self.interaction.tab == interaction::ShelfTab::All {
+                    return Err(ApiError::new("folder_has_no_pins", "Folder has no pinned view"));
+                }
+                self.interaction.select_position(self.interaction.tab);
                 Ok(serde_json::json!(self.interaction))
             },
             Command::NavigateTab { delta } => self.navigate_tab(delta),
@@ -765,7 +784,7 @@ if let Some(expected)=event.revision.strip_prefix("ref:") && preview::content_ha
                 if self.settings.sharex_folder != settings.sharex_folder { self.sharex_scanner = Default::default(); }
                 if self.settings.downloads_folder != settings.downloads_folder || self.settings.downloads_enabled != settings.downloads_enabled { self.downloads_scanner = Default::default(); }
                 let sources_changed=self.settings.sharex_folder!=settings.sharex_folder || self.settings.downloads_enabled!=settings.downloads_enabled || self.settings.downloads_folder!=settings.downloads_folder || self.settings.hidden_tabs!=settings.hidden_tabs;
-                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) || self.settings.tab_enabled(interaction::ShelfTab::Pods)!=settings.tab_enabled(interaction::ShelfTab::Pods) {self.capture_events.cancel();}
+                if self.settings.tab_enabled(interaction::ShelfTab::Images)!=settings.tab_enabled(interaction::ShelfTab::Images) || self.settings.tab_enabled(interaction::ShelfTab::Text)!=settings.tab_enabled(interaction::ShelfTab::Text) || self.settings.tab_enabled(interaction::ShelfTab::Links)!=settings.tab_enabled(interaction::ShelfTab::Links) || self.settings.tab_enabled(interaction::ShelfTab::Tables)!=settings.tab_enabled(interaction::ShelfTab::Tables) || self.settings.tab_enabled(interaction::ShelfTab::Pods)!=settings.tab_enabled(interaction::ShelfTab::Pods) || self.settings.tab_enabled(interaction::ShelfTab::Files)!=settings.tab_enabled(interaction::ShelfTab::Files) {self.capture_events.cancel();}
                 self.quota = settings.quota_bytes;
                 self.settings = settings;
                 self.interaction.sort = self.settings.sort.normalized();

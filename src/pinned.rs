@@ -119,6 +119,9 @@ pub fn toggle_pins(db: &Connection, ids: &[i64]) -> Result<Vec<ItemResult>> {
     for (id, exists) in states {
         if exists {
             tx.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,?2) ON CONFLICT(event_id) DO UPDATE SET pinned=excluded.pinned", params![id, any_unpinned])?;
+            if !any_unpinned {
+                tx.execute("DELETE FROM katran_tags WHERE event_id=?1", [id])?;
+            }
             result.push(ItemResult {
                 id,
                 pinned: Some(any_unpinned),
@@ -135,6 +138,7 @@ pub fn toggle_pins(db: &Connection, ids: &[i64]) -> Result<Vec<ItemResult>> {
             });
         }
     }
+    crate::tag_slots::clear_after_unpin(&tx, &ids)?;
     tx.commit()?;
     Ok(result)
 }
@@ -341,6 +345,7 @@ mod tests {
             INSERT INTO events VALUES(1),(2);
             CREATE TABLE katran_properties(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE, pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN(0,1)), display_name TEXT, opener_path TEXT);
             CREATE TABLE katran_tags(event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, tag_key TEXT NOT NULL, tag_display TEXT NOT NULL, PRIMARY KEY(event_id,tag_key));
+            CREATE TABLE tag_slot_assignments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL);
             CREATE INDEX katran_tags_lookup ON katran_tags(tag_key,event_id);
             CREATE INDEX katran_properties_pinned ON katran_properties(pinned,event_id);
             CREATE TABLE folder_history(path_key TEXT PRIMARY KEY, path TEXT NOT NULL, opened_at_ms INTEGER NOT NULL);
@@ -387,7 +392,7 @@ mod tests {
         assert!(!p.pinned);
         assert_eq!(p.display_name.as_deref(), Some("Name"));
         assert_eq!(p.opener, Some(PathBuf::from("app.exe")));
-        assert_eq!(tags(&db, 1).unwrap(), assigned);
+        assert!(tags(&db, 1).unwrap().is_empty());
         db.execute("DELETE FROM events WHERE id=1", []).unwrap();
         let remaining: i64 = db
             .query_row("SELECT count(*) FROM katran_tags", [], |r| r.get(0))

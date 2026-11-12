@@ -191,6 +191,8 @@ impl Service {
                             .tab_enabled(crate::interaction::ShelfTab::Tables),
                         self.settings
                             .tab_enabled(crate::interaction::ShelfTab::Pods),
+                        self.settings
+                            .tab_enabled(crate::interaction::ShelfTab::Files),
                     ),
                     &self.owned_table_tokens.iter().cloned().collect::<Vec<_>>(),
                 );
@@ -369,7 +371,11 @@ mod asynchronous_tests {
         let snapshot = CaptureSnapshot {
             sequence: 42,
             payload: CapturePayload::PreparedFiles {
-                items: vec![(path.clone(), Ok(good)), (missing, bad)],
+                origin: Origin::default(),
+                items: vec![
+                    (path.clone(), crate::capture::PreparedFile::Image(Ok(good))),
+                    (missing, crate::capture::PreparedFile::Image(bad)),
+                ],
             },
         };
         let result = service

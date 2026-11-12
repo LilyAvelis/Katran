@@ -16,6 +16,12 @@ pub(crate) enum CapturePayload {
     OwnTable {
         token: String,
     },
+    OwnText {
+        token: String,
+    },
+    OwnFile {
+        token: String,
+    },
     Retry,
     ExcludedSharex,
     Unsupported,
@@ -24,7 +30,8 @@ pub(crate) enum CapturePayload {
         paths: Vec<PathBuf>,
     },
     PreparedFiles {
-        items: Vec<(PathBuf, Result<crate::jobs_service::PreparedReference>)>,
+        origin: Origin,
+        items: Vec<(PathBuf, PreparedFile)>,
     },
     PreparedImage(crate::storage::PreparedBlob),
     PreparedText(crate::storage::PreparedBlob),
@@ -45,10 +52,26 @@ pub(crate) enum CapturePayload {
         content_hash: String,
     },
 }
+pub(crate) enum PreparedFile {
+    Image(Result<crate::jobs_service::PreparedReference>),
+    File(Result<crate::files_pointer::Pointer>),
+}
 fn owned_table_payload(token: Option<String>, owned: &[String]) -> Option<CapturePayload> {
     token
         .filter(|token| owned.contains(token))
         .map(|token| CapturePayload::OwnTable { token })
+}
+#[cfg(any(windows, test))]
+fn owned_text_payload(token: Option<String>) -> Option<CapturePayload> {
+    token
+        .filter(|token| crate::text_fragments::owns_clipboard_token(token))
+        .map(|token| CapturePayload::OwnText { token })
+}
+#[cfg(any(windows, test))]
+fn owned_file_payload(token: Option<String>) -> Option<CapturePayload> {
+    token
+        .filter(|token| crate::copy_out::owns_file_token(token))
+        .map(|token| CapturePayload::OwnFile { token })
 }
 pub(crate) fn sequence_number() -> u32 {
     #[cfg(windows)]
@@ -86,7 +109,13 @@ pub(crate) fn prepare_snapshot(
         if sequence_number() != sequence {
             return Ok(snapshot(CapturePayload::Retry));
         }
-        if let Some(payload) = owned_table_payload(token, owned_table_tokens) {
+        if let Some(payload) = owned_table_payload(token.clone(), owned_table_tokens) {
+            return Ok(snapshot(payload));
+        }
+        if let Some(payload) = owned_text_payload(token.clone()) {
+            return Ok(snapshot(payload));
+        }
+        if let Some(payload) = owned_file_payload(token) {
             return Ok(snapshot(payload));
         }
         let files: std::result::Result<Vec<PathBuf>, _> =
@@ -351,10 +380,11 @@ pub(crate) fn prepare_snapshot_for_ingest(
     root: &std::path::Path,
     quota: u64,
     references: &[PathBuf],
-    features: (bool, bool, bool, bool, bool),
+    features: (bool, bool, bool, bool, bool, bool),
     owned_table_tokens: &[String],
 ) -> Result<CaptureSnapshot> {
-    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled) = features;
+    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled, files_enabled) =
+        features;
     prepare_owned_snapshot_features(
         prepare_snapshot(
             last_sequence,
@@ -374,6 +404,7 @@ pub(crate) fn prepare_snapshot_for_ingest(
             links_enabled,
             tables_enabled,
             pods_enabled,
+            files_enabled,
         ),
     )
 }
@@ -382,9 +413,10 @@ fn prepare_owned_snapshot_features(
     root: &std::path::Path,
     quota: u64,
     references: &[PathBuf],
-    features: (bool, bool, bool, bool, bool),
+    features: (bool, bool, bool, bool, bool, bool),
 ) -> Result<CaptureSnapshot> {
-    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled) = features;
+    let (images_enabled, text_enabled, links_enabled, tables_enabled, pods_enabled, files_enabled) =
+        features;
     snapshot.payload = match snapshot.payload {
         CapturePayload::HtmlTable { origin, html } => {
             if tables_enabled {
@@ -405,17 +437,42 @@ fn prepare_owned_snapshot_features(
         CapturePayload::Files { origin, paths } => {
             let items = paths
                 .into_iter()
-                .filter(|path| images_enabled || !crate::file_types::is_native_image(path))
-                .map(|path| {
-                    let prepared = crate::jobs_service::prepare_reference(
-                        path.clone(),
-                        "clipboard_file".into(),
-                        origin.clone(),
-                    );
+                .filter(|path| {
+                    if crate::file_types::is_native_image(path) {
+                        images_enabled
+                    } else {
+                        files_enabled
+                    }
+                })
+                .enumerate()
+                .map(|(index, path)| {
+                    let too_many = || {
+                        ApiError::new(
+                            "invalid_argument",
+                            "Clipboard file batch exceeds 1000 items",
+                        )
+                    };
+                    let prepared = if crate::file_types::is_native_image(&path) {
+                        PreparedFile::Image(if index >= 1000 {
+                            Err(too_many())
+                        } else {
+                            crate::jobs_service::prepare_reference(
+                                path.clone(),
+                                "clipboard_file".into(),
+                                origin.clone(),
+                            )
+                        })
+                    } else {
+                        PreparedFile::File(if index >= 1000 {
+                            Err(too_many())
+                        } else {
+                            crate::files_pointer::prepare_pointer(&path).map_err(ApiError::from)
+                        })
+                    };
                     (path, prepared)
                 })
                 .collect();
-            CapturePayload::PreparedFiles { items }
+            CapturePayload::PreparedFiles { origin, items }
         }
         CapturePayload::Text { origin, text }
             if crate::link_fragments::recognize(&text).is_some() =>
@@ -493,6 +550,8 @@ impl Service {
                     .tab_enabled(crate::interaction::ShelfTab::Tables),
                 self.settings
                     .tab_enabled(crate::interaction::ShelfTab::Pods),
+                self.settings
+                    .tab_enabled(crate::interaction::ShelfTab::Files),
             ),
             &self.owned_table_tokens.iter().cloned().collect::<Vec<_>>(),
         )?;
@@ -518,23 +577,52 @@ impl Service {
                 }
                 json!({"captured":0,"state":"own_publication"})
             }
+            CapturePayload::OwnText { token } => {
+                #[cfg(any(windows, test))]
+                if crate::text_fragments::owns_clipboard_token(&token) {
+                    self.clipboard_sequence = sequence;
+                    return Ok(json!({"captured":0,"state":"own_publication"}));
+                }
+                let _ = token;
+                return Ok(json!({"captured":0,"state":"retry"}));
+            }
+            CapturePayload::OwnFile { token } => {
+                #[cfg(any(windows, test))]
+                if crate::copy_out::owns_file_token(&token) {
+                    self.clipboard_sequence = sequence;
+                    return Ok(json!({"captured":0,"state":"own_publication"}));
+                }
+                let _ = token;
+                return Ok(json!({"captured":0,"state":"retry"}));
+            }
             CapturePayload::Retry => return Ok(json!({"captured":0,"state":"retry"})),
             CapturePayload::ExcludedSharex => {
                 json!({"captured":0,"state":"excluded_sharex_folder_source"})
             }
             CapturePayload::Unsupported => json!({"captured":0,"state":"unsupported_format"}),
-            CapturePayload::PreparedFiles { items } => {
+            CapturePayload::PreparedFiles { origin, items } => {
                 let mut results = Vec::new();
                 for (path, prepared) in items {
-                    if !self
-                        .settings
-                        .tab_enabled(crate::interaction::ShelfTab::Images)
-                        && crate::file_types::is_native_image(&path)
-                    {
-                        continue;
-                    }
-                    let result =
-                        prepared.and_then(|prepared| self.commit_prepared_reference(prepared));
+                    let result = match prepared {
+                        PreparedFile::Image(prepared) => {
+                            if !self
+                                .settings
+                                .tab_enabled(crate::interaction::ShelfTab::Images)
+                            {
+                                continue;
+                            }
+                            prepared.and_then(|value| self.commit_prepared_reference(value))
+                        }
+                        PreparedFile::File(prepared) => {
+                            if !self
+                                .settings
+                                .tab_enabled(crate::interaction::ShelfTab::Files)
+                            {
+                                continue;
+                            }
+                            prepared.and_then(|value| self.commit_file(value, &origin))
+                        }
+                    };
                     results.push(match result {
                         Ok(event) => json!({"ok":true,"path":path,"event":event}),
                         Err(error) => json!({"ok":false,"path":path,"error":error}),
@@ -623,6 +711,126 @@ impl Service {
     }
 }
 #[cfg(test)]
+mod files_routing_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_clipboard_paths_use_images_and_files_with_commit_fences() {
+        let data = tempfile::tempdir().unwrap();
+        let input = tempfile::tempdir().unwrap();
+        let image = input.path().join("image.png");
+        let file = input.path().join("document.bin");
+        let missing = input.path().join("missing.bin");
+        std::fs::write(&image, b"synthetic image reference").unwrap();
+        std::fs::write(&file, b"synthetic file reference").unwrap();
+        let mut service = Service::open(data.path(), 4096).unwrap();
+        service.capture_enabled = true;
+        let prepare = |files_enabled| {
+            prepare_owned_snapshot_features(
+                CaptureSnapshot {
+                    sequence: 42,
+                    payload: CapturePayload::Files {
+                        origin: Origin::default(),
+                        paths: vec![image.clone(), file.clone(), missing.clone()],
+                    },
+                },
+                &service.root,
+                service.quota,
+                &[],
+                (true, false, false, false, false, files_enabled),
+            )
+            .unwrap()
+        };
+        let disabled = prepare(false);
+        let snapshot = prepare(true);
+        let stale = prepare(true);
+        let result = service.commit_capture_snapshot(stale, 43).unwrap();
+        assert_eq!(result["state"], "retry");
+        let result = service.commit_capture_snapshot(snapshot, 42).unwrap();
+        assert_eq!(result["captured"], 2, "{result}");
+        assert_eq!(result["items"][0]["event"]["source"], "clipboard_file");
+        assert_eq!(result["items"][1]["event"]["source"], "files");
+        assert_eq!(result["items"][2]["ok"], false);
+        let repeated = prepare_owned_snapshot_features(
+            CaptureSnapshot {
+                sequence: 43,
+                payload: CapturePayload::Files {
+                    origin: Origin::default(),
+                    paths: vec![file.clone()],
+                },
+            },
+            &service.root,
+            service.quota,
+            &[],
+            (true, false, false, false, false, true),
+        )
+        .unwrap();
+        let again = service.commit_capture_snapshot(repeated, 43).unwrap();
+        assert_eq!(
+            again["items"][0]["event"]["id"],
+            result["items"][1]["event"]["id"]
+        );
+        let CapturePayload::PreparedFiles { items, .. } = disabled.payload else {
+            panic!("expected files")
+        };
+        assert_eq!(items.len(), 1);
+        let delayed = prepare_owned_snapshot_features(
+            CaptureSnapshot {
+                sequence: 44,
+                payload: CapturePayload::Files {
+                    origin: Origin::default(),
+                    paths: vec![file.clone()],
+                },
+            },
+            &service.root,
+            service.quota,
+            &[],
+            (true, false, false, false, false, true),
+        )
+        .unwrap();
+        service
+            .settings
+            .hidden_tabs
+            .push(crate::interaction::ShelfTab::Files);
+        assert_eq!(
+            service.commit_capture_snapshot(delayed, 44).unwrap()["captured"],
+            0
+        );
+        assert_eq!(std::fs::read(file).unwrap(), b"synthetic file reference");
+    }
+
+    #[test]
+    fn own_file_marker_suppresses_later_sequences_only_if_known() {
+        let data = tempfile::tempdir().unwrap();
+        let mut service = Service::open(data.path(), 4096).unwrap();
+        service.capture_enabled = true;
+        let token = "cb9e6b67ddf24e259af52e7be5f802b1";
+        crate::copy_out::remember_file_token_for_test(token);
+        for sequence in [41, 42, 49] {
+            let payload = owned_file_payload(Some(token.into())).unwrap();
+            let result = service
+                .commit_capture_snapshot(CaptureSnapshot { sequence, payload }, sequence)
+                .unwrap();
+            assert_eq!(result["state"], "own_publication");
+        }
+        assert!(owned_file_payload(None).is_none());
+        assert!(owned_file_payload(Some("00000000000000000000000000000000".into())).is_none());
+        let result = service
+            .commit_capture_snapshot(
+                CaptureSnapshot {
+                    sequence: 50,
+                    payload: CapturePayload::OwnFile {
+                        token: "unknown".into(),
+                    },
+                },
+                50,
+            )
+            .unwrap();
+        assert_eq!(result["state"], "retry");
+    }
+}
+
+#[cfg(test)]
 fn prepare_owned_snapshot(
     snapshot: CaptureSnapshot,
     root: &std::path::Path,
@@ -637,13 +845,98 @@ fn prepare_owned_snapshot(
         root,
         quota,
         references,
-        (images, text, links, false, false),
+        (images, text, links, false, false, true),
     )
 }
 
 #[cfg(test)]
 mod text_tests {
     use super::*;
+    struct TextSink;
+    impl crate::text_fragments::ClipboardSink for TextSink {
+        fn write(&self, _: &str) -> Result<u32> {
+            Ok(40)
+        }
+    }
+    #[test]
+    fn own_text_and_links_marker_suppresses_only_owned_publications() {
+        for (value, link) in [
+            ("a synthetic fragment", false),
+            ("https://example.test/a", true),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut api = Service::open(root.path(), 10000).unwrap();
+            api.capture_enabled = true;
+            api.settings.text_enabled = true;
+            api.settings.links_enabled = true;
+            api.set_text_clipboard_sink(Box::new(TextSink));
+            let event = api
+                .dispatch(if link {
+                    crate::Command::IngestLink {
+                        url: value.into(),
+                        source: "test".into(),
+                    }
+                } else {
+                    crate::Command::IngestText {
+                        text: value.into(),
+                        source: "test".into(),
+                    }
+                })
+                .unwrap();
+            let id = event["id"].as_i64().unwrap();
+            let item = crate::SelectionRef {
+                id,
+                revision: event["revision"].as_str().unwrap().into(),
+            };
+            api.dispatch(crate::Command::CopySmart { items: vec![item] })
+                .unwrap();
+            assert_eq!(api.clipboard_sequence, 40);
+            let token = if link {
+                "000000000000000000000000000000a2"
+            } else {
+                "000000000000000000000000000000a1"
+            };
+            crate::text_fragments::remember_clipboard_token_for_test(token);
+            let payload = owned_text_payload(Some(token.into())).unwrap();
+            let result = api
+                .commit_capture_snapshot(
+                    CaptureSnapshot {
+                        sequence: 41,
+                        payload,
+                    },
+                    41,
+                )
+                .unwrap();
+            assert_eq!(result["state"], "own_publication");
+            assert_eq!(result["captured"], 0);
+            for marker in [None, Some("000000000000000000000000000000ff".into())] {
+                assert!(owned_text_payload(marker).is_none());
+                let snapshot = prepare_owned_snapshot_features(
+                    CaptureSnapshot {
+                        sequence: 42,
+                        payload: CapturePayload::Text {
+                            origin: Origin::default(),
+                            text: value.into(),
+                        },
+                    },
+                    &api.root,
+                    api.quota,
+                    &[],
+                    (false, true, true, false, false, true),
+                )
+                .unwrap();
+                let result = api.commit_capture_snapshot(snapshot, 42).unwrap();
+                assert_eq!(result["captured"], 1);
+                assert_eq!(result["event"]["id"], id);
+            }
+            assert_eq!(
+                api.db
+                    .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+    }
     #[test]
     fn pods_capture_is_independent_of_text_and_never_leaks_when_disabled() {
         let temp = tempfile::tempdir().unwrap();
@@ -663,7 +956,7 @@ mod text_tests {
                 &root,
                 4096,
                 &[],
-                (true, true, false, false, pods),
+                (true, true, false, false, pods, true),
             )
             .unwrap()
         };
@@ -835,7 +1128,7 @@ mod table_capture_tests {
                 &prepared_root,
                 10000,
                 &[],
-                (true, true, true, enabled, false),
+                (true, true, true, enabled, false, true),
             )
         };
         assert_eq!(
@@ -873,7 +1166,7 @@ mod table_capture_tests {
             &prepared_root,
             10000,
             &[],
-            (true, true, true, true, false),
+            (true, true, true, true, false, true),
         );
         assert!(matches!(invalid,Err(e)if e.code=="unsupported_table"));
         let ordinary = prepare_owned_snapshot_features(
@@ -887,7 +1180,7 @@ mod table_capture_tests {
             &prepared_root,
             10000,
             &[],
-            (true, true, true, true, false),
+            (true, true, true, true, false, true),
         )
         .unwrap();
         assert_eq!(
@@ -986,7 +1279,7 @@ mod table_capture_tests {
                     &api.root,
                     10000,
                     &[],
-                    (true, true, true, true, false),
+                    (true, true, true, true, false, true),
                 )
                 .unwrap();
                 let result = api.commit_capture_snapshot(snapshot, sequence).unwrap();

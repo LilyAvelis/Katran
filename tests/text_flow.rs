@@ -148,7 +148,7 @@ fn feature_visibility_search_and_file_transfer_share_the_domain() {
     );
     assert_eq!(
         call(&mut api, Command::Tabs)["visible_tabs"],
-        json!(["images", "screenshots", "downloads", "text"])
+        json!(["images", "screenshots", "downloads", "text", "files"])
     );
 }
 
@@ -208,13 +208,14 @@ fn legacy_saved_tab_order_appends_disabled_text_and_shared_content_is_reclaimed(
             "text",
             "links",
             "tables",
-            "pods"
+            "pods",
+            "files"
         ])
     );
     assert_eq!(settings["links_enabled"], false);
     assert_eq!(
         call(&mut api, Command::Tabs)["visible_tabs"],
-        json!(["downloads", "images", "screenshots"])
+        json!(["downloads", "images", "screenshots", "files"])
     );
 }
 

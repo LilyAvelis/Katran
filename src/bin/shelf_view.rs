@@ -6,24 +6,30 @@ enum PreviewDrag {
     Export,
 }
 
-fn card_outline(ctx: &egui::Context, selected: bool, cursor: bool) -> Option<egui::Stroke> {
-    if selected {
-        Some(egui::Stroke::new(
-            if cursor { 3.0 } else { 2.0 },
+pub(super) fn card_outline(ctx: &egui::Context, selected: bool) -> Option<egui::Stroke> {
+    selected.then(|| {
+        egui::Stroke::new(
+            2.0,
             theme_ui::color(
                 ctx,
                 theme_ui::Role::SelectionOutline,
                 Color32::from_gray(180),
             ),
-        ))
-    } else if cursor {
-        Some(egui::Stroke::new(
-            1.5,
-            theme_ui::color(ctx, theme_ui::Role::Accent, Color32::from_gray(180)),
-        ))
-    } else {
-        None
-    }
+        )
+    })
+}
+
+pub(super) fn paint_cursor(ui: &egui::Ui, rect: egui::Rect) {
+    let tip = rect.right_bottom() - egui::vec2(5.0, 5.0);
+    let color = theme_ui::color(ui.ctx(), theme_ui::Role::Accent, Color32::from_gray(220));
+    ui.painter().line_segment(
+        [tip - egui::vec2(10.0, 0.0), tip],
+        egui::Stroke::new(2.0, color),
+    );
+    ui.painter().line_segment(
+        [tip - egui::vec2(0.0, 10.0), tip],
+        egui::Stroke::new(2.0, color),
+    );
 }
 
 fn preview_drag(factor: f64) -> PreviewDrag {
@@ -408,13 +414,27 @@ impl Shelf {
                                         ),
                                     );
                                     theme_ui::paint_selected_optical(ui, rect, 8.0, selected);
-                                    if let Some(stroke) = card_outline(ctx, selected, cursor) {
-                                        ui.painter().rect_stroke(
-                                            rect,
-                                            8.0,
-                                            stroke,
-                                            egui::StrokeKind::Inside,
-                                        );
+                                    if let Some(slot) =
+                                        self.tag_material_cache.assignments.get(&id).and_then(|n| {
+                                            self.tag_material_cache
+                                                .slots
+                                                .iter()
+                                                .find(|slot| slot.number == *n)
+                                        })
+                                    {
+                                        // Texture remains on the card surface, outside the image and text content.
+                                        let region = if gallery && !pods {
+                                            gallery_card::geometry(rect).name
+                                        } else {
+                                            egui::Rect::from_min_max(
+                                                rect.min,
+                                                egui::pos2(
+                                                    rect.right(),
+                                                    (rect.top() + 6.0).min(rect.bottom()),
+                                                ),
+                                            )
+                                        };
+                                        super::tag_material_ui::paint(ui, region, slot);
                                     }
                                     if pods {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
@@ -459,7 +479,7 @@ impl Shelf {
                                         let origin_label = origin
                                             .label()
                                             .unwrap_or_else(|| "Источник не определён".into());
-                                        let label = criterion.as_ref().map_or_else(
+                                        let mut label = criterion.as_ref().map_or_else(
                                             || origin_label.clone(),
                                             |criterion| {
                                                 if self.state["sort"]["mode"] == "origin" {
@@ -469,6 +489,18 @@ impl Shelf {
                                                 }
                                             },
                                         );
+                                        if let Some(slot) =
+                                            self.tag_material_cache.assignments.get(&id).and_then(
+                                                |n| {
+                                                    self.tag_material_cache
+                                                        .slots
+                                                        .iter()
+                                                        .find(|slot| slot.number == *n)
+                                                },
+                                            )
+                                        {
+                                            label = format!("{} · {}", slot.name, label);
+                                        }
                                         ui.painter_at(zones.origin).rect_filled(
                                             zones.origin,
                                             4.0,
@@ -529,9 +561,24 @@ impl Shelf {
                                             criterion.clone().unwrap_or_else(|| {
                                                 event["source"].as_str().unwrap_or("").to_owned()
                                             }),
-                                            origin
-                                                .label()
-                                                .unwrap_or_else(|| "Источник не определён".into()),
+                                            {
+                                                let origin = origin.label().unwrap_or_else(|| {
+                                                    "Источник не определён".into()
+                                                });
+                                                self.tag_material_cache
+                                                    .assignments
+                                                    .get(&id)
+                                                    .and_then(|n| {
+                                                        self.tag_material_cache
+                                                            .slots
+                                                            .iter()
+                                                            .find(|slot| slot.number == *n)
+                                                    })
+                                                    .map(|slot| {
+                                                        format!("{} · {}", slot.name, origin)
+                                                    })
+                                                    .unwrap_or(origin)
+                                            },
                                             if event["available"] == false {
                                                 "Исходник недоступен"
                                             } else if event["storage"] == "cached" {
@@ -567,6 +614,35 @@ impl Shelf {
                                             );
                                         }
                                     }
+                                    if let Some(stroke) = card_outline(ctx, selected) {
+                                        ui.painter().rect_stroke(
+                                            rect,
+                                            8.0,
+                                            stroke,
+                                            egui::StrokeKind::Inside,
+                                        );
+                                    }
+                                    if cursor {
+                                        paint_cursor(ui, rect);
+                                    }
+                                    if pods
+                                        && let Some(slot) =
+                                            self.tag_material_cache.assignments.get(&id).and_then(
+                                                |n| {
+                                                    self.tag_material_cache
+                                                        .slots
+                                                        .iter()
+                                                        .find(|slot| slot.number == *n)
+                                                },
+                                            )
+                                    {
+                                        let dot = rect.left_top() + egui::vec2(5.0, 5.0);
+                                        ui.painter().circle_filled(
+                                            dot,
+                                            3.0,
+                                            super::tag_material_ui::color(slot),
+                                        );
+                                    }
                                     if event["properties"]["pinned"] == true {
                                         ui.painter().text(
                                             rect.right_top() + egui::vec2(-8.0, 8.0),
@@ -579,13 +655,26 @@ impl Shelf {
                                     let origin: katran::origin::Origin =
                                         serde_json::from_value(event["origin"].clone())
                                             .unwrap_or_default();
+                                    let tag_name = self
+                                        .tag_material_cache
+                                        .assignments
+                                        .get(&id)
+                                        .and_then(|n| {
+                                            self.tag_material_cache
+                                                .slots
+                                                .iter()
+                                                .find(|slot| slot.number == *n)
+                                        })
+                                        .map(|slot| format!("Тег: {}", slot.name))
+                                        .unwrap_or_default();
                                     let response = response.on_hover_text(format!(
-                                        "{}\n{}\n{}",
+                                        "{}\n{}\n{}\n{}",
                                         event["name"].as_str().unwrap_or("Файл"),
                                         origin
                                             .label()
                                             .unwrap_or_else(|| "Источник не определён".into()),
-                                        criterion.as_deref().unwrap_or("")
+                                        criterion.as_deref().unwrap_or(""),
+                                        tag_name
                                     ));
                                     if response.drag_started() {
                                         if !selected {
@@ -779,15 +868,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        for cursor in [false, true] {
-            let stroke = card_outline(&ctx, true, cursor).unwrap();
-            assert_eq!(stroke.width, if cursor { 3.0 } else { 2.0 });
-            assert_eq!(stroke.color, Color32::from_rgb(20, 210, 70));
-        }
-        let cursor = card_outline(&ctx, false, true).unwrap();
-        assert_eq!(cursor.width, 1.5);
-        assert_eq!(cursor.color, Color32::from_rgb(220, 30, 30));
-        assert!(card_outline(&ctx, false, false).is_none());
+        let stroke = card_outline(&ctx, true).unwrap();
+        assert_eq!(stroke.width, 2.0);
+        assert_eq!(stroke.color, Color32::from_rgb(20, 210, 70));
+        assert!(card_outline(&ctx, false).is_none());
     }
     #[test]
     fn pods_preview_loads_full_description_through_dispatcher() {

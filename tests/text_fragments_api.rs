@@ -47,7 +47,7 @@ impl katran::text_fragments::ClipboardSink for FakeClipboard {
 }
 
 #[test]
-fn unicode_preserves_distinct_arrivals_and_survives_restart() {
+fn unicode_reuses_exact_arrival_and_preserves_metadata_after_restart() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 4_000_000).unwrap();
     let writes = Arc::new(Mutex::new(Vec::new()));
@@ -65,9 +65,27 @@ fn unicode_preserves_distinct_arrivals_and_survives_restart() {
     enable(&mut api);
     let original = "\n  Привет 🐄\r\n第二 строка  \n";
     let first = ingest(&mut api, original);
+    let id = item(&first).id;
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    call(
+        &mut api,
+        Command::SetPinnedProperties {
+            id,
+            display_name: Some("Kept name".into()),
+            opener: None,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetPinnedTags {
+            id,
+            tags: vec!["Kept tag".into()],
+        },
+    );
     let second = ingest(&mut api, original);
-    assert_ne!(first["id"], second["id"]);
+    assert_eq!(first["id"], second["id"]);
     assert_eq!(first["revision"], second["revision"]);
+    assert_ne!(first["id"], ingest(&mut api, &format!("{original} "))["id"]);
     assert_eq!(first["kind"], "text_fragment");
     assert!(first["name"].as_str().unwrap().ends_with(".txt"));
     assert_eq!(
@@ -82,6 +100,11 @@ fn unicode_preserves_distinct_arrivals_and_survives_restart() {
     assert!(writes.lock().unwrap().is_empty());
     drop(api);
     let mut api = Service::open(root.path(), 4_000_000).unwrap();
+    assert_eq!(ingest(&mut api, original)["id"], id);
+    let properties = call(&mut api, Command::GetPinnedProperties { id });
+    assert_eq!(properties["properties"]["pinned"], true);
+    assert_eq!(properties["properties"]["display_name"], "Kept name");
+    assert_eq!(properties["tags"][0]["display"], "Kept tag");
     assert_eq!(
         call(
             &mut api,

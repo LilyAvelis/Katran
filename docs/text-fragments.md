@@ -18,8 +18,11 @@ An exact single HTTP(S) URL is routed to the independently enabled Links feature
 when Links is disabled it is skipped. Prose containing URLs remains ordinary text.
 Empty text is ignored. Existing Text records are never reclassified.
 
-Each arrival creates its own text-fragment event, even when the content matches
-another arrival. Equal text shares the existing content-addressed blob. Search
+Exact repeated text reuses an existing text-fragment event and its ID. If older
+duplicates exist, the pinned event wins, then the newest ID; existing duplicates
+are not merged or deleted. The chosen event retains its pin, tags, properties,
+timestamps and origin. Text and Links remain distinct event kinds even when their
+bytes match. No whitespace, line-ending or Unicode normalization is applied. Search
 matches the full content, while the shelf card keeps a short preview. The source
 text is preserved as Unicode, including its line endings; title trimming and
 preview truncation are presentation only.
@@ -121,8 +124,8 @@ automation:
 1. Confirm Text starts hidden and clipboard text is not captured. Enable Text,
    enable capture, and copy Unicode text containing CRLF and non-Latin
    characters; confirm one Text item appears with the full original body.
-2. Copy the same text again and confirm two arrivals exist while sharing one
-   managed content blob. Search for text beyond the card preview and confirm it
+2. Copy the same text again and confirm the existing card remains the only one.
+   Search for text beyond the card preview and confirm it
    matches.
 3. Confirm file references take precedence over bitmap/text, and with Images
    enabled, bitmap images take precedence over plain Unicode text. Confirm

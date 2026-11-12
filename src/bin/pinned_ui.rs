@@ -4,15 +4,11 @@ use katran::domain_jobs::JobId;
 pub(super) struct State {
     pub open: bool,
     id: Option<i64>,
-    tag_mode: bool,
     name: String,
-    tags: String,
     opener: Option<String>,
     apps: Vec<(String, String)>,
     token: Option<String>,
     job: Option<JobId>,
-    rows: Vec<(String, String)>,
-    selected: usize,
     error: String,
 }
 impl Shelf {
@@ -58,13 +54,6 @@ impl Shelf {
                     .unwrap_or("")
                     .into(),
                 opener: result["properties"]["opener"].as_str().map(str::to_owned),
-                tags: result["tags"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|t| t["display"].as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
                 ..Default::default()
             };
             let result = self.call(Command::BeginJob {
@@ -79,30 +68,7 @@ impl Shelf {
                 self.pinned_ui.error = self.message.clone();
             }
         } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::T)) {
-            if self.state["pinned_only"] != true {
-                let state = self.call(Command::FilterPinnedTag { tag: None });
-                if state.is_null() {
-                    return;
-                }
-                self.state = state;
-                self.refresh();
-            }
-            let result = self.call(Command::PinnedTags);
-            if result.is_null() {
-                return;
-            }
-            let rows = result["items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| Some((v["key"].as_str()?.into(), v["display"].as_str()?.into())))
-                .collect();
-            self.pinned_ui = State {
-                open: true,
-                tag_mode: true,
-                rows,
-                ..Default::default()
-            };
+            self.open_tag_menu();
         }
     }
     fn pinned_accept_apps(&mut self, result: &Value) {
@@ -149,106 +115,53 @@ impl Shelf {
             return;
         }
         let state = &mut self.pinned_ui;
-        let mut picked = None;
-        if state.tag_mode {
-            let n = state.rows.len();
-            ctx.input_mut(|i| {
-                if n > 0 && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    state.selected = (state.selected + 1) % n;
-                }
-                if n > 0 && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                    state.selected = (state.selected + n - 1) % n;
-                }
-                if n > 0 && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-                    picked = Some(state.rows[state.selected].0.clone());
-                }
-            });
-        }
         let mut save = false;
         let modal = egui::Modal::new(egui::Id::new("pinned-properties"))
             .frame(crate::action_row::popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width((ctx.content_rect().width() - 28.0).clamp(240.0, 480.0));
-                if state.tag_mode {
-                    ui.heading("Теги закреплённых");
-                    for (index, (key, label)) in state.rows.iter().enumerate() {
-                        if ui
-                            .selectable_label(index == state.selected, label)
-                            .clicked()
-                        {
-                            picked = Some(key.clone());
+                ui.heading("Свойства закреплённого объекта");
+                ui.label("Имя");
+                ui.text_edit_singleline(&mut state.name);
+                ui.label("Приложение открытия");
+                let label = state
+                    .opener
+                    .as_ref()
+                    .and_then(|id| state.apps.iter().find(|a| &a.0 == id).map(|a| a.1.as_str()))
+                    .unwrap_or(if state.opener.is_some() {
+                        "Сохранённое приложение"
+                    } else {
+                        "По умолчанию"
+                    });
+                egui::ComboBox::from_id_salt("pinned-opener")
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut state.opener, None, "По умолчанию");
+                        for (id, name) in &state.apps {
+                            ui.selectable_value(&mut state.opener, Some(id.clone()), name);
                         }
-                    }
-                    if state.rows.is_empty() {
-                        ui.weak("Тегов пока нет");
-                    }
-                    ui.weak("Выберите тег повторно, чтобы снять фильтр");
-                } else {
-                    ui.heading("Свойства закреплённого объекта");
-                    ui.label("Имя");
-                    ui.text_edit_singleline(&mut state.name);
-                    ui.label("Теги через запятую");
-                    ui.text_edit_singleline(&mut state.tags);
-                    ui.label("Приложение открытия");
-                    let label = state
-                        .opener
-                        .as_ref()
-                        .and_then(|id| state.apps.iter().find(|a| &a.0 == id).map(|a| a.1.as_str()))
-                        .unwrap_or(if state.opener.is_some() {
-                            "Сохранённое приложение"
-                        } else {
-                            "По умолчанию"
-                        });
-                    egui::ComboBox::from_id_salt("pinned-opener")
-                        .selected_text(label)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut state.opener, None, "По умолчанию");
-                            for (id, name) in &state.apps {
-                                ui.selectable_value(&mut state.opener, Some(id.clone()), name);
-                            }
-                        });
-                    if state.job.is_some() {
-                        ui.weak("Поиск приложений…");
-                    }
-                    if !state.error.is_empty() {
-                        ui.colored_label(Color32::LIGHT_RED, &state.error);
-                    }
-                    ui.weak("Имя и теги сохраняются после снятия закрепления.");
-                    save = ui.button("Сохранить").clicked();
+                    });
+                if state.job.is_some() {
+                    ui.weak("Поиск приложений…");
                 }
+                if !state.error.is_empty() {
+                    ui.colored_label(Color32::LIGHT_RED, &state.error);
+                }
+                ui.weak("Имя сохраняется после снятия закрепления.");
+                save = ui.button("Сохранить").clicked();
             });
-        if let Some(tag) = picked {
-            let result = self.call(Command::FilterPinnedTag { tag: Some(tag) });
-            if !result.is_null() {
-                self.state = result;
-                self.pinned_close();
-                self.refresh();
-            }
-        } else if save {
+        if save {
             let id = self.pinned_ui.id.unwrap();
             let name = self.pinned_ui.name.trim().to_owned();
             let opener = self.pinned_ui.opener.as_ref().map(PathBuf::from);
-            let tags = self
-                .pinned_ui
-                .tags
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect();
             let a = self.call(Command::SetPinnedProperties {
                 id,
                 display_name: (!name.is_empty()).then_some(name),
                 opener,
             });
             if !a.is_null() {
-                let b = self.call(Command::SetPinnedTags { id, tags });
-                if !b.is_null() {
-                    self.pinned_close();
-                    self.refresh();
-                } else {
-                    self.pinned_ui.error = self.message.clone();
-                }
+                self.pinned_close();
+                self.refresh();
             } else {
                 self.pinned_ui.error = self.message.clone();
             }

@@ -89,7 +89,7 @@ fn link_is_optional_exact_searchable_and_survives_restart() {
     let old = call(
         &mut api,
         Command::IngestText {
-            text: "https://пример.рф/🐄?a=1".into(),
+            text: "https://пример.рф/🐄?a=1#x".into(),
             source: "test".into(),
         },
     );
@@ -97,6 +97,18 @@ fn link_is_optional_exact_searchable_and_survives_restart() {
     let url = "https://пример.рф/🐄?a=1#x";
     let event = link(&mut api, url);
     let id = item(&event).id;
+    assert_ne!(item(&old).id, id);
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    call(
+        &mut api,
+        Command::SetPinnedTags {
+            id,
+            tags: vec!["Link tag".into()],
+        },
+    );
+    let again = link(&mut api, url);
+    assert_eq!(again["id"], id);
+    assert_eq!(again["revision"], event["revision"]);
     assert_eq!(event["kind"], "link_fragment");
     assert_eq!(call(&mut api, Command::GetLink { id })["url"], url);
     assert_eq!(call(&mut api, Command::GetDocumentText { id })["text"], url);
@@ -127,6 +139,10 @@ fn link_is_optional_exact_searchable_and_survives_restart() {
     assert_eq!(opened.lock().unwrap()[0].to_string_lossy(), url);
     drop(api);
     let mut api = Service::open(root.path(), 2_000_000).unwrap();
+    assert_eq!(link(&mut api, url)["id"], id);
+    let properties = call(&mut api, Command::GetPinnedProperties { id });
+    assert_eq!(properties["properties"]["pinned"], true);
+    assert_eq!(properties["tags"][0]["display"], "Link tag");
     assert_eq!(call(&mut api, Command::GetLink { id })["url"], url);
     assert_eq!(
         call(&mut api, Command::Get { id: item(&old).id })["kind"],
@@ -428,7 +444,7 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        10
     );
     assert_eq!(
         call(&mut api, Command::GetPinnedProperties { id: item(&old).id })["properties"]["display_name"],
@@ -445,6 +461,6 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("before-v8"))
+                .contains("before-v10"))
     );
 }

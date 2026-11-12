@@ -70,6 +70,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: false,
     },
     Definition {
+        id: "files",
+        label: "Таб: Files",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
         id: "toggle_pods",
         label: "Включить / отключить Pods",
         default_binding: "",
@@ -502,6 +510,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "toggle_pinned_view",
+        label: "Все / закреплённые в категории",
+        default_binding: "Period",
+        rebindable: true,
+        group: "Вид",
+        in_palette: true,
+    },
+    Definition {
         id: "all",
         label: "Таб: Folder",
         default_binding: "",
@@ -597,6 +613,10 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         return Some(command(Command::SelectTabPosition { position }));
     }
     Some(match id {
+        "toggle_pinned_view" => command(Command::TogglePinnedView),
+        "files" => command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Files,
+        }),
         "transfer_selection" => command(Command::TransferSelection),
         "add_to_katran" => command(Command::AddFolderFiles { ids: selected() }),
         "tables" => command(Command::SetTab {

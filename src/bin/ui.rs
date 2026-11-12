@@ -5,6 +5,7 @@ mod api_client;
 mod app_identity;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
+mod files_file_picker;
 mod gallery_card;
 mod glass_lab;
 mod images;
@@ -32,6 +33,9 @@ mod source_jobs;
 mod summon_animation;
 mod tab_bar;
 mod table_preview_ui;
+mod tag_material_ui;
+mod tag_menu_ui;
+mod tag_settings_ui;
 mod text_preview_ui;
 mod theme_file_picker;
 mod theme_ui;
@@ -182,6 +186,8 @@ struct Shelf {
     workspace: workspace_ui::State,
     info: info_bar::State,
     pinned_ui: pinned_ui::State,
+    tag_menu: tag_menu_ui::State,
+    tag_material_cache: tag_material_ui::Cache,
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
@@ -189,6 +195,8 @@ struct Shelf {
     preview_warmup: Option<katran::domain_jobs::JobId>,
     pending_preview: Option<(String, Value)>,
     pending_drops: Vec<PathBuf>,
+    files_picker: Option<mpsc::Receiver<files_file_picker::PickResult>>,
+    pending_file_pick: Option<Vec<PathBuf>>,
     pending_copy: Option<Vec<katran::SelectionRef>>,
     pending_copy_ids: Option<Vec<i64>>,
     sources: source_jobs::Sources,
@@ -369,6 +377,7 @@ impl Shelf {
             || self.workspace.open
             || self.info.is_open()
             || self.pinned_ui.open
+            || self.tag_menu.open
             || self.save
             || !self.pending_delete.is_empty()
             || self.state["settings_open"] == true
@@ -476,6 +485,7 @@ impl Shelf {
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -490,7 +500,7 @@ impl Shelf {
             self.overlay_escape(&ctx);
         }
 
-        if self.api.is_some() && !self.info.is_open() {
+        if self.api.is_some() && !self.info.is_open() && !self.tag_menu.open {
             if !self.sorting_input.is_open() {
                 self.pinned_input(&ctx);
             }
@@ -510,6 +520,7 @@ impl Shelf {
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -529,12 +540,24 @@ impl Shelf {
                 serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
             self.direct_transfer_input(&ctx);
         }
+        if self.api.is_some()
+            && !self.modal_owns_input()
+            && self.state["tab"] != "folder"
+            && self.state["preview"].is_null()
+            && !ctx.egui_wants_keyboard_input()
+            && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(&ctx, id).is_some()))
+            && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if modifiers.is_none() && (physical_key.unwrap_or(*key) == egui::Key::Slash || *key == egui::Key::Slash))))
+        {
+            ctx.input_mut(shortcuts_ui::discard);
+            self.open_tag_menu();
+        }
         let tab_input_allowed = self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -573,6 +596,7 @@ impl Shelf {
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
             && self.state["settings_open"] != true
@@ -592,6 +616,41 @@ impl Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
+        if let Some(receiver) = self.files_picker.as_ref() {
+            match receiver.try_recv() {
+                Ok(Ok(Some(paths))) => {
+                    self.files_picker = None;
+                    if !paths.is_empty() {
+                        self.pending_file_pick = Some(paths);
+                    }
+                }
+                Ok(Ok(None)) => self.files_picker = None,
+                Ok(Err(error)) => {
+                    self.files_picker = None;
+                    self.message = error;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.files_picker = None;
+                    self.message = "Не удалось получить выбранные файлы".into();
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                }
+            }
+        }
+        if self.api.is_some()
+            && self.job.is_none()
+            && let Some(paths) = self.pending_file_pick.take()
+            && !self.start_job(
+                Command::AddFiles {
+                    paths: paths.clone(),
+                },
+                false,
+                ctx.clone(),
+            )
+        {
+            self.pending_file_pick = Some(paths);
+        }
         self.preview_warmup_tick(&ctx);
         if self.api.is_some() {
             self.open_apps_tick(&ctx);
@@ -630,14 +689,15 @@ impl Shelf {
         self.pending_drops.extend(dropped);
         if self.api.is_some() && self.job.is_none() && !self.pending_drops.is_empty() {
             let path = self.pending_drops.remove(0);
-            self.start_job(
+            let command = if katran::file_types::is_native_image(&path) {
                 Command::IngestPath {
                     path,
                     source: "drop".into(),
-                },
-                false,
-                ctx.clone(),
-            );
+                }
+            } else {
+                Command::AddFiles { paths: vec![path] }
+            };
+            self.start_job(command, false, ctx.clone());
         }
         if self.api.is_some() {
             if let Some(editor) = self.shortcut_editor.as_mut()
@@ -653,6 +713,7 @@ impl Shelf {
                 && !self.workspace.open
                 && !self.info.is_open()
                 && !self.pinned_ui.open
+                && !self.tag_menu.open
                 && !self.save
                 && self.pending_delete.is_empty()
             {
@@ -665,6 +726,15 @@ impl Shelf {
                         (!self.actions || s.id == "settings")
                             && (!self.open_apps.open || s.id == "open_with")
                             && (self.state["settings_open"] != true || s.id == "copy")
+                            && (s.id != "toggle_pinned_view"
+                                || (self.state["preview"].is_null()
+                                    && !ctx.egui_wants_keyboard_input()
+                                    && !ctx.memory(|m| {
+                                        m.focused().is_some_and(|id| {
+                                            id == egui::Id::new("shelf-search")
+                                                || egui::TextEdit::load_state(&ctx, id).is_some()
+                                        })
+                                    })))
                     })
                     .cloned()
                     .collect();
@@ -680,6 +750,7 @@ impl Shelf {
                 && !self.workspace.open
                 && !self.info.is_open()
                 && !self.pinned_ui.open
+                && !self.tag_menu.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K))
             {
                 self.actions = !self.actions;
@@ -692,6 +763,7 @@ impl Shelf {
                 && !self.workspace.open
                 && !self.info.is_open()
                 && !self.pinned_ui.open
+                && !self.tag_menu.open
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {
@@ -837,6 +909,18 @@ impl Shelf {
                     if selected > 0 {
                         ui.weak(format!("{selected} выбрано"));
                     }
+                    if self.state["tab"] == "files" {
+                        let picking = self.files_picker.is_some();
+                        if ui
+                            .add_enabled(!picking, egui::Button::new("＋ Файлы"))
+                            .clicked()
+                        {
+                            match files_file_picker::start_pick_files() {
+                                Ok(receiver) => self.files_picker = Some(receiver),
+                                Err(error) => self.message = error,
+                            }
+                        }
+                    }
                     let hint_left = ui.cursor().left();
                     let mut hint_right = hint_left;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -848,6 +932,20 @@ impl Shelf {
                             self.actions = !self.actions;
                             self.focus_actions = self.actions;
                             self.action_query.clear();
+                        }
+                        let tags = ui_style::status_icon(ui, egui_lucide::Lucide::Tag, "Теги · / ");
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("tags-button-rect"), tags.rect)
+                        });
+                        if tags.clicked()
+                            && self.api.is_some()
+                            && self.state["tab"] != "folder"
+                            && self.state["preview"].is_null()
+                            && !self.modal_owns_input()
+                        {
+                            self.actions = false;
+                            self.sorting_input.close();
+                            self.open_tag_menu();
                         }
                         let sort = ui_style::status_icon(
                             ui,
@@ -890,6 +988,7 @@ impl Shelf {
             }
             ctx.request_repaint_after(Duration::from_secs(1));
         }
+        self.refresh_tag_materials();
         let visible = self.events.clone();
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
@@ -921,6 +1020,7 @@ impl Shelf {
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
         {
@@ -1001,6 +1101,7 @@ impl Shelf {
             self.pinned_panel(&ctx);
             self.sort_menu(&ctx);
             self.palette(&ctx);
+            self.tag_menu_panel(&ctx);
             self.open_apps_panel(&ctx);
         }
         if let Some(api) = self.api.as_mut()
@@ -1094,6 +1195,7 @@ impl Shelf {
             && !self.workspace.open
             && !self.info.is_open()
             && !self.pinned_ui.open
+            && !self.tag_menu.open
             && !self.save
             && self.shortcut_editor.is_none()
             && self.pending_delete.is_empty()
@@ -1180,7 +1282,12 @@ impl eframe::App for Shelf {
         let starts_sort=!self.modal_owns_input() && !ctx.egui_wants_keyboard_input() && input.events.iter().any(|e|matches!(e,
             egui::Event::Key{key,physical_key,pressed:true,modifiers,..}
                 if physical_key.unwrap_or(*key)==egui::Key::Comma && !modifiers.ctrl && !modifiers.alt && !modifiers.command));
-        let modal = self.modal_owns_input() || starts_sort;
+        let starts_tag = !self.modal_owns_input()
+            && self.state["preview"].is_null()
+            && !ctx.egui_wants_keyboard_input()
+            && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(ctx, id).is_some()))
+            && input.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } if modifiers.is_none() && (physical_key.unwrap_or(*key) == egui::Key::Slash || *key == egui::Key::Slash)));
+        let modal = self.modal_owns_input() || starts_sort || starts_tag;
         let copying_bound = self.shortcuts.iter().any(|s| {
             s.id == "transfer_copy"
                 && s.binding
@@ -1348,6 +1455,8 @@ fn main() -> eframe::Result {
         workspace: workspace_ui::State::default(),
         info: info_bar::State::default(),
         pinned_ui: pinned_ui::State::default(),
+        tag_menu: tag_menu_ui::State::default(),
+        tag_material_cache: tag_material_ui::Cache::default(),
         shortcut_editor: None,
         api: Some(api),
         job: None,
@@ -1355,6 +1464,8 @@ fn main() -> eframe::Result {
         preview_warmup,
         pending_preview: None,
         pending_drops: Vec::new(),
+        files_picker: None,
+        pending_file_pick: None,
         pending_copy: None,
         pending_copy_ids: None,
         sources: source_jobs::Sources::default(),
@@ -1545,6 +1656,8 @@ mod tests {
             workspace: workspace_ui::State::default(),
             info: info_bar::State::default(),
             pinned_ui: pinned_ui::State::default(),
+            tag_menu: tag_menu_ui::State::default(),
+            tag_material_cache: tag_material_ui::Cache::default(),
             shortcut_editor: None,
             api: Some(api),
             job: None,
@@ -1552,6 +1665,8 @@ mod tests {
             preview_warmup: None,
             pending_preview: None,
             pending_drops: Vec::new(),
+            files_picker: None,
+            pending_file_pick: None,
             pending_copy: None,
             pending_copy_ids: None,
             sources: source_jobs::Sources::default(),
@@ -2099,34 +2214,18 @@ mod tests {
         assert_eq!(actions, vec![Some("copy".into()), None]);
     }
     #[test]
-    fn pinned_tag_picker_filters_and_does_not_leak_navigation() {
+    fn legacy_ctrl_t_opens_the_shared_tag_menu() {
         let root = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
         app.call(Command::SetTab {
             tab: katran::interaction::ShelfTab::Images,
         });
-        let id = app.call(Command::IngestBytes {
-            name: "pin.png".into(),
-            bytes: vec![1],
-            source: "test".into(),
-        })["id"]
-            .as_i64()
-            .unwrap();
-        app.call(Command::TogglePins { ids: vec![id] });
-        app.call(Command::SetPinnedTags {
-            id,
-            tags: vec!["Work".into()],
-        });
-        app.state = app.call(Command::SelectTabPosition { position: 1 });
-        app.refresh();
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
         frame(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL);
-        assert!(app.pinned_ui.open);
-        frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(app.tag_menu.open);
         assert!(!app.pinned_ui.open);
-        assert_eq!(app.call(Command::Interaction)["tag_filter"], "work");
-        assert!(app.call(Command::Interaction)["preview"].is_null());
+        assert!(app.call(Command::Interaction)["tag_slot_filter"].is_null());
     }
     #[test]
     fn folder_modal_history_and_keyboard_do_not_leak() {
@@ -2160,6 +2259,126 @@ mod tests {
             Some(folder.path().canonicalize().unwrap())
         );
     }
+    #[test]
+    fn period_toggles_pinned_view_and_preserves_text_input() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let release_period = |ctx: &egui::Context, app: &mut Shelf| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Period,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app, &ctx, egui::Key::Period, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["pinned_only"], true);
+        release_period(&ctx, &mut app);
+        frame(&mut app, &ctx, egui::Key::Period, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["pinned_only"], false);
+
+        release_period(&ctx, &mut app);
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("shelf-search")));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(940.0, 680.0),
+                )),
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::Period,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text(".".into()),
+                ],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.query, ".");
+        assert_eq!(app.call(Command::Interaction)["pinned_only"], false);
+
+        release_period(&ctx, &mut app);
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("shelf-search")));
+        app.actions = true;
+        frame(&mut app, &ctx, egui::Key::Period, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["pinned_only"], false);
+    }
+
+    #[test]
+    fn tag_menu_search_owns_digits_and_does_not_switch_tabs() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(app.tag_menu.open);
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("tag-menu-search")));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(940.0, 680.0),
+                )),
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::Num2,
+                        physical_key: Some(egui::Key::Num2),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text("2".into()),
+                ],
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.tag_menu.query, "2");
+        assert_eq!(app.call(Command::Interaction)["tab"], "images");
+        assert!(app.tag_menu.open);
+    }
+
+    #[test]
+    fn slash_then_digit_filters_tag_without_switching_category() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(&mut app, &ctx, egui::Key::Slash, egui::Modifiers::NONE);
+        assert!(app.tag_menu.open);
+        frame(&mut app, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
+        let state = app.call(Command::Interaction);
+        assert_eq!(state["tab"], "images");
+        assert_eq!(state["tag_slot_filter"], 1);
+        assert!(!app.tag_menu.open);
+    }
+
     #[test]
     fn repeated_digit_switches_pinned_without_retaining_selection() {
         let root = tempfile::tempdir().unwrap();

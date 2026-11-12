@@ -459,18 +459,21 @@ pub(crate) fn commit_prepared_bytes(
         }
     }
     prepared.interest.publish(prepared.verified_stamp.clone());
-    // A single durable event represents an exact Pods value. Resolve under the
+    // A single durable event represents an exact Text or Link value. Resolve under the
     // writer lock, after validating/publishing bytes, so concurrent prepared
     // jobs cannot manufacture duplicate events. Preserve existing metadata,
     // pin, original timestamps and content revision.
     if let Some(content) = prepared.text.as_deref()
-        && !prepared.link
         && !prepared.table
-        && crate::pods::is_pod(content)
     {
         use rusqlite::OptionalExtension;
+        let fragments = if prepared.link {
+            "link_fragments"
+        } else {
+            "text_fragments"
+        };
         let existing: Option<i64> = tx.query_row(
-            "SELECT e.id FROM events e JOIN text_fragments t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1",
+            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
             params![prepared.hash, content], |row| row.get(0),
         ).optional()?;
         if let Some(id) = existing {

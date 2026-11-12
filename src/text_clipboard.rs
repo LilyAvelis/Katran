@@ -2,6 +2,35 @@
 use crate::{ApiError, Result};
 
 #[cfg(any(windows, test))]
+#[derive(Default)]
+struct OwnedTokens(std::collections::VecDeque<String>);
+#[cfg(any(windows, test))]
+impl OwnedTokens {
+    fn remember(&mut self, token: String) {
+        self.0.push_back(token);
+        if self.0.len() > 64 {
+            self.0.pop_front();
+        }
+    }
+    fn contains(&self, token: &str) -> bool {
+        self.0.iter().any(|item| item == token)
+    }
+}
+#[cfg(any(windows, test))]
+static OWNED_TOKENS: std::sync::Mutex<OwnedTokens> =
+    std::sync::Mutex::new(OwnedTokens(std::collections::VecDeque::new()));
+#[cfg(any(windows, test))]
+pub(super) fn owns_token(token: &str) -> bool {
+    OWNED_TOKENS
+        .lock()
+        .is_ok_and(|tokens| tokens.contains(token))
+}
+#[cfg(test)]
+pub(super) fn remember_token_for_test(token: &str) {
+    OWNED_TOKENS.lock().unwrap().remember(token.to_owned());
+}
+
+#[cfg(any(windows, test))]
 use sha2::{Digest, Sha256};
 #[cfg(any(windows, test))]
 #[derive(Clone, Debug)]
@@ -75,9 +104,10 @@ pub(super) fn write(text: &str) -> Result<u32> {
         Win32::{
             Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
             System::{
+                Com::CoCreateGuid,
                 DataExchange::{
                     CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard,
-                    SetClipboardData,
+                    RegisterClipboardFormatW, SetClipboardData,
                 },
                 LibraryLoader::GetModuleHandleW,
             },
@@ -127,6 +157,35 @@ pub(super) fn write(text: &str) -> Result<u32> {
     unsafe {
         std::ptr::copy_nonoverlapping(units.as_ptr().cast::<u8>(), pointer.cast(), size);
         GlobalUnlock(memory.0);
+    }
+    let token = format!(
+        "{:032x}",
+        unsafe { CoCreateGuid() }.map_err(error)?.to_u128()
+    );
+    let marker_name: Vec<u16> = crate::table_clipboard::OWNER_FORMAT
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let marker_format = unsafe { RegisterClipboardFormatW(PCWSTR(marker_name.as_ptr())) };
+    if marker_format == 0 {
+        return Err(error("Cannot register clipboard ownership format"));
+    }
+    let marker_bytes = [token.as_bytes(), &[0]].concat();
+    let marker = Memory(unsafe { GlobalAlloc(GMEM_MOVEABLE, marker_bytes.len()) });
+    if marker.0.is_null() {
+        return Err(error("Cannot allocate clipboard ownership marker"));
+    }
+    let marker_pointer = unsafe { GlobalLock(marker.0) };
+    if marker_pointer.is_null() {
+        return Err(error("Cannot lock clipboard ownership marker"));
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            marker_bytes.as_ptr(),
+            marker_pointer.cast(),
+            marker_bytes.len(),
+        );
+        GlobalUnlock(marker.0);
     }
     unsafe extern "system" fn procedure(
         hwnd: HWND,
@@ -217,15 +276,25 @@ pub(super) fn write(text: &str) -> Result<u32> {
     }
     struct Backend {
         memory: Memory,
+        marker: Memory,
+        marker_format: u32,
+        token: String,
         _open: Open,
         _window: Window,
     }
     impl Publication for Backend {
         fn publish(&mut self) -> Result<()> {
             unsafe { EmptyClipboard() }.map_err(error)?;
+            unsafe { SetClipboardData(self.marker_format, Some(HANDLE(self.marker.0))) }
+                .map_err(error)?;
+            self.marker.0 = std::ptr::null_mut();
             unsafe { SetClipboardData(13, Some(HANDLE(self.memory.0))) }.map_err(error)?;
             // Clipboard now owns this allocation; never free it locally.
             self.memory.0 = std::ptr::null_mut();
+            OWNED_TOKENS
+                .lock()
+                .map_err(|_| error("Ownership registry unavailable"))?
+                .remember(self.token.clone());
             Ok(())
         }
         fn sequence(&mut self) -> u32 {
@@ -238,6 +307,9 @@ pub(super) fn write(text: &str) -> Result<u32> {
     *latest = None;
     let sequence = publish_locked(Backend {
         memory,
+        marker,
+        marker_format,
+        token,
         _open: Open,
         _window: window,
     })?;
@@ -256,7 +328,7 @@ pub(super) fn verified_sequence(expected: u32) -> Option<u32> {
         System::{
             DataExchange::{
                 CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardOwner,
-                GetClipboardSequenceNumber, OpenClipboard,
+                GetClipboardSequenceNumber, OpenClipboard, RegisterClipboardFormatW,
             },
             Memory::{GlobalLock, GlobalSize, GlobalUnlock},
         },
@@ -286,6 +358,14 @@ pub(super) fn verified_sequence(expected: u32) -> Option<u32> {
     if !unsafe { GetClipboardOwner() }.is_null() {
         return None;
     }
+    let marker_name: Vec<u16> = crate::table_clipboard::OWNER_FORMAT
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let marker_format = unsafe { RegisterClipboardFormatW(marker_name.as_ptr()) };
+    if marker_format == 0 {
+        return None;
+    }
     let mut formats = Vec::new();
     let mut format = 0;
     loop {
@@ -298,6 +378,13 @@ pub(super) fn verified_sequence(expected: u32) -> Option<u32> {
                 return None;
             }
             break;
+        }
+        if format == marker_format {
+            let token = crate::table_clipboard::read_owner_token_locked().ok()??;
+            if !owns_token(&token) {
+                return None;
+            }
+            continue;
         }
         if !matches!(format, 1 | 7 | 13 | 16) {
             return None;
@@ -364,6 +451,17 @@ mod tests {
         fn drop(&mut self) {
             self.calls.borrow_mut().push("unlock");
         }
+    }
+    #[test]
+    fn ownership_registry_is_bounded_and_requires_exact_token() {
+        let mut tokens = OwnedTokens::default();
+        for id in 0..65 {
+            tokens.remember(format!("{id:032x}"));
+        }
+        assert!(!tokens.contains(&format!("{:032x}", 0)));
+        assert!(tokens.contains(&format!("{:032x}", 64)));
+        assert!(!tokens.contains("external"));
+        assert_eq!(tokens.0.len(), 64);
     }
     #[test]
     fn changed_sequence_requires_exact_latest_plain_text_receipt() {

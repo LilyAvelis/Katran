@@ -13,6 +13,7 @@ pub enum ShelfTab {
     Links,
     Tables,
     Pods,
+    Files,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -34,6 +35,7 @@ pub enum SelectionMode {
 pub struct Interaction {
     pub pinned_only: bool,
     pub tag_filter: Option<String>,
+    pub tag_slot_filter: Option<u8>,
     pub view_generation: u64,
     pub folder_path: Option<std::path::PathBuf>,
     pub sort: crate::sorting::SortSpec,
@@ -55,7 +57,11 @@ pub struct Interaction {
 }
 impl Interaction {
     pub fn set_tab(&mut self, tab: ShelfTab) {
-        if self.tab != tab || self.pinned_only || self.tag_filter.is_some() {
+        if self.tab != tab
+            || self.pinned_only
+            || self.tag_filter.is_some()
+            || self.tag_slot_filter.is_some()
+        {
             self.reset_context();
         }
         self.tab = tab;
@@ -66,6 +72,7 @@ impl Interaction {
     pub fn reset_context(&mut self) {
         self.pinned_only = false;
         self.tag_filter = None;
+        self.tag_slot_filter = None;
         self.view_generation = self.view_generation.wrapping_add(1);
         self.visible.clear();
         self.selected.clear();
@@ -76,7 +83,8 @@ impl Interaction {
     }
     pub fn select_position(&mut self, tab: ShelfTab) {
         if self.tab == tab && tab != ShelfTab::All {
-            let pinned = !self.pinned_only && self.tag_filter.is_none();
+            let pinned =
+                !self.pinned_only && self.tag_filter.is_none() && self.tag_slot_filter.is_none();
             self.reset_context();
             self.pinned_only = pinned;
         } else {

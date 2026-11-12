@@ -22,6 +22,7 @@ impl Service {
             self.interaction.sort,
             self.interaction.pinned_only,
             self.interaction.tag_filter.as_deref(),
+            self.interaction.tag_slot_filter,
             self.interaction.view_generation,
             (
                 self.settings
@@ -55,7 +56,7 @@ impl Service {
                 .work_folder
                 .browse(query, limit, None, self.interaction.sort);
         }
-        if self.interaction.pinned_only {
+        if self.interaction.pinned_only || self.interaction.tag_slot_filter.is_some() {
             return self.browse_shelf_sorted(query, limit, None);
         }
         let events = crate::catalogue_query::query_features(

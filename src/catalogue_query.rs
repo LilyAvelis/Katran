@@ -45,6 +45,7 @@ pub(crate) fn query_sorted_slice(
     sort: crate::sorting::SortSpec,
     pinned: bool,
     tag: Option<&str>,
+    tag_slot: Option<u8>,
     view_generation: u64,
     features: (bool, bool, bool, bool),
 ) -> Result<(Vec<Event>, Option<String>)> {
@@ -56,7 +57,7 @@ pub(crate) fn query_sorted_slice(
     let sort = sort.normalized();
     let sources: String = db.query_row("SELECT COALESCE(group_concat(source_id||':'||generation||':'||enabled,';'),'') FROM (SELECT * FROM source_configurations ORDER BY source_id)", [], |r| r.get(0))?;
     let generation = format!(
-        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{view_generation}"
+        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{tag_slot:?}:{view_generation}"
     );
     let after = cursor
         .map(|value| {
@@ -88,6 +89,7 @@ pub(crate) fn query_sorted_slice(
             | ShelfTab::Links
             | ShelfTab::Tables
             | ShelfTab::Pods
+            | ShelfTab::Files
     );
     let source = match tab {
         ShelfTab::Screenshots => "sharex",
@@ -100,6 +102,7 @@ pub(crate) fn query_sorted_slice(
         let mut sql = slice_projection(
             pinned,
             tag,
+            tag_slot,
             tab,
             projection_sql(
                 tab,
@@ -166,6 +169,7 @@ pub(crate) fn query_sorted_slice(
     let projection = slice_projection(
         pinned,
         tag,
+        tag_slot,
         tab,
         projection_sql(
             tab,
@@ -293,6 +297,7 @@ pub(crate) fn query_features(
             | ShelfTab::Links
             | ShelfTab::Tables
             | ShelfTab::Pods
+            | ShelfTab::Files
     );
     let source = match tab {
         ShelfTab::Screenshots => "sharex",
@@ -322,8 +327,14 @@ pub(crate) fn query_features(
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-fn slice_projection(pinned: bool, tag: Option<&str>, tab: ShelfTab, sql: String) -> String {
-    if !pinned {
+fn slice_projection(
+    pinned: bool,
+    tag: Option<&str>,
+    tag_slot: Option<u8>,
+    tab: ShelfTab,
+    sql: String,
+) -> String {
+    if !pinned && tag_slot.is_none() {
         return sql;
     }
     let category = match tab {
@@ -332,9 +343,10 @@ fn slice_projection(pinned: bool, tag: Option<&str>, tab: ShelfTab, sql: String)
         ShelfTab::Downloads => "e.source='downloads'".into(),
         ShelfTab::Text => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=0)".into(),
         ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
+        ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
         ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
-        ShelfTab::Images => format!("{} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
+        ShelfTab::Images => format!("{} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
     };
     // Literal quoting is restricted to this optional tag value; all search and
     // cursor values remain bound parameters in the shared SQL pipeline.
@@ -346,11 +358,14 @@ fn slice_projection(pinned: bool, tag: Option<&str>, tab: ShelfTab, sql: String)
             )
         })
         .unwrap_or_default();
+    let slot_filter = tag_slot
+        .map(|number| format!("AND EXISTS(SELECT 1 FROM tag_slot_assignments a WHERE a.event_id=e.id AND a.slot_number={number})"))
+        .unwrap_or_default();
     format!("SELECT e.id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,e.origin_json,e.reference_hash,e.delete_policy_json,
       CASE WHEN json_extract(e.delete_policy_json,'$.kind')='live_original' THEN EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=e.id AND p.available=1) ELSE NULL END AS projected_available,
       COALESCE((SELECT preview FROM text_fragments f WHERE f.event_id=e.id),(SELECT preview FROM link_fragments f WHERE f.event_id=e.id),(SELECT preview FROM table_fragments f WHERE f.event_id=e.id)) AS text_preview,
       EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AS is_table,e.modified_at_ms
-      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND e.id <= ?4 {tag_filter}
+      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND e.id <= ?4 {tag_filter} {slot_filter}
       AND (?1 OR ?2 OR ?3='' OR ?3!='') AND (?5='' OR katran_contains(e.name,?5) OR katran_contains(COALESCE(k.display_name,''),?5)) ORDER BY id DESC LIMIT ?6")
 }
 
@@ -378,6 +393,12 @@ fn projection_sql(
     if tab == ShelfTab::Pods {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_is_pod(c.content)=1)");
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    }
+    if tab == ShelfTab::Files {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)");
+        sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    } else {
+        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)");
     }
     if tab == ShelfTab::Links {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");

@@ -6,7 +6,16 @@ fn default_positions_and_stable_reorder() {
     let mut order = tab_layout::default_order();
     assert_eq!(
         order,
-        vec![Images, Screenshots, Downloads, Text, Links, Tables, Pods]
+        vec![
+            Images,
+            Screenshots,
+            Downloads,
+            Text,
+            Links,
+            Tables,
+            Pods,
+            Files
+        ]
     );
     assert_eq!(tab_layout::tab_at(&order, 0).unwrap(), All);
     for (index, tab) in order.iter().enumerate() {
@@ -15,7 +24,16 @@ fn default_positions_and_stable_reorder() {
     tab_layout::reorder(&mut order, Downloads, 0).unwrap();
     assert_eq!(
         order,
-        vec![Downloads, Images, Screenshots, Text, Links, Tables, Pods]
+        vec![
+            Downloads,
+            Images,
+            Screenshots,
+            Text,
+            Links,
+            Tables,
+            Pods,
+            Files
+        ]
     );
     assert_eq!(tab_layout::tab_at(&order, 1).unwrap(), Downloads);
     tab_layout::reorder(&mut order, Downloads, 2).unwrap();
@@ -28,12 +46,12 @@ fn default_positions_and_stable_reorder() {
 fn invalid_requests_preserve_order() {
     use ShelfTab::*;
     let original = tab_layout::default_order();
-    for (tab, index) in [(All, 0), (Images, 7), (Downloads, usize::MAX)] {
+    for (tab, index) in [(All, 0), (Images, 8), (Downloads, usize::MAX)] {
         let mut order = original.clone();
         assert!(tab_layout::reorder(&mut order, tab, index).is_err());
         assert_eq!(order, original);
     }
-    for position in 8..=u8::MAX {
+    for position in 9..=u8::MAX {
         assert_eq!(
             tab_layout::tab_at(&original, position).unwrap_err().code,
             "invalid_tab_position"

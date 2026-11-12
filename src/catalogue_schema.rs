@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 8;
+pub(crate) const VERSION: i64 = 10;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -143,6 +143,18 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
       CREATE TABLE IF NOT EXISTS folder_favorites(path_key TEXT PRIMARY KEY,path TEXT NOT NULL,added_at_ms INTEGER NOT NULL);
       PRAGMA user_version=7;")?;
     tx.execute_batch("UPDATE events SET delete_policy_json=json_set(delete_policy_json,'$.mode','recycle') WHERE json_extract(delete_policy_json,'$.kind')='live_original'; UPDATE events SET modified_at_ms=detected_at_ms WHERE blob_hash IS NOT NULL AND modified_at_ms IS NULL; PRAGMA user_version=8;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS files_pointers(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,path_key TEXT NOT NULL UNIQUE);
+      PRAGMA user_version=9;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS tag_slots(number INTEGER PRIMARY KEY CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295));
+      CREATE TABLE IF NOT EXISTS tag_slot_assignments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,slot_number INTEGER NOT NULL REFERENCES tag_slots(number));
+      CREATE INDEX IF NOT EXISTS tag_slot_assignments_slot ON tag_slot_assignments(slot_number,event_id DESC);
+      INSERT OR IGNORE INTO tag_slots(number,name,color,material,scale,intensity,angle,seed) VALUES
+      (1,'Тег 1','#808080','solid',50,0,0,1),(2,'Тег 2','#808080','solid',50,0,0,2),
+      (3,'Тег 3','#808080','solid',50,0,0,3),(4,'Тег 4','#808080','solid',50,0,0,4),
+      (5,'Тег 5','#808080','solid',50,0,0,5),(6,'Тег 6','#808080','solid',50,0,0,6),
+      (7,'Тег 7','#808080','solid',50,0,0,7),(8,'Тег 8','#808080','solid',50,0,0,8),
+      (9,'Тег 9','#808080','solid',50,0,0,9);
+      PRAGMA user_version=10;")?;
     tx.commit()?;
     Ok(())
 }

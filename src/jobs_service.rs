@@ -71,6 +71,10 @@ pub(crate) enum PreparedWork {
         snapshot: Result<capture::CaptureSnapshot>,
     },
     LegacyCapture(Result<capture::CaptureSnapshot>),
+    Files {
+        prepared: files_service::PreparedFiles,
+        origin: Origin,
+    },
     Reference(PreparedReference),
     Copy {
         events: Vec<Event>,
@@ -571,6 +575,7 @@ impl Service {
                         let tables_enabled =
                             self.settings.tab_enabled(interaction::ShelfTab::Tables);
                         let pods_enabled = self.settings.tab_enabled(interaction::ShelfTab::Pods);
+                        let files_enabled = self.settings.tab_enabled(interaction::ShelfTab::Files);
                         let references = self.reference_paths()?;
                         let owned_table_tokens: Vec<_> =
                             self.owned_table_tokens.iter().cloned().collect();
@@ -589,6 +594,7 @@ impl Service {
                                         links_enabled,
                                         tables_enabled,
                                         pods_enabled,
+                                        files_enabled,
                                     ),
                                     &owned_table_tokens,
                                 ),
@@ -606,6 +612,7 @@ impl Service {
                 let links_enabled = self.settings.tab_enabled(interaction::ShelfTab::Links);
                 let tables_enabled = self.settings.tab_enabled(interaction::ShelfTab::Tables);
                 let pods_enabled = self.settings.tab_enabled(interaction::ShelfTab::Pods);
+                let files_enabled = self.settings.tab_enabled(interaction::ShelfTab::Files);
                 let sequence = self.clipboard_sequence;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -625,6 +632,7 @@ impl Service {
                                 links_enabled,
                                 tables_enabled,
                                 pods_enabled,
+                                files_enabled,
                             ),
                             &owned_table_tokens,
                         ),
@@ -692,6 +700,20 @@ impl Service {
                         })?
                     }
                 }
+            }
+            Command::AddFiles { paths } => {
+                files_service::validate_paths(&paths)?;
+                let origin = self.ingest_origin.clone();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let mut prepared = Vec::with_capacity(paths.len());
+                    for path in paths {
+                        cancel.check()?;
+                        let pointer = files_pointer::prepare_pointer(&path).map_err(ApiError::from);
+                        prepared.push((path, pointer));
+                    }
+                    cancel.check()?;
+                    Ok(PreparedWork::Files { prepared, origin })
+                })?
             }
             Command::IngestPath { path, source } => {
                 self.check_ingest_enabled(&path.to_string_lossy())?;
@@ -896,6 +918,7 @@ impl Service {
                 PreparedWork::Blob(prepared)=> { if prepared.is_table(){self.check_tables_enabled()?;}else if prepared.is_link(){self.check_links_enabled()?;}else if prepared.is_pod(){self.check_pods_enabled()?;}else if prepared.is_text(){self.check_text_enabled()?;}else{self.check_ingest_enabled(prepared.name())?;} let id=storage::commit_prepared_bytes(&mut self.db,&self.root,self.quota,prepared)?; Ok(json!(self.get(id)?)) }
                 PreparedWork::Capture{ticket,snapshot}=>self.complete_capture(ticket,snapshot),
                 PreparedWork::LegacyCapture(snapshot)=>snapshot.and_then(|snapshot|self.commit_capture_snapshot(snapshot,capture::sequence_number())),
+                PreparedWork::Files{prepared,origin}=>{self.jobs.authorize_claimed_effect(ready)?;self.commit_files(prepared,origin)},
                 PreparedWork::Reference(prepared)=>self.commit_prepared_reference(prepared),
                 PreparedWork::Copy{events,plan,mut sink}=> {
                     self.validate_job_events(&events)?;

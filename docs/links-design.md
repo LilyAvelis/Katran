@@ -16,7 +16,10 @@ as Text. Existing Text events are never reclassified.
 
 The exact original URL is retained, including Unicode, query and fragment.
 Limits are 1 MiB per link, 8 MiB per combined copy/export and 1,000 selected
-items. Equal content shares managed blobs while arrivals remain distinct.
+items. An exact repeated URL reuses an existing Link ID, preferring a pinned
+match and then the newest ID. Pin, tags, properties, timestamps and origin stay
+unchanged; existing duplicates are not merged or deleted. Text and Links remain
+distinct kinds, and URL spelling is not normalized for identity.
 Schema v5 adds event-specific `link_fragments` metadata and reuses content-keyed
 search metadata. Migration makes a consistent `index-before-v5` backup before
 changing an existing catalogue. Older binaries reject the newer schema.

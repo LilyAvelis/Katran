@@ -260,7 +260,7 @@ fn migration_preserves_v3_events_unknown_metadata_and_old_settings() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        10
     );
     assert_eq!(
         db.query_row(

@@ -93,6 +93,9 @@ pub enum Command {
     AddFolderFiles {
         ids: Vec<i64>,
     },
+    AddFiles {
+        paths: Vec<std::path::PathBuf>,
+    },
     ChooseFolder {
         path: PathBuf,
     },
@@ -131,6 +134,23 @@ pub enum Command {
     PinnedTags,
     FilterPinnedTag {
         tag: Option<String>,
+    },
+    ListTagSlots,
+    SaveTagSlot {
+        slot: crate::tag_slots::Slot,
+    },
+    AssignTagSlot {
+        ids: Vec<i64>,
+        slot: Option<u8>,
+    },
+    GetTagSlot {
+        id: i64,
+    },
+    GetTagSlots {
+        ids: Vec<i64>,
+    },
+    FilterTagSlot {
+        slot: Option<u8>,
     },
     GetUpdateStatus,
     CheckUpdates,
@@ -257,6 +277,7 @@ pub enum Command {
     SelectTabPosition {
         position: u8,
     },
+    TogglePinnedView,
     NavigateTab {
         delta: i8,
     },

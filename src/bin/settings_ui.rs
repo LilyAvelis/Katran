@@ -19,6 +19,7 @@ pub struct State {
     restart_confirmation: bool,
     restart_requested: bool,
     updates: super::updates_ui::State,
+    tags: super::tag_settings_ui::State,
     confirm_history: bool,
     query: String,
     section: usize,
@@ -565,6 +566,7 @@ impl State {
             if self.editor.is_some() {
                 ctx.request_repaint();
             }
+            self.tags.reset();
             self.confirm_history = false;
             self.draft = None;
             self.custom_backgrounds = None;
@@ -646,7 +648,7 @@ impl State {
      ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы","Теги"].iter().enumerate(){if label.to_lowercase().contains(&self.query.to_lowercase())&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text("Ctrl+, — закрыть настройки");});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
@@ -824,6 +826,8 @@ impl State {
          });
         } else {ui.label("Не удалось прочитать текущую тему.");}
        } else {ui.label(response["error"]["message"].as_str().unwrap_or("Не удалось загрузить темы"));}
+      } else if self.section==5 {
+       if self.tags.show(ui,api){tabs_changed=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
       } else {
        ui.heading("Горячие клавиши");ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text("Поиск команды…").desired_width(ui.available_width())).changed(){self.editor=None;}

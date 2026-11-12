@@ -76,6 +76,7 @@ impl Service {
             ShelfTab::Screenshots => "e.source='sharex'".into(),
             ShelfTab::Text => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=0)".into(),
             ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
+            ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
             ShelfTab::Links => {
                 "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into()
             }

@@ -22,6 +22,14 @@ pub trait ClipboardSink: Send {
 pub struct NativeClipboard;
 #[path = "text_clipboard.rs"]
 mod text_clipboard;
+#[cfg(any(windows, test))]
+pub(crate) fn owns_clipboard_token(token: &str) -> bool {
+    text_clipboard::owns_token(token)
+}
+#[cfg(test)]
+pub(crate) fn remember_clipboard_token_for_test(token: &str) {
+    text_clipboard::remember_token_for_test(token);
+}
 #[cfg(windows)]
 pub(crate) fn verified_text_paste_sequence(expected: u32) -> Option<u32> {
     text_clipboard::verified_sequence(expected)

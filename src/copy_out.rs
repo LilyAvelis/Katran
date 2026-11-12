@@ -538,6 +538,42 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
     })
 }
 /// Image decoding and HDROP encoding are preparation work, not publication work.
+#[cfg(any(windows, test))]
+static FILE_OWNER_TOKENS: std::sync::Mutex<std::collections::VecDeque<String>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+#[cfg(any(windows, test))]
+pub(crate) fn owns_file_token(token: &str) -> bool {
+    FILE_OWNER_TOKENS
+        .lock()
+        .is_ok_and(|tokens| tokens.iter().any(|known| known == token))
+}
+
+#[cfg(test)]
+pub(crate) fn remember_file_token_for_test(token: &str) {
+    remember_file_token(&mut FILE_OWNER_TOKENS.lock().unwrap(), token.to_owned());
+}
+
+#[cfg(any(windows, test))]
+fn remember_file_token(tokens: &mut std::collections::VecDeque<String>, token: String) {
+    tokens.push_back(token);
+    if tokens.len() > 64 {
+        tokens.pop_front();
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn file_owner_tokens_are_bounded() {
+    let mut tokens = std::collections::VecDeque::new();
+    for id in 0..65 {
+        remember_file_token(&mut tokens, format!("{id:032x}"));
+    }
+    assert_eq!(tokens.len(), 64);
+    assert!(!tokens.contains(&format!("{:032x}", 0)));
+    assert!(tokens.contains(&format!("{:032x}", 64)));
+}
+
 pub(crate) struct PreparedNativeClipboard {
     paths: Vec<PathBuf>,
     #[cfg(windows)]
@@ -589,6 +625,30 @@ impl ClipboardSink for PreparedNativeClipboard {
                     clipboard_win::raw::set_without_clear(format.get(), &1u32.to_le_bytes())
             {
                 warnings.push(format!("Copy effect unavailable: {error}"));
+            }
+            // Keep the registry locked until publication completes, so capture
+            // cannot observe a marker before its token is remembered.
+            match FILE_OWNER_TOKENS.lock() {
+                Ok(mut tokens) => {
+                    let marker = unsafe { windows::Win32::System::Com::CoCreateGuid() }
+                        .map(|guid| format!("{:032x}", guid.to_u128()))
+                        .map_err(|e| e.to_string());
+                    let result = marker.and_then(|token| {
+                        let format = clipboard_win::raw::register_format(
+                            crate::table_clipboard::OWNER_FORMAT,
+                        )
+                        .ok_or_else(|| "Cannot register ownership marker".to_string())?;
+                        let bytes = [token.as_bytes(), &[0]].concat();
+                        clipboard_win::raw::set_without_clear(format.get(), &bytes)
+                            .map_err(|e| e.to_string())?;
+                        remember_file_token(&mut tokens, token);
+                        Ok(())
+                    });
+                    if let Err(error) = result {
+                        warnings.push(format!("Clipboard ownership marker failed: {error}"));
+                    }
+                }
+                Err(_) => warnings.push("Clipboard ownership registry unavailable".into()),
             }
             Ok((
                 unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() },
