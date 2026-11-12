@@ -1,9 +1,17 @@
-# Folder · local Katran 2.5 preview
+# Folder · Katran 3.4.1
 
-Katran 2.5 is an in-development local preview. The accepted public release is
-still 2.0.0. In this branch, Folder replaces All as the live view of the folder
-you choose. It shows immediate regular files and refreshes its listing; the
-chosen path is session state, not a copied/imported collection.
+Folder replaces All as the live view of the folder you choose. It shows
+immediate regular files and refreshes its listing; the chosen path is session
+state, not a copied/imported collection. The asynchronous browse improvement
+below is a local checkpoint after the 3.4.1 release, not yet a published build.
+
+Each refresh and additional page is prepared by a bounded Discovery job. The
+UI keeps the previous page visible during ordinary refresh and accepts the result
+only if the Folder, tab, query, sort and generation still match. Ctrl+A waits
+for the current search page before selecting and prepares the complete Folder
+selection in a worker. Synthetic API and headless UI tests cover stale jobs,
+changed files, search and pagination. Each page still enumerates and sorts the
+whole directory; slow-disk latency and memory use await native measurement.
 
 ## Choose and browse
 
@@ -61,8 +69,8 @@ Owner clarification2026-11-11 supersedes the old copy-only return behavior:
 Folder deletion, where available through the managed-file action, stages the
 verified original and asks Windows to recycle it. Recovery may expose a manual
 path if automatic restoration cannot safely put a file back. Downloads and
-ShareX Screenshots managed originals also use Windows recycling in the 2.5
-branch. No permanent-delete fallback is intended.
+ShareX Screenshots managed originals also use Windows recycling. No
+permanent-delete fallback is intended.
 
 ## Information panel
 
@@ -76,5 +84,6 @@ errors do not reduce the gallery height by expanding the header.
 Properties and tags presentation is implemented; explicit return import creates
 fresh typed objects for the supported formats. Raycast clipboard filtering is not implemented:
 no reliable source marker has been established, so intentional emoji are kept.
-See the [preview notes](releases/2.5.0-preview.md) for verification state and
-the [preview build procedure](patch-2.5/BUILD.md) for the unaccepted artifact.
+See the [historical 2.5 preview notes](releases/2.5.0-preview.md) for the
+original acceptance history and [development map](development.md) for current
+build and test commands.

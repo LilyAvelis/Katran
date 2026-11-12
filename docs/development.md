@@ -7,11 +7,13 @@ current product instructions. Lilia's [author guide](https://app.notion.com/p/41
 describes the user experience; its page currently identifies itself as 3.2.3,
 so check exact shortcuts and defaults against the current command catalogue.
 
-Known scaling boundary: Folder browsing currently enumerates and sorts the
-selected directory synchronously for each page. Do not replace this with an
-mtime-only cache: a file can change without changing the directory mtime.
-Moving it off the UI thread requires revision-safe prepared snapshots and
-stale-result handling across folder, query, sort and tab changes.
+Folder browsing now prepares each page in a Discovery job and commits only a
+matching generation, tab, query and sort. The UI requests refresh and further
+pages asynchronously. The selected directory is still enumerated and sorted
+for each page; cancellation is checked around, not within, one enumeration.
+Do not replace revision checks with an mtime-only cache: a file can change
+without changing the directory mtime. Native latency and memory on large or
+remote folders have not yet been measured.
 
 Read `AGENTS.md`, current `README.md`, then this map and the relevant API test.
 For any new view, popup or dialog, follow [reusable UI design patterns](design-patterns.md): shared tokens/ActionRow, one input owner, and asynchronous native/worker adapters.
