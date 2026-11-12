@@ -670,7 +670,12 @@ impl State {
     if drag.drag_started(){ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);}
     egui::Panel::left("settings-sidebar").exact_size(215.0).resizable(false).frame(egui::Frame::new().fill(background).inner_margin(16)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
-     ui.add_space(8.0);ui.label(RichText::new("Settings").size(19.0).strong());ui.add_space(24.0);
+     ui.add_space(8.0);
+     ui.vertical_centered(|ui|{
+      if ui.add_sized([ui.available_width(),28.0],egui::Button::new(RichText::new("Settings").size(19.0).strong()).frame(false)).on_hover_text("Закрыть настройки").clicked(){close=true;}
+      ui.label(RichText::new("Ctrl+, или нажмите Settings, чтобы закрыть").size(11.0).color(Color32::from_gray(185)));
+     });
+     ui.add_space(16.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text("Поиск настроек…").margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new("WORKSPACE").size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
      for(index,label)in ["Основные","Горячие клавиши","Вкладки","Обновления","Темы","Теги"].iter().enumerate(){if section_matches_query(index,label,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(*label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}

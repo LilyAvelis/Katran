@@ -741,6 +741,15 @@ impl Shelf {
             self.start_job(command, false, ctx.clone());
         }
         if self.api.is_some() {
+            // The settings viewport has its own keyboard focus. Keep an exit
+            // route on the main shelf when the user returns here first.
+            if self.state["settings_open"] == true
+                && self.shortcut_editor.is_none()
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Comma))
+            {
+                self.state = self.call(Command::CloseSettings);
+                ctx.request_repaint_of(egui::ViewportId::from_hash_of("katran-settings"));
+            }
             if let Some(editor) = self.shortcut_editor.as_mut()
                 && let Some(intent) = editor.input(&ctx)
                 && self
@@ -2977,6 +2986,8 @@ mod tests {
         app.actions = true;
         frame(&mut app, &ctx, egui::Key::F8, egui::Modifiers::NONE);
         assert_eq!(app.call(Command::Interaction)["settings_open"], true);
+        frame(&mut app, &ctx, egui::Key::Comma, egui::Modifiers::CTRL);
+        assert_eq!(app.call(Command::Interaction)["settings_open"], false);
     }
     #[test]
     fn settings_window_keeps_main_shelf_navigation_available() {
