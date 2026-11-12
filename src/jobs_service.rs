@@ -33,6 +33,15 @@ pub(crate) struct PreparedReference {
     pub(crate) origin: Origin,
 }
 pub(crate) enum PreparedWork {
+    FolderBrowse {
+        snapshot: work_folder::State,
+        generation: u64,
+        view_generation: u64,
+        previous_query: String,
+        query: String,
+        sort: sorting::SortSpec,
+        page: Value,
+    },
     VideoBackground {
         prepared: video_backgrounds::PreparedVideo,
         event: Option<Event>,
@@ -255,6 +264,30 @@ impl Service {
             };
         }
         let id = match command {
+            Command::BrowseShelfSorted {
+                query,
+                limit,
+                cursor,
+            } if self.interaction.tab == interaction::ShelfTab::All => {
+                let (generation, snapshot) = self.work_folder.reserve_snapshot();
+                let view_generation = self.interaction.view_generation;
+                let previous_query = self.interaction.browse_query.clone();
+                let sort = self.interaction.sort;
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    cancel.check()?;
+                    let page = snapshot.browse(&query, limit, cursor.as_deref(), sort)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::FolderBrowse {
+                        snapshot,
+                        generation,
+                        view_generation,
+                        previous_query,
+                        query,
+                        sort,
+                        page,
+                    })
+                })?
+            }
             Command::EnsureMediaRuntime => self.jobs.submit(Lane::Foreground, move |cancel| {
                 cancel.begin_effect()?;
                 crate::media_runtime::install()
@@ -893,6 +926,14 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::FolderBrowse{snapshot,generation,view_generation,previous_query,query,sort,page}=>{
+                    if self.interaction.tab != interaction::ShelfTab::All || self.interaction.view_generation != view_generation || self.interaction.sort != sort || self.interaction.browse_query != previous_query {
+                        return Err(ApiError::new("stale_folder", "Folder browsing context changed"));
+                    }
+                    self.work_folder.commit_snapshot(generation,snapshot)?;
+                    self.interaction.browse_query=query;
+                    Ok(page)
+                },
                 PreparedWork::ThemeBackground{prepared,event,activate}=>{
                     if let Some(event)=event {self.validate_job_events(&[event])?;}
                     self.jobs.authorize_claimed_effect(ready)?;

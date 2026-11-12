@@ -16,13 +16,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct State {
     root: Option<PathBuf>,
     cache: RefCell<Cache>,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Cache {
+    generation: u64,
     next: i64,
     by_path: HashMap<PathBuf, Event>,
     by_id: HashMap<i64, Event>,
@@ -43,12 +44,35 @@ impl State {
         }
         self.root = Some(root);
         let cache = self.cache.get_mut();
+        cache.generation = cache.generation.wrapping_add(1);
         cache.by_path.clear();
         cache.by_id.clear();
         Ok(())
     }
     pub fn current(&self) -> Option<&Path> {
         self.root.as_deref()
+    }
+
+    /// Reserve an isolated preparation. Any subsequent browse or reservation
+    /// invalidates it, so IDs allocated in concurrent snapshots cannot collide.
+    pub(crate) fn reserve_snapshot(&self) -> (u64, Self) {
+        let generation = {
+            let mut cache = self.cache.borrow_mut();
+            cache.generation = cache.generation.wrapping_add(1);
+            cache.generation
+        };
+        (generation, self.clone())
+    }
+
+    pub(crate) fn commit_snapshot(&mut self, generation: u64, prepared: Self) -> Result<()> {
+        if self.cache.borrow().generation != generation || self.root != prepared.root {
+            return Err(ApiError::new(
+                "stale_folder",
+                "Folder browsing context changed",
+            ));
+        }
+        *self = prepared;
+        Ok(())
     }
 
     /// A full fresh directory enumeration precedes filtering and pagination.
@@ -59,6 +83,10 @@ impl State {
         cursor: Option<&str>,
         sort: SortSpec,
     ) -> Result<Value> {
+        {
+            let mut cache = self.cache.borrow_mut();
+            cache.generation = cache.generation.wrapping_add(1);
+        }
         if !(1..=1000).contains(&limit) {
             return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
         }
