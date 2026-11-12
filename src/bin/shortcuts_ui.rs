@@ -47,6 +47,7 @@ pub struct Editor {
     selected: Option<usize>,
     release: bool,
     physical_keys: bool,
+    alt_armed: bool,
 }
 impl Editor {
     pub fn with_physical_keys(mut self) -> Self {
@@ -110,35 +111,64 @@ impl Editor {
     }
     pub fn input(&mut self, ctx: &egui::Context) -> Option<Intent> {
         ctx.input_mut(|input| {
+            self.alt_armed |= input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key {
+                        key: Key::AltLeft | Key::AltRight,
+                        pressed: true,
+                        repeat: false,
+                        ..
+                    }
+                )
+            });
+            let candidate = |event: &egui::Event| match event {
+                egui::Event::Key {
+                    key,
+                    pressed,
+                    repeat,
+                    modifiers,
+                    ..
+                } => {
+                    !modifier_key(*key)
+                        && !repeat
+                        && (*pressed || (self.alt_armed && modifiers.alt && input.focused))
+                }
+                _ => false,
+            };
             if self.release {
                 let released = input.keys_down.is_empty() && input.modifiers.is_none();
-                let fresh = input.events.iter().any(|event| {
-                    matches!(event,
-                    egui::Event::Key {key, pressed:true, repeat:false, ..} if !modifier_key(*key))
-                });
+                let fresh = input.events.iter().any(candidate);
                 self.release = !released && !fresh;
                 if !fresh {
                     discard(input);
                     return None;
                 }
             }
-            let captured = input.events.iter().find_map(|e| match e {
-                egui::Event::Key {
-                    key,
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                    physical_key,
-                } if !modifier_key(*key) => Some((
-                    if self.physical_keys {
-                        physical_key.unwrap_or(*key)
-                    } else {
-                        *key
-                    },
-                    *modifiers,
-                )),
-                _ => None,
-            });
+            let captured = input
+                .events
+                .iter()
+                .filter(|event| candidate(event))
+                .find_map(|e| match e {
+                    egui::Event::Key {
+                        key,
+                        pressed: _,
+                        repeat: _,
+                        modifiers,
+                        physical_key,
+                    } if !modifier_key(*key) => Some((
+                        if self.physical_keys {
+                            physical_key.unwrap_or(*key)
+                        } else {
+                            *key
+                        },
+                        *modifiers,
+                    )),
+                    _ => None,
+                });
+            if !input.modifiers.alt {
+                self.alt_armed = false;
+            }
             discard(input);
             let (key, m) = captured?;
             if key == Key::Escape && m.is_none() {
@@ -332,6 +362,52 @@ pub fn take_action_with_editing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn alt_system_key_release_is_recorded_only_after_alt_was_pressed_in_editor() {
+        for armed in [false, true] {
+            let ctx = egui::Context::default();
+            let mut editor = Editor::new("overlay_hotkey", "Overlay", "").with_physical_keys();
+            if armed {
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::Key {
+                            key: Key::AltLeft,
+                            physical_key: Some(Key::AltLeft),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::ALT,
+                        }],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        assert!(editor.input(ui.ctx()).is_none());
+                    },
+                );
+                out.textures_delta.clear();
+            }
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: Key::R,
+                        physical_key: Some(Key::R),
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::ALT,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    let intent = editor.input(ui.ctx());
+                    if armed {
+                        assert!(matches!(intent,Some(Intent::Set{binding,..}) if binding=="Alt R"));
+                    } else {
+                        assert!(intent.is_none());
+                    }
+                },
+            );
+            out.textures_delta.clear();
+        }
+    }
     #[test]
     fn global_recorder_accepts_fresh_physical_chord_without_idle_frame() {
         let ctx = egui::Context::default();
