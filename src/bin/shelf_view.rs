@@ -351,11 +351,12 @@ impl Shelf {
                     scroll.bar_inner_margin = 8.0;
                     scroll.bar_outer_margin = 2.0;
                     scroll.handle_min_length = 36.0;
-                    // The bar overlays its reserved lane; width is computed below so
-                    // hidden bars and shelves that fit do not consume any space.
+                    // The floating bar uses a full, fixed lane when visible.
+                    // Its handle has the same width on hover, so neither the
+                    // cards nor the handle move sideways during scrolling.
                     scroll.floating = true;
                     scroll.floating_width = 12.0;
-                    scroll.floating_allocated_width = 0.0;
+                    scroll.floating_allocated_width = 22.0;
                     scroll.dormant_handle_opacity = 1.0;
                     scroll.active_handle_opacity = 1.0;
                     scroll.dormant_background_opacity = 1.0;
@@ -453,6 +454,7 @@ impl Shelf {
                     let banana = scroll_inertia_ui::begin(ui, scroll_id, &theme, self.scroll);
                     let mut area = egui::ScrollArea::vertical()
                         .id_salt("shelf-scroll")
+                        .auto_shrink([false, false])
                         .scroll_bar_visibility(visibility);
                     if self.scroll
                         && let Some(index) =
