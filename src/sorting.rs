@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum SortMode {
     #[default]
     Arrival,
+    /// Pinned objects in the user's order, then unpinned by arrival.
+    Pinned,
     Extension,
     Modified,
     Shuffle,
@@ -26,7 +28,7 @@ pub struct SortSpec {
 
 impl SortSpec {
     pub fn normalized(mut self) -> Self {
-        if self.mode == SortMode::Shuffle {
+        if matches!(self.mode, SortMode::Shuffle | SortMode::Pinned) {
             self.reverse = false;
         }
         self
@@ -122,6 +124,7 @@ pub fn action_sort(id: &str) -> Option<(SortMode, bool)> {
     let key = id.strip_suffix("_reverse").unwrap_or(id);
     let mode = match key {
         "arrival" => SortMode::Arrival,
+        "pinned" if !reverse => SortMode::Pinned,
         "extension" => SortMode::Extension,
         "modified" => SortMode::Modified,
         "shuffle" if !reverse => SortMode::Shuffle,

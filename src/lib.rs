@@ -41,6 +41,7 @@ pub mod origin;
 mod paste_service;
 pub mod pinned;
 mod pinned_open;
+pub mod pinned_order;
 pub mod safe_recycle;
 pub mod screenshot_identity;
 pub mod settings;
@@ -218,6 +219,7 @@ impl Service {
         }
         storage::initialize(&db, &root)?;
         catalogue_schema::migrate(&db)?;
+        pinned_order::ensure_schema(&db)?;
         classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
         let stored: Option<String> = db
@@ -633,6 +635,13 @@ impl Service {
                 settings.sort = sorting::SortSpec { mode, reverse, seed: seed.unwrap_or_else(|| if mode == sorting::SortMode::Shuffle { self.interaction.sort.seed.wrapping_add(now_ms() as u64 | 1) } else { self.interaction.sort.seed }) }.normalized();
                 self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
+            },
+            Command::MovePinned { id, direction } => {
+                let result = self.move_visible_pinned(id, direction)?;
+                if result.moved {
+                    self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                }
+                Ok(serde_json::json!(result))
             },
             Command::ScanSharex => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Sharex}),
             Command::ScanDownloads => self.dispatch(Command::RescanSource{source_id:source_policy::SourceId::Downloads}),

@@ -14,6 +14,22 @@ pub struct Definition {
 }
 pub const DEFS: &[Definition] = &[
     Definition {
+        id: "pinned_move_up",
+        label: "Поднять закреплённый объект",
+        default_binding: "Ctrl Alt ArrowUp",
+        rebindable: true,
+        group: "Закреплённые",
+        in_palette: true,
+    },
+    Definition {
+        id: "pinned_move_down",
+        label: "Опустить закреплённый объект",
+        default_binding: "Ctrl Alt ArrowDown",
+        rebindable: true,
+        group: "Закреплённые",
+        in_palette: true,
+    },
+    Definition {
         id: "select_all",
         label: "Выделить всё",
         default_binding: "Ctrl A",
@@ -136,6 +152,14 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "sort_arrival_reverse",
         label: "Сортировать по поступлению · обратно",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_pinned",
+        label: "Закреплённые по своему порядку, затем по поступлению",
         default_binding: "",
         rebindable: true,
         group: "Сортировка",
@@ -629,6 +653,19 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         return Some(command(Command::SelectTabPosition { position }));
     }
     Some(match id {
+        "pinned_move_up" | "pinned_move_down" => command(Command::MovePinned {
+            id: state
+                .selected
+                .first()
+                .copied()
+                .or(state.cursor)
+                .unwrap_or(0),
+            direction: if id == "pinned_move_up" {
+                crate::pinned_order::Direction::Up
+            } else {
+                crate::pinned_order::Direction::Down
+            },
+        }),
         "toggle_pinned_view" => command(Command::TogglePinnedView),
         "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
         "files" => command(Command::SetTab {

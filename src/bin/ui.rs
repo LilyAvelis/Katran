@@ -2942,6 +2942,52 @@ mod tests {
         assert_eq!(app.call(Command::Interaction)["settings_open"], true);
     }
     #[test]
+    fn ctrl_alt_up_moves_the_selected_pin_through_actions() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let mut ids = Vec::new();
+        for n in 0..2 {
+            ids.push(
+                app.call(Command::IngestBytes {
+                    name: format!("pin-{n}.png"),
+                    bytes: vec![n],
+                    source: "test".into(),
+                })["id"]
+                    .as_i64()
+                    .unwrap(),
+            );
+        }
+        app.call(Command::TogglePins { ids: ids.clone() });
+        app.call(Command::SetSort {
+            mode: katran::sorting::SortMode::Pinned,
+            reverse: false,
+            seed: None,
+        });
+        app.refresh();
+        app.call(Command::SetVisible { ids: ids.clone() });
+        app.call(Command::Select {
+            id: ids[1],
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        frame(
+            &mut app,
+            &ctx,
+            egui::Key::ArrowUp,
+            egui::Modifiers::CTRL | egui::Modifiers::ALT,
+        );
+        let page = app.call(Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        });
+        assert_eq!(page["events"][0]["id"], ids[1]);
+    }
+    #[test]
     fn background_sharex_notifies_and_commits_without_repeated_scans() {
         let root = tempfile::tempdir().unwrap();
         let shots = tempfile::tempdir().unwrap();

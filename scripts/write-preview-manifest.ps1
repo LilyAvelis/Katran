@@ -10,7 +10,7 @@ if (-not (Test-Path -LiteralPath $binary) -or -not (Test-Path -LiteralPath $laun
 $sourceFiles = @(Get-KatranSources $projectRoot)
 $manifest = [ordered]@{
     label = "Katran $Label local preview"
-    package_version = '3.1.1'
+    package_version = '3.2.0'
     commit = (& git rev-parse HEAD).Trim()
     branch = (& git branch --show-current).Trim()
     working_tree_modified = [bool]((& git status --porcelain) | Select-Object -First 1)

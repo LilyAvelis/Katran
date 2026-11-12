@@ -56,8 +56,13 @@ pub(crate) fn query_sorted_slice(
     }
     let sort = sort.normalized();
     let sources: String = db.query_row("SELECT COALESCE(group_concat(source_id||':'||generation||':'||enabled,';'),'') FROM (SELECT * FROM source_configurations ORDER BY source_id)", [], |r| r.get(0))?;
+    let pinned_generation = if sort.mode == SortMode::Pinned {
+        crate::pinned_order::generation(db)?
+    } else {
+        0
+    };
     let generation = format!(
-        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{tag_slot:?}:{view_generation}"
+        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{tag_slot:?}:{view_generation}:{pinned_generation}"
     );
     let after = cursor
         .map(|value| {
@@ -185,6 +190,7 @@ pub(crate) fn query_sorted_slice(
         .expect("known projection tail");
     let key = match sort.mode {
         SortMode::Arrival => "p.id",
+        SortMode::Pinned => "CASE WHEN po.event_id IS NOT NULL THEN po.position ELSE -p.id END",
         SortMode::Name => "katran_name_key(p.name)",
         SortMode::Extension => "katran_extension_key(p.name)",
         SortMode::Natural => "katran_natural_key(p.name)",
@@ -200,8 +206,16 @@ pub(crate) fn query_sorted_slice(
     let relation = if descending { "<" } else { ">" };
     // Missing primary values always last; COALESCE supplies only a cursor value,
     // never a fabricated modification date/provenance.
+    let (rank_join, missing) = if sort.mode == SortMode::Pinned {
+        (
+            "LEFT JOIN katran_pinned_order po ON po.event_id=p.id",
+            "po.event_id IS NULL".to_owned(),
+        )
+    } else {
+        ("", format!("{key} IS NULL"))
+    };
     let sql = format!(
-        "WITH projection AS ({projection}), keyed AS (SELECT p.*,({key} IS NULL) AS missing,COALESCE({key},0) AS sort_key,katran_name_key(p.name) AS name_key FROM projection p JOIN events m ON m.id=p.id) SELECT * FROM keyed WHERE ?8=0 OR missing>?9 OR (missing=?9 AND (sort_key {relation} ?10 OR (sort_key=?10 AND (name_key {relation} ?11 OR (name_key=?11 AND id {relation} ?12))))) ORDER BY missing ASC,sort_key {direction},name_key {direction},id {direction} LIMIT ?6"
+        "WITH projection AS ({projection}), keyed AS (SELECT p.*,({missing}) AS missing,COALESCE({key},0) AS sort_key,katran_name_key(p.name) AS name_key FROM projection p JOIN events m ON m.id=p.id {rank_join}) SELECT * FROM keyed WHERE ?8=0 OR missing>?9 OR (missing=?9 AND (sort_key {relation} ?10 OR (sort_key=?10 AND (name_key {relation} ?11 OR (name_key=?11 AND id {relation} ?12))))) ORDER BY missing ASC,sort_key {direction},name_key {direction},id {direction} LIMIT ?6"
     );
     let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query(params![

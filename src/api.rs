@@ -329,6 +329,10 @@ pub enum Command {
         reverse: bool,
         seed: Option<u64>,
     },
+    MovePinned {
+        id: i64,
+        direction: crate::pinned_order::Direction,
+    },
     ScanSharex,
     ScanDownloads,
     CaptureClipboard {

@@ -30,8 +30,13 @@ An ordered cursor must bind the sort specification, source/tab and search filter
 and carry the last row's ordering keys. The existing descending-ID cursor alone
 cannot represent other sort orders. Changing any bound input resets pagination.
 
-The native key adapter uses comma followed by `e`, `m`, `r`, `n`, `s`,
-`a`, or `o` (origin); Shift on the second key reverses the corresponding order except shuffle.
+The native key adapter uses comma followed by `t`, `e`, `m`, `r`, `n`, `s`,
+`a`, `o` (origin), or `y` (custom pinned order). Shift on the second key
+reverses the corresponding order except shuffle and custom pinned order.
+Custom pinned order puts pins in their saved sequence before unpinned arrival
+order. Actions and Ctrl+Alt+Up/Down move a pinned card one visible position in
+the current tab; moves persist and invalidate old sorted cursors. Folder has no
+pins and uses arrival order for this mode.
 Text inputs keep ordinary comma/letter input. Ctrl comma remains Settings.
 All sort operations are also available through Ctrl K Actions.
 

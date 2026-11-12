@@ -164,7 +164,9 @@ impl State {
         all.retain(|event| event.name.to_lowercase().contains(&needle));
         all.sort_by(|a, b| {
             let order = match sort.mode {
-                SortMode::Arrival | SortMode::Modified => a.modified_at_ms.cmp(&b.modified_at_ms),
+                SortMode::Arrival | SortMode::Pinned | SortMode::Modified => {
+                    a.modified_at_ms.cmp(&b.modified_at_ms)
+                }
                 SortMode::Extension => {
                     sorting::extension_key(&a.name).cmp(&sorting::extension_key(&b.name))
                 }

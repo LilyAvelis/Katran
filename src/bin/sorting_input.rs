@@ -124,6 +124,7 @@ impl State {
 fn key_mode(key: Key) -> Option<&'static str> {
     Some(match key {
         Key::T => "arrival",
+        Key::Y => "pinned",
         Key::E => "extension",
         Key::M => "modified",
         Key::R => "shuffle",
@@ -137,6 +138,7 @@ fn key_mode(key: Key) -> Option<&'static str> {
 fn text_mode(text: &str) -> Option<&'static str> {
     Some(match text.to_lowercase().as_str() {
         "t" | "е" => "arrival",
+        "y" | "н" => "pinned",
         "e" | "у" => "extension",
         "m" | "ь" => "modified",
         "r" | "к" => "shuffle",
@@ -150,7 +152,7 @@ fn text_mode(text: &str) -> Option<&'static str> {
 fn action_id(mode: &str, reverse: bool) -> String {
     format!(
         "sort_{mode}{}",
-        if reverse && mode != "shuffle" {
+        if reverse && mode != "shuffle" && mode != "pinned" {
             "_reverse"
         } else {
             ""
@@ -382,6 +384,27 @@ mod tests {
                 true
             ),
             (None, 1)
+        );
+    }
+    #[test]
+    fn y_selects_pinned_order_in_both_keyboard_layouts() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        state.open();
+        assert_eq!(
+            frame(
+                &ctx,
+                &mut state,
+                vec![key(Key::Y, egui::Modifiers::NONE)],
+                true
+            )
+            .0,
+            Some("sort_pinned".into())
+        );
+        state.open();
+        assert_eq!(
+            frame(&ctx, &mut state, vec![egui::Event::Text("н".into())], true).0,
+            Some("sort_pinned".into())
         );
     }
 }

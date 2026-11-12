@@ -1,9 +1,9 @@
 # Katran 3.2 local preview
 
-This checklist covers the local 3.2 preview, including the later search and
-experimental glass tab changes. It is not an accepted release. The package
-version remains 3.1.1 until the next release; no tag or distribution package
-is implied by this document.
+This checklist records the manual review of the 3.2 preview. The owner accepted
+the local 3.2 milestone on 2026-11-12. Package version 3.2.0 and GitHub main
+identify the installed build; a public release or distribution package is a
+separate step.
 
 ## Manual Windows review
 

@@ -155,8 +155,15 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
       (7,'Тег 7','#808080','solid',50,0,0,7),(8,'Тег 8','#808080','solid',50,0,0,8),
       (9,'Тег 9','#808080','solid',50,0,0,9);
       PRAGMA user_version=10;")?;
-    tx.execute_batch("ALTER TABLE tag_slots ADD COLUMN opacity INTEGER NOT NULL DEFAULT 55 CHECK(opacity BETWEEN 0 AND 100);
-      PRAGMA user_version=11;")?;
+    let has_opacity: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tag_slots') WHERE name='opacity')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_opacity {
+        tx.execute_batch("ALTER TABLE tag_slots ADD COLUMN opacity INTEGER NOT NULL DEFAULT 55 CHECK(opacity BETWEEN 0 AND 100);")?;
+    }
+    tx.execute_batch("PRAGMA user_version=11;")?;
     tx.commit()?;
     Ok(())
 }

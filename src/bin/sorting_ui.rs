@@ -5,6 +5,7 @@ pub fn sequence_hint(id: &str) -> Option<&'static str> {
     Some(match id {
         "sort_arrival" => ", t",
         "sort_arrival_reverse" => ", Shift+T",
+        "sort_pinned" => ", y",
         "sort_extension" => ", e",
         "sort_extension_reverse" => ", Shift+E",
         "sort_modified" => ", m",
@@ -48,6 +49,7 @@ pub fn confirmation(sort: &Value) -> String {
                 "новые → старые"
             },
         ),
+        "pinned" => return "Сортировка: закреплённые в своём порядке, затем по поступлению".into(),
         "origin" => ("источнику", if reverse { "Я → А" } else { "А → Я" }),
         "extension" => ("расширению", if reverse { "Я → А" } else { "А → Я" }),
         "natural" => (
