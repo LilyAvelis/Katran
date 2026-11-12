@@ -10,12 +10,12 @@ use std::{
 };
 
 struct Queue {
-    pending: VecDeque<(String, i64, egui::Context)>,
+    pending: VecDeque<(i64, u64, bool, egui::Context)>,
     closed: bool,
 }
 struct Worker {
     queue: Arc<(Mutex<Queue>, Condvar)>,
-    rx: mpsc::Receiver<(String, Value)>,
+    rx: mpsc::Receiver<(i64, u64, bool, Value)>,
 }
 struct Visual {
     site: String,
@@ -27,8 +27,11 @@ pub(super) struct State {
     root: PathBuf,
     online: bool,
     worker: Option<Worker>,
-    queued: HashSet<String>,
-    visuals: HashMap<String, Visual>,
+    queued: HashSet<i64>,
+    attempted: HashSet<i64>,
+    visuals: HashMap<i64, Visual>,
+    epoch: u64,
+    refresh: Option<(usize, usize, usize)>,
 }
 impl State {
     pub fn new(root: PathBuf) -> Self {
@@ -37,7 +40,10 @@ impl State {
             online: false,
             worker: None,
             queued: HashSet::new(),
+            attempted: HashSet::new(),
             visuals: HashMap::new(),
+            epoch: 0,
+            refresh: None,
         }
     }
     pub fn set_online(&mut self, online: bool) {
@@ -55,7 +61,10 @@ impl State {
                 wake.notify_one();
             }
         }
+        self.epoch = self.epoch.wrapping_add(1);
+        self.refresh = None;
         self.queued.clear();
+        self.attempted.clear();
         self.visuals.clear();
     }
     fn start(&mut self) {
@@ -74,8 +83,10 @@ impl State {
         let worker = queue.clone();
         std::thread::spawn(move || {
             let mut api = Service::open_read_only(&root);
+            let mut host_cache: HashMap<String, Value> = HashMap::new();
+            let mut cache_epoch = 0;
             loop {
-                let (key, id, ctx) = {
+                let (id, epoch, refresh, ctx) = {
                     let (lock, wake) = &*worker;
                     let mut state = lock.lock().unwrap();
                     while state.pending.is_empty() && !state.closed {
@@ -86,15 +97,43 @@ impl State {
                     }
                     state.pending.pop_front().unwrap()
                 };
+                if epoch != cache_epoch {
+                    host_cache.clear();
+                    cache_epoch = epoch;
+                }
                 let result = match &mut api {
-                    Ok(api) => api.execute(Request {
-                        api_version: 1,
-                        request_id: "link-visual".into(),
-                        command: Command::GetLinkVisual { id },
-                    }),
+                    Ok(api) => {
+                        let link = api.execute(Request {
+                            api_version: 1,
+                            request_id: "link-visual-url".into(),
+                            command: Command::GetLink { id },
+                        });
+                        let host = link["result"]["url"]
+                            .as_str()
+                            .and_then(|url| url::Url::parse(url).ok())
+                            .and_then(|url| url.host_str().map(str::to_owned))
+                            .map(|host| host.trim_end_matches('.').to_ascii_lowercase());
+                        if let Some(cached) = host.as_ref().and_then(|host| host_cache.get(host)) {
+                            let mut result = cached.clone();
+                            result["result"]["id"] = Value::from(id);
+                            result
+                        } else {
+                            let result = api.execute(Request {
+                                api_version: 1,
+                                request_id: "link-visual".into(),
+                                command: Command::GetLinkVisual { id },
+                            });
+                            if result["ok"] == true
+                                && let Some(host) = host
+                            {
+                                host_cache.insert(host, result.clone());
+                            }
+                            result
+                        }
+                    }
                     Err(error) => serde_json::json!({"ok":false,"error":error}),
                 };
-                if tx.send((key, result)).is_err() {
+                if tx.send((id, epoch, refresh, result)).is_err() {
                     return;
                 }
                 ctx.request_repaint();
@@ -106,11 +145,21 @@ impl State {
         let Some(worker) = &self.worker else {
             return;
         };
-        while let Ok((key, result)) = worker.rx.try_recv() {
-            self.queued.remove(&key);
+        while let Ok((id, epoch, refresh, result)) = worker.rx.try_recv() {
+            if epoch != self.epoch {
+                continue;
+            }
+            self.queued.remove(&id);
+            self.attempted.insert(id);
+            if refresh && let Some((done, _, failed)) = &mut self.refresh {
+                *done += 1;
+                if result["ok"] != true || result["result"]["favicon_base64"].is_null() {
+                    *failed += 1;
+                }
+            }
             let data = &result["result"];
             let host = data["host"].as_str().unwrap_or("");
-            if result["ok"] != true || host != key {
+            if result["ok"] != true || data["id"].as_i64() != Some(id) {
                 continue;
             }
             let color = data["color"]
@@ -143,7 +192,7 @@ impl State {
                     )
                 });
             self.visuals.insert(
-                key,
+                id,
                 Visual {
                     site: data["site"].as_str().unwrap_or(host).to_owned(),
                     mark: data["mark"].as_str().unwrap_or("↗").to_owned(),
@@ -153,19 +202,46 @@ impl State {
             );
         }
     }
-    fn key(event: &Value) -> Option<String> {
-        let url = event["text_preview"].as_str()?;
-        url::Url::parse(url)
-            .ok()?
-            .host_str()
-            .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+    /// Explicitly retry supplied link IDs. Results from an older queue are ignored.
+    pub fn refresh_all(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
+        self.start();
+        self.epoch = self.epoch.wrapping_add(1);
+        self.queued.clear();
+        let mut unique = HashSet::new();
+        let ids: Vec<_> = ids
+            .into_iter()
+            .filter(|id| *id > 0 && unique.insert(*id))
+            .collect();
+        self.refresh = Some((0, ids.len(), 0));
+        if let Some(worker) = &self.worker {
+            let (lock, wake) = &*worker.queue;
+            if let Ok(mut queue) = lock.lock() {
+                queue.pending.clear();
+                for id in ids {
+                    queue.pending.push_back((id, self.epoch, true, ctx.clone()));
+                    self.queued.insert(id);
+                }
+                wake.notify_one();
+            }
+        }
+        ctx.request_repaint();
     }
+
+    /// Completed, total, and failures (including unavailable icons).
+    pub fn progress(&mut self, ctx: &egui::Context) -> Option<(usize, usize, usize)> {
+        self.drain(ctx);
+        self.refresh
+    }
+
     pub fn paint(&mut self, ui: &egui::Ui, event: &Value, rect: Rect) {
         self.drain(ui.ctx());
-        let key = Self::key(event);
-        if let (Some(key), Some(id)) = (key.as_ref(), event["id"].as_i64())
-            && !self.queued.contains(key)
-            && !self.visuals.contains_key(key)
+        // The catalogue preview may be truncated or unavailable. The dispatcher
+        // resolves the full stored URL from the stable event ID.
+        let id = event["id"].as_i64();
+        if let Some(id) = id
+            && !self.queued.contains(&id)
+            && !self.attempted.contains(&id)
+            && !self.visuals.contains_key(&id)
         {
             self.start();
             if let Some(worker) = &self.worker {
@@ -173,13 +249,15 @@ impl State {
                 if let Ok(mut queue) = lock.lock()
                     && queue.pending.len() < 64
                 {
-                    queue.pending.push_back((key.clone(), id, ui.ctx().clone()));
-                    self.queued.insert(key.clone());
+                    queue
+                        .pending
+                        .push_back((id, self.epoch, false, ui.ctx().clone()));
+                    self.queued.insert(id);
                     wake.notify_one();
                 }
             }
         }
-        let visual = key.as_ref().and_then(|key| self.visuals.get(key));
+        let visual = id.and_then(|id| self.visuals.get(&id));
         let icon_rect = Rect::from_center_size(
             rect.center() - egui::vec2(0.0, 7.0),
             egui::vec2(rect.width() * 0.54, rect.height() * 0.54),

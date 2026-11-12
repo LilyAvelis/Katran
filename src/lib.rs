@@ -6,6 +6,7 @@ mod catalogue_schema;
 mod classification_runtime;
 pub mod clipboard_files;
 pub mod clipboard_listener;
+pub mod compact_layout;
 pub mod copy_out;
 mod delete_jobs;
 mod delete_selection;
@@ -311,6 +312,21 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         pods::register_sql(&db)?;
+        let stored: Option<String> = db
+            .query_row(
+                "SELECT document FROM preferences WHERE key='general'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let settings: settings::Settings = match stored {
+            Some(document) => serde_json::from_str(&document)
+                .map_err(|error| ApiError::new("settings_error", error))?,
+            None => settings::Settings::default(),
+        };
+        settings
+            .validate(0)
+            .map_err(|error| ApiError::new("settings_error", error))?;
         Ok(Self {
             window_visible: true,
             overlay_session: Default::default(),
@@ -357,12 +373,12 @@ impl Service {
             diagnostics: None,
             db,
             root,
-            quota: DEFAULT_QUOTA,
+            quota: settings.quota_bytes,
             capture_enabled: false,
             clipboard_sequence: 0,
             owned_table_tokens: Default::default(),
             interaction: Interaction::default(),
-            settings: settings::Settings::default(),
+            settings,
             shortcuts: shortcuts::Shortcuts::default(),
             ingest_origin: origin::Origin::default(),
             read_only: true,
@@ -416,6 +432,8 @@ impl Service {
                     | Command::PreviewFile { .. }
                     | Command::GetText { .. }
                     | Command::GetLink { .. }
+                    | Command::GetLinkVisual { .. }
+                    | Command::ListLinkIds { .. }
                     | Command::GetTable { .. }
                     | Command::GetDocumentText { .. }
                     | Command::PreviewPath { .. }
@@ -505,6 +523,7 @@ impl Service {
             Command::GetTagSlot {id} => self.get_tag_slot(id),
             Command::GetTagSlots {ids} => self.get_tag_slots(ids),
             Command::GetLinkVisual {id} => self.get_link_visual(id),
+            Command::ListLinkIds {after_id,limit} => self.list_link_visual_ids(after_id,limit),
             Command::FilterTagSlot {slot} => self.filter_tag_slot(slot),
             Command::GetUpdateStatus => Ok(self.update_status.clone()),
             Command::CheckUpdates => {let status=self.updater.check()?;self.accept_update_check(status)},
@@ -532,7 +551,9 @@ impl Service {
             Command::AdjustDensity { delta } => {
                 let mut settings = self.settings.clone();
                 if self.interaction.tab==interaction::ShelfTab::Pods {
-                    settings.pods_tile_size=(i32::from(settings.pods_tile_size)-i32::from(delta)*12).clamp(48,192) as u16;
+                    settings.pods_columns=density::adjust_density(settings.pods_columns,delta);
+                } else if self.interaction.tab==interaction::ShelfTab::Links {
+                    settings.links_columns=density::adjust_density(settings.links_columns,delta);
                 } else {match self.interaction.view {
                     interaction::View::Gallery => settings.gallery_columns=density::adjust_density(settings.gallery_columns,delta),
                     interaction::View::List => settings.stream_rows=density::adjust_density(settings.stream_rows,delta),

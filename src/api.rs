@@ -156,6 +156,11 @@ pub enum Command {
     GetLinkVisual {
         id: i64,
     },
+    /// Page through stored Link IDs for an explicit retrospective refresh.
+    ListLinkIds {
+        after_id: i64,
+        limit: u32,
+    },
     FilterTagSlot {
         slot: Option<u8>,
     },

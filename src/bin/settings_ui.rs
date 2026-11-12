@@ -32,6 +32,7 @@ pub struct State {
     shortcut_filter: String,
     sharex_folder: String,
     downloads_folder: String,
+    refresh_links_requested: bool,
 }
 fn apply_editor_intent(
     api: &mut Service,
@@ -291,6 +292,9 @@ impl State {
     }
     pub(super) fn take_restart_requested(&mut self) -> bool {
         std::mem::take(&mut self.restart_requested)
+    }
+    pub(super) fn take_link_refresh_requested(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_links_requested)
     }
 
     pub fn set_overlay_status(&mut self, status: String) {
@@ -681,6 +685,12 @@ impl State {
          SettingsRow::show(ui,"Подсказка сортировки","Показывать выбранный порядок на две секунды.",|ui|{ui.checkbox(&mut draft.sort_notifications,"Показывать");});
          SettingsRow::show(ui,"Поиск на полке","Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.",|ui|{ui.checkbox(&mut draft.search_keyboard_only,"Только через Ctrl+T");});
          SettingsRow::show(ui,"Значки ссылок","Локальные символы работают без сети. При включении Katran загружает favicon с публичных HTTPS-сайтов; если значок недоступен, остаётся локальный символ.",|ui|{ui.checkbox(&mut draft.link_favicons_online,"Загружать favicon сайтов");});
+         SettingsRow::show(ui,"Обновление значков","После сохранения сетевой настройки вручную проверяет все уже сохранённые ссылки. Ход обновления виден на полке.",|ui|{
+          let online=call(api,Command::GetSettings)["result"]["link_favicons_online"]==true;
+          if ui.add_enabled(online,egui::Button::new("Обновить значки сохранённых ссылок")).clicked(){self.refresh_links_requested=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+         });
+         SettingsRow::show(ui,"Плитки Pods","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.pods_columns,1..=12));});
+         SettingsRow::show(ui,"Плитки Links","Ctrl− / Ctrl+: отдельное число карточек в строке.",|ui|{ui.add(egui::Slider::new(&mut draft.links_columns,1..=12));});
          SettingsRow::show(ui,"Вид при запуске","Текущий вид меняется отдельно через Actions.",|ui|{ui.selectable_value(&mut draft.default_view,View::Gallery,"Галерея");ui.selectable_value(&mut draft.default_view,View::List,"Поток");});
          SettingsRow::show(ui,"Столбцы галереи","Ctrl− / Ctrl+: количество карточек, без масштабирования интерфейса.",|ui|{ui.add(egui::Slider::new(&mut draft.gallery_columns,1..=12));});
          SettingsRow::show(ui,"Строки потока","Предпочтительное количество видимых карточек; в маленьком окне их будет меньше.",|ui|{ui.add(egui::Slider::new(&mut draft.stream_rows,1..=12));});

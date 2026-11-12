@@ -50,8 +50,26 @@ fn names_codepoints_and_density_are_domain_owned() {
     );
     call(&mut api, Command::AdjustDensity { delta: 1 });
     let after = call(&mut api, Command::GetSettings);
-    assert_eq!(after["pods_tile_size"], 84);
+    assert_eq!(after["pods_columns"], 10);
+    assert_eq!(after["links_columns"], before["links_columns"]);
     assert_eq!(after["gallery_columns"], before["gallery_columns"]);
     call(&mut api, Command::AdjustDensity { delta: -1 });
-    assert_eq!(call(&mut api, Command::GetSettings)["pods_tile_size"], 96);
+    assert_eq!(call(&mut api, Command::GetSettings)["pods_columns"], 9);
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Links,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Links,
+        },
+    );
+    call(&mut api, Command::AdjustDensity { delta: -1 });
+    let independent = call(&mut api, Command::GetSettings);
+    assert_eq!(independent["links_columns"], 8);
+    assert_eq!(independent["pods_columns"], 9);
 }

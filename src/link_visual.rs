@@ -39,6 +39,29 @@ fn identity(url: &str) -> Result<(String, String, String, [u8; 3])> {
 }
 
 impl Service {
+    /// Enumerate only stable IDs; URL contents stay in the catalogue.
+    pub(crate) fn list_link_visual_ids(&self, after_id: i64, limit: u32) -> Result<Value> {
+        if after_id < 0 || !(1..=500).contains(&limit) {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Expected nonnegative cursor and limit 1..500",
+            ));
+        }
+        let mut stmt = self.db.prepare(
+            "SELECT event_id FROM link_fragments WHERE event_id > ?1 ORDER BY event_id LIMIT ?2",
+        )?;
+        let mut ids = stmt
+            .query_map(rusqlite::params![after_id, i64::from(limit) + 1], |row| {
+                row.get::<_, i64>(0)
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let has_more = ids.len() > limit as usize;
+        if has_more {
+            ids.pop();
+        }
+        let next_after_id = if has_more { ids.last().copied() } else { None };
+        Ok(json!({"ids": ids, "next_after_id": next_after_id}))
+    }
     pub(crate) fn get_link_visual(&self, id: i64) -> Result<Value> {
         let event = self.get(id)?;
         if event.kind != EventKind::LinkFragment {

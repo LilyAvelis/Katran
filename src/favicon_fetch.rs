@@ -165,8 +165,8 @@ fn read_bounded(reader: impl Read) -> Result<Vec<u8>, Error> {
 }
 
 /// Validate full decoding, not just a MIME type or magic prefix. Return bytes
-/// usable by the existing image feature set. ICO containing PNG is unwrapped;
-/// BMP-only ICO is unsupported without enabling the image crate's ICO codec.
+/// usable by the existing image feature set. PNG-in-ICO is unwrapped;
+/// other supported ICO entries are decoded and converted to bounded PNG.
 fn image_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() > MAX_BYTES {
         return None;
@@ -194,7 +194,16 @@ fn image_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
                 return Some(candidate.to_vec());
             }
         }
-        None
+        let mut reader = ImageReader::with_format(Cursor::new(bytes), ImageFormat::Ico);
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_EDGE);
+        limits.max_image_height = Some(MAX_EDGE);
+        limits.max_alloc = Some(MAX_ALLOC);
+        reader.limits(limits);
+        let image = reader.decode().ok()?;
+        let mut png = Cursor::new(Vec::new());
+        image.write_to(&mut png, ImageFormat::Png).ok()?;
+        (png.get_ref().len() <= MAX_BYTES).then(|| png.into_inner())
     } else if decode_image(bytes) {
         Some(bytes.to_vec())
     } else {

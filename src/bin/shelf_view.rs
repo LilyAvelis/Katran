@@ -337,18 +337,41 @@ impl Shelf {
                     let pods = self.state["tab"] == "pods";
                     let links = self.state["tab"] == "links";
                     let compact = pods || links;
+                    // Reserve a separate lane for the handle so it never covers a card.
+                    let scroll = &mut ui.style_mut().spacing.scroll;
+                    *scroll = egui::style::ScrollStyle::solid();
+                    scroll.bar_width = 12.0;
+                    scroll.bar_inner_margin = 8.0;
+                    scroll.bar_outer_margin = 2.0;
+                    scroll.handle_min_length = 36.0;
+                    if theme_ui::is_blue(ctx) {
+                        scroll.foreground_color = true;
+                        let visuals = &mut ui.style_mut().visuals;
+                        visuals.extreme_bg_color =
+                            Color32::from_rgba_unmultiplied(90, 140, 205, 38);
+                        let accent = theme_ui::color(
+                            ctx,
+                            theme_ui::Role::Accent,
+                            Color32::from_rgb(107, 174, 255),
+                        );
+                        visuals.widgets.inactive.fg_stroke.color = accent.gamma_multiply(0.7);
+                        visuals.widgets.hovered.fg_stroke.color = accent;
+                        visuals.widgets.active.fg_stroke.color = accent;
+                    }
+                    let inner_width = (ui.available_width() - 22.0).max(1.0);
+                    let compact_layout = katran::compact_layout::compact_layout(
+                        inner_width,
+                        columns,
+                        gap,
+                        48.0,
+                        f32::INFINITY,
+                    );
                     let cell_width = if compact {
-                        f32::from(self.pods_tile_size).min(
-                            ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
-                                / columns as f32)
-                                .max(1.0),
-                        )
+                        compact_layout.tile_width
                     } else if gallery {
-                        ((ui.available_width() - 16.0 - gap * (columns - 1) as f32)
-                            / columns as f32)
-                            .max(1.0)
+                        ((inner_width - gap * (columns - 1) as f32) / columns as f32).max(1.0)
                     } else {
-                        (ui.available_width() - 16.0).max(80.0)
+                        inner_width.max(80.0)
                     };
                     let height = if compact {
                         cell_width
@@ -358,7 +381,11 @@ impl Shelf {
                         stream_row_height(ui.available_height(), self.stream_rows, gap)
                     };
                     let scroll_id = ui.make_persistent_id("shelf-scroll");
-                    let mut area = egui::ScrollArea::vertical().id_salt("shelf-scroll");
+                    let mut area = egui::ScrollArea::vertical()
+                        .id_salt("shelf-scroll")
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        );
                     if self.scroll
                         && let Some(index) =
                             visible.iter().position(|e| e["id"] == self.state["cursor"])
@@ -377,6 +404,18 @@ impl Shelf {
                     area.show_rows(ui, height, visible.len().div_ceil(columns), |ui, range| {
                         for row in range {
                             ui.horizontal(|ui| {
+                                #[cfg(test)]
+                                if compact && row == 0 {
+                                    ctx.data_mut(|data| {
+                                        data.insert_temp(
+                                            egui::Id::new("test-compact-row"),
+                                            ui.max_rect(),
+                                        )
+                                    });
+                                }
+                                if compact && compact_layout.inset > 0.5 {
+                                    ui.add_space(compact_layout.inset);
+                                }
                                 for event in visible
                                     .iter()
                                     .take(((row + 1) * columns).min(visible.len()))
@@ -399,7 +438,17 @@ impl Shelf {
                                             data.insert_temp(
                                                 egui::Id::new("test-pod-tile-rect"),
                                                 rect,
-                                            )
+                                            );
+                                            let mut rects = data
+                                                .get_temp::<Vec<egui::Rect>>(egui::Id::new(
+                                                    "test-compact-rects",
+                                                ))
+                                                .unwrap_or_default();
+                                            rects.push(rect);
+                                            data.insert_temp(
+                                                egui::Id::new("test-compact-rects"),
+                                                rects,
+                                            );
                                         });
                                     }
                                     ui.painter().rect_filled(
@@ -425,7 +474,9 @@ impl Shelf {
                                         })
                                     {
                                         // Texture remains on the card surface, outside the image and text content.
-                                        let region = if gallery && !compact {
+                                        let region = if links {
+                                            rect
+                                        } else if gallery && !compact {
                                             gallery_card::geometry(rect).name
                                         } else {
                                             egui::Rect::from_min_max(
@@ -900,6 +951,38 @@ mod tests {
             .expect("compact Links tile allocated");
         assert_eq!(tile.width(), tile.height());
         assert!(tile.width() <= 96.0);
+    }
+    #[test]
+    fn compact_link_row_fills_width_with_equal_side_margins() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"links","selected":[],"cursor":1,"preview":null,"sort":{"mode":"arrival"}});
+        let events: Vec<_> = (1..=9).map(|id| serde_json::json!({"id":id,"kind":"link_fragment","text_preview":"https://example.com","properties":{"pinned":false},"revision":"r1"})).collect();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.shelf_view(ui, &ctx, &events, true, 9),
+        );
+        output.textures_delta.clear();
+        let row = ctx
+            .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-compact-row")))
+            .unwrap();
+        let rects = ctx
+            .data(|data| data.get_temp::<Vec<egui::Rect>>(egui::Id::new("test-compact-rects")))
+            .unwrap();
+        assert_eq!(rects.len(), 9);
+        let left = rects.first().unwrap().left() - row.left();
+        let right = row.right() - rects.last().unwrap().right();
+        assert!(
+            (left - right).abs() < 3.0,
+            "left={left}, right={right}, row={row:?}"
+        );
     }
     #[test]
     fn selected_cards_have_independent_outline_even_without_cursor() {

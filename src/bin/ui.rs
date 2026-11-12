@@ -206,12 +206,14 @@ struct Shelf {
     tab_order: Vec<katran::interaction::ShelfTab>,
     shortcuts: Vec<katran::shortcuts::ShortcutInfo>,
     gallery_columns: u8,
-    pods_tile_size: u16,
+    pods_columns: u8,
+    links_columns: u8,
     stream_rows: u8,
     pending_density: Vec<String>,
     images: Images,
     text_preview: text_preview_ui::TextPreview,
     link_cards: link_card_ui::State,
+    link_refresh_last: Option<(usize, usize, usize)>,
     table_preview: table_preview_ui::TablePreview,
     events: Vec<Value>,
     next_cursor: Option<String>,
@@ -1062,13 +1064,23 @@ impl Shelf {
                 .unwrap_or(4)
                 .clamp(1, 12) as u8;
             self.stream_rows = settings["stream_rows"].as_u64().unwrap_or(3).clamp(1, 12) as u8;
-            self.pods_tile_size = settings["pods_tile_size"]
-                .as_u64()
-                .unwrap_or(96)
-                .clamp(48, 192) as u16;
+            self.pods_columns = settings["pods_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8;
+            self.links_columns = settings["links_columns"].as_u64().unwrap_or(9).clamp(1, 12) as u8;
         }
         let columns = if compact {
-            pods_ui::columns(root.available_width() - 40.0, self.pods_tile_size)
+            let desired = if self.state["tab"] == "pods" {
+                self.pods_columns
+            } else {
+                self.links_columns
+            };
+            katran::compact_layout::compact_layout(
+                root.available_width() - 46.0,
+                usize::from(desired),
+                gallery_card::GAP,
+                48.0,
+                f32::INFINITY,
+            )
+            .columns
         } else if gallery {
             effective_gallery_columns(root.available_width() - 40.0, self.gallery_columns)
         } else {
@@ -1171,6 +1183,53 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
             self.refresh();
             ctx.request_repaint();
+        }
+        if self.settings_ui.take_link_refresh_requested() {
+            let mut ids = Vec::new();
+            let mut after_id = 0;
+            loop {
+                let page = self.call(Command::ListLinkIds {
+                    after_id,
+                    limit: 500,
+                });
+                if !page["ids"].is_array() {
+                    self.message = "Не удалось получить список сохранённых ссылок".into();
+                    ids.clear();
+                    break;
+                }
+                ids.extend(
+                    page["ids"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(Value::as_i64),
+                );
+                let Some(next) = page["next_after_id"].as_i64() else {
+                    break;
+                };
+                if next <= after_id {
+                    self.message = "Не удалось продолжить список ссылок".into();
+                    ids.clear();
+                    break;
+                }
+                after_id = next;
+            }
+            if !ids.is_empty() {
+                self.link_cards.refresh_all(ids, &ctx);
+            } else if self.message.is_empty() {
+                self.message = "Сохранённых ссылок пока нет".into();
+            }
+        }
+        let progress = self.link_cards.progress(&ctx);
+        if progress != self.link_refresh_last {
+            self.link_refresh_last = progress;
+            if let Some((done, total, unavailable)) = progress {
+                self.message = if done < total {
+                    format!("Значки ссылок: {done}/{total}")
+                } else {
+                    format!("Значки ссылок обновлены: {done}/{total}, без favicon: {unavailable}")
+                };
+            }
         }
         if self.api.is_some()
             && self.job.is_none()
@@ -1535,12 +1594,14 @@ fn main() -> eframe::Result {
         tab_order: katran::tab_layout::default_order(),
         shortcuts: Vec::new(),
         gallery_columns: 4,
-        pods_tile_size: 96,
+        pods_columns: 9,
+        links_columns: 9,
         stream_rows: 3,
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
         text_preview: text_preview_ui::TextPreview::new(root.clone()),
         link_cards: link_card_ui::State::new(root.clone()),
+        link_refresh_last: None,
         table_preview: table_preview_ui::TablePreview::new(root),
         events: vec![],
         next_cursor: None,
@@ -1739,12 +1800,14 @@ mod tests {
             tab_order: katran::tab_layout::default_order(),
             shortcuts: Vec::new(),
             gallery_columns: 4,
-            pods_tile_size: 96,
+            pods_columns: 9,
+            links_columns: 9,
             stream_rows: 3,
             pending_density: Vec::new(),
             images: Images::new(root.into()),
             text_preview: text_preview_ui::TextPreview::new(root.into()),
             link_cards: link_card_ui::State::new(root.into()),
+            link_refresh_last: None,
             table_preview: table_preview_ui::TablePreview::new(root.into()),
             events: vec![],
             next_cursor: None,
@@ -1926,6 +1989,24 @@ mod tests {
         );
         assert_eq!(ctx.pixels_per_point(), scale);
         assert_eq!(app.call(Command::GetSettings)["gallery_columns"], 3);
+    }
+
+    #[test]
+    fn link_density_shortcut_changes_links_without_changing_pods() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Links,
+            enabled: true,
+        });
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Links,
+        });
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, egui::Key::Minus, egui::Modifiers::CTRL);
+        let settings = app.call(Command::GetSettings);
+        assert_eq!(settings["links_columns"], 10);
+        assert_eq!(settings["pods_columns"], 9);
     }
 
     #[test]

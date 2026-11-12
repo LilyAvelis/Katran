@@ -15,6 +15,8 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         sort_notifications: true,
         pods_enabled: false,
         pods_tile_size: 96,
+        pods_columns: 9,
+        links_columns: 8,
         overlay_hotkey: String::new(),
         emoji_font: "apple".into(),
         sort: Default::default(),

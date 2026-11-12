@@ -8,7 +8,12 @@ pub struct Settings {
     pub overlay_hotkey: String,
     pub emoji_font: String,
     pub sort_notifications: bool,
+    /// Legacy preference retained so existing settings documents still load.
     pub pods_tile_size: u16,
+    /// Desired count per row for the compact Pods shelf.
+    pub pods_columns: u8,
+    /// Desired count per row for the compact Links shelf, independent of Pods.
+    pub links_columns: u8,
     pub sort: crate::sorting::SortSpec,
     #[serde(
         default = "crate::tab_layout::default_order",
@@ -50,6 +55,8 @@ impl Settings {
             emoji_font: "apple".into(),
             sort_notifications: true,
             pods_tile_size: 96,
+            pods_columns: 9,
+            links_columns: 9,
             sort: Default::default(),
             quota_bytes: quota,
             gallery_columns: 4,
@@ -129,6 +136,9 @@ impl Settings {
         }
         if !(48..=192).contains(&self.pods_tile_size) {
             return Err("Pods: размер плитки должен быть 48–192".into());
+        }
+        if !(1..=12).contains(&self.pods_columns) || !(1..=12).contains(&self.links_columns) {
+            return Err("Pods/Links: число плиток в строке должно быть 1–12".into());
         }
         if !self.overlay_hotkey.trim().is_empty() {
             crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error| error.message)?;

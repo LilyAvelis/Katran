@@ -10,6 +10,9 @@ fn current(ctx: &egui::Context) -> ThemePreferences {
     ctx.data(|data| data.get_temp::<ThemePreferences>(key()))
         .unwrap_or_default()
 }
+pub(super) fn is_blue(ctx: &egui::Context) -> bool {
+    current(ctx).preset == Preset::BlueExperimental
+}
 pub(super) fn compact_header(ctx: &egui::Context) -> bool {
     let theme = current(ctx);
     theme.preset == Preset::BlueExperimental && theme.compact_header

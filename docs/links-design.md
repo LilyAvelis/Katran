@@ -31,7 +31,11 @@ only `https://<host>/favicon.ico` on a bounded worker. It sends no URL path,
 query, fragment or credentials, refuses private/non-public DNS results,
 redirects and oversized images, and falls back to the local symbol on failure.
 Sites that publish icons elsewhere also use the local fallback. The in-memory
-host cache is session-only. The destination domain is not evidence of the
+card cache is session-only. Settings → Основные offers an explicit retrospective
+refresh of saved Links with progress in the lower panel; `ListLinkIds` pages
+stable IDs without exposing URLs. The read-only worker loads persisted settings,
+so saving the opt-in allows existing visible links to fetch on the next view.
+The destination domain is not evidence of the
 clipboard source domain. Recorded source provenance remains separate.
 
 ## Domain API and transfer
@@ -43,6 +47,9 @@ copies links; `CopySmart` and `CopySelectedObjects` choose this behavior for a
 links-only selection. Items carry exact IDs and revisions.
 `GetLinkVisual {id}` returns the local site label, mark and color plus optional
 base64 favicon and warning. It never changes the stored Link.
+Pods and Links keep separate desired column counts. Ctrl− / Ctrl+ changes only
+the active compact tab; square cards share the available row width and the
+scrollbar occupies a separate lane.
 
 Ctrl+C writes plain URL values separated by LF. Ctrl-click keeps explicit
 click order; Shift selection follows the current visible top-to-bottom order.
