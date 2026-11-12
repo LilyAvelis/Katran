@@ -117,7 +117,6 @@ impl Shelf {
             && !self.save
             && self.pending_delete.is_empty()
             && self.shortcut_editor.is_none()
-            && self.state["settings_open"] != true
             && !ctx.egui_wants_keyboard_input()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {

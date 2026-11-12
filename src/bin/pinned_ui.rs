@@ -29,7 +29,6 @@ impl Shelf {
             || self.save
             || self.shortcut_editor.is_some()
             || !self.pending_delete.is_empty()
-            || self.state["settings_open"] == true
             || self.state["tab"] == "folder"
             || ctx
                 .memory(|m| m.focused())

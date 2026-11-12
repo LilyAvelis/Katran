@@ -387,7 +387,6 @@ impl Shelf {
             || self.tag_menu.open
             || self.save
             || !self.pending_delete.is_empty()
-            || self.state["settings_open"] == true
     }
     fn toggle_search_focus(&mut self, ctx: &egui::Context) {
         let search = egui::Id::new("shelf-search");
@@ -510,7 +509,6 @@ impl Shelf {
             && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
-            && self.state["settings_open"] != true
             && self.state["preview"].is_null()
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")))
             && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
@@ -597,7 +595,6 @@ impl Shelf {
             && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
-            && self.state["settings_open"] != true
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")));
         if tab_input_allowed && !self.sorting_input.is_open() {
             if ctx.input_mut(|i| i.events.iter().any(|event| matches!(event, egui::Event::Key {key:egui::Key::Tab,pressed:true,modifiers,..} if *modifiers == egui::Modifiers::NONE)) && i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
@@ -636,7 +633,6 @@ impl Shelf {
             && !self.tag_menu.open
             && !self.save
             && self.pending_delete.is_empty()
-            && self.state["settings_open"] != true
             && self.state["preview"].is_null()
         {
             let density: Vec<_> = self
@@ -762,7 +758,6 @@ impl Shelf {
                     .filter(|s| {
                         (!self.actions || s.id == "settings")
                             && (!self.open_apps.open || s.id == "open_with")
-                            && (self.state["settings_open"] != true || s.id == "copy")
                             && (s.id != "toggle_pinned_view"
                                 || (self.state["preview"].is_null()
                                     && !ctx.egui_wants_keyboard_input()
@@ -810,7 +805,6 @@ impl Shelf {
                 } else if self.save {
                     self.save = false;
                 } else if self.state["preview"].is_null()
-                    && self.state["settings_open"] != true
                     && !ctx.egui_wants_keyboard_input()
                     && self.state["selected"]
                         .as_array()
@@ -1320,7 +1314,6 @@ impl Shelf {
             && !self.save
             && self.shortcut_editor.is_none()
             && self.pending_delete.is_empty()
-            && self.state["settings_open"] != true
         {
             if self.last_poll.elapsed() >= CLIPBOARD_POLL_INTERVAL {
                 self.last_poll = Instant::now();
@@ -2324,11 +2317,11 @@ mod tests {
         assert_eq!(app.state["tab"], "folder");
         app.call(Command::ShowSettings);
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "folder");
+        assert_eq!(app.state["tab"], "downloads");
         app.call(Command::CloseSettings);
         app.actions = true;
         frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::NONE);
-        assert_eq!(app.state["tab"], "folder");
+        assert_eq!(app.state["tab"], "downloads");
     }
     #[test]
     fn copy_event_and_key_produce_one_shortcut_action() {
@@ -2930,6 +2923,22 @@ mod tests {
         assert_eq!(app.call(Command::Interaction)["settings_open"], false);
         app.actions = true;
         frame(&mut app, &ctx, egui::Key::F8, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["settings_open"], true);
+    }
+    #[test]
+    fn settings_window_keeps_main_shelf_navigation_available() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.call(Command::ShowSettings);
+        let original_tab = app.call(Command::Interaction)["tab"].clone();
+        frame(&mut app, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
+        assert_ne!(app.call(Command::Interaction)["tab"], original_tab);
+        frame(&mut app, &ctx, egui::Key::Period, egui::Modifiers::NONE);
+        assert_eq!(app.call(Command::Interaction)["pinned_only"], true);
+        frame(&mut app, &ctx, egui::Key::K, egui::Modifiers::CTRL);
+        assert!(app.actions);
         assert_eq!(app.call(Command::Interaction)["settings_open"], true);
     }
     #[test]
