@@ -25,6 +25,20 @@ pub struct PaletteOptions {
     pub has_background: bool,
 }
 
+/// Recolor the blue palette while retaining its brightness, contrast and alpha.
+/// No custom accent preserves the existing blue palette exactly.
+pub fn tint(base: Color32, accent: Option<[u8; 3]>) -> Color32 {
+    let Some([r, g, b]) = accent else {
+        return base;
+    };
+    let chosen = egui::ecolor::Hsva::from(Color32::from_rgb(r, g, b));
+    let original = egui::ecolor::Hsva::from(Color32::from_rgb(107, 174, 255));
+    let mut result = egui::ecolor::Hsva::from(base);
+    result.h = (result.h + chosen.h - original.h).rem_euclid(1.0);
+    result.s *= chosen.s;
+    Color32::from(result)
+}
+
 fn selection_fill(surface: Color32, rgb: [u8; 3], intensity: u8) -> Color32 {
     let weight = (u32::from(intensity.min(100)) * 22).min(3500);
     let blend = |base: u8, selected: u8| {
@@ -51,20 +65,21 @@ pub fn color(role: Role, legacy: Color32, options: PaletteOptions) -> Color32 {
     }
     let accent = options.accent.unwrap_or([107, 174, 255]);
     let selected = options.selection.unwrap_or(accent);
+    let palette = |base| tint(base, options.accent);
     let base = match role {
         Role::Background if options.has_background => Color32::TRANSPARENT,
         Role::Background if options.glass_active => {
-            Color32::from_rgba_unmultiplied(11, 20, 35, 175)
+            palette(Color32::from_rgba_unmultiplied(11, 20, 35, 175))
         }
-        Role::Background => Color32::from_rgb(11, 20, 35),
-        Role::Surface => Color32::from_rgb(16, 30, 50),
-        Role::Raised => Color32::from_rgb(23, 43, 70),
-        Role::Border => Color32::from_rgb(52, 87, 121),
-        Role::Text => Color32::from_rgb(230, 241, 255),
-        Role::Muted => Color32::from_rgb(155, 176, 200),
+        Role::Background => palette(Color32::from_rgb(11, 20, 35)),
+        Role::Surface => palette(Color32::from_rgb(16, 30, 50)),
+        Role::Raised => palette(Color32::from_rgb(23, 43, 70)),
+        Role::Border => palette(Color32::from_rgb(52, 87, 121)),
+        Role::Text => palette(Color32::from_rgb(230, 241, 255)),
+        Role::Muted => palette(Color32::from_rgb(155, 176, 200)),
         Role::Accent => Color32::from_rgb(accent[0], accent[1], accent[2]),
         Role::Selection => selection_fill(
-            Color32::from_rgb(16, 30, 50),
+            palette(Color32::from_rgb(16, 30, 50)),
             selected,
             options.selection_intensity,
         ),
@@ -80,6 +95,50 @@ pub fn color(role: Role, legacy: Color32, options: PaletteOptions) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn custom_accent_tints_surfaces_but_preserves_glass_and_selection_override() {
+        let legacy = Color32::from_gray(80);
+        let orange = PaletteOptions {
+            blue: true,
+            accent: Some([255, 140, 40]),
+            selection: Some([40, 220, 100]),
+            glass_active: true,
+            has_background: true,
+            ..Default::default()
+        };
+        let surface = color(Role::Surface, legacy, orange);
+        let raised = color(Role::Raised, legacy, orange);
+        assert!(
+            surface.r() > surface.b(),
+            "surface should be warm: {surface:?}"
+        );
+        assert!(
+            raised.r() > raised.b(),
+            "raised surface should be warm: {raised:?}"
+        );
+        assert_eq!(surface.a(), 200);
+        assert_eq!(
+            color(Role::Background, legacy, orange),
+            Color32::TRANSPARENT
+        );
+        assert_eq!(
+            color(Role::SelectionOutline, legacy, orange),
+            Color32::from_rgb(40, 220, 100)
+        );
+        assert_eq!(color(Role::Text, legacy, orange).a(), 255);
+        assert_eq!(
+            color(Role::Surface, legacy, PaletteOptions::default()),
+            legacy
+        );
+        let blue = PaletteOptions {
+            blue: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            color(Role::Surface, legacy, blue),
+            Color32::from_rgb(16, 30, 50)
+        );
+    }
     #[test]
     fn host_options_preserve_legacy_and_blue_glass_selection() {
         let legacy = Color32::from_rgba_unmultiplied(40, 60, 80, 120);
