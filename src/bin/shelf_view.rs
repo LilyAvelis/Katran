@@ -132,6 +132,13 @@ impl Shelf {
                     .inner_margin(12),
             )
             .show(root, |ui| {
+                if self.state["tab"] == "downloads" && self.sources.downloads_over_limit {
+                    ui.label(tr(
+                        "В папке Downloads больше 20 000 записей. Это предел Katran, включая файлы и папки во вложенных папках. Пожалуйста, разберите свою свалку или выберите папку поменьше.",
+                        "Downloads contains more than 20,000 entries, the Katran limit (including files and folders in subfolders). Please tidy up your pile or choose a smaller folder.",
+                    ));
+                    ui.add_space(8.0);
+                }
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
                         if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {

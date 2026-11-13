@@ -216,6 +216,8 @@ impl SourceRuntime {
                         slot.error = None;
                     }
                     FolderEvent::Snapshot { paths, .. } => {
+                        slot.state = SourceState::Watching;
+                        slot.error = None;
                         batch.snapshots.retain(|snapshot| {
                             snapshot.configuration.source_id != slot.configuration.source_id
                         });
