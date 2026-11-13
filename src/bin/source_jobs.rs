@@ -73,9 +73,15 @@ mod tests {
     #[test]
     fn limit_warning_only_matches_downloads_limit() {
         use super::*;
-        assert!(downloads_over_limit(&serde_json::json!({"source_id":"downloads", "error":"Downloads scan exceeds 20000 entries"})));
-        assert!(!downloads_over_limit(&serde_json::json!({"source_id":"sharex", "error":"Downloads scan exceeds 20000 entries"})));
-        assert!(!downloads_over_limit(&serde_json::json!({"source_id":"downloads", "error":null})));
+        assert!(downloads_over_limit(
+            &serde_json::json!({"source_id":"downloads", "error":"Downloads scan exceeds 20000 entries"})
+        ));
+        assert!(!downloads_over_limit(
+            &serde_json::json!({"source_id":"sharex", "error":"Downloads scan exceeds 20000 entries"})
+        ));
+        assert!(!downloads_over_limit(
+            &serde_json::json!({"source_id":"downloads", "error":null})
+        ));
     }
     use super::*;
     #[test]
