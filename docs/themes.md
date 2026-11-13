@@ -70,3 +70,7 @@ API tests cover migration, persistence, independent accent/selection values and
 rejection above100 without losing saved settings. Headless tests check semantic
 colors, selected-only optical parameters and narrow settings layouts. GPU
 appearance remains subject to the owner's manual Windows check.
+
+## Accent palette preview
+
+A custom accent now recolors the experimental theme’s dark surfaces, borders, text tints and widget hover states. Reset keeps the original blue palette; Standard is unchanged. Background artwork and glass settings remain independent, including their transparency. An explicit selection color still overrides the accent for selection. Native appearance with artwork and glass requires manual review.
