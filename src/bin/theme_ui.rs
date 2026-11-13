@@ -22,7 +22,8 @@ pub(super) fn reset(ctx: &egui::Context) {
 }
 fn selection_color(preference: &ThemePreferences) -> Color32 {
     let accent = preference.accent.unwrap_or([107, 174, 255]);
-    let surface = [16u8, 30, 50];
+    let surface =
+        avilon_egui::theme::tint(Color32::from_rgb(16, 30, 50), preference.accent).to_array();
     let blend = |index: usize| {
         ((u16::from(surface[index]) * 78 + u16::from(accent[index]) * 22 + 50) / 100) as u8
     };
@@ -69,14 +70,15 @@ pub(super) fn apply(ctx: &egui::Context, preference: &ThemePreferences) {
         let visuals = &mut style.visuals;
         visuals.panel_fill = get(Role::Background);
         visuals.window_fill = get(Role::Surface);
-        visuals.extreme_bg_color = Color32::from_rgb(7, 15, 27);
+        visuals.extreme_bg_color =
+            avilon_egui::theme::tint(Color32::from_rgb(7, 15, 27), preference.accent);
         visuals.faint_bg_color = get(Role::Surface);
         visuals.override_text_color = Some(get(Role::Text));
         visuals.selection.bg_fill = get(Role::Selection);
         visuals.selection.stroke.color = get(Role::SelectionOutline);
         visuals.hyperlink_color = get(Role::Accent);
         let normal = get(Role::Raised);
-        let hover = Color32::from_rgb(36, 65, 96);
+        let hover = avilon_egui::theme::tint(Color32::from_rgb(36, 65, 96), preference.accent);
         let selection = selection_color(preference);
         let surface = get(Role::Surface);
         let text = get(Role::Text);
