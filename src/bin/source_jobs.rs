@@ -5,6 +5,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Sources {
     started: bool,
+    pub(super) downloads_over_limit: bool,
     // Compatibility with capture completion until its refresh bookkeeping is removed.
     pub match_dirty: bool,
 }
@@ -33,6 +34,9 @@ impl Shelf {
         // Poll also synchronizes settings in the domain; the client does not
         // fingerprint configuration, create watchers or accept worker receipts.
         let result = self.call(Command::PollSources { limit: 1 });
+        if let Some(sources) = result["sources"].as_array() {
+            self.sources.downloads_over_limit = sources.iter().any(downloads_over_limit);
+        }
         let mut errors = Vec::new();
         let item_errors = item_failures(&result["items"]);
         if !item_errors.is_empty() {
@@ -59,8 +63,26 @@ impl Shelf {
     }
 }
 
+fn downloads_over_limit(source: &Value) -> bool {
+    source["source_id"] == "downloads"
+        && source["error"].as_str() == Some("Downloads scan exceeds 20000 entries")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn limit_warning_only_matches_downloads_limit() {
+        use super::*;
+        assert!(downloads_over_limit(
+            &serde_json::json!({"source_id":"downloads", "error":"Downloads scan exceeds 20000 entries"})
+        ));
+        assert!(!downloads_over_limit(
+            &serde_json::json!({"source_id":"sharex", "error":"Downloads scan exceeds 20000 entries"})
+        ));
+        assert!(!downloads_over_limit(
+            &serde_json::json!({"source_id":"downloads", "error":null})
+        ));
+    }
     use super::*;
     #[test]
     fn thin_source_client_ingests_native_sources_through_domain_api() {
