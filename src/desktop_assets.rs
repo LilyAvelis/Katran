@@ -69,6 +69,16 @@ pub(crate) fn list(
     Ok(json!({"items":items}))
 }
 
+pub(crate) fn list_available(
+    root: &Path,
+    theme: &ThemePreferences,
+    remembered_wallpaper: Option<&str>,
+) -> Result<Value> {
+    let wallpapers = crate::desktop_wallpaper::current_wallpapers().unwrap_or_default();
+    list(root, theme, remembered_wallpaper, &wallpapers)
+        .or_else(|_| list(root, theme, remembered_wallpaper, &[]))
+}
+
 /// Resolve a typed ID to a validated managed object for a domain operation.
 pub(crate) fn lookup(root: &Path, typed_id: &str) -> Result<Value> {
     let (kind, id) = typed_id

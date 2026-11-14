@@ -11,6 +11,7 @@ pub struct State {
     selected: Option<String>,
     pending_delete: Option<String>,
     entered: bool,
+    list_job: Option<katran::domain_jobs::JobId>,
     error: String,
     notice: String,
     textures: HashMap<String, TextureHandle>,
@@ -31,22 +32,65 @@ impl State {
     }
 
     fn refresh(&mut self, api: &mut Service, ctx: &egui::Context) {
-        let reply = call(api, Command::ListDesktopAssets);
-        if reply["ok"] != true {
-            self.error = reply["error"]["message"]
-                .as_str()
-                .unwrap_or(tr(
-                    "Не удалось загрузить фоны",
-                    "Could not load backgrounds",
-                ))
-                .to_owned();
-            return;
+        if let Some(job_id) = self.list_job.take() {
+            call(api, Command::CancelJob { job_id });
         }
         self.error.clear();
-        self.items = reply["result"]["items"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let reply = call(
+            api,
+            Command::BeginJob {
+                command: Box::new(Command::ListDesktopAssets),
+            },
+        );
+        if reply["ok"] != true {
+            self.list_error(&reply["error"]);
+        } else if reply["result"]["state"] == "succeeded" {
+            self.accept_list(&reply["result"]["result"], ctx);
+        } else if let Ok(id) = serde_json::from_value(reply["result"]["job_id"].clone()) {
+            self.list_job = Some(id);
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        } else {
+            self.list_error(&serde_json::Value::Null);
+        }
+    }
+
+    fn list_error(&mut self, error: &Value) {
+        self.error = error["message"]
+            .as_str()
+            .unwrap_or(tr(
+                "Не удалось загрузить фоны",
+                "Could not load backgrounds",
+            ))
+            .to_owned();
+    }
+
+    fn poll_list(&mut self, api: &mut Service, ctx: &egui::Context) {
+        let Some(job_id) = self.list_job else {
+            return;
+        };
+        let reply = call(api, Command::PollJob { job_id });
+        if reply["ok"] != true {
+            self.list_job = None;
+            self.list_error(&reply["error"]);
+            return;
+        }
+        match reply["result"]["state"].as_str() {
+            Some("queued" | "running" | "ready") => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(50))
+            }
+            Some("succeeded") => {
+                self.list_job = None;
+                self.accept_list(&reply["result"]["result"], ctx);
+            }
+            _ => {
+                self.list_job = None;
+                self.list_error(&reply["result"]["error"]);
+            }
+        }
+    }
+
+    fn accept_list(&mut self, result: &Value, ctx: &egui::Context) {
+        self.items = result["items"].as_array().cloned().unwrap_or_default();
         if self
             .selected
             .as_ref()
@@ -118,6 +162,7 @@ impl State {
             self.entered = true;
             self.refresh(api, ui.ctx());
         }
+        self.poll_list(api, ui.ctx());
         if let Some(rx) = &self.thumbnails {
             while let Ok((id, image)) = rx.try_recv() {
                 self.textures.insert(
@@ -142,8 +187,17 @@ impl State {
         if !self.notice.is_empty() {
             ui.label(&self.notice);
         }
+        if self.list_job.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(tr("Загрузка фонов…", "Loading backgrounds…"));
+            });
+            return;
+        }
         if self.items.is_empty() {
-            ui.weak(tr("Сохранённых фонов пока нет", "No saved backgrounds yet"));
+            if self.error.is_empty() {
+                ui.weak(tr("Сохранённых фонов пока нет", "No saved backgrounds yet"));
+            }
             return;
         }
         let gallery_height = (ui.available_height() - 55.0).max(80.0);
