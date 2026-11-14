@@ -36,7 +36,12 @@ fn hidden_desktop_tab_still_collects_and_can_delete_inactive_backgrounds() {
     let bid = format!("image:{}", b["id"].as_str().unwrap());
     let listed = call(&mut api, Command::ListDesktopAssets);
     assert_eq!(listed["items"].as_array().unwrap().len(), 2);
-    let job = call(&mut api, Command::BeginJob { command: Box::new(Command::ListDesktopAssets) });
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::ListDesktopAssets),
+        },
+    );
     let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {

@@ -273,7 +273,8 @@ impl Service {
                 let remembered = self.settings.desktop_wallpaper_id.clone();
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     cancel.check()?;
-                    let assets = desktop_assets::list_available(&root, &theme, remembered.as_deref())?;
+                    let assets =
+                        desktop_assets::list_available(&root, &theme, remembered.as_deref())?;
                     cancel.check()?;
                     Ok(PreparedWork::Value(assets))
                 })?

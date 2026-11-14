@@ -502,9 +502,11 @@ impl Service {
                 self.record_desktop_wallpaper(result["id"].as_str().unwrap_or(""))?;
                 Ok(serde_json::json!({"desktop_wallpaper_applied": true, "background": result}))
             }
-            Command::ListDesktopAssets => {
-                desktop_assets::list_available(&self.root, &self.settings.theme, self.settings.desktop_wallpaper_id.as_deref())
-            }
+            Command::ListDesktopAssets => desktop_assets::list_available(
+                &self.root,
+                &self.settings.theme,
+                self.settings.desktop_wallpaper_id.as_deref(),
+            ),
             Command::DeleteDesktopAsset { id } => {
                 let wallpapers = if id.starts_with("image:") {
                     desktop_wallpaper::current_wallpapers().unwrap_or_default()
