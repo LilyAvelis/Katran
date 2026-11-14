@@ -15,16 +15,57 @@ fn names() -> &'static Names {
             .expect("bundled Unicode names")
     })
 }
-pub(crate) fn emoji_entries() -> &'static Vec<(String, String)> {
-    static ENTRIES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+#[derive(Debug)]
+pub(crate) struct EmojiEntry {
+    pub text: String,
+    pub name: String,
+    pub group: String,
+    pub subgroup: String,
+}
+pub(crate) fn emoji_entries() -> &'static Vec<EmojiEntry> {
+    static ENTRIES: OnceLock<Vec<EmojiEntry>> = OnceLock::new();
     ENTRIES.get_or_init(|| {
-        let mut items: Vec<_> = names()
-            .emoji
-            .iter()
-            .map(|(emoji, name)| (emoji.clone(), name.clone()))
-            .collect();
-        items.sort_by(|a, b| a.0.cmp(&b.0));
-        items
+        let mut entries = Vec::new();
+        let mut group = "";
+        let mut subgroup = "";
+        for line in include_str!("../assets/unicode/emoji-test.txt").lines() {
+            if let Some(value) = line.strip_prefix("# group: ") {
+                group = value;
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("# subgroup: ") {
+                subgroup = value;
+                continue;
+            }
+            let Some((fields, comment)) = line.split_once('#') else {
+                continue;
+            };
+            let Some((codepoints, qualification)) = fields.split_once(';') else {
+                continue;
+            };
+            if qualification.trim() != "fully-qualified" {
+                continue;
+            }
+            let text: String = codepoints
+                .split_whitespace()
+                .map(|cp| {
+                    char::from_u32(u32::from_str_radix(cp, 16).expect("Unicode codepoint"))
+                        .expect("Unicode scalar")
+                })
+                .collect();
+            let mut words = comment.split_whitespace();
+            let _display = words.next();
+            let _version = words.next();
+            let name = words.collect::<Vec<_>>().join(" ");
+            assert!(!group.is_empty() && !subgroup.is_empty() && !name.is_empty());
+            entries.push(EmojiEntry {
+                text,
+                name,
+                group: group.into(),
+                subgroup: subgroup.into(),
+            });
+        }
+        entries
     })
 }
 pub(crate) fn is_official_emoji(text: &str) -> bool {

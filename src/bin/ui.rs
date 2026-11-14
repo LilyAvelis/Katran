@@ -3,6 +3,7 @@ mod action_icons;
 mod action_row;
 mod api_client;
 mod app_identity;
+mod category_divider;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
 mod files_file_picker;
@@ -1306,7 +1307,7 @@ impl Shelf {
                     continue;
                 }
                 let preview = self.state["preview"].is_i64();
-                let delta = match key {
+                let mut delta = match key {
                     egui::Key::ArrowDown | egui::Key::ArrowRight if preview => Some(1),
                     egui::Key::ArrowUp | egui::Key::ArrowLeft if preview => Some(-1),
                     egui::Key::ArrowDown => Some(columns as i32),
@@ -1315,6 +1316,23 @@ impl Shelf {
                     egui::Key::ArrowRight if gallery => Some(1),
                     _ => None,
                 };
+                if !preview
+                    && self.state["emoji_catalogue"] == true
+                    && matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown)
+                {
+                    delta = self.state["cursor"]
+                        .as_i64()
+                        .and_then(|id| visible.iter().position(|e| e["id"] == id))
+                        .and_then(|index| {
+                            category_divider::vertical_target(
+                                &visible,
+                                columns,
+                                index,
+                                key == egui::Key::ArrowDown,
+                            )
+                            .map(|target| target as i32 - index as i32)
+                        });
+                }
                 if let Some(delta) = delta {
                     if let Some(id) = ctx.memory(|m| m.focused()) {
                         ctx.memory_mut(|m| m.surrender_focus(id));

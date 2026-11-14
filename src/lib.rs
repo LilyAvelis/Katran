@@ -642,10 +642,10 @@ impl Service {
                 }
                 let mut texts = Vec::new();
                 for id in ids {
-                    let (text, _) = pods::emoji_for_id(id).ok_or_else(|| {
+                    let entry = pods::emoji_for_id(id).ok_or_else(|| {
                         ApiError::new("invalid_selection", "Invalid emoji selection")
                     })?;
-                    texts.push(text.clone());
+                    texts.push(entry.text.clone());
                 }
                 let mut results = Vec::new();
                 for text in texts {

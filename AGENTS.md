@@ -10,7 +10,7 @@ individual claims with the code before using it as a 3.4 technical contract.
 Earlier dated sections below record decisions at the time, not the current
 release or authorization to push new work.
 Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
-Pods has a read-only Unicode 16 emoji catalogue; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. See `docs/pods.md`.
+Pods has a read-only, fully-qualified Unicode 16 emoji catalogue grouped from the bundled official emoji-test file; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. See `docs/pods.md`.
 Local unreleased work after 3.4.1 adds the Desktop background library; see
 `docs/releases/next.md` before changing background storage or tab routing.
 Its cards now use the standard shelf Event, selection, and Actions path via

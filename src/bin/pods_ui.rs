@@ -10,6 +10,7 @@ struct Entry {
     texture: egui::TextureHandle,
     size: Vec2,
     touched: u64,
+    bytes: usize,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -18,6 +19,7 @@ pub(super) struct State {
     receiver: Option<Receiver<(Key, RenderResult)>>,
     pending: HashSet<Key>,
     cache: HashMap<Key, Entry>,
+    visible: HashSet<Key>,
     failed: HashMap<Key, Instant>,
     clock: u64,
     font_id: Option<String>,
@@ -28,6 +30,27 @@ pub(super) struct State {
     description: Option<Value>,
 }
 impl State {
+    pub(super) fn begin_frame(&mut self) {
+        self.visible.clear();
+    }
+    pub(super) fn end_frame(&mut self) {
+        const CACHE_BUDGET: usize = 32 * 1024 * 1024;
+        let mut bytes: usize = self.cache.values().map(|entry| entry.bytes).sum();
+        while bytes > CACHE_BUDGET {
+            let Some(key) = self
+                .cache
+                .iter()
+                .filter(|(key, _)| !self.visible.contains(*key))
+                .min_by_key(|(_, entry)| entry.touched)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            if let Some(entry) = self.cache.remove(&key) {
+                bytes = bytes.saturating_sub(entry.bytes);
+            }
+        }
+    }
     pub(super) fn font_selection(&self) -> Option<&str> {
         self.font_id.as_deref()
     }
@@ -96,6 +119,7 @@ impl State {
             self.font_id.clone().unwrap_or_else(|| "system".into()),
             self.font_generation,
         );
+        self.visible.insert(key.clone());
         self.start();
         while let Ok((key, result)) = self.receiver.as_ref().unwrap().try_recv() {
             if key.3 != self.font_generation {
@@ -119,6 +143,9 @@ impl State {
                             texture,
                             size: egui::vec2(image.width as f32, image.height as f32),
                             touched: self.clock,
+                            bytes: (image.width as usize)
+                                .saturating_mul(image.height as usize)
+                                .saturating_mul(4),
                         },
                     );
                 }
@@ -189,24 +216,91 @@ impl State {
                 self.pending.insert(key);
             }
         }
-        while self.cache.len() > 64 {
-            if let Some(old) = self
-                .cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.touched)
-                .map(|(key, _)| key.clone())
-            {
-                self.cache.remove(&old);
-            } else {
-                break;
-            }
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn visible_working_set_larger_than_64_survives_repaints() {
+        let ctx = egui::Context::default();
+        let (sender, _jobs) = mpsc::sync_channel(1);
+        let (_results, receiver) = mpsc::channel();
+        let mut state = State {
+            sender: Some(sender),
+            receiver: Some(receiver),
+            ..Default::default()
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 80.0));
+        for n in 0..80 {
+            let key = (format!("emoji-{n}"), 44, "system".into(), 0);
+            let image = egui::ColorImage::filled([44, 44], Color32::WHITE);
+            let texture =
+                ctx.load_texture(format!("working-{n}"), image, egui::TextureOptions::LINEAR);
+            state.cache.insert(
+                key,
+                Entry {
+                    texture,
+                    size: egui::vec2(44.0, 44.0),
+                    touched: 0,
+                    bytes: 44 * 44 * 4,
+                },
+            );
+        }
+        for _ in 0..2 {
+            state.begin_frame();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                for n in 0..80 {
+                    state.paint(
+                        ui,
+                        &serde_json::json!({"text_preview":format!("emoji-{n}")}),
+                        rect,
+                    );
+                }
+            });
+            output.textures_delta.clear();
+            state.end_frame();
+            assert_eq!(state.cache.len(), 80);
+            assert!(state.pending.is_empty());
+        }
+        assert_eq!(
+            state.cache.values().map(|entry| entry.bytes).sum::<usize>(),
+            619_520
+        );
+    }
+    #[test]
+    fn memory_budget_evicts_old_unseen_textures() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        for n in 0..3 {
+            let key = (format!("item-{n}"), 44, "system".into(), 0);
+            let texture = ctx.load_texture(
+                format!("budget-{n}"),
+                egui::ColorImage::filled([1, 1], Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            );
+            state.cache.insert(
+                key.clone(),
+                Entry {
+                    texture,
+                    size: Vec2::splat(1.0),
+                    touched: n,
+                    bytes: 20 * 1024 * 1024,
+                },
+            );
+            if n == 0 {
+                state.visible.insert(key);
+            }
+        }
+        state.end_frame();
+        assert_eq!(state.cache.len(), 1);
+        assert!(
+            state
+                .cache
+                .contains_key(&("item-0".into(), 44, "system".into(), 0))
+        );
+    }
     #[test]
     fn pending_raster_does_not_paint_monochrome_text() {
         let (sender, _jobs) = mpsc::sync_channel(1);

@@ -472,11 +472,12 @@ impl Shelf {
                         };
                         (layout, cell_width, height)
                     };
-                    let rows = visible.len().div_ceil(columns);
                     // Keep card geometry stable across filters; egui still draws the thumb only
                     // when this reserved lane is needed for overflow.
                     let inner_width = shelf_content_width(full_width, reserved_scrollbar_width);
                     let (compact_layout, cell_width, height) = dimensions(inner_width);
+                    let grouped = self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true;
+                    let layout = category_divider::layout(visible, columns, height, gap, grouped);
                     let banana = scroll_inertia_ui::begin(ui, scroll_id, &theme, self.scroll);
                     let mut area = egui::ScrollArea::vertical()
                         .id_salt("shelf-scroll")
@@ -488,19 +489,26 @@ impl Shelf {
                     {
                         let offset = egui::scroll_area::State::load(ctx, scroll_id)
                             .map_or(0.0, |state| state.offset.y);
-                        let pitch = height + ui.spacing().item_spacing.y;
-                        area = area.vertical_scroll_offset(ensure_visible_offset(
-                            offset,
-                            ui.available_height(),
-                            (index / columns) as f32 * pitch,
-                            height,
-                        ));
+                        if let Some(row) = layout.rows.iter().find(|row| matches!(&row.kind, category_divider::Kind::Cards(range) if range.contains(&index))) {
+                            area = area.vertical_scroll_offset(ensure_visible_offset(offset, ui.available_height(), row.top, row.height));
+                        }
                     }
                     self.scroll = false;
-                    let _area_output = area.show_rows(ui, height, rows, |ui, range| {
+                    self.pods_ui.begin_frame();
+                    let _area_output = area.show_viewport(ui, |ui, viewport| {
                         ui.set_max_width(inner_width);
-                        for row in range {
-                            ui.horizontal(|ui| {
+                        let (content, _) = ui.allocate_exact_size(egui::vec2(inner_width, layout.height), egui::Sense::hover());
+                        for (row, item) in layout.rows.iter().enumerate() {
+                            if item.top + item.height < viewport.top() || item.top > viewport.bottom() { continue; }
+                            let rect = egui::Rect::from_min_size(content.min + egui::vec2(0.0, item.top), egui::vec2(inner_width, item.height));
+                            match &item.kind {
+                                category_divider::Kind::Divider { level, label } => {
+                                    let style = if *level == "group" { 16.0 } else { 12.0 };
+                                    ui.painter().text(rect.left_center() + egui::vec2(4.0, 0.0), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(style), Color32::from_gray(if *level == "group" { 235 } else { 170 }));
+                                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0, Color32::from_white_alpha(28)));
+                                }
+                                category_divider::Kind::Cards(range) => {
+                            ui.scope_builder(egui::UiBuilder::new().id_salt(("shelf-row", row)).max_rect(rect), |ui| ui.horizontal(|ui| {
                                 #[cfg(test)]
                                 if compact && row == 0 {
                                     ctx.data_mut(|data| {
@@ -513,11 +521,7 @@ impl Shelf {
                                 if compact && compact_layout.inset > 0.5 {
                                     ui.add_space(compact_layout.inset);
                                 }
-                                for event in visible
-                                    .iter()
-                                    .take(((row + 1) * columns).min(visible.len()))
-                                    .skip(row * columns)
-                                {
+                                for event in &visible[range.clone()] {
                                     let criterion =
                                         sorting_ui::criterion(event, &self.state["sort"]);
                                     let id = event["id"].as_i64().unwrap();
@@ -904,15 +908,13 @@ impl Shelf {
                                         }
                                     }
                                 }
-                            });
+                            }));
+                                }
+                            }
                         }
-                        if let Some(banana) = banana {
-                            banana.apply(
-                                ui,
-                                rows as f32 * height + rows.saturating_sub(1) as f32 * gap,
-                            );
-                        }
+                        if let Some(banana) = banana { banana.apply(ui, layout.height); }
                     });
+                    self.pods_ui.end_frame();
                     #[cfg(test)]
                     ctx.data_mut(|data| {
                         data.insert_temp(

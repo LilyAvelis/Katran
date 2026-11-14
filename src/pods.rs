@@ -156,7 +156,7 @@ const EMOJI_ID_BASE: i64 = -(1_i64 << 61);
 pub(crate) fn is_emoji_id(id: i64) -> bool {
     id <= EMOJI_ID_BASE && id > crate::desktop_projection::DESKTOP_ID_MAX
 }
-pub(crate) fn emoji_for_id(id: i64) -> Option<&'static (String, String)> {
+pub(crate) fn emoji_for_id(id: i64) -> Option<&'static crate::pod_metadata::EmojiEntry> {
     if !is_emoji_id(id) {
         return None;
     }
@@ -164,8 +164,10 @@ pub(crate) fn emoji_for_id(id: i64) -> Option<&'static (String, String)> {
     crate::pod_metadata::emoji_entries().get(index)
 }
 pub(crate) fn emoji_event(id: i64) -> crate::Result<crate::Event> {
-    let (text, name) = emoji_for_id(id)
+    let entry = emoji_for_id(id)
         .ok_or_else(|| crate::ApiError::new("not_found", "Emoji catalogue entry not found"))?;
+    let text = &entry.text;
+    let name = &entry.name;
     Ok(crate::Event {
         id,
         kind: crate::EventKind::TextFragment,
@@ -201,7 +203,12 @@ pub(crate) fn browse_emoji(
     let entries: Vec<_> = crate::pod_metadata::emoji_entries()
         .iter()
         .enumerate()
-        .filter(|(_, (emoji, name))| emoji.contains(&query) || name.to_lowercase().contains(&query))
+        .filter(|(_, entry)| {
+            entry.text.contains(&query)
+                || entry.name.to_lowercase().contains(&query)
+                || entry.group.to_lowercase().contains(&query)
+                || entry.subgroup.to_lowercase().contains(&query)
+        })
         .collect();
     if start > entries.len() {
         return Err(crate::ApiError::new(
@@ -210,8 +217,16 @@ pub(crate) fn browse_emoji(
         ));
     }
     let end = (start + limit as usize).min(entries.len());
-    let events: Vec<_> = entries[start..end].iter().map(|(index, (emoji, name))| serde_json::json!({"id":EMOJI_ID_BASE - *index as i64,"kind":"text_fragment","text_preview":emoji,"name":name,"revision":"unicode-16.0","source":"emoji_catalogue","storage":"virtual","path":"","size":emoji.len(),"available":true})).collect();
+    let mut dividers = Vec::new();
+    let events: Vec<_> = entries[start..end].iter().enumerate().map(|(offset, (index, entry))| {
+        let previous = (start + offset).checked_sub(1).and_then(|i| entries.get(i)).map(|(_, e)| *e);
+        let group_changed = previous.is_none_or(|e| e.group != entry.group);
+        let subgroup_changed = group_changed || previous.is_none_or(|e| e.subgroup != entry.subgroup);
+        if group_changed { dividers.push(serde_json::json!({"type":"category_divider","level":"group","label":entry.group,"before":offset})); }
+        if subgroup_changed { dividers.push(serde_json::json!({"type":"category_divider","level":"subgroup","label":entry.subgroup,"before":offset})); }
+        serde_json::json!({"id":EMOJI_ID_BASE - *index as i64,"kind":"text_fragment","text_preview":entry.text,"name":entry.name,"category":{"group":entry.group,"subgroup":entry.subgroup},"revision":"unicode-16.0","source":"emoji_catalogue","storage":"virtual","path":"","size":entry.text.len(),"available":true})
+    }).collect();
     Ok(
-        serde_json::json!({"events":events,"next_cursor":(end < entries.len()).then(|| end.to_string()), "unicode_version":"16.0", "total":entries.len()}),
+        serde_json::json!({"events":events,"dividers":dividers,"next_cursor":(end < entries.len()).then(|| end.to_string()),"unicode_version":"16.0","total":entries.len()}),
     )
 }
