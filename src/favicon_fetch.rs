@@ -299,7 +299,7 @@ fn read_bounded(reader: impl Read) -> Result<Vec<u8>, Error> {
 /// Validate full decoding, not just a MIME type or magic prefix. Return bytes
 /// usable by the existing image feature set. PNG-in-ICO is unwrapped;
 /// other supported ICO entries are decoded and converted to bounded PNG.
-fn image_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn image_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() > MAX_BYTES {
         return None;
     }
@@ -365,6 +365,14 @@ fn decode_image(bytes: &[u8]) -> bool {
     limits.max_alloc = Some(MAX_ALLOC);
     reader.limits(limits);
     reader.decode().is_ok()
+}
+
+/// Validate the same origin policy before looking up an existing cached icon.
+pub(crate) fn cache_host(input: &str) -> Result<String, Error> {
+    Ok(favicon_url(input)?
+        .host_str()
+        .ok_or(Error::InvalidUrl)?
+        .to_owned())
 }
 
 /// Network errors and oversized responses are explicit; unsupported/missing

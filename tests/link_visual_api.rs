@@ -12,6 +12,22 @@ fn reply(api: &mut Service, command: Command) -> serde_json::Value {
 fn link_visual_defaults_to_local_symbol_and_online_is_explicit() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
+    // A populated derived cache must not leak icons when online mode is off.
+    let mut image = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(1, 1)
+        .write_to(&mut image, image::ImageFormat::Png)
+        .unwrap();
+    let cache = rusqlite::Connection::open(root.path().join("favicon-cache.sqlite3")).unwrap();
+    cache
+        .execute_batch("CREATE TABLE icons (host TEXT PRIMARY KEY, image BLOB NOT NULL)")
+        .unwrap();
+    cache
+        .execute(
+            "INSERT INTO icons VALUES (?1, ?2)",
+            rusqlite::params!["app.notion.com", image.into_inner()],
+        )
+        .unwrap();
+    drop(cache);
     assert_eq!(
         reply(
             &mut api,
@@ -67,6 +83,10 @@ fn link_visual_defaults_to_local_symbol_and_online_is_explicit() {
     assert!(visual["result"]["warning"].is_string());
     drop(api);
     let mut reader = Service::open_read_only(root.path()).unwrap();
+    let cached = reply(&mut reader, Command::GetLinkVisual { id });
+    assert_eq!(cached["ok"], true, "{cached}");
+    assert!(cached["result"]["favicon_base64"].is_string());
+    assert!(cached["result"]["warning"].is_null());
     let visual = reply(
         &mut reader,
         Command::GetLinkVisual {

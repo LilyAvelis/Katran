@@ -3,7 +3,64 @@
 use crate::{ApiError, EventKind, Result, Service, favicon_fetch, link_fragments};
 use base64::Engine;
 use serde_json::{Value, json};
+use std::{path::Path, time::Duration};
 use url::Url;
+
+const CACHE_ENTRIES: i64 = 256;
+const CACHE_BYTES: i64 = 256 * 1024;
+
+// Separate derived-data database: a read-only catalogue worker may safely update
+// it. SQLite transactions make replacements and eviction atomic across workers.
+fn cache_connection(root: &Path) -> rusqlite::Result<rusqlite::Connection> {
+    let db = rusqlite::Connection::open(root.join("favicon-cache.sqlite3"))?;
+    db.busy_timeout(Duration::from_millis(500))?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS icons (host TEXT PRIMARY KEY, image BLOB NOT NULL)",
+    )?;
+    Ok(db)
+}
+
+fn cached_fetch<F>(
+    root: &Path,
+    url: &str,
+    force: bool,
+    fetch: F,
+) -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error>
+where
+    F: FnOnce(&str) -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error>,
+{
+    let host = favicon_fetch::cache_host(url)?;
+    let mut db = cache_connection(root).ok();
+    if !force && let Some(db) = db.as_ref() {
+        let bytes: rusqlite::Result<Vec<u8>> = db.query_row(
+            "SELECT image FROM icons WHERE host = ?1 AND length(image) <= ?2",
+            rusqlite::params![host, CACHE_BYTES],
+            |row| row.get(0),
+        );
+        if let Ok(bytes) = bytes
+            && let Some(image) = favicon_fetch::image_bytes(&bytes)
+        {
+            return Ok(Some(image));
+        }
+    }
+    let result = fetch(url)?;
+    // Cache only fully decoded, bounded positive results; failure to persist is
+    // cosmetic and never changes the result returned to the caller.
+    if let Some(image) = result
+        .as_ref()
+        .and_then(|bytes| favicon_fetch::image_bytes(bytes))
+        && let Some(db) = db.as_mut()
+        && let Ok(tx) = db.transaction()
+    {
+        let written = tx.execute("DELETE FROM icons WHERE host = ?1", [&host])
+            .and_then(|_| tx.execute("INSERT INTO icons(host, image) VALUES (?1, ?2)", rusqlite::params![host, image]))
+            .and_then(|_| tx.execute("DELETE FROM icons WHERE rowid IN (SELECT rowid FROM icons ORDER BY rowid DESC LIMIT -1 OFFSET ?1)", [CACHE_ENTRIES]));
+        if written.is_ok() {
+            let _ = tx.commit();
+        }
+    }
+    Ok(result)
+}
 
 fn identity(url: &str) -> Result<(String, String, String, [u8; 3])> {
     let parsed = Url::parse(url).map_err(|_| ApiError::new("invalid_link", "Invalid link URL"))?;
@@ -62,7 +119,7 @@ impl Service {
         let next_after_id = if has_more { ids.last().copied() } else { None };
         Ok(json!({"ids": ids, "next_after_id": next_after_id}))
     }
-    pub(crate) fn get_link_visual(&self, id: i64) -> Result<Value> {
+    pub(crate) fn get_link_visual(&self, id: i64, force_refresh: bool) -> Result<Value> {
         let event = self.get(id)?;
         if event.kind != EventKind::LinkFragment {
             return Err(ApiError::new("not_link", "Item is not a link"));
@@ -72,7 +129,7 @@ impl Service {
         let mut favicon = None;
         let mut warning = None;
         if self.settings.link_favicons_online {
-            match favicon_fetch::fetch(&url) {
+            match cached_fetch(&self.root, &url, force_refresh, favicon_fetch::fetch) {
                 Ok(Some(bytes)) => {
                     favicon = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
                 }
@@ -96,6 +153,99 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_survives_reopen_and_force_refresh_replaces_positive_entry() {
+        use std::{cell::Cell, io::Cursor};
+        fn png(color: u8) -> Vec<u8> {
+            let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                2,
+                2,
+                image::Rgba([color, 0, 0, 255]),
+            ));
+            let mut output = Cursor::new(Vec::new());
+            image
+                .write_to(&mut output, image::ImageFormat::Png)
+                .unwrap();
+            output.into_inner()
+        }
+        let root = tempfile::tempdir().unwrap();
+        let count = Cell::new(0);
+        let a = png(1);
+        let b = png(2);
+        let url = "https://Example.COM/path?private=yes";
+        let fetch_a = |_: &str| {
+            count.set(count.get() + 1);
+            Ok(Some(a.clone()))
+        };
+        assert_eq!(
+            cached_fetch(root.path(), url, false, fetch_a).unwrap(),
+            Some(a.clone())
+        );
+        let no_fetch = |_: &str| -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error> {
+            panic!("cache should avoid network")
+        };
+        assert_eq!(
+            cached_fetch(root.path(), "https://example.com/another", false, no_fetch).unwrap(),
+            Some(a)
+        );
+        assert_eq!(count.get(), 1);
+        assert_eq!(
+            cached_fetch(root.path(), url, true, |_| Ok(Some(b.clone()))).unwrap(),
+            Some(b.clone())
+        );
+        assert_eq!(
+            cached_fetch(root.path(), url, false, no_fetch).unwrap(),
+            Some(b)
+        );
+        assert!(
+            cached_fetch(
+                root.path(),
+                "https://user:secret@example.com/",
+                false,
+                no_fetch
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn cache_rejects_corruption_and_evicts_old_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let mut output = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .unwrap();
+        let icon = output.into_inner();
+        let db = cache_connection(root.path()).unwrap();
+        db.execute("INSERT INTO icons VALUES ('broken.example', x'010203')", [])
+            .unwrap();
+        drop(db);
+        assert_eq!(
+            cached_fetch(root.path(), "https://broken.example/", false, |_| Ok(Some(
+                icon.clone()
+            )))
+            .unwrap(),
+            Some(icon.clone())
+        );
+        for index in 0..CACHE_ENTRIES {
+            let url = format!("https://host{index}.example/");
+            cached_fetch(root.path(), &url, false, |_| Ok(Some(icon.clone()))).unwrap();
+        }
+        let db = cache_connection(root.path()).unwrap();
+        let count: i64 = db
+            .query_row("SELECT count(*) FROM icons", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, CACHE_ENTRIES);
+        let oldest: i64 = db
+            .query_row(
+                "SELECT count(*) FROM icons WHERE host = 'broken.example'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(oldest, 0);
+    }
 
     #[test]
     fn identity_keeps_host_but_uses_readable_site_mark() {
