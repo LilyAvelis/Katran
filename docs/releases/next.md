@@ -1,5 +1,56 @@
 # Unreleased local changes after 3.4.1
 
+## PRODUCT-10 hardening in the local source
+
+This work is not a public release. The installed public release remains 3.4.1;
+the installed private E runtime `c1555b47dc04` predates these changes. There is
+no release acceptance or GitHub publication claim here. Targeted checks passed
+for the listed boundaries, but the integrated source has not completed its final
+combined validation. An internal status ledger tracks session ownership and the
+remaining work. Public and private E share Pods/Desktop/settings storage, so
+the schema v12 migration must not be applied to a real user database until both
+installed editions support it. The installed public 3.4.1 and E runtime
+`c1555b47dc04` remain pre-v12; no real user database has been migrated.
+
+- **A1 — public UI focus:** category selection now reads the focused widget ID
+  before loading text-edit state, avoiding nested egui context locks. The
+  targeted UI regression passed 1/1; Windows owner acceptance remains separate.
+- **A2 — external JSON clients:** stdio protocol v2 supports lossless large
+  numeric IDs using canonical decimal strings, including job and window IDs,
+  while v1 and the in-process Rust API retain their existing representation.
+  Real-process round-trip and invalid-value checks passed 4/4. See
+  [wire v2](../wire-v2.md); the E copy was updated without a separate E test.
+- **A3 — Copy action:** the domain action owns catalogue import, clipboard
+  publication and per-item/clipboard outcomes, so GUI and API clients share the
+  same composition. Public and private E targeted tests passed 2/2 each.
+- **A4 — Desktop pagination:** cursors bind to the browse query, sort, filter
+  and catalogue context. The public API test passed 1/1; E code was mirrored,
+  with no E test reported.
+- **A5 — managed preview:** preview capability uses managed file type/path,
+  including extensionless display names. The public regression passed 1/1.
+- **A6 — durable schema:** Desktop pin/order tables are installed by numbered
+  migration v12. The targeted upgrade/data-preservation test passed 1/1;
+  rollback after an injected migration failure was not tested. Real shared
+  database migration is gated on v12 support in both installed editions.
+- **A8 — build provenance:** local build manifests now include toolchain,
+  target, features, profile, source identity and compiled-resource hashes;
+  release metadata derives its data schema version from the migration source.
+  The synthetic package-contract check passed, including resource-change
+  detection; the manifest measured 55,607 bytes, below the 64 KiB updater
+  limit. No product build was run.
+- **N2/N3/N4 — managed media:** media bytes and sidecars publish from staged
+  files, the active Wallpaper Engine receipt is replaced atomically, and action
+  lookup validates managed bytes without hashing during browse. Wallpaper
+  Engine control waits are bounded; a timeout is surfaced and the command is
+  not blindly replayed. Targeted media publication/API tests passed 2/2 and 1/1;
+  direct modified-video apply passed 1/1; timeout test passed 1/1.
+- **A7 — private E only:** its independent AI lane and bounded cancellation
+  have targeted API evidence (4 passed, 1 ignored). It is not part of this
+  public source tree; no model or implementation details are documented here.
+
+**Still open:** A9 public/E handoff and distribution identity; N1 synchronous
+Folder transfer work (being worked separately); final integrated validation.
+
 - The Pods emoji catalogue now has an All Categories picker in a compact strip below the tabs, with the nine Unicode groups, searchable keyboard/mouse navigation, and `Shift+\` within the catalogue. Filtering combines with search and retains all pages and subgroup dividers.
 
 - Pods now offers a read-only Unicode 16 emoji catalogue with 3,781 fully-qualified entries, official groups and subgroups, and a visible-card-aware texture cache. Inside Pods, physical `\` toggles the catalogue and `Ctrl+\` selects between it and saved Pods. Ctrl+C adds selected entries to ordinary Pods and copies them; Enter pastes into the previous window through the ordinary copy/paste path. Catalogue cards support drag-out as Unicode text and pods.txt. Entries remain in the catalogue.

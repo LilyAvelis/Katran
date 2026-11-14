@@ -30,6 +30,27 @@ An additional action sends a copy with its audio track removed. Wallpaper Engine
 applies the video to its first monitor by default. Katran keeps a durable copy
 and lists successfully sent videos in Desktop; the source may later move or disappear.
 
+## Local source hardening after 3.4.1
+
+The working source tree contains additional, unreleased hardening work. It does
+not change the installed public release: GitHub's public line remains 3.4.1,
+and the installed private E runtime `c1555b47dc04` predates this hardening.
+These changes are still being integrated and have not been published or
+accepted as a new release. The [unreleased change log](docs/releases/next.md)
+records the implemented contracts and targeted evidence. A7 concerns private
+E only; no E model or implementation is part of this public source tree.
+
+Local contracts include the opt-in lossless JSON stdio protocol v2 for large
+IDs, domain-owned Copy behavior, context-bound Desktop cursors, managed-path
+preview selection, schema v12 migrations, complete build provenance, and
+safer managed-media publication/action checks. See the
+[wire v2 contract](docs/wire-v2.md) for client requirements. A9 product
+handoff and N1 Folder transfer responsiveness remain open; this is not a
+release-ready claim. Public and E share the Pods/Desktop/settings database:
+do not migrate a real profile to schema v12 until both installed editions can
+open it. The installed public 3.4.1 and E `c1555b47dc04` are both pre-v12, and
+no real user database has been migrated.
+
 Prepare an updated build without overwriting a running executable:
 
 On a fresh checkout, first run `cargo fetch --locked` to populate dependencies.

@@ -21,7 +21,13 @@ For the local reusable-component workspace, see [Avilon framework](garden-framew
 Its [design SDK index](../crates/README.md) covers semantic colors, responsive layout,
 Acrylic, GPU optics and video-background adapters.
 For builds, CI and release retries, follow [DevOps execution rules](devops.md).
-The source map below describes the public **3.4.1** tree plus documented local work. The `1.5` labels and ownership section below are dated historical snapshots, not the current baseline; historical reviews describe the snapshots they examined. Current behavior is described by the current README and feature contracts.
+The public release remains **3.4.1**. The local source map below includes unreleased hardening after that baseline; it does not describe the installed 3.4.1 binary or authorize publication. See [unreleased changes](releases/next.md) for implementation status and evidence. The `1.5` labels and ownership section below are dated historical snapshots; historical reviews describe the snapshots they examined.
+
+The local schema v12 migration has synthetic upgrade/data-preservation evidence
+only. Public and private E share the Pods/Desktop/settings database. Do not open
+a real shared profile with v12 until both installed editions support it. The
+installed public 3.4.1 and E runtime `c1555b47dc04` are pre-v12; no real user DB
+has been migrated.
 
 | Responsibility | Current owner files |
 | --- | --- |
@@ -29,6 +35,7 @@ The source map below describes the public **3.4.1** tree plus documented local w
 | 2.5 Pinned metadata, tags and saved application handlers | `src/pinned.rs`, `src/pinned_open.rs`, `src/bin/pinned_ui.rs` |
 | 2.5 Everything folder search and negative-ID previews | `src/everything.rs`, `src/preview_snapshot.rs`, `src/bin/workspace_ui.rs`, `assets/everything/` |
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |
+| Lossless JSON stdio wire protocol v2 for large numeric IDs | `src/api_wire_v2.rs`, `src/main.rs`, `tests/wire_v2_api.rs`, [contract](wire-v2.md) |
 | SQL, recovery, durable blobs / preview decode and cache | `src/storage.rs`, `src/preview.rs` |
 | Text fragment ingest/read/merge/copy and shared-blob metadata | `src/text_fragments.rs`, `src/text_service.rs`, `src/catalogue_schema.rs`, `src/catalogue_query.rs`, `tests/text_fragments_api.rs`, `tests/text_flow.rs`, `docs/text-fragments.md` |
 | Exact HTTP(S) Links / grouped drag / functional tab | `src/link_fragments.rs`, `src/text_service.rs`, `src/drag_session.rs`, `src/copy_out.rs`, `tests/links_api.rs`, `docs/links-design.md` |
@@ -74,6 +81,7 @@ The source map below describes the public **3.4.1** tree plus documented local w
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
 | Managed Desktop assets as standard shelf objects | `src/desktop_assets.rs`, `src/desktop_projection.rs`, `src/desktop_selection.rs`, `src/shelf_tabs.rs`, `tests/desktop_shelf_api.rs` |
 | Desktop list performance and background type checks | `src/theme_backgrounds.rs` (`list_fast` for metadata), `src/theme_service.rs` (file path for image/video type), `tests/desktop_shelf_api.rs` |
+| Desktop browse cursor bound to query, sort, filter and catalogue revision | `src/desktop_projection.rs`, `src/shelf_tabs.rs`, `tests/desktop_cursor_api.rs` |
 | Desktop pin/tag state and multi-object transfers | `src/desktop_pins.rs`, `src/tag_service.rs`, `src/copy_out.rs`, `src/transfer_service.rs`, `src/folder_transfer.rs`, `tests/desktop_shelf_api.rs` |
 
 ## Historical 1.5 ownership snapshot

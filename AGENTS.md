@@ -1,14 +1,32 @@
 # Katran development rules
 
-## Current baseline · 3.4.1 · 2026-11-12
+## Public release baseline · 3.4.1 · 2026-11-12
 
-The current source and public-release line is 3.4.1. Read `README.md`,
-`docs/development.md`, and the latest `docs/releases/` entry for current
-behavior. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
+The latest public release remains 3.4.1. The local source also contains
+unreleased PRODUCT-10 hardening; do not describe it as installed or published.
+Read `README.md`, `docs/development.md`, and `docs/releases/next.md` for its
+current implementation and evidence. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
 is valuable product context; it currently labels itself 3.2.3, so reconcile
 individual claims with the code before using it as a 3.4 technical contract.
 Earlier dated sections below record decisions at the time, not the current
 release or authorization to push new work.
+
+Local PRODUCT-10 source contracts after 3.4.1: opt-in stdio wire v2 encodes
+unsafe JSON integers losslessly as canonical decimal strings; `CopySelectionAction`
+owns emoji import plus clipboard outcomes; Desktop cursors bind browse context;
+managed preview uses the asset path; durable Desktop pin tables are in numbered
+schema v12; package manifests derive the schema version and include build
+identity/input hashes; managed media uses staged publication, action-boundary
+integrity checks, and a bounded Wallpaper Engine control wait. Targeted evidence
+and limitations are listed in `docs/releases/next.md` and the internal
+PRODUCT-10 status ledger. These contracts are local and unreleased. A7 applies
+only to private E and must not add model,
+AI command, UI, or implementation to this public source tree. A9 handoff and N1
+Folder transfer remain open; no release or push is authorized by this work.
+Public and E share Pods/Desktop/settings storage. Schema v12 must not be applied
+to a real user database until both installed editions support v12; installed
+public 3.4.1 and E runtime `c1555b47dc04` remain pre-v12, and no real database
+has been migrated. Synthetic migration tests do not satisfy this gate.
 Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Pods has a read-only, fully-qualified Unicode 16 emoji catalogue grouped from the bundled official emoji-test file; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. The catalogue category picker uses Shift+physical backslash only in the full catalogue; its session-only group filter must remain scoped to search and pagination. See `docs/pods.md`.
 Catalogue emoji use the ordinary revision-checked copy, previous-window paste and native drag paths. Ctrl+C additionally imports them into saved Pods; Enter uses the ordinary previous-window paste flow, and all-Pods native drag offers Unicode text alongside the existing `pods.txt` file. No AI search command, UI or model belongs in this public source tree; Katran E is a separate private distribution.
