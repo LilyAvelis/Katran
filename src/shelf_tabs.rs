@@ -159,6 +159,12 @@ impl Service {
                 cursor,
                 self.interaction.sort,
                 &ranks,
+                (
+                    self.interaction.view_generation,
+                    self.interaction.pinned_only,
+                    self.interaction.tag_filter.as_deref(),
+                    self.interaction.tag_slot_filter,
+                ),
             )?;
             return self.decorate_page(serde_json::json!({"events":events,"next_cursor":next,"sort":self.interaction.sort}));
         }

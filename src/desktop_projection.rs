@@ -20,6 +20,7 @@ pub(crate) fn browse(
     cursor: Option<&str>,
     sort: crate::sorting::SortSpec,
     pinned_ranks: &std::collections::HashMap<i64, i64>,
+    context: (u64, bool, Option<&str>, Option<u8>),
 ) -> Result<(Vec<Event>, Option<String>)> {
     use crate::sorting::{self, SortMode};
     if !(1..=1000).contains(&limit) {
@@ -54,17 +55,37 @@ pub(crate) fn browse(
             order
         }
     });
-    let start = cursor
-        .map_or(Ok(0usize), |value| value.parse::<usize>())
-        .map_err(|_| ApiError::new("invalid_cursor", "Invalid Desktop cursor"))?;
-    if start > events.len() {
+    // Bind the offset to both the view and its current metadata snapshot. This
+    // stays metadata-only: managed file contents are checked at action time.
+    let ranks: Vec<_> = events
+        .iter()
+        .map(|event| pinned_ranks.get(&event.id))
+        .collect();
+    let snapshot = serde_json::to_vec(&(&needle, sort, context, &events, ranks))
+        .map_err(|_| ApiError::new("invalid_cursor", "Cannot encode Desktop cursor"))?;
+    let fingerprint = format!("{:x}", Sha256::digest(snapshot));
+    let start = match cursor {
+        None => 0,
+        Some(value) => {
+            let mut parts = value.split(':');
+            let parsed = match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                (Some("d1"), Some(offset), Some(digest), None) if digest == fingerprint => {
+                    offset.parse::<usize>().ok()
+                }
+                _ => None,
+            };
+            parsed
+                .ok_or_else(|| ApiError::new("invalid_cursor", "Stale or invalid Desktop cursor"))?
+        }
+    };
+    if start == 0 && cursor.is_some() || start >= events.len() && cursor.is_some() {
         return Err(ApiError::new(
             "invalid_cursor",
             "Desktop cursor is out of range",
         ));
     }
     let end = start.saturating_add(limit as usize).min(events.len());
-    let next = (end < events.len()).then(|| end.to_string());
+    let next = (end < events.len()).then(|| format!("d1:{end}:{fingerprint}"));
     Ok((events.drain(start..end).collect(), next))
 }
 
