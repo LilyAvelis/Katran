@@ -172,6 +172,10 @@ fn ensure_visible_offset(offset: f32, viewport: f32, top: f32, height: f32) -> f
 }
 use images::Images;
 enum UiJob {
+    TransferPrepaint {
+        command: Box<Command>,
+        ctx: egui::Context,
+    },
     Domain {
         job_id: katran::domain_jobs::JobId,
         capture: bool,
@@ -179,6 +183,49 @@ enum UiJob {
     // Synthetic transport-loss fixtures only; production never moves a Service.
     #[cfg(test)]
     UnavailableTransport(mpsc::Receiver<(Service, Value, bool)>),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransferKind {
+    Copy,
+    Move,
+    Import,
+    Paste,
+    Delete,
+    Recycle,
+}
+impl TransferKind {
+    fn for_command(command: &Command) -> Option<Self> {
+        match command {
+            Command::CopySelection => Some(Self::Copy),
+            Command::TransferSelection => Some(Self::Move),
+            Command::AddFolderFiles { .. } => Some(Self::Import),
+            Command::RunAction { id } if id == "add_to_katran" => Some(Self::Import),
+            Command::PasteToFolder => Some(Self::Paste),
+            _ => None,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Copy => i18n::tr("Копирование…", "Copying…"),
+            Self::Move => i18n::tr("Перемещение…", "Moving…"),
+            Self::Import => i18n::tr("Добавление в Катран…", "Adding to Katran…"),
+            Self::Paste => i18n::tr("Вставка…", "Pasting…"),
+            Self::Delete => i18n::tr("Удаление…", "Deleting…"),
+            Self::Recycle => i18n::tr("В корзину…", "Moving to Recycle Bin…"),
+        }
+    }
+}
+struct TransferBusy {
+    kind: TransferKind,
+    visible_since: Option<Instant>,
+    painted: bool,
+    active: bool,
+    prepaint: bool,
+}
+impl TransferBusy {
+    fn show_due(&self) -> bool {
+        self.prepaint
+    }
 }
 struct FolderPageJob {
     id: katran::domain_jobs::JobId,
@@ -221,6 +268,9 @@ struct Shelf {
     shortcut_editor: Option<shortcuts_ui::Editor>,
     api: Option<Service>,
     job: Option<UiJob>,
+    transfer_busy: Option<TransferBusy>,
+    #[cfg(test)]
+    transfer_begin_count: usize,
     folder_page_job: Option<FolderPageJob>,
     pending_folder_select_all: bool,
     capture_job: Option<katran::domain_jobs::JobId>,
@@ -430,9 +480,14 @@ impl Shelf {
             };
         }
     }
+    fn transfer_input_reserved(&self) -> bool {
+        self.transfer_busy.as_ref().is_some_and(|busy| busy.active)
+            || !self.pending_transfer_copies.is_empty()
+    }
     /// Shared input ownership includes overlays before any early command handler.
     fn modal_owns_input(&self) -> bool {
-        self.sorting_input.is_open()
+        self.transfer_input_reserved()
+            || self.sorting_input.is_open()
             || self.pods_ui.selector_open
             || self.pods_ui.category_open
             || self.shortcut_editor.is_some()
@@ -455,8 +510,55 @@ impl Shelf {
         self.actions = false;
         ctx.request_repaint();
     }
+    fn paint_transfer_busy(&mut self, ctx: &egui::Context) {
+        let Some(busy) = self.transfer_busy.as_mut() else {
+            return;
+        };
+        if !busy.active
+            && busy
+                .visible_since
+                .is_none_or(|shown| shown.elapsed() >= Duration::from_millis(200))
+        {
+            self.transfer_busy = None;
+            return;
+        }
+        if !busy.show_due() {
+            return;
+        }
+        let shown = *busy.visible_since.get_or_insert_with(Instant::now);
+        let rect = ctx.content_rect();
+        let layer = egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("transfer-busy-scrim"),
+        );
+        ctx.layer_painter(layer)
+            .rect_filled(rect, 0.0, Color32::from_black_alpha(28));
+        let width = rect.width().clamp(0.0, 360.0);
+        let card_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(width, 62.0));
+        let mut ui = egui::Ui::new(
+            ctx.clone(),
+            egui::Id::new("transfer-busy-card"),
+            egui::UiBuilder::new().layer_id(layer).max_rect(card_rect),
+        );
+        action_row::popup_frame(ctx).show(&mut ui, |ui| {
+            ui.set_min_width((width - 24.0).max(0.0));
+            ui.horizontal_centered(|ui| {
+                ui.add(egui::Spinner::new().size(18.0));
+                ui.label(busy.kind.label());
+            });
+        });
+        busy.painted = true;
+        if busy.active {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        } else {
+            ctx.request_repaint_after(Duration::from_millis(200).saturating_sub(shown.elapsed()));
+        }
+    }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        if self.transfer_input_reserved() {
+            root.disable();
+        }
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
             i18n::set(if settings["language"] == "en" {
@@ -814,17 +916,20 @@ impl Shelf {
         if self.api.is_some() {
             self.open_apps_tick(&ctx);
         }
-        if self.api.is_some() {
+        if self.api.is_some() && !self.transfer_input_reserved() {
             for action in std::mem::take(&mut self.pending_density) {
                 self.run(action, &ctx);
             }
         }
         if self.api.is_some()
+            && (!self.transfer_input_reserved()
+                || self.pending_tab_action.as_deref() == Some("transfer_copy"))
             && let Some(action) = self.pending_tab_action.take()
         {
             self.run(action, &ctx);
         }
         if self.api.is_some()
+            && !self.transfer_input_reserved()
             && let Some(action) = self.pending_sort.take()
         {
             self.run(action, &ctx);
@@ -1670,6 +1775,7 @@ impl Shelf {
             }
             ctx.request_repaint_after(poll_delay(self.last_poll.elapsed()));
         }
+        self.paint_transfer_busy(&ctx);
     }
 }
 impl eframe::App for Shelf {
@@ -1744,6 +1850,24 @@ impl eframe::App for Shelf {
     }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         ctx.options_mut(|options| options.zoom_with_keyboard = false);
+        if self.transfer_input_reserved() {
+            let copy_bound = self.shortcuts.iter().any(|shortcut| {
+                shortcut.id == "transfer_copy"
+                    && shortcut.binding.as_deref().is_some_and(|binding| {
+                        binding.split(" / ").any(|binding| binding == "Ctrl Tab")
+                    })
+            });
+            let repeated_copy = copy_bound && input.focused && input.events.iter().any(|event| matches!(event,
+                egui::Event::Key { key: egui::Key::Tab, pressed: true, repeat: false, modifiers, .. }
+                    if *modifiers == egui::Modifiers::CTRL));
+            input.events.retain(|event| matches!(event,
+                egui::Event::Key { pressed: false, .. }
+                | egui::Event::PointerButton { pressed: false, .. }
+                | egui::Event::PointerMoved(_)
+                | egui::Event::PointerGone
+                | egui::Event::WindowFocused(_)));
+            if repeated_copy { self.queue_transfer_copy(); }
+        }
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
         self.perform_native_drag(ctx, input);
@@ -1941,6 +2065,9 @@ fn main() -> eframe::Result {
         shortcut_editor: None,
         api: Some(api),
         job: None,
+        transfer_busy: None,
+        #[cfg(test)]
+        transfer_begin_count: 0,
         folder_page_job: None,
         pending_folder_select_all: false,
         capture_job: None,
@@ -2184,6 +2311,9 @@ mod tests {
             shortcut_editor: None,
             api: Some(api),
             job: None,
+            transfer_busy: None,
+            #[cfg(test)]
+            transfer_begin_count: 0,
             folder_page_job: None,
             pending_folder_select_all: false,
             capture_job: None,

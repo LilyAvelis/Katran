@@ -30,6 +30,14 @@ installed public 3.4.1 and E runtime `c1555b47dc04` are pre-v12; no real user DB
 has been migrated.
 
 Folder transfer/copy/import/paste preparation now runs through background jobs.
+Known file selections totaling at least 16 MiB or 20 distinct files get a
+busy presentation frame before Folder transfer or physical deletion starts.
+The UI holds conflicting input while active and keeps the accepted repeated
+Ctrl+Tab copy queue. This is a presentation boundary; `PollJob` remains the
+domain commit path. Unknown-size external clipboard paste, smaller selections
+and shelf-only removal do not receive the overlay. Multi-item delete shows its
+confirmation before the busy state. Folder Ctrl+Shift+C enters the existing
+`BeginJob(AddFolderFiles)` route.
 Transfer completion uses handle-bound recycling for verified Downloads,
 Screenshots and explicitly movable reference originals. `finish_cut` returns
 per-item recycle/recovery details; `tests/transfer_recycle_api.rs` covers direct

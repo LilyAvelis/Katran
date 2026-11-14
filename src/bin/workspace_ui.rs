@@ -156,7 +156,8 @@ impl Shelf {
         self.message = message;
     }
     fn workspace_transfer_input(&mut self, ctx: &egui::Context) {
-        if self.workspace.open
+        if self.transfer_input_reserved()
+            || self.workspace.open
             || self.actions
             || self.open_apps.open
             || self.save
@@ -176,8 +177,9 @@ impl Shelf {
         {
             ctx.input_mut(|i| i.events.retain(|event| !matches!(event, egui::Event::Copy)));
             let ids = self.selected_ids();
-            let result = self.call(Command::AddFolderFiles { ids });
-            self.workspace_transfer_result(&result, true);
+            if self.start_job(Command::AddFolderFiles { ids }, false, ctx.clone()) {
+                self.message = tr("Добавление в Катран…", "Adding to Katran…").into();
+            }
         } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::X)) {
             if let Some(items) = self.selection_snapshot() {
                 let result = self.call(Command::StageTransfer { items, cut: true });

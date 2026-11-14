@@ -40,6 +40,700 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn large_transfer_paints_before_begin_job_even_for_unloaded_selection() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = source.path().join("synthetic.bin");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"synthetic").unwrap();
+        file.set_len(16 * 1024 * 1024).unwrap();
+        drop(file);
+        let mut app = super::super::tests::test_shelf(root.path());
+        let event = app.call(Command::IngestPath {
+            path,
+            source: "synthetic".into(),
+        });
+        let id = event["id"].as_i64().unwrap();
+        app.call(Command::ChooseFolder {
+            path: target.path().into(),
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        app.events.clear(); // The selected item is outside the loaded page.
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        assert!(app.start_job(Command::CopySelection, false, ctx.clone()));
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        app.finish_job();
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        let mut repeated_move = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: Some(egui::Key::Tab),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::SHIFT,
+            }],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut repeated_move);
+        assert!(repeated_move.events.is_empty());
+        assert!(app.pending_tab_action.is_none());
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        // Ctrl+Tab must not become a copy when the shortcut is not bound.
+        assert!(app.shortcuts.is_empty());
+        let mut unbound_copy = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: Some(egui::Key::Tab),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut unbound_copy);
+        assert!(app.pending_transfer_copies.is_empty());
+        app.pending_density.push("density_more".into());
+        app.pending_sort = Some("sort_name".into());
+        app.pending_tab_action = Some("tab_toggle".into());
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert_eq!(app.pending_density.len(), 1);
+        assert_eq!(app.pending_sort.as_deref(), Some("sort_name"));
+        assert_eq!(app.pending_tab_action.as_deref(), Some("tab_toggle"));
+        assert_eq!(app.transfer_begin_count, 0);
+        fn has_status(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(text) => {
+                    text.galley.text().contains("Копирование")
+                        || text.galley.text().contains("Copying")
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().any(has_status),
+                _ => false,
+            }
+        }
+        fn collect_text(shape: &egui::Shape, output: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => output.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect_text(shape, output);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut painted_text = Vec::new();
+        for shape in &output.shapes {
+            collect_text(&shape.shape, &mut painted_text);
+        }
+        assert!(
+            output.shapes.iter().any(|shape| has_status(&shape.shape)),
+            "text: {painted_text:?}"
+        );
+        assert!(app.transfer_busy.as_ref().unwrap().painted);
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        // A second move cannot replace or start beside the accepted transfer.
+        app.run("transfer_selection".into(), &ctx);
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert!(app.pending_transfer_copies.is_empty());
+        app.finish_job();
+        assert!(matches!(app.job, Some(UiJob::Domain { .. })));
+        assert_eq!(app.transfer_begin_count, 1);
+        app.run("transfer_selection".into(), &ctx);
+        assert_eq!(app.transfer_begin_count, 1);
+        let mut repeated_copy = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: Some(egui::Key::Tab),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut repeated_copy);
+        assert!(repeated_copy.events.is_empty());
+        assert_eq!(app.pending_transfer_copies.len(), 1);
+        assert_eq!(app.pending_tab_action.as_deref(), Some("tab_toggle"));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while app.job.is_some() || !app.pending_transfer_copies.is_empty() {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+            output.textures_delta.clear();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(target.path().join("synthetic.bin").exists());
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 2);
+        assert_eq!(app.transfer_begin_count, 2);
+    }
+
+    #[test]
+    fn small_transfer_and_unknown_paste_have_no_busy_overlay() {
+        let root = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let event = app.call(Command::IngestBytes {
+            name: "tiny.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        });
+        let id = event["id"].as_i64().unwrap();
+        app.call(Command::ChooseFolder {
+            path: target.path().into(),
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        app.events = vec![event];
+        assert_eq!(app.transfer_size_risk(&Command::PasteToFolder), Some(None));
+        assert_eq!(
+            app.transfer_size_risk(&Command::AddFolderFiles {
+                ids: vec![-999_999]
+            }),
+            Some(None)
+        );
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        assert!(app.start_job(Command::CopySelection, false, ctx.clone()));
+        assert!(matches!(app.job, Some(UiJob::Domain { .. })));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(
+            app.transfer_busy
+                .as_ref()
+                .is_none_or(|busy| busy.visible_since.is_none())
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.job.is_some() {
+            app.finish_job();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn busy_overlay_labels_match_transfer_operation() {
+        fn contains(shape: &egui::Shape, ru: &str, en: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == ru || text.galley.text() == en,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, ru, en)),
+                _ => false,
+            }
+        }
+        let cases = [
+            (
+                Command::CopySelection,
+                TransferKind::Copy,
+                "Копирование…",
+                "Copying…",
+            ),
+            (
+                Command::TransferSelection,
+                TransferKind::Move,
+                "Перемещение…",
+                "Moving…",
+            ),
+            (
+                Command::AddFolderFiles { ids: vec![] },
+                TransferKind::Import,
+                "Добавление в Катран…",
+                "Adding to Katran…",
+            ),
+            (
+                Command::PasteToFolder,
+                TransferKind::Paste,
+                "Вставка…",
+                "Pasting…",
+            ),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        for (command, expected, ru, en) in &cases {
+            let kind = TransferKind::for_command(command).unwrap();
+            assert_eq!(kind, *expected);
+            for (language, expected_text) in [
+                (katran::settings::Language::Russian, *ru),
+                (katran::settings::Language::English, *en),
+            ] {
+                i18n::set(language);
+                app.transfer_busy = Some(TransferBusy {
+                    kind,
+                    visible_since: None,
+                    painted: false,
+                    active: true,
+                    prepaint: true,
+                });
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    app.paint_transfer_busy(ui.ctx())
+                });
+                output.textures_delta.clear();
+                assert!(
+                    output.shapes.iter().any(|shape| contains(
+                        &shape.shape,
+                        expected_text,
+                        expected_text
+                    )),
+                    "missing label {expected_text}"
+                );
+            }
+        }
+        i18n::set(katran::settings::Language::Russian);
+        assert_eq!(
+            TransferKind::for_command(&Command::RunAction {
+                id: "add_to_katran".into()
+            }),
+            Some(TransferKind::Import)
+        );
+    }
+
+    #[test]
+    fn delete_and_transfer_risks_use_physical_files_and_confirmation() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ids: Vec<i64> = (1..=20).map(|index| -index).collect();
+        app.events = ids
+            .iter()
+            .map(|id| {
+                serde_json::json!({
+                    "id":id, "size":1, "kind":"file_reference", "source":"work_folder",
+                    "storage":"reference", "path":format!("C:/synthetic/{id}.txt"),
+                    "delete_policy":{"kind":"shelf_only"}
+                })
+            })
+            .collect();
+        assert_eq!(
+            app.transfer_size_risk(&Command::AddFolderFiles { ids: ids.clone() }),
+            Some(Some(true))
+        );
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: ids.clone(),
+                confirmed: false
+            }),
+            None
+        );
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: ids.clone(),
+                confirmed: true
+            }),
+            Some((TransferKind::Recycle, Some(true)))
+        );
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: false
+            }),
+            Some((TransferKind::Recycle, Some(false)))
+        );
+        app.events[0]["size"] = serde_json::json!(16 * 1024 * 1024);
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: false
+            }),
+            Some((TransferKind::Recycle, Some(true)))
+        );
+        app.events[0]["source"] = serde_json::json!("desktop");
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: true
+            }),
+            Some((TransferKind::Delete, Some(true)))
+        );
+        app.events[0]["source"] = serde_json::json!("downloads");
+        app.events[0]["delete_policy"] =
+            serde_json::json!({"kind":"live_original","mode":"recycle"});
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: true
+            }),
+            Some((TransferKind::Recycle, Some(true)))
+        );
+        app.events[0]["source"] = serde_json::json!("sharex");
+        app.events[0]["delete_policy"] =
+            serde_json::json!({"kind":"live_original","mode":"permanent"});
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: true
+            }),
+            Some((TransferKind::Recycle, Some(true)))
+        );
+        app.events[0]["delete_policy"] = serde_json::json!({"kind":"shelf_only"});
+        assert_eq!(
+            app.delete_size_risk(&Command::DeleteSelection {
+                ids: vec![ids[0]],
+                confirmed: true
+            }),
+            None
+        );
+        for event in &mut app.events {
+            event["kind"] = serde_json::json!("text_fragment");
+            event["source"] = serde_json::json!("emoji_catalogue");
+            event["storage"] = serde_json::json!("virtual");
+            event["size"] = serde_json::json!(1);
+        }
+        assert_eq!(
+            app.transfer_size_risk(&Command::AddFolderFiles { ids: ids.clone() }),
+            Some(Some(false))
+        );
+        for event in &mut app.events {
+            event["kind"] = serde_json::json!("file_reference");
+            event.as_object_mut().unwrap().remove("storage");
+        }
+        assert_eq!(
+            app.transfer_size_risk(&Command::AddFolderFiles { ids }),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn delete_overlay_labels_are_painted_in_both_languages() {
+        fn contains(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == expected,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, expected)),
+                _ => false,
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        for (kind, ru, en) in [
+            (TransferKind::Delete, "Удаление…", "Deleting…"),
+            (
+                TransferKind::Recycle,
+                "В корзину…",
+                "Moving to Recycle Bin…",
+            ),
+        ] {
+            for (language, expected) in [
+                (katran::settings::Language::Russian, ru),
+                (katran::settings::Language::English, en),
+            ] {
+                i18n::set(language);
+                app.transfer_busy = Some(TransferBusy {
+                    kind,
+                    visible_since: None,
+                    painted: false,
+                    active: true,
+                    prepaint: true,
+                });
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    app.paint_transfer_busy(ui.ctx())
+                });
+                output.textures_delta.clear();
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .any(|shape| contains(&shape.shape, expected)),
+                    "missing {expected}"
+                );
+            }
+        }
+        i18n::set(katran::settings::Language::Russian);
+    }
+
+    #[test]
+    fn single_tiny_folder_delete_has_no_overlay() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct FakeTrash(Arc<AtomicUsize>);
+        impl katran::downloads::Trash for FakeTrash {
+            fn recycle(&self, staged: &std::path::Path) -> katran::Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(staged)?;
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("tiny.txt"), b"x").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_trash(Box::new(FakeTrash(calls.clone())));
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let page = app.call(Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        });
+        app.events = page["events"].as_array().unwrap().clone();
+        let id = app.events[0]["id"].as_i64().unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        app.run("delete".into(), &ctx);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(app.transfer_begin_count, 1);
+        assert!(
+            app.transfer_busy
+                .as_ref()
+                .is_none_or(|busy| busy.visible_since.is_none() && !busy.prepaint)
+        );
+        assert!(app.job.is_none());
+    }
+
+    #[test]
+    fn single_large_folder_delete_paints_recycle_before_begin() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct FakeTrash(Arc<AtomicUsize>);
+        impl katran::downloads::Trash for FakeTrash {
+            fn recycle(&self, staged: &std::path::Path) -> katran::Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(staged)?;
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("synthetic.txt"), b"x").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_trash(Box::new(FakeTrash(calls.clone())));
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let page = app.call(Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        });
+        let mut event = page["events"][0].clone();
+        let id = event["id"].as_i64().unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        event["size"] = serde_json::json!(16 * 1024 * 1024);
+        app.events = vec![event];
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.run("delete".into(), &ctx);
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert_eq!(
+            app.transfer_busy.as_ref().unwrap().kind,
+            TransferKind::Recycle
+        );
+        assert_eq!(app.transfer_begin_count, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(app.transfer_busy.as_ref().unwrap().painted);
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        app.finish_job();
+        assert_eq!(app.transfer_begin_count, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(app.job.is_none());
+    }
+
+    #[test]
+    fn many_tiny_folder_deletes_confirm_then_paint_before_begin() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct FakeTrash(Arc<AtomicUsize>);
+        impl katran::downloads::Trash for FakeTrash {
+            fn recycle(&self, staged: &std::path::Path) -> katran::Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(staged)?;
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        for index in 0..20 {
+            std::fs::write(folder.path().join(format!("item-{index:02}.txt")), b"x").unwrap();
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_trash(Box::new(FakeTrash(calls.clone())));
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let page = app.call(Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 30,
+            cursor: None,
+        });
+        app.events = page["events"].as_array().unwrap().clone();
+        let ids: Vec<i64> = app
+            .events
+            .iter()
+            .map(|event| event["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 20);
+        app.call(Command::SetVisible { ids: ids.clone() });
+        for (index, id) in ids.iter().enumerate() {
+            app.state = app.call(Command::Select {
+                id: *id,
+                mode: if index == 0 {
+                    SelectionMode::Replace
+                } else {
+                    SelectionMode::Toggle
+                },
+            });
+        }
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.run("delete".into(), &ctx);
+        assert_eq!(app.pending_delete.len(), 20);
+        assert!(app.transfer_busy.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(app.start_job(
+            Command::DeleteSelection {
+                ids: app.pending_delete.clone(),
+                confirmed: true
+            },
+            false,
+            ctx.clone()
+        ));
+        app.pending_delete.clear();
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert_eq!(app.transfer_begin_count, 0);
+        app.run("delete".into(), &ctx);
+        app.queue_transfer_copy();
+        assert!(app.pending_transfer_copies.is_empty());
+        assert_eq!(app.transfer_begin_count, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert!(app.transfer_busy.as_ref().unwrap().painted);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        app.finish_job();
+        assert_eq!(app.transfer_begin_count, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 20);
+        assert!(app.job.is_none());
+    }
+
+    #[test]
+    fn completed_busy_overlay_dwell_does_not_hold_job() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        app.transfer_busy = Some(TransferBusy {
+            kind: TransferKind::Copy,
+            visible_since: Some(Instant::now()),
+            painted: true,
+            active: false,
+            prepaint: true,
+        });
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.paint_transfer_busy(ui.ctx())
+        });
+        output.textures_delta.clear();
+        assert!(app.transfer_busy.is_some());
+        assert!(!app.transfer_input_reserved());
+        app.transfer_busy.as_mut().unwrap().visible_since =
+            Some(Instant::now() - Duration::from_millis(201));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.paint_transfer_busy(ui.ctx())
+        });
+        output.textures_delta.clear();
+        assert!(app.transfer_busy.is_none());
+    }
+
+    #[test]
+    fn ctrl_shift_c_folder_import_uses_begin_job_after_overlay_frame() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("synthetic.txt"), b"hello").unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Text,
+            enabled: true,
+        });
+        app.state = app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let page = app.call(Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        });
+        let mut event = page["events"][0].clone();
+        let id = event["id"].as_i64().unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        event["size"] = serde_json::json!(16 * 1024 * 1024);
+        app.events = vec![event];
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::C,
+                physical_key: Some(egui::Key::C),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        assert!(app.transfer_busy.as_ref().unwrap().painted);
+        app.finish_job();
+        assert!(matches!(app.job, Some(UiJob::Domain { .. })));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.job.is_some() {
+            app.finish_job();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(folder.path().join("synthetic.txt").exists());
+    }
+
+    #[test]
     fn folder_refresh_discards_old_query_and_loads_more_asynchronously() {
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
@@ -107,6 +801,30 @@ mod folder_page_tests {
     }
 }
 impl Shelf {
+    pub(super) fn queue_transfer_copy(&mut self) {
+        if self.transfer_busy.as_ref().is_some_and(|busy| {
+            busy.active && matches!(busy.kind, TransferKind::Delete | TransferKind::Recycle)
+        }) {
+            self.message = tr(
+                "Дождитесь завершения удаления",
+                "Wait for deletion to finish",
+            )
+            .into();
+            return;
+        }
+        if self.pending_transfer_copies.len() >= 64 {
+            self.message = tr("Очередь копирования заполнена", "Copy queue is full").into();
+        } else if let Some(items) = self.selection_snapshot() {
+            self.pending_transfer_copies.push_back((
+                items,
+                self.state["tab"].clone(),
+                self.state["folder_path"].clone(),
+            ));
+            self.message = tr("Копирование добавлено в очередь", "Copy added to queue").into();
+        } else {
+            self.message = tr("Выбор устарел", "Selection is out of date").into();
+        }
+    }
     pub(super) fn direct_transfer_input(&mut self, ctx: &egui::Context) {
         if self.job.is_none()
             && self.api.is_some()
@@ -149,18 +867,8 @@ impl Shelf {
             .collect();
         if let Some(action) = shortcuts_ui::take_action_with_editing(ctx, &catalogue, false) {
             if self.job.is_some() {
-                if action == "transfer_copy" && self.pending_transfer_copies.len() < 64 {
-                    if let Some(items) = self.selection_snapshot() {
-                        self.pending_transfer_copies.push_back((
-                            items,
-                            self.state["tab"].clone(),
-                            self.state["folder_path"].clone(),
-                        ));
-                        self.message =
-                            tr("Копирование добавлено в очередь", "Copy added to queue").into();
-                    } else {
-                        self.message = tr("Выбор устарел", "Selection is out of date").into();
-                    }
+                if action == "transfer_copy" {
+                    self.queue_transfer_copy();
                 } else {
                     self.message = tr(
                         "Дождитесь завершения текущей операции",
@@ -213,6 +921,144 @@ impl Shelf {
         }
         r["result"].clone()
     }
+    fn risk_event(&mut self, id: i64) -> Value {
+        match self
+            .events
+            .iter()
+            .find(|event| event["id"].as_i64() == Some(id))
+        {
+            Some(event)
+                if event["size"].is_u64()
+                    && event["kind"].is_string()
+                    && event["source"].is_string()
+                    && event["storage"].is_string()
+                    && event["delete_policy"].is_object() =>
+            {
+                event.clone()
+            }
+            _ => self.call(Command::Get { id }),
+        }
+    }
+    fn is_real_file(event: &Value) -> bool {
+        matches!(
+            event["kind"].as_str(),
+            Some("file_reference" | "managed_image")
+        ) && matches!(event["storage"].as_str(), Some("cached" | "reference"))
+            && event["path"].as_str().is_some_and(|path| !path.is_empty())
+    }
+    fn unknown_file_identity(event: &Value) -> bool {
+        match event["kind"].as_str() {
+            Some("file_reference" | "managed_image") => {
+                if event["storage"] == "virtual" {
+                    return false;
+                }
+                !matches!(event["storage"].as_str(), Some("cached" | "reference"))
+                    || !event["path"].as_str().is_some_and(|path| !path.is_empty())
+            }
+            Some("text_fragment" | "link_fragment" | "table_fragment") => false,
+            _ => true,
+        }
+    }
+    fn transfer_size_risk(&mut self, command: &Command) -> Option<Option<bool>> {
+        let ids = match command {
+            Command::CopySelection | Command::TransferSelection => self.selected_ids(),
+            Command::AddFolderFiles { ids } => ids.clone(),
+            Command::RunAction { id } if id == "add_to_katran" => self.selected_ids(),
+            Command::PasteToFolder => return Some(None), // Clipboard size is not in the UI state.
+            _ => return None,
+        };
+        let mut total = 0u64;
+        let mut unknown = false;
+        let mut files = 0usize;
+        let mut seen = HashSet::new();
+        for id in ids {
+            if !seen.insert(id) {
+                continue;
+            }
+            let event = self.risk_event(id);
+            if let Some(size) = event["size"].as_u64() {
+                total = total.saturating_add(size);
+            } else {
+                unknown = true;
+            }
+            if Self::is_real_file(&event) {
+                files += 1;
+            } else if Self::unknown_file_identity(&event) {
+                unknown = true;
+            }
+        }
+        Some(if total >= 16 * 1024 * 1024 || files >= 20 {
+            Some(true)
+        } else if unknown {
+            None
+        } else {
+            Some(false)
+        })
+    }
+    fn delete_size_risk(&mut self, command: &Command) -> Option<(TransferKind, Option<bool>)> {
+        let (ids, confirmed) = match command {
+            Command::DeleteSelection { ids, confirmed } => (ids.clone(), *confirmed),
+            Command::RunAction { id } if id == "delete" => (self.selected_ids(), false),
+            _ => return None,
+        };
+        let mut seen = HashSet::new();
+        let ids: Vec<_> = ids.into_iter().filter(|id| seen.insert(*id)).collect();
+        if ids.is_empty() || (!confirmed && ids.len() > 1) {
+            return None;
+        }
+        let mut total = 0u64;
+        let mut count = 0usize;
+        let mut unknown = false;
+        let mut recycle_only = true;
+        for id in ids {
+            let event = self.risk_event(id);
+            let source = event["source"].as_str();
+            let policy = event["delete_policy"]["kind"].as_str();
+            let physical = if !Self::is_real_file(&event) {
+                if Self::unknown_file_identity(&event) {
+                    unknown = true;
+                }
+                false
+            } else if source == Some("work_folder") {
+                true
+            } else if source == Some("desktop") {
+                recycle_only = false;
+                true
+            } else if policy == Some("live_original") {
+                // The dispatcher recycles even legacy ShareX records marked permanent.
+                true
+            } else {
+                if policy.is_none() || source.is_none() {
+                    unknown = true;
+                }
+                false
+            };
+            if physical {
+                count += 1;
+                if let Some(size) = event["size"].as_u64() {
+                    total = total.saturating_add(size);
+                } else {
+                    unknown = true;
+                }
+            }
+        }
+        if count == 0 && !unknown {
+            return None;
+        } // Shelf-only removal is metadata-only.
+        let kind = if recycle_only && count > 0 {
+            TransferKind::Recycle
+        } else {
+            TransferKind::Delete
+        };
+        let risk = if total >= 16 * 1024 * 1024 || count >= 20 {
+            Some(true)
+        } else if unknown {
+            None
+        } else {
+            Some(false)
+        };
+        Some((kind, risk))
+    }
     pub(super) fn start_job(
         &mut self,
         command: Command,
@@ -226,6 +1072,43 @@ impl Shelf {
             return false;
         }
         self.busy_text_editing = ctx.egui_wants_keyboard_input();
+        let operation = if capture {
+            None
+        } else {
+            self.delete_size_risk(&command).or_else(|| {
+                self.transfer_size_risk(&command).map(|risk| {
+                    (
+                        TransferKind::for_command(&command).expect("Folder transfer kind"),
+                        risk,
+                    )
+                })
+            })
+        };
+        if let Some((kind, risk)) = operation {
+            let prepaint = risk == Some(true);
+            self.transfer_busy = Some(TransferBusy {
+                kind,
+                visible_since: None,
+                painted: false,
+                active: true,
+                prepaint,
+            });
+            if prepaint {
+                self.job = Some(UiJob::TransferPrepaint {
+                    command: Box::new(command),
+                    ctx: ctx.clone(),
+                });
+                ctx.request_repaint();
+                return true;
+            }
+        }
+        self.submit_job(command, capture, ctx)
+    }
+    fn submit_job(&mut self, command: Command, capture: bool, ctx: egui::Context) -> bool {
+        #[cfg(test)]
+        if self.transfer_busy.as_ref().is_some_and(|busy| busy.active) {
+            self.transfer_begin_count += 1;
+        }
         let result = self.call(Command::BeginJob {
             command: Box::new(command),
         });
@@ -234,9 +1117,15 @@ impl Shelf {
                 serde_json::json!({"ok":true,"result":result["result"]}),
                 capture,
             );
+            if !capture && let Some(busy) = &mut self.transfer_busy {
+                busy.active = false;
+            }
             return true;
         }
         let Some(id) = result["job_id"].as_u64() else {
+            if !capture && let Some(busy) = &mut self.transfer_busy {
+                busy.active = false;
+            }
             return false;
         };
         if capture {
@@ -303,11 +1192,25 @@ impl Shelf {
         self.apply_job_reply(reply, true);
     }
     pub(super) fn finish_job(&mut self) {
+        if self
+            .transfer_busy
+            .as_ref()
+            .is_some_and(|busy| busy.active && busy.show_due() && !busy.painted)
+        {
+            return;
+        }
+        if matches!(self.job, Some(UiJob::TransferPrepaint { .. })) {
+            if let Some(UiJob::TransferPrepaint { command, ctx }) = self.job.take() {
+                self.submit_job(*command, false, ctx);
+            }
+            return;
+        }
         self.finish_capture_job();
         let Some(job) = self.job.as_ref() else {
             return;
         };
         let (reply, capture) = match job {
+            UiJob::TransferPrepaint { .. } => unreachable!("handled before polling"),
             UiJob::Domain { job_id, capture } => {
                 let job_id = *job_id;
                 let capture = *capture;
@@ -343,6 +1246,9 @@ impl Shelf {
         };
         self.job = None;
         self.apply_job_reply(reply, capture);
+        if !capture && let Some(busy) = &mut self.transfer_busy {
+            busy.active = false;
+        }
     }
     fn apply_job_reply(&mut self, reply: Value, capture: bool) {
         let wallpaper = !capture && std::mem::take(&mut self.wallpaper_job);
@@ -864,18 +1770,8 @@ impl Shelf {
         }
         if matches!(id.as_str(), "transfer_selection" | "transfer_copy") {
             if self.job.is_some() {
-                if id == "transfer_copy" && self.pending_transfer_copies.len() < 64 {
-                    if let Some(items) = self.selection_snapshot() {
-                        self.pending_transfer_copies.push_back((
-                            items,
-                            self.state["tab"].clone(),
-                            self.state["folder_path"].clone(),
-                        ));
-                        self.message =
-                            tr("Копирование добавлено в очередь", "Copy added to queue").into();
-                    } else {
-                        self.message = tr("Выбор устарел", "Selection is out of date").into();
-                    }
+                if id == "transfer_copy" {
+                    self.queue_transfer_copy();
                 } else {
                     self.message = tr(
                         "Дождитесь завершения текущей операции",

@@ -79,6 +79,14 @@ transfer, keep this final effect Service-bound for now. Returning control before
 completion would need visible in-progress state and rejection of repeated or
 conflicting operations across both editions. This is an accepted responsiveness
 limit, not a claim that asynchronous transfer is impossible.
+The UI now dims the window and shows a glass status card before starting known
+Folder copy/move/import or physical-delete selections totaling at least 16 MiB
+or 20 distinct files. It paints the card before starting the job, so a heavy
+Service-bound effect has a visible cue. Multi-item deletion first shows its
+ordinary confirmation; shelf-only removal and small selections do not flash a
+card. Unknown-size external Ctrl+V does not currently get this cue. Folder
+Ctrl+Shift+C uses its existing background `AddFolderFiles` job instead of the
+direct UI call. The overlay is a dim layer, not full-frame optical blur.
 The A9 public/E source handoff check has zero unresolved findings at
 `e6453c5`. The private E runtime manifest contract has
 synthetic checks 3/3; real-model execution, Python environment portability and

@@ -63,6 +63,11 @@ The local source now recycles verified external originals during moves and
 reports any recovery location per item; direct deletion of those originals was
 removed from this path. Synthetic fake-Trash API checks passed 2/2, with no
 user files involved.
+For known file selections totaling at least 16 MiB or 20 distinct files, a
+dimmed window and glass status card appear before Folder transfer or physical
+deletion starts. Smaller selections do not flash the card; shelf-only removal
+does not need it. Unknown-size external clipboard pastes retain the ordinary
+status text. Folder Ctrl+Shift+C uses its background import job.
 
 Prepare an updated build without overwriting a running executable:
 
