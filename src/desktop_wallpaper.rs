@@ -1,6 +1,6 @@
 //! Windows desktop wallpaper adapter. The documented API targets monitors;
 //! it does not specify a virtual-desktop target or guarantee its scope.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The caller owns image validation, revision checking and durable file lifetime.
 pub trait WallpaperHost: Send + Sync {
@@ -16,6 +16,78 @@ pub fn set_wallpaper(path: &Path, host: &dyn WallpaperHost) -> std::result::Resu
         return Err("Wallpaper must be an existing file with an absolute path".into());
     }
     host.set_wallpaper(path)
+}
+
+/// Returns the image paths reported for all monitors, including detached monitors
+/// with an assigned image. This does not enumerate other virtual desktops, and
+/// Windows may report a derived image path; absence is not proof a file is unused.
+#[cfg(windows)]
+pub fn current_wallpapers() -> std::result::Result<Vec<PathBuf>, String> {
+    std::thread::spawn(|| {
+        use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+        use windows::{
+            Win32::{
+                System::Com::{
+                    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
+                    CoInitializeEx, CoTaskMemFree, CoUninitialize,
+                },
+                UI::Shell::{DesktopWallpaper, IDesktopWallpaper},
+            },
+            core::{PCWSTR, PWSTR},
+        };
+        struct Apartment;
+        impl Drop for Apartment {
+            fn drop(&mut self) {
+                unsafe { CoUninitialize() }
+            }
+        }
+        struct ComString(PWSTR);
+        impl Drop for ComString {
+            fn drop(&mut self) {
+                unsafe { CoTaskMemFree(Some(self.0.0.cast())) }
+            }
+        }
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }
+            .map_err(|e| format!("Initializing wallpaper service failed: {e}"))?;
+        let _apartment = Apartment;
+        let wallpaper: IDesktopWallpaper =
+            unsafe { CoCreateInstance(&DesktopWallpaper, None, CLSCTX_INPROC_SERVER) }
+                .map_err(|e| format!("Opening wallpaper service failed: {e}"))?;
+        let count = unsafe { wallpaper.GetMonitorDevicePathCount() }
+            .map_err(|e| format!("Reading wallpaper monitor count failed: {e}"))?;
+        if count == 0 {
+            return Err("No wallpaper monitors were reported".into());
+        }
+        let mut paths = Vec::new();
+        for index in 0..count {
+            let monitor = ComString(
+                unsafe { wallpaper.GetMonitorDevicePathAt(index) }
+                    .map_err(|e| format!("Reading wallpaper monitor {index} failed: {e}"))?,
+            );
+            if monitor.0.is_null() {
+                return Err(format!("Wallpaper monitor {index} has no identifier"));
+            }
+            let path = ComString(
+                unsafe { wallpaper.GetWallpaper(PCWSTR(monitor.0.0)) }
+                    .map_err(|e| format!("Reading wallpaper for monitor {index} failed: {e}"))?,
+            );
+            if path.0.is_null() {
+                return Err(format!("Wallpaper for monitor {index} has no result"));
+            }
+            let value = unsafe { path.0.as_wide() };
+            if !value.is_empty() {
+                paths.push(PathBuf::from(OsString::from_wide(value)));
+            }
+        }
+        Ok(paths)
+    })
+    .join()
+    .map_err(|_| "Wallpaper service thread failed".to_string())?
+}
+
+#[cfg(not(windows))]
+pub fn current_wallpapers() -> std::result::Result<Vec<PathBuf>, String> {
+    Err("Desktop wallpaper is only available on Windows".into())
 }
 
 #[cfg(windows)]
