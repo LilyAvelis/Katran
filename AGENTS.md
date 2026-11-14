@@ -15,6 +15,10 @@ Local unreleased work after 3.4.1 adds the Desktop background library; see
 Its cards now use the standard shelf Event, selection, and Actions path via
 `src/desktop_projection.rs` and `src/desktop_selection.rs`; the separate
 Desktop gallery was removed in local checkpoint `95eac10`.
+Desktop browsing must remain metadata-only; do not hash or decode every managed
+image during selection or Actions palette construction. Validate selected bytes
+at the action boundary, and detect image/video types from managed paths rather
+than display names (which may have no extension).
 
 For each release or change to an architectural contract, update this current
 baseline, the affected README/development-map passage, and the relevant release

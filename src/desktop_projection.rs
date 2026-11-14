@@ -68,7 +68,7 @@ fn stable_id(typed_id: &str) -> i64 {
 
 /// Read and validate the current managed catalogue. Never imports or copies source files.
 pub(crate) fn list(root: &Path) -> Result<Vec<Event>> {
-    let images = crate::theme_backgrounds::list(root)?;
+    let images = crate::theme_backgrounds::list_fast(root)?;
     let videos =
         crate::video_backgrounds::catalogue(root).map_err(|e| ApiError::new("invalid_video", e))?;
     let mut events = Vec::new();

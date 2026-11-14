@@ -105,9 +105,10 @@ fn desktop_assets_use_standard_browse_selection_and_delete() {
 fn selected_desktop_image_uses_existing_background_action() {
     let root = tempfile::tempdir().unwrap();
     let originals = tempfile::tempdir().unwrap();
-    let path = originals.path().join("portrait.png");
+    // A managed background can retain a source label without an extension.
+    let path = originals.path().join("portrait");
     image::RgbaImage::from_pixel(2, 2, image::Rgba([8, 9, 10, 255]))
-        .save(&path)
+        .save_with_format(&path, image::ImageFormat::Png)
         .unwrap();
     let mut service = Service::open(root.path(), 100).unwrap();
     call(&mut service, Command::ImportThemeBackground { path });

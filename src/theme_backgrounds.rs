@@ -384,6 +384,59 @@ pub fn list(root: &Path) -> Result<Value> {
     Ok(json!({"backgrounds":backgrounds}))
 }
 
+/// Metadata-only listing for the interactive Desktop shelf. Full hash and
+/// image validation remain in `get` and in the selected action's prepare path.
+pub(crate) fn list_fast(root: &Path) -> Result<Value> {
+    let dir = directory(root)?;
+    let mut backgrounds = Vec::new();
+    for id in entries(&dir)? {
+        let path = dir.join(format!("{id}.png"));
+        let metadata = checked_file(&path)?;
+        if metadata.len() > MAX_STORED {
+            return Err(ApiError::new(
+                "invalid_background",
+                "Stored background exceeds limit",
+            ));
+        }
+        let sidecar = dir.join(format!("{id}.json"));
+        let name = match fs::symlink_metadata(&sidecar) {
+            Ok(_) => {
+                let meta = checked_file(&sidecar)?;
+                if meta.len() > 4096 {
+                    return Err(ApiError::new(
+                        "invalid_background",
+                        "Background metadata exceeds limit",
+                    ));
+                }
+                let mut bytes = Vec::new();
+                fs::File::open(&sidecar)?
+                    .take(4097)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() > 4096 {
+                    return Err(ApiError::new(
+                        "invalid_background",
+                        "Background metadata exceeds limit",
+                    ));
+                }
+                let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                value["name"]
+                    .as_str()
+                    .filter(|name| {
+                        !name.is_empty()
+                            && name.chars().count() <= 255
+                            && !name.chars().any(char::is_control)
+                    })
+                    .unwrap_or("Фон")
+                    .to_owned()
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "Фон".into(),
+            Err(error) => return Err(error.into()),
+        };
+        backgrounds.push(json!({"id":id,"path":path,"name":name}));
+    }
+    Ok(json!({"backgrounds":backgrounds}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,7 +24,7 @@ impl Service {
         {
             return Err(ApiError::new("invalid_image", "Выберите изображение"));
         }
-        if !file_types::is_native_image(std::path::Path::new(&event.name)) {
+        if !file_types::is_native_image(&event.path) {
             return Err(ApiError::new("invalid_image", "Выберите изображение"));
         }
         Ok(event)
@@ -35,7 +35,8 @@ impl Service {
             return Err(ApiError::new("invalid_selection", "Выберите одно видео"));
         }
         let event = self.get(items[0].id)?;
-        let extension = std::path::Path::new(&event.name)
+        let extension = event
+            .path
             .extension()
             .and_then(|v| v.to_str())
             .unwrap_or("")
