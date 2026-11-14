@@ -21,7 +21,7 @@ For the local reusable-component workspace, see [Avilon framework](garden-framew
 Its [design SDK index](../crates/README.md) covers semantic colors, responsive layout,
 Acrylic, GPU optics and video-background adapters.
 For builds, CI and release retries, follow [DevOps execution rules](devops.md).
-Current source structure and1.5 contracts are listed below. Historical reviews describe their examined snapshots; current behavior is in [domain-jobs.md](domain-jobs.md).
+The source map below describes the public **3.4.1** tree plus documented local work. The `1.5` labels and ownership section below are dated historical snapshots, not the current baseline; historical reviews describe the snapshots they examined. Current behavior is described by the current README and feature contracts.
 
 | Responsibility | Current owner files |
 | --- | --- |
@@ -41,7 +41,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Video background import / hardware streaming adapter | `src/video_backgrounds.rs`, `src/bin/video_background_ui.rs`, [contract](video-backgrounds.md) |
 | Desktop wallpaper action / Windows COM adapter | `src/theme_backgrounds.rs`, `src/desktop_wallpaper.rs`, `src/theme_service.rs`, `src/actions.rs` |
 | Optional Wallpaper Engine video wallpaper action, silent remux and Desktop history | `src/wallpaper_engine.rs`, `src/desktop_assets.rs`, `src/desktop_projection.rs`, `src/actions.rs`, `src/bin/api_client.rs` |
-| Unified Desktop library (managed image/video backgrounds, independent of tab visibility) | `src/desktop_assets.rs`, `src/theme_backgrounds.rs`, `src/video_backgrounds.rs`, `src/bin/desktop_ui.rs`, `tests/desktop_assets_api.rs` |
+| Unified Desktop library (managed image/video backgrounds, independent of tab visibility) | `src/desktop_assets.rs`, `src/theme_backgrounds.rs`, `src/video_backgrounds.rs`, `src/desktop_projection.rs`, `src/desktop_selection.rs`, `tests/desktop_assets_api.rs`, `tests/desktop_shelf_api.rs` |
 | Pods Unicode catalogue / virtual IDs / copy, paste, native text drag and import into saved Pods | `src/pods.rs`, `src/pod_metadata.rs`, `src/text_fragments.rs`, `src/text_service.rs`, `src/copy_out.rs`, `src/drag_out.rs`, `src/interaction.rs`, `src/bin/pods_ui.rs`, `src/bin/category_divider.rs`, `src/bin/emoji_categories_ui.rs`, `src/bin/special_mode_bar.rs`, `tests/emoji_catalogue_api.rs`, [contract](pods.md) |
 | Emoji font preferences / profile-local imports / private DirectWrite rendering | `src/emoji_fonts.rs`, `src/emoji_render.rs`, `tests/emoji_fonts_api.rs`, [contract](emoji-fonts.md) |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
@@ -76,7 +76,10 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Desktop list performance and background type checks | `src/theme_backgrounds.rs` (`list_fast` for metadata), `src/theme_service.rs` (file path for image/video type), `tests/desktop_shelf_api.rs` |
 | Desktop pin/tag state and multi-object transfers | `src/desktop_pins.rs`, `src/tag_service.rs`, `src/copy_out.rs`, `src/transfer_service.rs`, `src/folder_transfer.rs`, `tests/desktop_shelf_api.rs` |
 
-## Current1.5 ownership
+## Historical 1.5 ownership snapshot
+
+This ownership map records the 1.5 implementation and is retained for history;
+it is not a current module map or release baseline.
 
 | Responsibility | Modules |
 | --- | --- |
@@ -151,7 +154,8 @@ distinguishes debug/release, source API response and actual rendering. Source
 roots remain bounded to20,000 entries; large catalogue/idle work tests do not remove
 that limit. Explicit maintenance/native-finalization limitations remain documented.
 
-The owner accepted this baseline as1.5.0 and authorized its GitHub push. See
+The owner accepted this historical baseline as 1.5.0 and authorized its GitHub
+push at that time. This is not current publication authorization. See
 [release/handoff](releases/1.5.0.md). Do not resume experiments without new scope.
 
 For delegation, read the existing Garden mask map and selected card first. Prefer

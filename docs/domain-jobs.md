@@ -1,6 +1,13 @@
-# 1.5 domain contracts
+# Historical 1.5 domain contracts
 
-Checkpoint before changes: `585df0c` (1.2.6). The owner accepted this work as1.5.0 and authorized its GitHub push. Initial audit:
+This page preserves the accepted 1.5 contract snapshot and its dated evidence.
+It is not the current deletion, schema, or release policy. The current public
+baseline is 3.4.1; consult the current README, feature documentation, and
+`AGENTS.md` before changing behavior.
+
+Checkpoint before the historical changes: `585df0c` (1.2.6). The owner accepted
+that work as 1.5.0 and authorized its GitHub push at the time; this is not
+authorization for later publication. Initial audit:
 [azuros-1.3-readiness.md](reviews/azuros-1.3-readiness.md).
 
 ## Jobs and clients
@@ -81,8 +88,11 @@ that is the explicit point of no return. Changing settings afterwards does not
 undo an action already authorized. Failures are per-item, including missing IDs,
 changed objects and recycle errors; nested cleanup warnings reach the GUI.
 
-ShareX permanent removal hashes and retains the same deny-write/delete Windows
-handle through authorization and disposition, preventing pathname replacement.
+Historical 1.5 ShareX policy: permanent removal hashed and retained the same
+deny-write/delete Windows handle through authorization and disposition,
+preventing pathname replacement. This paragraph describes that dated policy;
+it must not be used as the current deletion contract. Current owner-approved
+behavior is recorded in `AGENTS.md` and the current feature documentation.
 Downloads uses an injectable recycler and no permanent fallback. Shell recycling
 is a pathname API: it revalidates bytes immediately before Shell, but cannot offer
 an atomic file-identity transaction against hostile concurrent pathname mutation.
