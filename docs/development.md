@@ -70,6 +70,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Stable launch / per-user Start Menu registration / single-instance activation | `src/bin/launcher.rs`, `app_registration.rs`, `single_instance.rs` |
 | Action SVGs / capture status | `src/bin/action_icons.rs`, `capture_lamp.rs` |
 | Build/install pointer | `scripts/build-working.ps1`, `Start Katran.cmd` |
+| Managed Desktop assets as standard shelf objects | `src/desktop_assets.rs`, `src/desktop_projection.rs`, `src/desktop_selection.rs`, `src/shelf_tabs.rs`, `tests/desktop_shelf_api.rs` |
 
 ## Current1.5 ownership
 

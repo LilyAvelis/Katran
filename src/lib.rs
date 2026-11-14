@@ -89,6 +89,8 @@ pub mod table_view;
 pub mod updater;
 pub use api::*;
 mod desktop_assets;
+mod desktop_projection;
+mod desktop_selection;
 pub mod desktop_wallpaper;
 pub mod emoji_fonts;
 pub mod emoji_render;
@@ -1212,7 +1214,9 @@ impl Service {
                 result
             }
             Command::DeleteSelection { ids, confirmed } => {
-                if ids.iter().any(|id| *id < 0) {
+                if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
+                    self.delete_desktop_selection(ids, confirmed)
+                } else if ids.iter().any(|id| *id < 0) {
                     self.delete_folder_selection(ids, confirmed)
                 } else {
                     self.delete_selection(ids, confirmed)
@@ -1629,7 +1633,9 @@ impl Service {
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
-        if id < 0 {
+        if desktop_projection::is_desktop_id(id) {
+            Ok(desktop_projection::get(&self.root, id)?.0)
+        } else if id < 0 {
             self.work_folder.get(id)
         } else {
             storage::get_event(&self.db, id)

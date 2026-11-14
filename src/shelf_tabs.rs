@@ -79,6 +79,17 @@ impl Service {
                 .work_folder
                 .browse(query, limit, cursor, self.interaction.sort);
         }
+        if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
+            let events = crate::desktop_projection::list(&self.root)?;
+            let (events, next) = crate::desktop_projection::browse(
+                events,
+                query,
+                limit,
+                cursor,
+                self.interaction.sort,
+            )?;
+            return self.decorate_page(serde_json::json!({"events":events,"next_cursor":next,"sort":self.interaction.sort}));
+        }
         let (events, next) = crate::catalogue_query::query_sorted_slice(
             &self.db,
             self.interaction.tab,
@@ -111,6 +122,15 @@ impl Service {
         limit: u32,
         after: Option<i64>,
     ) -> Result<serde_json::Value> {
+        if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
+            if after.is_some() {
+                return Err(crate::ApiError::new(
+                    "invalid_cursor",
+                    "Desktop requires BrowseShelfSorted cursors",
+                ));
+            }
+            return self.browse_shelf_sorted(query, limit, None);
+        }
         if self.interaction.tab == crate::interaction::ShelfTab::All {
             if after.is_some() {
                 return Err(crate::ApiError::new(

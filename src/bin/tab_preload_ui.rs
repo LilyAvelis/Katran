@@ -96,7 +96,12 @@ impl Shelf {
                 .unwrap_or_default();
         let mut tabs: Vec<_> = tabs
             .into_iter()
-            .filter(|tab| *tab != katran::interaction::ShelfTab::All)
+            .filter(|tab| {
+                !matches!(
+                    tab,
+                    katran::interaction::ShelfTab::All | katran::interaction::ShelfTab::Desktop
+                )
+            })
             .collect();
         if let Some(waiting) = self.tab_preload.waiting {
             tabs.sort_by_key(|tab| *tab != waiting);
@@ -133,7 +138,11 @@ impl Shelf {
         else {
             return false;
         };
-        if tab == katran::interaction::ShelfTab::All {
+        // Managed backgrounds can change independently of the catalogue stamp.
+        if matches!(
+            tab,
+            katran::interaction::ShelfTab::All | katran::interaction::ShelfTab::Desktop
+        ) {
             return false;
         }
         self.tab_preload.poll();

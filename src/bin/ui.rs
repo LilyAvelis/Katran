@@ -5,7 +5,6 @@ mod api_client;
 mod app_identity;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
-mod desktop_ui;
 mod files_file_picker;
 mod gallery_card;
 mod glass_lab;
@@ -202,7 +201,6 @@ struct Shelf {
     pending_delete_permanent: bool,
     pending_delete_recycle: bool,
     settings_ui: settings_ui::State,
-    desktop_ui: desktop_ui::State,
     wallpaper_job: bool,
     wallpaper_notice: Option<(String, Instant)>,
     open_apps: open_apps_ui::State,
@@ -1192,7 +1190,6 @@ impl Shelf {
             1
         };
         if self.api.is_some()
-            && self.state["tab"] != "desktop"
             && !self.actions
             && !self.sorting_input.is_open()
             && !self.open_apps.open
@@ -1277,14 +1274,7 @@ impl Shelf {
                 }
             }
         }
-        if self.state["tab"] == "desktop" {
-            if let Some(api) = self.api.as_mut() {
-                self.desktop_ui.show(root, api);
-            }
-        } else {
-            self.desktop_ui.leave();
-            self.shelf_view(root, &ctx, &visible, gallery, columns);
-        }
+        self.shelf_view(root, &ctx, &visible, gallery, columns);
         self.sort_notice(&ctx);
         if self.api.is_some() {
             self.info_panel(&ctx);
@@ -1390,7 +1380,10 @@ impl Shelf {
         }
         if self.api.is_some() && !self.pending_delete.is_empty() {
             let result=egui::Modal::new(egui::Id::new("delete-confirmation")).show(&ctx,|ui| {
-                if self.pending_delete_originals {
+                if self.state["tab"] == "desktop" {
+                    ui.heading(i18n::tr("Удалить сохранённые фоны?", "Delete saved backgrounds?"));
+                    ui.label(if i18n::is_english() { format!("Selected items: {}. Managed copies will be deleted.", self.pending_delete.len()) } else { format!("Выбрано объектов: {}. Сохранённые копии будут удалены.", self.pending_delete.len()) });
+                } else if self.pending_delete_originals {
                     ui.heading(if self.pending_delete_recycle && !self.pending_delete_permanent { i18n::tr("Переместить файлы в корзину?", "Move files to Recycle Bin?") } else { i18n::tr("Удалить оригиналы с диска?", "Delete originals from disk?") });
                     ui.label(if i18n::is_english() { format!("Selected items: {}.", self.pending_delete.len()) } else { format!("Выбрано объектов: {}.", self.pending_delete.len()) });
                     if self.pending_delete_permanent { ui.label(i18n::tr("Оригиналы снимков ShareX будут удалены безвозвратно, без корзины.", "Original ShareX screenshots will be deleted permanently, without the Recycle Bin.")); }
@@ -1401,7 +1394,7 @@ impl Shelf {
                     ui.label(i18n::tr("Исходные файлы останутся на месте. Временные копии без других ссылок будут удалены.", "Source files stay in place. Temporary copies with no other references will be deleted."));
                 }
                 let enter=ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
-                let label = if self.pending_delete_recycle && !self.pending_delete_permanent { i18n::tr("В корзину · Enter", "Recycle · Enter") } else if self.pending_delete_originals { i18n::tr("Удалить оригиналы · Enter", "Delete originals · Enter") } else { i18n::tr("Убрать · Enter", "Remove · Enter") };
+                let label = if self.state["tab"] == "desktop" { i18n::tr("Удалить · Enter", "Delete · Enter") } else if self.pending_delete_recycle && !self.pending_delete_permanent { i18n::tr("В корзину · Enter", "Recycle · Enter") } else if self.pending_delete_originals { i18n::tr("Удалить оригиналы · Enter", "Delete originals · Enter") } else { i18n::tr("Убрать · Enter", "Remove · Enter") };
                 if ui.button(label).clicked()||enter {
                     let ids=self.pending_delete.clone();
                     if self.start_job(Command::DeleteSelection{ids,confirmed:true},false,ctx.clone()) {self.pending_delete.clear();}
@@ -1729,7 +1722,6 @@ fn main() -> eframe::Result {
         pending_delete_permanent: false,
         pending_delete_recycle: false,
         settings_ui: settings_ui::State::default(),
-        desktop_ui: Default::default(),
         wallpaper_job: false,
         wallpaper_notice: None,
         open_apps: open_apps_ui::State::default(),
@@ -1972,7 +1964,6 @@ mod tests {
             pending_delete_permanent: false,
             pending_delete_recycle: false,
             settings_ui: settings_ui::State::default(),
-            desktop_ui: Default::default(),
             wallpaper_job: false,
             wallpaper_notice: None,
             open_apps: open_apps_ui::State::default(),

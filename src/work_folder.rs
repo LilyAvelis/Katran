@@ -135,6 +135,12 @@ impl State {
                     .next
                     .checked_sub(1)
                     .ok_or_else(|| ApiError::new("id_exhausted", "Working folder IDs exhausted"))?;
+                if id <= crate::desktop_projection::DESKTOP_ID_MAX {
+                    return Err(ApiError::new(
+                        "id_exhausted",
+                        "Working folder IDs exhausted",
+                    ));
+                }
                 cache.next = id;
                 let modified = metadata.modified().ok().and_then(sorting::modified_ms);
                 let event = Event {
