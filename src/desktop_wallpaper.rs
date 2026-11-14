@@ -28,8 +28,8 @@ pub fn current_wallpapers() -> std::result::Result<Vec<PathBuf>, String> {
         use windows::{
             Win32::{
                 System::Com::{
-                    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
-                    CoInitializeEx, CoTaskMemFree, CoUninitialize,
+                    CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED,
+                    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
                 },
                 UI::Shell::{DesktopWallpaper, IDesktopWallpaper},
             },
@@ -50,9 +50,14 @@ pub fn current_wallpapers() -> std::result::Result<Vec<PathBuf>, String> {
         unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }
             .map_err(|e| format!("Initializing wallpaper service failed: {e}"))?;
         let _apartment = Apartment;
-        let wallpaper: IDesktopWallpaper =
-            unsafe { CoCreateInstance(&DesktopWallpaper, None, CLSCTX_INPROC_SERVER) }
-                .map_err(|e| format!("Opening wallpaper service failed: {e}"))?;
+        let wallpaper: IDesktopWallpaper = unsafe {
+            CoCreateInstance(
+                &DesktopWallpaper,
+                None,
+                CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+            )
+        }
+        .map_err(|e| format!("Opening wallpaper service failed: {e}"))?;
         let count = unsafe { wallpaper.GetMonitorDevicePathCount() }
             .map_err(|e| format!("Reading wallpaper monitor count failed: {e}"))?;
         if count == 0 {
@@ -104,8 +109,8 @@ impl WallpaperHost for NativeWallpaperHost {
             use windows::{
                 Win32::{
                     System::Com::{
-                        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
-                        CoInitializeEx, CoUninitialize,
+                        CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED,
+                        CoCreateInstance, CoInitializeEx, CoUninitialize,
                     },
                     UI::Shell::{DesktopWallpaper, IDesktopWallpaper},
                 },
@@ -120,9 +125,14 @@ impl WallpaperHost for NativeWallpaperHost {
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }
                 .map_err(|e| format!("Initializing wallpaper service failed: {e}"))?;
             let _apartment = Apartment;
-            let wallpaper: IDesktopWallpaper =
-                unsafe { CoCreateInstance(&DesktopWallpaper, None, CLSCTX_INPROC_SERVER) }
-                    .map_err(|e| format!("Opening wallpaper service failed: {e}"))?;
+            let wallpaper: IDesktopWallpaper = unsafe {
+                CoCreateInstance(
+                    &DesktopWallpaper,
+                    None,
+                    CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+                )
+            }
+            .map_err(|e| format!("Opening wallpaper service failed: {e}"))?;
             unsafe { wallpaper.SetWallpaper(PCWSTR::null(), PCWSTR(wide.as_ptr())) }
                 .map_err(|e| format!("Setting desktop wallpaper failed: {e}"))
         })
