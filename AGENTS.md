@@ -12,6 +12,9 @@ release or authorization to push new work.
 Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Local unreleased work after 3.4.1 adds the Desktop background library; see
 `docs/releases/next.md` before changing background storage or tab routing.
+Its cards now use the standard shelf Event, selection, and Actions path via
+`src/desktop_projection.rs` and `src/desktop_selection.rs`; the separate
+Desktop gallery was removed in local checkpoint `95eac10`.
 
 For each release or change to an architectural contract, update this current
 baseline, the affected README/development-map passage, and the relevant release
