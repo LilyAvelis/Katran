@@ -127,7 +127,11 @@ impl State {
                             let result = api.execute(Request {
                                 api_version: 1,
                                 request_id: "link-visual".into(),
-                                command: Command::GetLinkVisual { id },
+                                command: if refresh {
+                                    Command::RefreshLinkVisual { id }
+                                } else {
+                                    Command::GetLinkVisual { id }
+                                },
                             });
                             if result["ok"] == true
                                 && let Some(host) = host

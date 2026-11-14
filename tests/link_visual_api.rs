@@ -99,6 +99,14 @@ fn link_visual_defaults_to_local_symbol_and_online_is_explicit() {
         "read-only worker must load saved opt-in"
     );
     assert!(visual["result"]["warning"].is_string());
+    let refreshed = reply(
+        &mut reader,
+        Command::RefreshLinkVisual {
+            id: local["result"]["id"].as_i64().unwrap(),
+        },
+    );
+    assert_eq!(refreshed["ok"], true, "{refreshed}");
+    assert!(refreshed["result"]["warning"].is_string());
     let listed = reply(
         &mut reader,
         Command::ListLinkIds {

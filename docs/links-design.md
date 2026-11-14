@@ -26,15 +26,18 @@ changing an existing catalogue. Older binaries reject the newer schema.
 
 Recognition, search, preview and export never fetch destinations, titles or
 browser history. Compact Links tiles use a local domain symbol by default.
-If `Settings.link_favicons_online` is enabled, `GetLinkVisual {id}` may fetch
-only `https://<host>/favicon.ico` on a bounded worker. It sends no URL path,
-query, fragment or credentials, refuses private/non-public DNS results,
-redirects and oversized images, and falls back to the local symbol on failure.
-Sites that publish icons elsewhere also use the local fallback. The in-memory
-card cache is session-only. Settings → Основные offers an explicit retrospective
-refresh of saved Links with progress in the lower panel; `ListLinkIds` pages
-stable IDs without exposing URLs. The read-only worker loads persisted settings,
-so saving the opt-in allows existing visible links to fetch on the next view.
+If `Settings.link_favicons_online` is enabled, `GetLinkVisual {id}` first reads
+the derived, persistent favicon cache by host. On a miss, a bounded worker may
+fetch `https://<host>/favicon.ico` and public HTTPS icons declared by the
+site's origin page. It sends no saved URL path, query, fragment or credentials;
+private/non-public DNS results and oversized images are rejected. A missing
+icon falls back to the local symbol. Missing icons are remembered for 24 hours;
+transient network errors are retried later. The card texture cache is session-only,
+while successfully fetched favicon bytes persist across restarts. Settings →
+General offers an explicit retrospective refresh of saved Links with progress
+in the lower panel; `RefreshLinkVisual {id}` bypasses the favicon cache, and
+`ListLinkIds` pages stable IDs without exposing URLs. Saving the opt-in lets
+existing visible links load cached icons or fetch missing ones on the next view.
 The destination domain is not evidence of the
 clipboard source domain. Recorded source provenance remains separate.
 
@@ -46,7 +49,8 @@ returns the URL for the read-only preview client. `CopyLinks {items}` explicitly
 copies links; `CopySmart` and `CopySelectedObjects` choose this behavior for a
 links-only selection. Items carry exact IDs and revisions.
 `GetLinkVisual {id}` returns the local site label, mark and color plus optional
-base64 favicon and warning. It never changes the stored Link.
+base64 favicon and warning. It never changes the stored Link. The name and URL
+come from the local catalogue; no remote page title is fetched.
 Pods and Links keep separate desired column counts. Ctrl− / Ctrl+ changes only
 the active compact tab; square cards share the available row width and the
 scrollbar occupies a separate lane.

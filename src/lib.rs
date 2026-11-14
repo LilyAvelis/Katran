@@ -438,6 +438,7 @@ impl Service {
                     | Command::GetText { .. }
                     | Command::GetLink { .. }
                     | Command::GetLinkVisual { .. }
+                    | Command::RefreshLinkVisual { .. }
                     | Command::ListLinkIds { .. }
                     | Command::GetTable { .. }
                     | Command::GetDocumentText { .. }
@@ -617,7 +618,8 @@ impl Service {
             Command::AssignTagSlot { ids, slot } => self.assign_tag_slot(ids, slot),
             Command::GetTagSlot { id } => self.get_tag_slot(id),
             Command::GetTagSlots { ids } => self.get_tag_slots(ids),
-            Command::GetLinkVisual { id } => self.get_link_visual(id),
+            Command::GetLinkVisual { id } => self.get_link_visual(id, false),
+            Command::RefreshLinkVisual { id } => self.get_link_visual(id, true),
             Command::ListLinkIds { after_id, limit } => self.list_link_visual_ids(after_id, limit),
             Command::FilterTagSlot { slot } => self.filter_tag_slot(slot),
             Command::GetUpdateStatus => Ok(self.update_status.clone()),

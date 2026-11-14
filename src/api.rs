@@ -159,6 +159,10 @@ pub enum Command {
     GetLinkVisual {
         id: i64,
     },
+    /// Explicitly refresh the derived favicon cache for a saved link.
+    RefreshLinkVisual {
+        id: i64,
+    },
     /// Page through stored Link IDs for an explicit retrospective refresh.
     ListLinkIds {
         after_id: i64,
