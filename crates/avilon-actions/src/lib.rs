@@ -1,5 +1,8 @@
-//! Host-supplied shortcut definitions and pure assignment policy.
+//! Host-neutral shortcut, action palette and visible-list navigation policy.
 use std::collections::{BTreeMap, HashSet};
+
+pub mod navigation;
+pub mod palette;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Definition<'a> {

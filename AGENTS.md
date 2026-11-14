@@ -9,6 +9,7 @@ is valuable product context; it currently labels itself 3.2.3, so reconcile
 individual claims with the code before using it as a 3.4 technical contract.
 Earlier dated sections below record decisions at the time, not the current
 release or authorization to push new work.
+Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Local unreleased work after 3.4.1 adds the Desktop background library; see
 `docs/releases/next.md` before changing background storage or tab routing.
 

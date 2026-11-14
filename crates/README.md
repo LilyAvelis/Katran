@@ -12,7 +12,7 @@ machine-wide installation. Pin a Git revision or use workspace/path dependencies
 | `avilon-egui` with `glow` | Live GPU refraction, blur, highlights, chromatic adjustment and selection tint over an application-owned background texture | Texture lifetime, GL context and shutdown cleanup |
 | [avilon-windows](avilon-windows/README.md) | Explicit Desktop Acrylic and corner request, typed failures and partial-application rollback | Existing owned HWND, transparent viewport/clear/panels and opaque fallback |
 | [avilon-media](avilon-media/README.md) | Bounded looping playback policy; with `egui`, decoder worker, texture reuse, seam blend and pause/cleanup | Validated media path/metadata, FFmpeg command factory, asset ownership and configuration |
-| [avilon-actions](avilon-actions/README.md) | Shortcut normalization and conflict assignment policy | Action catalogue, persistence and execution |
+| [avilon-actions](avilon-actions/README.md) | Shortcut policy, palette filtering/selection and visible-list navigation | Action catalogue, input, UI, persistence and execution |
 
 ```toml
 [dependencies]

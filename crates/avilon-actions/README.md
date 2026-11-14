@@ -21,3 +21,15 @@ are policy values; platform-specific shortcut registration and availability are
 host responsibilities. This internal, unpublished 0.1 crate uses Rust 2024.
 
 Shortcut policy adapted from Katran; see the accompanying MIT license.
+
+## Palette and visible-list navigation
+
+`palette::Palette` supplies multiword, case-insensitive command filtering,
+selection reset on query change, clamping and wraparound. Hosts supply an
+ordered catalogue, scroll the selected row, execute the chosen ID and keep
+their own icons and colors. `navigation::ItemCursor<T>` holds a stable item ID,
+enters the first visible item, moves across the current visible list and clears
+an ID absent after category changes. Hosts decide which keys invoke these
+operations and whether opening an item changes application state. These pure
+Rust APIs were adapted from the working local Telegram Glass action palette
+and category/chat navigation; Telegram Desktop's Qt code does not link Rust.

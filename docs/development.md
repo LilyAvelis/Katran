@@ -53,7 +53,8 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Default app / Explorer reveal / Windows Open With | `src/open_file.rs`, `tests/open_file_api.rs` |
 | Associated applications / revision-bound picker sessions | `src/app_handlers.rs`, `src/app_picker.rs`, `tests/open_apps_api.rs` |
 | Standalone bottom application picker / shared palette rows | `src/bin/open_apps_ui.rs`, `src/bin/action_row.rs` |
-| Shortcut catalogue, normalization, persistence/conflicts | `src/shortcuts.rs` |
+| Shortcut catalogue, normalization, persistence/conflicts | `src/shortcuts.rs`, `crates/avilon-actions` |
+| Reusable palette selection and visible-list navigation | `crates/avilon-actions/src/palette.rs`, `navigation.rs` |
 | Native copy payload preparation/publication | `src/copy_out.rs` |
 | Two-phase drag lifecycle / native OLE adapter / cursor image | `src/drag_session.rs`, `src/drag_out.rs`, `src/drag_image.rs` |
 | Window-thread native drag handoff | `src/bin/native_drag_ui.rs` |
