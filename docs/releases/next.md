@@ -1,6 +1,6 @@
 # Unreleased local changes after 3.4.1
 
-- The Pods emoji catalogue now has an All Categories picker beside Search, with the nine Unicode groups, searchable keyboard/mouse navigation, and `Shift+\` within the catalogue. Filtering combines with search and retains all pages and subgroup dividers.
+- The Pods emoji catalogue now has an All Categories picker in a compact strip below the tabs, with the nine Unicode groups, searchable keyboard/mouse navigation, and `Shift+\` within the catalogue. Filtering combines with search and retains all pages and subgroup dividers.
 
 - Pods now offers a read-only Unicode 16 emoji catalogue with 3,781 fully-qualified entries, official groups and subgroups, and a visible-card-aware texture cache. Inside Pods, physical `\` toggles the catalogue and `Ctrl+\` selects between it and saved Pods. Ctrl+C adds the selected entries to ordinary Pods without removing catalogue entries.
 

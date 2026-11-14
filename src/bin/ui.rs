@@ -35,6 +35,7 @@ mod single_instance;
 mod sorting_input;
 mod sorting_ui;
 mod source_jobs;
+mod special_mode_bar;
 mod summon_animation;
 mod tab_bar;
 mod tab_preload_ui;
@@ -961,6 +962,13 @@ impl Shelf {
             root.set_opacity(1.0);
         }
         self.state = self.call(Command::Interaction);
+        #[cfg(test)]
+        ctx.data_mut(|data| {
+            data.remove::<egui::Rect>(egui::Id::new("test-emoji-mode-bar-rect"));
+            data.remove::<egui::Rect>(egui::Id::new("test-emoji-load-more-rect"));
+            data.remove::<egui::Rect>(egui::Id::new("test-search-rect"));
+            data.remove::<egui::Rect>(egui::Id::new("test-tabs-rect"));
+        });
         let _header = egui::Panel::top("header")
             .frame(
                 egui::Frame::new()
@@ -1002,64 +1010,49 @@ impl Shelf {
                         }
                     });
                 }
-                ui.horizontal(|ui| {
-                    let show_categories =
-                        self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true;
-                    let search_width = (ui.available_width()
-                        - if show_categories { 172.0 } else { 0.0 })
-                    .max(20.0);
-                    if self.search_keyboard_only && !ctx.memory(|m| m.has_focus(search_id)) {
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(search_width, 31.0),
-                            egui::Sense::drag(),
-                        );
-                        ui.painter().text(
-                            rect.left_center(),
-                            egui::Align2::LEFT_CENTER,
-                            if self.query.is_empty() {
-                                i18n::tr("Поиск на полке…", "Search shelf…")
-                            } else {
-                                &self.query
-                            },
-                            egui::FontId::proportional(22.0),
-                            Color32::from_gray(145),
-                        );
-                        if response.drag_started() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                        }
-                        response.on_hover_text(i18n::tr(
-                            "Ctrl+T — включить поиск",
-                            "Ctrl+T — activate search",
-                        ));
-                    } else {
-                        let search = ui.add(
-                            egui::TextEdit::singleline(&mut self.query)
-                                .id(search_id)
-                                .hint_text(i18n::tr("Поиск на полке…", "Search shelf…"))
-                                .font(egui::FontId::proportional(22.0))
-                                .frame(egui::Frame::NONE)
-                                .desired_width(search_width),
-                        );
-                        if search.changed() {
-                            self.refresh();
-                        }
+                // Search retains the full header width in every shelf mode.
+                if self.search_keyboard_only && !ctx.memory(|m| m.has_focus(search_id)) {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 31.0),
+                        egui::Sense::drag(),
+                    );
+                    #[cfg(test)]
+                    ctx.data_mut(|data| data.insert_temp(egui::Id::new("test-search-rect"), rect));
+                    ui.painter().text(
+                        rect.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        if self.query.is_empty() {
+                            i18n::tr("Поиск на полке…", "Search shelf…")
+                        } else {
+                            &self.query
+                        },
+                        egui::FontId::proportional(22.0),
+                        Color32::from_gray(145),
+                    );
+                    if response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
-                    if show_categories {
-                        let label = self.state["emoji_category"]
-                            .as_str()
-                            .unwrap_or(i18n::tr("Все категории", "All Categories"));
-                        let response = ui.add_sized([160.0, 28.0], egui::Button::new(label));
-                        ctx.data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new("emoji-category-button-rect"),
-                                response.rect,
-                            )
-                        });
-                        if response.clicked() && !self.modal_owns_input() {
-                            self.open_emoji_categories();
-                        }
+                    response.on_hover_text(i18n::tr(
+                        "Ctrl+T — включить поиск",
+                        "Ctrl+T — activate search",
+                    ));
+                } else {
+                    let search = ui.add(
+                        egui::TextEdit::singleline(&mut self.query)
+                            .id(search_id)
+                            .hint_text(i18n::tr("Поиск на полке…", "Search shelf…"))
+                            .font(egui::FontId::proportional(22.0))
+                            .frame(egui::Frame::NONE)
+                            .desired_width(ui.available_width()),
+                    );
+                    #[cfg(test)]
+                    ctx.data_mut(|data| {
+                        data.insert_temp(egui::Id::new("test-search-rect"), search.rect)
+                    });
+                    if search.changed() {
+                        self.refresh();
                     }
-                });
+                }
                 if self.api.is_some() {
                     let tabs = self.call(Command::Tabs);
                     let text_enabled = tabs["tabs"].as_array().is_some_and(|tabs| {
@@ -1096,6 +1089,8 @@ impl Shelf {
                         self.tab_order = order;
                     }
                 }
+                #[cfg(test)]
+                let tab_top = ui.cursor().top();
                 if let Some(command) = tab_bar::show_with_glass(
                     ui,
                     &self.tab_order,
@@ -1105,7 +1100,70 @@ impl Shelf {
                 ) {
                     self.apply_tab_bar_command(command, &ctx);
                 }
-                if (self.next_cursor.is_some() || self.preloaded_has_more)
+                #[cfg(test)]
+                ctx.data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("test-tabs-rect"),
+                        egui::Rect::from_min_max(
+                            egui::pos2(ui.min_rect().left(), tab_top),
+                            egui::pos2(ui.max_rect().right(), ui.cursor().top()),
+                        ),
+                    )
+                });
+                let emoji_catalogue =
+                    self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true;
+                if emoji_catalogue {
+                    let more_available = self.next_cursor.is_some() || self.preloaded_has_more;
+                    let bar = special_mode_bar::show(ui, |ui| {
+                        let more = special_mode_bar::action(
+                            ui,
+                            i18n::tr("Загрузить ещё", "Load more"),
+                            None,
+                            more_available,
+                            false,
+                            140.0,
+                        );
+                        #[cfg(test)]
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::new("test-emoji-load-more-rect"), more.rect)
+                        });
+                        if more.clicked() {
+                            if self.preloaded_has_more {
+                                self.preloaded_has_more = false;
+                                self.refresh();
+                            }
+                            self.load_more();
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let label = self.state["emoji_category"]
+                                .as_str()
+                                .unwrap_or(i18n::tr("Все категории", "All Categories"));
+                            let response = special_mode_bar::action(
+                                ui,
+                                label,
+                                Some(emoji_categories_ui::group_icon(
+                                    self.state["emoji_category"].as_str(),
+                                )),
+                                true,
+                                self.pods_ui.category_open,
+                                180.0,
+                            );
+                            ctx.data_mut(|d| {
+                                d.insert_temp(
+                                    egui::Id::new("emoji-category-button-rect"),
+                                    response.rect,
+                                )
+                            });
+                            if response.clicked() && !self.modal_owns_input() {
+                                self.open_emoji_categories();
+                            }
+                        });
+                    });
+                    #[cfg(test)]
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("test-emoji-mode-bar-rect"), bar.response.rect)
+                    });
+                } else if (self.next_cursor.is_some() || self.preloaded_has_more)
                     && ui.button(i18n::tr("Загрузить ещё", "Load more")).clicked()
                 {
                     if self.preloaded_has_more {
@@ -4907,5 +4965,142 @@ mod tests {
         frame(&mut app, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
         assert!(!app.pods_ui.category_open);
         assert_eq!(app.state["emoji_catalogue"], true);
+    }
+    #[test]
+    fn emoji_mode_bar_sits_below_tabs_and_search_stays_full_width() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Pods,
+        });
+        app.refresh();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(940.0, 680.0));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        assert!(
+            ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-emoji-mode-bar-rect")))
+                .is_none()
+        );
+        app.state = app.call(Command::SetEmojiCatalogue { enabled: true });
+        app.refresh();
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            output.textures_delta.clear();
+        }
+        let bar = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-emoji-mode-bar-rect")))
+            .unwrap();
+        let tabs = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-tabs-rect")))
+            .unwrap();
+        let search = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-search-rect")))
+            .unwrap();
+        let left = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-emoji-load-more-rect")))
+            .unwrap();
+        let right = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("emoji-category-button-rect")))
+            .unwrap();
+        assert!(
+            bar.top() >= tabs.bottom() - 1.0,
+            "bar={bar:?}, tabs={tabs:?}"
+        );
+        assert!(
+            left.right() < right.left(),
+            "left={left:?}, right={right:?}"
+        );
+        assert!(
+            left.left() - bar.left() < 20.0 && bar.right() - right.right() < 20.0,
+            "bar={bar:?}, left={left:?}, right={right:?}"
+        );
+        assert!(
+            search.width() > bar.width() * 0.9,
+            "search={search:?}, bar={bar:?}"
+        );
+        app.state = app.call(Command::SetEmojiCatalogue { enabled: false });
+        app.refresh();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        assert!(
+            ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-emoji-mode-bar-rect")))
+                .is_none()
+        );
+    }
+    #[test]
+    fn emoji_mode_bar_load_more_responds_to_mouse() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Pods,
+        });
+        app.state = app.call(Command::SetEmojiCatalogue { enabled: true });
+        app.refresh();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(940.0, 680.0));
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.events.len(), 1000);
+        let pos = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-emoji-load-more-rect")))
+            .unwrap()
+            .center();
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.events.len(), 2000);
     }
 }

@@ -1,6 +1,22 @@
 //! Domain-backed emoji group chooser using the shared Actions popup visuals.
 use super::*;
 
+pub(super) fn group_icon(group: Option<&str>) -> egui_lucide::Lucide {
+    use egui_lucide::Lucide;
+    match group {
+        Some("Smileys & Emotion") => Lucide::FaceGrinning,
+        Some("People & Body") => Lucide::UsersRound,
+        Some("Animals & Nature") => Lucide::PawPrint,
+        Some("Food & Drink") => Lucide::Utensils,
+        Some("Travel & Places") => Lucide::Map,
+        Some("Activities") => Lucide::Trophy,
+        Some("Objects") => Lucide::Package,
+        Some("Symbols") => Lucide::Shapes,
+        Some("Flags") => Lucide::Flag,
+        _ => Lucide::LayoutGrid,
+    }
+}
+
 impl Shelf {
     pub(super) fn open_emoji_categories(&mut self) {
         self.pods_ui.category_query.clear();
@@ -99,11 +115,11 @@ impl Shelf {
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
                     .show(ui, |ui| {
-                        for (index, (_, label)) in choices.iter().enumerate() {
+                        for (index, (group, label)) in choices.iter().enumerate() {
                             let row = crate::action_row::ActionRow::new(
                                 crate::action_row::ActionPresentation {
                                     label,
-                                    icon: egui_lucide::Lucide::LayoutGrid,
+                                    icon: group_icon(group.as_deref()),
                                     primary_shortcut: "",
                                     full_shortcut_tooltip: "",
                                 },
@@ -161,6 +177,25 @@ impl Shelf {
             }
         } else if result.should_close() {
             self.pods_ui.category_open = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn every_unicode_group_has_a_specific_icon() {
+        let mut service = katran::Service::open(tempfile::tempdir().unwrap().path(), 1000).unwrap();
+        let reply = service.execute(katran::Request {
+            api_version: 1,
+            request_id: "icons".into(),
+            command: katran::Command::EmojiCategories,
+        });
+        let groups = reply["result"]["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 9);
+        for group in groups {
+            assert_ne!(group_icon(group.as_str()), group_icon(None), "{group}");
         }
     }
 }
