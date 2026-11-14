@@ -11,8 +11,9 @@ remaining work. Public and private E share Pods/Desktop/settings storage, so
 the schema v12 migration must not be applied to a real user database until both
 installed editions support it. The installed public 3.4.1 and E runtime
 `c1555b47dc04` remain pre-v12; no real user database has been migrated.
-Source checkpoint `c222a7b` includes the current N1 job preparation and the
-local Wallpaper Engine and decoder-stop changes. No new release is installed.
+Source checkpoint `e6453c5` includes the N1 job preparation, recoverable
+original moves, Wallpaper Engine and decoder-stop changes. No new release is
+installed.
 
 - **A1 — public UI focus:** category selection now reads the focused widget ID
   before loading text-edit state, avoiding nested egui context locks. The
@@ -73,9 +74,8 @@ local Wallpaper Engine and decoder-stop changes. No new release is installed.
 owner-job lease and ready-commit deferral remain needed. Moving this effect to
 a worker also requires cross-process protection for destructive file paths and
 durable intent/outcome reconciliation; a SQLite writer lock alone is insufficient.
-The A9 handoff check
-had zero open findings before the latest E UI/runtime work and needs a final
-recheck after source freeze. The private E runtime manifest contract has
+The A9 public/E source handoff check has zero unresolved findings at
+`e6453c5`. The private E runtime manifest contract has
 synthetic checks 3/3; real-model execution, Python environment portability and
 signed distribution remain unverified. The latest E full UI suite passed
 203/203 after repairs. No E update is installed; regenerate its manifest only
