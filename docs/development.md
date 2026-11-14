@@ -1,6 +1,6 @@
 # Developer and agent entry point
 
-Current baseline: **3.4.1** (2026-11-12). For each new release, update this
+Public release baseline: **3.4.1** (2026-11-12). For each new release, update this
 baseline and the current section of `AGENTS.md` together with the README and
 release note. Older numbered sections and reviews are dated evidence, not
 current product instructions. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
@@ -29,9 +29,22 @@ a real shared profile with v12 until both installed editions support it. The
 installed public 3.4.1 and E runtime `c1555b47dc04` are pre-v12; no real user DB
 has been migrated.
 
+Folder transfer/copy/import/paste preparation now runs through background jobs.
+The final `safe_recycle` / `finish_cut` stage remains Service-bound; do not claim
+the entire operation is nonblocking. Synthetic debug medians were 48 ms for
+1 MiB, 458 ms for 16 MiB and 2,078 ms for 64 MiB; these are not release or real
+Recycle Bin measurements. A remaining worker ownership issue needs an
+owner-job lease and ready-commit deferral. Public UI checks passed 201/201 and transfer/import/
+Wallpaper Engine checks passed 23/23; E N1 API checks passed 27/27 with a
+targeted UI check. Repeated Ctrl+Tab queueing is covered. Public category
+divider handling now omits empty subgroup labels. Avilon Windows decoder stop
+closes an assigned process tree; its stop fixture does not prove containment
+before process assignment. Keep that process-spawn window separate from the
+Folder job ownership requirement.
+
 | Responsibility | Current owner files |
 | --- | --- |
-| 2.5 Folder session, transfer, clipboard paste, recycle and explicit import | `src/work_folder.rs`, `src/workspace_service.rs`, `src/transfer_service.rs`, `src/paste_service.rs`, `src/clipboard_files.rs`, `src/folder_delete.rs`, `src/safe_recycle.rs`, `src/folder_import.rs` |
+| Folder session, transfer/copy/import/paste jobs, recycle and explicit import | `src/work_folder.rs`, `src/workspace_service.rs`, `src/transfer_service.rs`, `src/paste_service.rs`, `src/clipboard_files.rs`, `src/folder_delete.rs`, `src/safe_recycle.rs`, `src/folder_import.rs`, `src/jobs_service.rs` |
 | 2.5 Pinned metadata, tags and saved application handlers | `src/pinned.rs`, `src/pinned_open.rs`, `src/bin/pinned_ui.rs` |
 | 2.5 Everything folder search and negative-ID previews | `src/everything.rs`, `src/preview_snapshot.rs`, `src/bin/workspace_ui.rs`, `assets/everything/` |
 | Wire types / dispatcher | `src/api.rs`, `src/lib.rs` |

@@ -51,6 +51,15 @@ do not migrate a real profile to schema v12 until both installed editions can
 open it. The installed public 3.4.1 and E `c1555b47dc04` are both pre-v12, and
 no real user database has been migrated.
 
+Transfer, import, paste and move preparation now use background jobs, and the
+repeated Ctrl+Tab queue case is covered. Public targeted UI checks passed
+201/201 and transfer/import/Wallpaper Engine checks passed 23/23; E N1 API
+checks passed 27/27 with a targeted UI check. Final recycle/cut completion still
+uses the Service thread, so transfers are not fully nonblocking. Synthetic
+debug medians (1/16/64 MiB: 48/458/2,078 ms) are not release or real-Recycle-Bin
+measurements. See [the development map](docs/development.md) for the remaining
+worker ownership constraint.
+
 Prepare an updated build without overwriting a running executable:
 
 On a fresh checkout, first run `cargo fetch --locked` to populate dependencies.

@@ -16,17 +16,29 @@ unsafe JSON integers losslessly as canonical decimal strings; `CopySelectionActi
 owns emoji import plus clipboard outcomes; Desktop cursors bind browse context;
 managed preview uses the asset path; durable Desktop pin tables are in numbered
 schema v12; package manifests derive the schema version and include build
-identity/input hashes; managed media uses staged publication, action-boundary
-integrity checks, and a bounded Wallpaper Engine control wait. Targeted evidence
-and limitations are listed in `docs/releases/next.md` and the internal
+identity/input hashes; managed media uses staged publication, pending receipts,
+action-boundary integrity checks, and a bounded Wallpaper Engine control wait.
+N1 now prepares copy/import/paste and moves in background jobs and fixes repeated
+Ctrl+Tab queuing, but final `safe_recycle` / `finish_cut` remains Service-bound;
+do not claim end-to-end nonblocking. Synthetic debug medians are not release or
+real trash measurements. A worker owner-job lease and ready-commit deferral are
+still needed. The separate Avilon child-process review must cover its
+spawn-to-assignment window. Targeted evidence and limitations are listed in
+`docs/releases/next.md` and the internal
 PRODUCT-10 status ledger. These contracts are local and unreleased. A7 applies
 only to private E and must not add model,
-AI command, UI, or implementation to this public source tree. A9 handoff and N1
-Folder transfer remain open; no release or push is authorized by this work.
+AI command, UI, or implementation to this public source tree. A9's private E
+runtime manifest contract has targeted synthetic evidence; final handoff checks
+remain pending. N1 Folder transfer remains partially open. No release or push
+is authorized by this work.
 Public and E share Pods/Desktop/settings storage. Schema v12 must not be applied
 to a real user database until both installed editions support v12; installed
 public 3.4.1 and E runtime `c1555b47dc04` remain pre-v12, and no real database
 has been migrated. Synthetic migration tests do not satisfy this gate.
+The public category divider omits empty subgroup labels (scoped UI regression).
+Avilon Windows media stop closes the assigned decoder process tree; its current
+evidence is limited to the stop fixture, and does not close the spawn-to-assign
+window.
 Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Pods has a read-only, fully-qualified Unicode 16 emoji catalogue grouped from the bundled official emoji-test file; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. The catalogue category picker uses Shift+physical backslash only in the full catalogue; its session-only group filter must remain scoped to search and pagination. See `docs/pods.md`.
 Catalogue emoji use the ordinary revision-checked copy, previous-window paste and native drag paths. Ctrl+C additionally imports them into saved Pods; Enter uses the ordinary previous-window paste flow, and all-Pods native drag offers Unicode text alongside the existing `pods.txt` file. No AI search command, UI or model belongs in this public source tree; Katran E is a separate private distribution.

@@ -11,6 +11,8 @@ remaining work. Public and private E share Pods/Desktop/settings storage, so
 the schema v12 migration must not be applied to a real user database until both
 installed editions support it. The installed public 3.4.1 and E runtime
 `c1555b47dc04` remain pre-v12; no real user database has been migrated.
+Source checkpoint `c222a7b` includes the current N1 job preparation and the
+local Wallpaper Engine and decoder-stop changes. No new release is installed.
 
 - **A1 — public UI focus:** category selection now reads the focused widget ID
   before loading text-edit state, avoiding nested egui context locks. The
@@ -38,18 +40,38 @@ installed editions support it. The installed public 3.4.1 and E runtime
   The synthetic package-contract check passed, including resource-change
   detection; the manifest measured 55,607 bytes, below the 64 KiB updater
   limit. No product build was run.
+- **N1 — Folder transfers:** copy/import/paste and move preparation run in
+  background jobs; repeated Ctrl+Tab queueing is fixed. Public UI checks passed
+  201/201 and transfer/import/Wallpaper Engine checks 23/23; E N1 API checks
+  passed 27/27 and its targeted UI check passed. The final `safe_recycle` /
+  `finish_cut` stage remains Service-bound, so this is not end-to-end
+  nonblocking. Synthetic debug medians were 48 ms (1 MiB), 458 ms (16 MiB) and
+  2,078 ms (64 MiB); they are not release or real-Recycle-Bin measurements.
+  Worker ownership still needs an owner-job lease and ready-commit deferral.
 - **N2/N3/N4 — managed media:** media bytes and sidecars publish from staged
-  files, the active Wallpaper Engine receipt is replaced atomically, and action
-  lookup validates managed bytes without hashing during browse. Wallpaper
-  Engine control waits are bounded; a timeout is surfaced and the command is
-  not blindly replayed. Targeted media publication/API tests passed 2/2 and 1/1;
-  direct modified-video apply passed 1/1; timeout test passed 1/1.
+  files; a pending receipt is recorded before Wallpaper Engine apply, with
+  active and pending assets protected from deletion. Ambiguous delivery returns
+  `wallpaper_outcome_unknown`, and action lookup validates managed bytes without
+  hashing during browse. Control waits are bounded. Targeted synthetic tests
+  passed in public and E; modified-video apply passed 1/1 and timeout handling
+  passed 1/1.
+- **Shared UI/runtime fixes:** empty subgroup dividers are omitted in the public
+  category picker. Avilon's Windows media stop path closes the assigned decoder
+  process tree. Evidence is scoped to the divider regression and assigned-child
+  stop fixture; the spawn-to-assignment window remains a limitation.
 - **A7 — private E only:** its independent AI lane and bounded cancellation
   have targeted API evidence (4 passed, 1 ignored). It is not part of this
   public source tree; no model or implementation details are documented here.
 
-**Still open:** A9 public/E handoff and distribution identity; N1 synchronous
-Folder transfer work (being worked separately); final integrated validation.
+**Still open:** N1 final `safe_recycle` / `finish_cut` still runs in Service;
+owner-job lease and ready-commit deferral remain needed. The A9 handoff check
+had zero open findings before the latest E UI/runtime work and needs a final
+recheck after source freeze. The private E runtime manifest contract has
+synthetic checks 3/3; real-model execution, Python environment portability and
+signed distribution remain unverified. The latest E full UI suite passed
+203/203 after repairs. No E update is installed; regenerate its manifest only
+after the source is frozen. Shared-profile schema v12 remains gated on both
+installed editions. Final integrated validation and release remain open.
 
 - The Pods emoji catalogue now has an All Categories picker in a compact strip below the tabs, with the nine Unicode groups, searchable keyboard/mouse navigation, and `Shift+\` within the catalogue. Filtering combines with search and retains all pages and subgroup dividers.
 
