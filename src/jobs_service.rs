@@ -1024,14 +1024,12 @@ impl Service {
                         .and_then(|()| {
                             self.jobs.authorize_claimed_effect(ready)?;
                             self.jobs.continue_claimed(ready, move |_cancel| {
-                                wallpaper_engine::apply(&path)
-                                    .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
-                                Ok(PreparedWork::Value(wallpaper_engine::registration_result(
+                                Ok(PreparedWork::Value(wallpaper_engine::handoff(
                                     &root,
                                     &path,
                                     &event.path,
                                     silent,
-                                )))
+                                )?))
                             })
                         });
                     if let Err(error) = continued {

@@ -144,9 +144,8 @@ fn wallpaper_active(root: &Path) -> Result<Option<String>> {
     }
 }
 
-/// Register bytes only after Wallpaper Engine accepted them. A separate copy
-/// means deleting a shelf entry never removes the file currently used by WE.
-pub(crate) fn register_wallpaper_video(
+/// Prepare a complete catalogue entry before contacting Wallpaper Engine.
+pub(crate) fn prepare_wallpaper_video(
     root: &Path,
     staged_path: &Path,
     original_path: &Path,
@@ -229,9 +228,73 @@ pub(crate) fn register_wallpaper_video(
     };
     let _ = fs::remove_file(&temp);
     publication?;
-    // If a previous receipt cannot be read safely, fail closed rather than
-    // replacing it and accidentally authorizing deletion.
+    let mut item = wallpaper_video(root, &id)?;
+    item["id"] = json!(format!("wallpaper_video:{id}"));
+    item["kind"] = json!("wallpaper_video");
+    Ok(item)
+}
+
+pub(crate) fn wallpaper_lock(root: &Path) -> Result<fs::File> {
+    let path = wallpaper_dir(root)?.join("handoff.lock");
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.lock()
+        .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
+    Ok(file)
+}
+
+pub(crate) fn mark_wallpaper_pending(root: &Path, id: &str) -> Result<()> {
+    if !crate::video_backgrounds::valid_id(id) {
+        return Err(ApiError::new("invalid_video", "Invalid wallpaper video ID"));
+    }
     wallpaper_active(root)?;
+    let path = wallpaper_dir(root)?.join(format!("pending-{id}"));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file.sync_all()?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let meta = fs::symlink_metadata(path)?;
+            if !meta.is_file() || !safe_metadata(&meta) || meta.len() != 0 {
+                return Err(ApiError::new(
+                    "invalid_video",
+                    "Unsafe pending wallpaper receipt",
+                ));
+            }
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+fn wallpaper_pending(root: &Path, id: &str) -> Result<bool> {
+    let path = wallpaper_dir(root)?.join(format!("pending-{id}"));
+    match fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+        Ok(meta) if meta.is_file() && safe_metadata(&meta) && meta.len() == 0 => Ok(true),
+        Ok(_) => Err(ApiError::new(
+            "invalid_video",
+            "Unsafe pending wallpaper receipt",
+        )),
+    }
+}
+
+pub(crate) fn finish_wallpaper_video(root: &Path, id: &str) -> Result<()> {
+    wallpaper_active(root)?;
+    if !wallpaper_pending(root, id)? {
+        return Err(ApiError::new(
+            "invalid_video",
+            "Missing pending wallpaper receipt",
+        ));
+    }
+    let dir = wallpaper_dir(root)?;
     let active = dir.join("active");
     let temp = staged_file(&dir, |file| {
         file.write_all(id.as_bytes())?;
@@ -240,9 +303,22 @@ pub(crate) fn register_wallpaper_video(
     let publication = fs::rename(&temp, active);
     let _ = fs::remove_file(&temp);
     publication?;
-    let mut item = wallpaper_video(root, &id)?;
-    item["id"] = json!(format!("wallpaper_video:{id}"));
-    item["kind"] = json!("wallpaper_video");
+    // Failure to remove the marker leaves extra protection, never less.
+    let _ = fs::remove_file(dir.join(format!("pending-{id}")));
+    Ok(())
+}
+
+#[cfg(test)]
+fn register_wallpaper_video(root: &Path, staged: &Path, original: &Path) -> Result<Value> {
+    let _lock = wallpaper_lock(root)?;
+    let item = prepare_wallpaper_video(root, staged, original)?;
+    let id = item["id"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("wallpaper_video:")
+        .unwrap();
+    mark_wallpaper_pending(root, id)?;
+    finish_wallpaper_video(root, id)?;
     Ok(item)
 }
 
@@ -309,7 +385,10 @@ pub(crate) fn list(
     }
     let active = wallpaper_active(root)?;
     for video in wallpaper_catalogue(root)? {
-        let is_active = video["id"].as_str() == active.as_deref();
+        let id = video["id"]
+            .as_str()
+            .ok_or_else(|| ApiError::new("invalid_video", "Missing wallpaper ID"))?;
+        let is_active = Some(id) == active.as_deref() || wallpaper_pending(root, id)?;
         items.push(annotate(video, "wallpaper_video", is_active, &[])?);
     }
     Ok(json!({"items":items}))
@@ -359,9 +438,9 @@ pub(crate) fn lookup(root: &Path, typed_id: &str) -> Result<Value> {
     // Listing stays metadata-only; validate managed bytes when an action
     // resolves the asset, including direct ApplyDesktopAsset calls.
     if matches!(kind, "image" | "video") {
-        let path = item["path"].as_str().ok_or_else(|| {
-            ApiError::new("stale_selection", "Managed Desktop asset has no path")
-        })?;
+        let path = item["path"]
+            .as_str()
+            .ok_or_else(|| ApiError::new("stale_selection", "Managed Desktop asset has no path"))?;
         if crate::preview::content_hash(Path::new(path))? != id {
             return Err(ApiError::new(
                 "stale_selection",
@@ -414,7 +493,8 @@ pub(crate) fn delete(
                 .map_err(|e| ApiError::new("invalid_video", e))?;
         }
         "wallpaper_video" => {
-            if wallpaper_active(root)?.as_deref() == Some(id) {
+            let _lock = wallpaper_lock(root)?;
+            if wallpaper_active(root)?.as_deref() == Some(id) || wallpaper_pending(root, id)? {
                 return Err(ApiError::new(
                     "background_in_use",
                     "Wallpaper video was last applied to Wallpaper Engine",

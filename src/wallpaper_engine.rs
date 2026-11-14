@@ -334,18 +334,39 @@ pub(crate) fn stage_silent(root: &Path, event: &crate::Event) -> crate::Result<P
     Ok(output)
 }
 
-pub(crate) fn registration_result(
+pub(crate) fn handoff(
     root: &Path,
     staged: &Path,
     original: &Path,
     muted: bool,
-) -> serde_json::Value {
-    let mut result = serde_json::json!({"video_desktop_wallpaper_requested": true, "muted": muted});
-    match crate::desktop_assets::register_wallpaper_video(root, staged, original) {
-        Ok(asset) => result["desktop_asset"] = asset,
-        Err(error) => result["desktop_asset_error"] = serde_json::json!(error),
-    }
-    result
+) -> crate::Result<serde_json::Value> {
+    handoff_with(root, staged, original, muted, apply)
+}
+
+fn handoff_with(
+    root: &Path,
+    staged: &Path,
+    original: &Path,
+    muted: bool,
+    apply: impl FnOnce(&Path) -> Result<(), String>,
+) -> crate::Result<serde_json::Value> {
+    let _lock = crate::desktop_assets::wallpaper_lock(root)?;
+    let asset = crate::desktop_assets::prepare_wallpaper_video(root, staged, original)?;
+    let id = asset["id"]
+        .as_str()
+        .and_then(|id| id.strip_prefix("wallpaper_video:"))
+        .ok_or_else(|| crate::ApiError::new("invalid_video", "Missing wallpaper ID"))?;
+    crate::desktop_assets::mark_wallpaper_pending(root, id)?;
+    apply(staged).map_err(|error| {
+        crate::ApiError::new(
+            "wallpaper_outcome_unknown",
+            format!("Wallpaper Engine outcome is unknown; the video remains protected: {error}"),
+        )
+    })?;
+    crate::desktop_assets::finish_wallpaper_video(root, id).map_err(|error| crate::ApiError::new("wallpaper_outcome_unknown", format!("Wallpaper Engine accepted the command, but its receipt could not be finalized; the video remains protected: {}", error.message)))?;
+    Ok(
+        serde_json::json!({"video_desktop_wallpaper_requested": true, "muted": muted, "desktop_asset": asset}),
+    )
 }
 
 fn wait_for_command(
@@ -396,6 +417,114 @@ pub fn apply(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::{Command, Request, Service};
+
+    #[test]
+    fn ambiguous_handoff_keeps_both_videos_protected_after_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let staged = tempfile::tempdir().unwrap();
+        let first = staged.path().join("first.mp4");
+        let second = staged.path().join("second.mp4");
+        let third = staged.path().join("third.mp4");
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(&second, b"second").unwrap();
+        std::fs::write(&third, b"third").unwrap();
+        let accepted = handoff_with(root.path(), &first, &first, false, |_| Ok(())).unwrap();
+        let first_id = accepted["desktop_asset"]["id"].as_str().unwrap().to_owned();
+        let error = handoff_with(root.path(), &second, &second, false, |_| {
+            Err("timeout".into())
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "wallpaper_outcome_unknown");
+        let second_id = format!(
+            "wallpaper_video:{}",
+            crate::preview::content_hash(&second).unwrap()
+        );
+        // A fresh service sees the durable pending marker, as after process interruption.
+        let _service = Service::open(root.path(), 100000).unwrap();
+        for id in [&first_id, &second_id] {
+            assert_eq!(
+                crate::desktop_assets::delete(
+                    root.path(),
+                    id,
+                    &crate::theme::ThemePreferences::default(),
+                    None,
+                    &[]
+                )
+                .unwrap_err()
+                .code,
+                "background_in_use"
+            );
+        }
+        let accepted = handoff_with(root.path(), &second, &second, false, |_| Ok(())).unwrap();
+        assert_eq!(accepted["desktop_asset"]["id"], second_id);
+        crate::desktop_assets::delete(
+            root.path(),
+            &first_id,
+            &crate::theme::ThemePreferences::default(),
+            None,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::desktop_assets::delete(
+                root.path(),
+                &second_id,
+                &crate::theme::ThemePreferences::default(),
+                None,
+                &[]
+            )
+            .unwrap_err()
+            .code,
+            "background_in_use"
+        );
+        // Unwinding in the external call simulates interruption after preparation.
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = handoff_with(root.path(), &third, &third, false, |_| {
+                    panic!("interrupted")
+                });
+            })
+            .is_err()
+        );
+        let third_id = format!(
+            "wallpaper_video:{}",
+            crate::preview::content_hash(&third).unwrap()
+        );
+        assert_eq!(
+            crate::desktop_assets::delete(
+                root.path(),
+                &third_id,
+                &crate::theme::ThemePreferences::default(),
+                None,
+                &[]
+            )
+            .unwrap_err()
+            .code,
+            "background_in_use"
+        );
+
+        let failed_receipt = tempfile::tempdir().unwrap();
+        let error = handoff_with(failed_receipt.path(), &first, &first, false, |_| {
+            std::fs::create_dir(
+                failed_receipt
+                    .path()
+                    .join("wallpaper-videos")
+                    .join("active"),
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "wallpaper_outcome_unknown");
+        let digest = crate::preview::content_hash(&first).unwrap();
+        assert!(
+            failed_receipt
+                .path()
+                .join("wallpaper-videos")
+                .join(format!("pending-{digest}"))
+                .is_file()
+        );
+    }
 
     #[test]
     fn timeout_child_fixture() {

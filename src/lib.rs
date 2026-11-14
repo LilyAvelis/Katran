@@ -493,14 +493,7 @@ impl Service {
                     wallpaper_engine::stage(&self.root, &event)?
                 };
                 self.validate_job_events(std::slice::from_ref(&event))?;
-                wallpaper_engine::apply(&path)
-                    .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
-                Ok(wallpaper_engine::registration_result(
-                    &self.root,
-                    &path,
-                    &event.path,
-                    silent,
-                ))
+                wallpaper_engine::handoff(&self.root, &path, &event.path, silent)
             }
             Command::UseSelectedImageAsBackground => {
                 let event = self.selected_background_image()?;
