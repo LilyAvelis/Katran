@@ -558,6 +558,7 @@ impl Shelf {
         }
         self.poll_preloaded_tab(&ctx);
         if self.api.is_some()
+            && self.state["tab"] == "pods"
             && !self.modal_owns_input()
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
@@ -589,26 +590,15 @@ impl Shelf {
             });
             if let Some(selector) = action {
                 ctx.input_mut(shortcuts_ui::discard);
-                let already_pods = self.state["tab"] == "pods";
-                if !already_pods {
-                    let next = self.call(Command::SetTab {
-                        tab: katran::interaction::ShelfTab::Pods,
-                    });
-                    if next.is_object() {
-                        self.state = next;
-                    }
-                }
-                if self.state["tab"] == "pods" {
-                    if selector {
-                        self.pods_ui.selector_open = true;
-                    } else {
-                        let enabled = !already_pods || self.state["emoji_catalogue"] != true;
-                        self.state = self.call(Command::SetEmojiCatalogue { enabled });
-                        self.query.clear();
-                        self.loaded_query.clear();
-                        self.events.clear();
-                        self.refresh();
-                    }
+                if selector {
+                    self.pods_ui.selector_open = true;
+                } else {
+                    let enabled = self.state["emoji_catalogue"] != true;
+                    self.state = self.call(Command::SetEmojiCatalogue { enabled });
+                    self.query.clear();
+                    self.loaded_query.clear();
+                    self.events.clear();
+                    self.refresh();
                 }
             }
         }
@@ -693,7 +683,7 @@ impl Shelf {
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
             && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(&ctx, id).is_some()))
-            && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if modifiers.is_none() && (physical_key.unwrap_or(*key) == egui::Key::Slash || *key == egui::Key::Slash))))
+            && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if modifiers.is_none() && physical_key.unwrap_or(*key) == egui::Key::Slash)))
         {
             ctx.input_mut(shortcuts_ui::discard);
             self.open_tag_menu();
@@ -1640,7 +1630,7 @@ impl eframe::App for Shelf {
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
             && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(ctx, id).is_some()))
-            && input.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } if modifiers.is_none() && (physical_key.unwrap_or(*key) == egui::Key::Slash || *key == egui::Key::Slash)));
+            && input.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } if modifiers.is_none() && physical_key.unwrap_or(*key) == egui::Key::Slash));
         let modal = self.modal_owns_input() || starts_sort || starts_tag;
         let copying_bound = self.shortcuts.iter().any(|s| {
             s.id == "transfer_copy"
@@ -4408,7 +4398,7 @@ mod tests {
             enabled: true,
         });
         app.state = app.call(Command::SetTab {
-            tab: katran::interaction::ShelfTab::Images,
+            tab: katran::interaction::ShelfTab::Pods,
         });
         app.refresh();
         let ctx = egui::Context::default();
@@ -4494,5 +4484,45 @@ mod tests {
             cursor: None,
         });
         assert_eq!(saved["events"].as_array().unwrap().len(), 2);
+    }
+    #[test]
+    fn physical_backslash_does_not_leave_other_tabs_or_open_tags() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        for tab in [
+            katran::interaction::ShelfTab::Images,
+            katran::interaction::ShelfTab::Files,
+        ] {
+            app.state = app.call(Command::SetTab { tab });
+            app.refresh();
+            for ctrl in [false, true] {
+                let ctx = egui::Context::default();
+                ui_style::install(&ctx);
+                let input = egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Slash,
+                        physical_key: Some(egui::Key::Backslash),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: if ctrl {
+                            egui::Modifiers::CTRL
+                        } else {
+                            egui::Modifiers::NONE
+                        },
+                    }],
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(input, |ui| app.render(ui));
+                output.textures_delta.clear();
+                assert_eq!(app.state["tab"], serde_json::json!(tab));
+                assert_ne!(app.state["emoji_catalogue"], true);
+                assert!(!app.pods_ui.selector_open);
+                assert!(!app.tag_menu.open);
+            }
+        }
     }
 }
