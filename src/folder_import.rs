@@ -170,3 +170,204 @@ impl Service {
         }
     }
 }
+
+fn read_snapshot_cancellable(
+    event: &Event,
+    limit: usize,
+    cancel: &crate::domain_jobs::Cancellation,
+) -> Result<Vec<u8>> {
+    open_file::validate(event)?;
+    let mut input = File::open(&event.path)?;
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        cancel.check()?;
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        if bytes.len().saturating_add(count) > limit {
+            return Err(ApiError::new(
+                "import_too_large",
+                format!("Import exceeds {limit} bytes"),
+            ));
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    open_file::validate(event)?;
+    Ok(bytes)
+}
+
+// Worker-owned preparation for one Folder import. Staged blobs clean themselves up
+// when a cancelled or stale job is discarded.
+pub(crate) struct PreparedFolderCopy {
+    pub event: Event,
+    pub kind: &'static str,
+    pub source_hash: String,
+    pub blobs: Vec<(Option<String>, Result<crate::storage::PreparedBlob>)>,
+}
+
+pub(crate) fn prepare_folder_copy(
+    event: Event,
+    root: &Path,
+    quota: u64,
+    origin: &crate::origin::Origin,
+    references: &[std::path::PathBuf],
+    cancel: &crate::domain_jobs::Cancellation,
+) -> Result<PreparedFolderCopy> {
+    cancel.check()?;
+    let path = Path::new(&event.name);
+    let ext = path
+        .extension()
+        .and_then(|x| x.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let kind = if file_types::is_native_image(path) {
+        "image"
+    } else {
+        match ext.as_str() {
+            "txt" | "md" | "markdown" => "text",
+            "csv" => "table",
+            "html" | "htm" => "links",
+            _ => {
+                return Err(ApiError::new(
+                    "unsupported_import",
+                    "This file type has no visible Katran category",
+                ));
+            }
+        }
+    };
+    let limit = match kind {
+        "image" => quota.min(256 * 1024 * 1024) as usize,
+        "text" => crate::text_fragments::MAX_TEXT_BYTES,
+        "table" => table_fragments::MAX_INPUT_BYTES,
+        _ => crate::text_fragments::MAX_MERGED_BYTES,
+    };
+    let bytes = read_snapshot_cancellable(&event, limit, cancel)?;
+    cancel.check()?;
+    let source_hash = format!("{:x}", Sha256::digest(&bytes));
+    let blobs = match kind {
+        "image" => vec![(
+            None,
+            crate::storage::prepare_bytes(
+                root,
+                quota,
+                crate::storage::ByteIngest {
+                    name: &event.name,
+                    bytes: &bytes,
+                    source: "manual",
+                    origin,
+                },
+                references,
+            ),
+        )],
+        "text" => {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| ApiError::new("invalid_text", "Import must be UTF-8"))?;
+            vec![(
+                None,
+                crate::text_fragments::prepare(root, quota, &text, "manual", origin, references),
+            )]
+        }
+        "table" => {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| ApiError::new("invalid_text", "Import must be UTF-8"))?;
+            let table = table_fragments::parse_csv(&text).map_err(crate::table_service::invalid)?;
+            vec![(
+                None,
+                crate::table_service::prepare(root, quota, &table, "manual", origin, references),
+            )]
+        }
+        _ => {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| ApiError::new("invalid_text", "Import must be UTF-8"))?;
+            let mut blobs = Vec::new();
+            for url in bookmarks(&text)? {
+                cancel.check()?;
+                let result = match url.as_deref() {
+                    Some(url) => {
+                        link_fragments::prepare(root, quota, url, "manual", origin, references)
+                    }
+                    None => Err(ApiError::new(
+                        "invalid_link",
+                        "Bookmark must contain an absolute HTTP(S) URL",
+                    )),
+                };
+                blobs.push((url, result));
+            }
+            blobs
+        }
+    };
+    cancel.check()?;
+    Ok(PreparedFolderCopy {
+        event,
+        kind,
+        source_hash,
+        blobs,
+    })
+}
+
+impl Service {
+    pub(crate) fn commit_folder_copy(&mut self, prepared: PreparedFolderCopy) -> Result<Value> {
+        let current = self.get(prepared.event.id)?;
+        if current.revision != prepared.event.revision || current.path != prepared.event.path {
+            return Err(ApiError::new(
+                "stale_selection",
+                "Folder item changed before import",
+            ));
+        }
+        match prepared.kind {
+            "image" => self.check_ingest_enabled(&prepared.event.name)?,
+            "text" => {} // Each prepared text blob may be a Pod.
+            "table" => self.check_tables_enabled()?,
+            _ => self.check_links_enabled()?,
+        }
+        let mut items = Vec::new();
+        for (url, blob) in prepared.blobs {
+            let result = blob.and_then(|blob| {
+                if blob.is_pod() {
+                    self.check_pods_enabled()?;
+                } else if prepared.kind == "text" {
+                    self.check_text_enabled()?;
+                }
+                let id = crate::storage::commit_prepared_bytes(
+                    &mut self.db,
+                    &self.root,
+                    self.quota,
+                    blob,
+                )?;
+                if prepared.kind == "image"
+                    && let Some(modified) = prepared.event.modified_at_ms
+                {
+                    self.db.execute(
+                        "UPDATE events SET modified_at_ms=?1 WHERE id=?2",
+                        rusqlite::params![modified, id],
+                    )?;
+                }
+                Ok(json!(self.get(id)?))
+            });
+            items.push((url, result));
+        }
+        if prepared.kind != "links" {
+            let (_, result) = items.pop().expect("single import has one blob");
+            return Ok(
+                json!({"kind":prepared.kind,"event":result?,"imported":1,"failed":0,"source_hash":prepared.source_hash}),
+            );
+        }
+        let mut output = Vec::new();
+        let mut imported = 0;
+        for (url, result) in items {
+            match result {
+                Ok(event) => {
+                    imported += 1;
+                    output.push(json!({"url":url,"ok":true,"event":event}));
+                }
+                Err(error) => output.push(json!({"url":url,"ok":false,"error":error})),
+            }
+        }
+        let failed = output.len() - imported;
+        Ok(
+            json!({"kind":"links","items":output,"imported":imported,"failed":failed,"source_hash":prepared.source_hash}),
+        )
+    }
+}

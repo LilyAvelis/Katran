@@ -674,3 +674,500 @@ fn legacy_alias_of_pinned_managed_blob_cannot_be_moved_or_removed() {
         true
     );
 }
+
+#[test]
+fn folder_copy_job_prepares_in_background_and_reports_each_item() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("one.txt"), "one synthetic text").unwrap();
+    std::fs::write(folder.path().join("two.txt"), "two synthetic text").unwrap();
+    std::fs::write(folder.path().join("bad.bin"), "unsupported").unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Text,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    let ids: Vec<i64> = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["id"].as_i64().unwrap())
+        .collect();
+    select(&mut api, &ids);
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::CopySelection),
+        },
+    );
+    assert_eq!(job["state"], "queued");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let result = loop {
+        let status = call(&mut api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            break status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(result["direction"], "from_folder");
+    let items = result["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(
+        items.iter().filter(|item| item["ok"] == true).count(),
+        2,
+        "{result}"
+    );
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| item["error"]["code"] == "unsupported_import")
+            .count(),
+        1
+    );
+    assert!(folder.path().join("one.txt").exists());
+    assert!(folder.path().join("two.txt").exists());
+    assert_eq!(result["interaction"]["tab"], "folder");
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::RunAction {
+                id: "add_to_katran".into(),
+            }),
+        },
+    );
+    assert_eq!(job["state"], "queued");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let result = loop {
+        let status = call(&mut api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            break status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(result["folder_import"], true);
+    assert_eq!(
+        result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["ok"] == true)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn folder_copy_job_cancelled_before_commit_does_not_import() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("source.txt"), "synthetic content").unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Text,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    select(&mut api, &[page["events"][0]["id"].as_i64().unwrap()]);
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::CopySelection),
+        },
+    );
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    call(&mut api, Command::CancelJob { job_id });
+    assert_eq!(
+        call(&mut api, Command::PollJob { job_id })["state"],
+        "cancelled"
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Text,
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    assert!(page["events"].as_array().unwrap().is_empty());
+    assert!(folder.path().join("source.txt").exists());
+}
+
+#[test]
+fn folder_copy_job_rechecks_source_before_commit() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let source = folder.path().join("source.txt");
+    std::fs::write(&source, "initial synthetic content").unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Text,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    select(&mut api, &[page["events"][0]["id"].as_i64().unwrap()]);
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::CopySelection),
+        },
+    );
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    std::fs::write(&source, "changed synthetic content with different length").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let result = loop {
+        let status = call(&mut api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            break status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(result["items"][0]["ok"], false, "{result}");
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Text,
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    assert!(page["events"].as_array().unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn folder_move_job_preserves_pin_and_recycles_only_unpinned_source() {
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+    }
+    for pinned in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("synthetic.png");
+        image::RgbaImage::from_pixel(4, 3, image::Rgba([3, 5, 7, 255]))
+            .save(&path)
+            .unwrap();
+        let mut api = Service::open(root.path(), 1_000_000).unwrap();
+        api.set_trash(Box::new(SyntheticTrash));
+        if pinned {
+            let reference = call(
+                &mut api,
+                Command::IngestPath {
+                    path: path.clone(),
+                    source: "synthetic".into(),
+                },
+            );
+            call(
+                &mut api,
+                Command::TogglePins {
+                    ids: vec![reference["id"].as_i64().unwrap()],
+                },
+            );
+        }
+        call(
+            &mut api,
+            Command::ChooseFolder {
+                path: folder.path().into(),
+            },
+        );
+        let page = call(
+            &mut api,
+            Command::BrowseShelfSorted {
+                query: "".into(),
+                limit: 10,
+                cursor: None,
+            },
+        );
+        select(&mut api, &[page["events"][0]["id"].as_i64().unwrap()]);
+        let job = call(
+            &mut api,
+            Command::BeginJob {
+                command: Box::new(Command::TransferSelection),
+            },
+        );
+        assert_eq!(job["state"], "queued");
+        let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let result = loop {
+            let status = call(&mut api, Command::PollJob { job_id });
+            if status["state"] == "succeeded" {
+                break status["result"].clone();
+            }
+            assert!(
+                status["state"] != "failed" && std::time::Instant::now() < deadline,
+                "{status}"
+            );
+            std::thread::yield_now();
+        };
+        assert_eq!(
+            result["items"][0]["status"],
+            if pinned { "pinned_copy" } else { "moved" },
+            "{result}"
+        );
+        assert_eq!(path.exists(), pinned);
+    }
+}
+
+#[test]
+fn shelf_copy_job_materializes_in_folder_with_per_item_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    let event = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: b"synthetic bytes".to_vec(),
+            source: "synthetic".into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    let id = event["id"].as_i64().unwrap();
+    select(&mut api, &[id]);
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::RunAction {
+                id: "transfer_copy".into(),
+            }),
+        },
+    );
+    assert_eq!(job["state"], "queued");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let result = loop {
+        let status = call(&mut api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            break status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(result["direction"], "to_folder");
+    assert_eq!(result["items"][0]["status"], "copied", "{result}");
+    assert_eq!(
+        std::fs::read(folder.path().join("synthetic.png")).unwrap(),
+        b"synthetic bytes"
+    );
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::CopySelection),
+        },
+    );
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    call(&mut api, Command::CancelJob { job_id });
+    assert_eq!(
+        call(&mut api, Command::PollJob { job_id })["state"],
+        "cancelled"
+    );
+    assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 1);
+}
+
+fn wait_transfer_job(api: &mut Service, command: Command) -> Value {
+    let job = call(
+        api,
+        Command::BeginJob {
+            command: Box::new(command),
+        },
+    );
+    assert_eq!(job["state"], "queued");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = call(api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            return status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn shelf_move_job_commits_verified_destination_without_clipboard() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    api.set_clipboard_files_source(Box::new(NoClipboard));
+    let event = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "move.png".into(),
+            bytes: vec![4, 5, 6],
+            source: "synthetic".into(),
+        },
+    );
+    let id = event["id"].as_i64().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    select(&mut api, &[id]);
+    let result = wait_transfer_job(&mut api, Command::TransferSelection);
+    assert_eq!(result["items"][0]["status"], "moved", "{result}");
+    assert_eq!(
+        std::fs::read(folder.path().join("move.png")).unwrap(),
+        vec![4, 5, 6]
+    );
+    assert_eq!(request(&mut api, Command::Get { id })["ok"], false);
+}
+
+#[test]
+fn shelf_move_job_reports_pinned_and_missing_sources() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    api.set_clipboard_files_source(Box::new(NoClipboard));
+    let pinned = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "pinned.png".into(),
+            bytes: vec![1],
+            source: "synthetic".into(),
+        },
+    );
+    let missing = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "missing.png".into(),
+            bytes: vec![2],
+            source: "synthetic".into(),
+        },
+    );
+    let pinned_id = pinned["id"].as_i64().unwrap();
+    let missing_id = missing["id"].as_i64().unwrap();
+    call(
+        &mut api,
+        Command::TogglePins {
+            ids: vec![pinned_id],
+        },
+    );
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    select(&mut api, &[pinned_id, missing_id]);
+    std::fs::remove_file(missing["path"].as_str().unwrap()).unwrap();
+    let result = wait_transfer_job(&mut api, Command::TransferSelection);
+    assert_eq!(result["direction"], "to_folder");
+    assert_eq!(result["interaction"]["tab"], "folder");
+    assert_eq!(result["items"][0]["status"], "pinned_copy");
+    assert_eq!(result["items"][1]["status"], "failed");
+    assert_eq!(
+        call(&mut api, Command::Get { id: pinned_id })["id"],
+        pinned_id
+    );
+}

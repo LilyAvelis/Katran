@@ -176,3 +176,109 @@ fn managed_download_move_and_mixed_pin_same_folder_are_reported() {
         pinned_id
     );
 }
+
+fn wait_paste_job(api: &mut Service) -> Value {
+    let job = call(
+        api,
+        Command::BeginJob {
+            command: Box::new(Command::PasteToFolder),
+        },
+    );
+    assert_eq!(job["state"], "queued", "{job}");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status = call(api, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            return status["result"].clone();
+        }
+        assert!(
+            status["state"] != "failed" && std::time::Instant::now() < deadline,
+            "{status}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn job_pinned_cut_is_copy_and_intent_is_consumed() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1024 * 1024).unwrap();
+    let event = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "sample.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        },
+    );
+    let id = event["id"].as_i64().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::StageTransfer {
+            items: vec![selection(&event)],
+            cut: true,
+        },
+    );
+    // Pinning after staging still protects the source at the effect boundary.
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    let receipt = wait_paste_job(&mut api);
+    assert_eq!(receipt["items"][0]["status"], "pinned_copy");
+    assert!(std::path::Path::new(receipt["items"][0]["path"].as_str().unwrap()).is_file());
+    assert_eq!(call(&mut api, Command::Get { id })["id"], id);
+    let again = api.execute(Request {
+        api_version: 1,
+        request_id: "again".into(),
+        command: Command::PasteToFolder,
+    });
+    assert_eq!(again["ok"], false);
+}
+
+#[cfg(windows)]
+#[test]
+fn job_owned_cut_moves_only_after_copy_and_unpinned_check() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1024 * 1024).unwrap();
+    let event = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "sample.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        },
+    );
+    let id = event["id"].as_i64().unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: folder.path().into(),
+        },
+    );
+    call(
+        &mut api,
+        Command::StageTransfer {
+            items: vec![selection(&event)],
+            cut: true,
+        },
+    );
+    let result = wait_paste_job(&mut api);
+    assert_eq!(result["items"][0]["status"], "moved", "{result}");
+    assert_eq!(
+        std::fs::read(result["items"][0]["path"].as_str().unwrap()).unwrap(),
+        vec![1, 2, 3]
+    );
+    let missing = api.execute(Request {
+        api_version: 1,
+        request_id: "missing".into(),
+        command: Command::Get { id },
+    });
+    assert_eq!(missing["ok"], false);
+}

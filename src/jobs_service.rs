@@ -32,7 +32,75 @@ pub(crate) struct PreparedReference {
     pub(crate) content_hash: String,
     pub(crate) origin: Origin,
 }
+pub(crate) struct FolderCopyBatch {
+    pending: std::collections::VecDeque<(i64, Result<Event>)>,
+    items: Vec<Value>,
+    direct: bool,
+    moving: bool,
+    target: Option<interaction::ShelfTab>,
+    folder: PathBuf,
+    root: PathBuf,
+    quota: u64,
+    origin: Origin,
+    references: Vec<PathBuf>,
+}
+fn prepare_folder_copy_step(
+    mut batch: FolderCopyBatch,
+    cancel: domain_jobs::Cancellation,
+) -> Result<PreparedWork> {
+    cancel.check()?;
+    let (id, event) = batch
+        .pending
+        .pop_front()
+        .expect("folder copy has pending item");
+    let prepared = event.and_then(|event| {
+        folder_import::prepare_folder_copy(
+            event,
+            &batch.root,
+            batch.quota,
+            &batch.origin,
+            &batch.references,
+            &cancel,
+        )
+    });
+    cancel.check()?;
+    Ok(PreparedWork::FolderCopy {
+        batch,
+        id,
+        prepared,
+    })
+}
+pub(crate) struct FolderExportBatch {
+    folder: PathBuf,
+    ids: Vec<i64>,
+    events: Vec<Event>,
+    errors: std::collections::HashMap<i64, Value>,
+    moving: bool,
+    paste: bool,
+    locks: std::collections::HashMap<i64, crate::delete_selection::LockedOriginal>,
+    lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
+}
 pub(crate) enum PreparedWork {
+    ExternalPasteReady {
+        folder: PathBuf,
+        ids: Vec<i64>,
+        events: Vec<Event>,
+        errors: std::collections::HashMap<i64, Value>,
+    },
+    ExternalPasteFinished {
+        ids: Vec<i64>,
+        items: std::collections::HashMap<i64, Value>,
+    },
+    FolderExportReady(FolderExportBatch),
+    FolderExportCopied {
+        batch: FolderExportBatch,
+        receipt: Result<folder_transfer::TransferReceipt>,
+    },
+    FolderCopy {
+        batch: FolderCopyBatch,
+        id: i64,
+        prepared: Result<folder_import::PreparedFolderCopy>,
+    },
     FolderBrowse {
         snapshot: work_folder::State,
         generation: u64,
@@ -258,6 +326,215 @@ impl Service {
                 return self.ready_value_job(value);
             }
             command = Command::CopySelectedObjects;
+        }
+        if matches!(command, Command::PasteToFolder) {
+            let folder = self
+                .work_folder
+                .current()
+                .ok_or_else(|| {
+                    ApiError::new("folder_not_selected", "Choose a working folder first")
+                })?
+                .to_owned();
+            let root = folder.canonicalize()?;
+            if !root.is_dir() {
+                return Err(ApiError::new(
+                    "invalid_folder",
+                    "Working folder is unavailable",
+                ));
+            }
+            let staged_current = self.transfer_intent.is_some()
+                && self
+                    .transfer_sequence
+                    .is_none_or(|sequence| sequence == self.clipboard_files.sequence());
+            if staged_current {
+                let (items, moving) = self.transfer_intent.as_ref().expect("checked intent");
+                let mut ids = Vec::new();
+                let mut events = Vec::new();
+                let mut errors = std::collections::HashMap::new();
+                for item in items {
+                    ids.push(item.id);
+                    match self.get(item.id) {
+                        Ok(event) if event.revision == item.revision => events.push(event),
+                        Ok(_) => {
+                            errors.insert(item.id, json!({"id":item.id,"path":null,"status":"failed","error":{"code":"stale_selection","message":"Selection changed"}}));
+                        }
+                        Err(error) => {
+                            errors.insert(
+                                item.id,
+                                json!({"id":item.id,"path":null,"status":"failed","error":error}),
+                            );
+                        }
+                    }
+                }
+                let batch = FolderExportBatch {
+                    folder: root,
+                    ids,
+                    events,
+                    errors,
+                    moving: *moving,
+                    paste: true,
+                    locks: std::collections::HashMap::new(),
+                    lock_specs: std::collections::HashMap::new(),
+                };
+                let id = self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    Ok(PreparedWork::FolderExportReady(batch))
+                })?;
+                self.transfer_intent = None;
+                self.transfer_sequence = None;
+                return Ok(json!({"job_id":id,"state":"queued"}));
+            }
+            self.transfer_intent = None;
+            self.transfer_sequence = None;
+            let paths = self.clipboard_files.files()?;
+            if paths.is_empty() || paths.len() > 1000 {
+                return Err(ApiError::new("invalid_argument", "Expected 1..1000 files"));
+            }
+            let id = self.jobs.submit(Lane::Foreground, move |cancel| {
+                let mut events = Vec::new();
+                let mut errors = std::collections::HashMap::new();
+                let ids: Vec<i64> = (0..paths.len()).map(|index| -(index as i64) - 1).collect();
+                for (id, path) in ids.iter().copied().zip(paths) {
+                    cancel.check()?;
+                    match prepare_reference(path, "external_paste".into(), Origin::default()) {
+                        Ok(input) => events.push(Event {
+                            kind: EventKind::FileReference,
+                            text_preview: None,
+                            delete_policy: source_policy::DeletePolicy::ShelfOnly,
+                            revision: format!("ref:{}", input.content_hash),
+                            origin: input.origin,
+                            id,
+                            detected_at_ms: now_ms(),
+                            modified_at_ms: sorting::modified_ms(input.modified),
+                            source: input.source,
+                            name: input.name,
+                            storage: "reference".into(),
+                            path: input.path,
+                            size: input.size,
+                            available: true,
+                        }),
+                        Err(error) => {
+                            errors.insert(
+                                id,
+                                json!({"id":id,"path":null,"status":"failed","error":error}),
+                            );
+                        }
+                    }
+                }
+                Ok(PreparedWork::ExternalPasteReady {
+                    folder: root,
+                    ids,
+                    events,
+                    errors,
+                })
+            })?;
+            self.transfer_intent = None;
+            self.transfer_sequence = None;
+            return Ok(json!({"job_id":id,"state":"queued"}));
+        }
+        let folder_copy = match &command {
+            Command::CopySelection if self.interaction.tab == interaction::ShelfTab::All => {
+                let ids = if self.interaction.selected.is_empty() {
+                    self.interaction.cursor.into_iter().collect::<Vec<_>>()
+                } else {
+                    self.interaction.selected.clone()
+                };
+                Some((ids, true, false))
+            }
+            Command::TransferSelection if self.interaction.tab == interaction::ShelfTab::All => {
+                let ids = if self.interaction.selected.is_empty() {
+                    self.interaction.cursor.into_iter().collect::<Vec<_>>()
+                } else {
+                    self.interaction.selected.clone()
+                };
+                Some((ids, true, true))
+            }
+            Command::AddFolderFiles { ids } => Some((ids.clone(), false, false)),
+            _ => None,
+        };
+        if let Some((ids, direct, moving)) = folder_copy {
+            if ids.is_empty() || ids.len() > 1000 || ids.iter().any(|id| *id >= 0) {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Expected 1..1000 folder IDs",
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            if ids.iter().any(|id| !seen.insert(*id)) {
+                return Err(ApiError::new("invalid_argument", "Duplicate item ID"));
+            }
+            let folder = self
+                .work_folder
+                .current()
+                .ok_or_else(|| ApiError::new("folder_not_selected", "Folder unavailable"))?
+                .to_owned();
+            let batch = FolderCopyBatch {
+                pending: ids.into_iter().map(|id| (id, self.get(id))).collect(),
+                items: Vec::new(),
+                direct,
+                moving,
+                target: None,
+                folder,
+                root: self.root.clone(),
+                quota: self.quota,
+                origin: self.ingest_origin.clone(),
+                references: self.reference_paths()?,
+            };
+            let id = self.jobs.submit(Lane::Foreground, move |cancel| {
+                prepare_folder_copy_step(batch, cancel)
+            })?;
+            return Ok(json!({"job_id":id,"state":"queued"}));
+        }
+        if matches!(command, Command::CopySelection | Command::TransferSelection)
+            && self.interaction.tab != interaction::ShelfTab::All
+        {
+            let ids = if self.interaction.selected.is_empty() {
+                self.interaction.cursor.into_iter().collect::<Vec<_>>()
+            } else {
+                self.interaction.selected.clone()
+            };
+            if ids.is_empty() || ids.len() > 1000 {
+                return Err(ApiError::new("invalid_argument", "Select 1..1000 objects"));
+            }
+            let folder = self
+                .work_folder
+                .current()
+                .ok_or_else(|| ApiError::new("folder_not_selected", "Folder unavailable"))?
+                .to_owned();
+            if !folder.is_dir() || folder.canonicalize().ok().as_deref() != Some(folder.as_path()) {
+                return Err(ApiError::new("folder_not_selected", "Folder unavailable"));
+            }
+            let mut events = Vec::new();
+            let mut errors = std::collections::HashMap::new();
+            for &id in &ids {
+                match self.get(id) {
+                    Ok(event) => events.push(event),
+                    Err(error) => {
+                        errors.insert(
+                            id,
+                            json!({"id":id,"path":null,"status":"failed","error":error}),
+                        );
+                    }
+                }
+            }
+            let moving = matches!(command, Command::TransferSelection);
+            let batch = FolderExportBatch {
+                folder,
+                ids,
+                events,
+                errors,
+                moving,
+                paste: false,
+                locks: std::collections::HashMap::new(),
+                lock_specs: std::collections::HashMap::new(),
+            };
+            let id = self.jobs.submit(Lane::Foreground, move |cancel| {
+                cancel.check()?;
+                Ok(PreparedWork::FolderExportReady(batch))
+            })?;
+            self.transfer_intent = None;
+            self.transfer_sequence = None;
+            return Ok(json!({"job_id":id,"state":"queued"}));
         }
         if matches!(command, Command::CopySelectedText) {
             command = Command::CopyText {
@@ -1048,6 +1325,294 @@ impl Service {
                     }
                     continue;
                 }
+                Ok(PreparedWork::ExternalPasteReady {
+                    folder,
+                    ids,
+                    events,
+                    mut errors,
+                }) => {
+                    if self.work_folder.current() != Some(folder.as_path()) {
+                        self.jobs.finish(
+                            ready,
+                            Err(ApiError::new(
+                                "stale_folder",
+                                "Working folder changed before paste",
+                            )),
+                        )?;
+                        continue;
+                    }
+                    let continued = self.jobs.authorize_claimed_effect(ready).and_then(|()| {
+                        self.jobs.continue_claimed(ready, move |_cancel| {
+                            for event in events {
+                                let value = match folder_transfer::materialize(std::slice::from_ref(&event), &folder) {
+                                    Ok(receipt) => serde_json::to_value(&receipt.items[0]).map_err(|e| ApiError::new("serialization_error", e))?,
+                                    Err(error) => json!({"id":event.id,"path":null,"status":"failed","error":error}),
+                                };
+                                errors.insert(event.id, value);
+                            }
+                            Ok(PreparedWork::ExternalPasteFinished { ids, items: errors })
+                        })
+                    });
+                    if let Err(error) = continued {
+                        self.jobs.finish(ready, Err(error))?;
+                    }
+                    continue;
+                }
+                Ok(PreparedWork::ExternalPasteFinished { ids, mut items }) => {
+                    let items: Vec<_> = ids.iter().filter_map(|id| items.remove(id)).collect();
+                    self.jobs.finish(
+                        ready,
+                        Ok(json!({"folder_paste":true,"cut":false,"external":true,"items":items})),
+                    )?;
+                    continue;
+                }
+                Ok(PreparedWork::FolderExportReady(mut batch)) => {
+                    if self.work_folder.current() != Some(batch.folder.as_path()) {
+                        self.jobs.finish(
+                            ready,
+                            Err(ApiError::new(
+                                "stale_folder",
+                                "Working folder changed before copy",
+                            )),
+                        )?;
+                        continue;
+                    }
+                    let mut events = Vec::new();
+                    for event in std::mem::take(&mut batch.events) {
+                        if !self.get(event.id).is_ok_and(|current| {
+                            current.revision == event.revision && current.path == event.path
+                        }) {
+                            batch.errors.insert(event.id, json!({"id":event.id,"path":null,"status":"failed","error":{"code":"stale_selection","message":"Selection changed before copy"}}));
+                            continue;
+                        }
+                        if batch.moving {
+                            if event
+                                .path
+                                .canonicalize()
+                                .ok()
+                                .and_then(|path| path.parent().map(|parent| parent == batch.folder))
+                                .unwrap_or(false)
+                            {
+                                self.jobs.authorize_claimed_effect(ready)?;
+                                let value = if batch.paste {
+                                    json!({"id":event.id,"path":event.path,"status":"same_folder","error":null})
+                                } else {
+                                    self.prepare_job_same_folder_move(&event, &batch.folder)
+                                };
+                                batch.errors.insert(event.id, value);
+                                continue;
+                            }
+                            match self.prepare_job_move_source(&event, !batch.paste) {
+                                Ok(Some(spec)) => {
+                                    batch.lock_specs.insert(event.id, spec);
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    batch.errors.insert(event.id, json!({"id":event.id,"path":null,"status":"failed","error":error}));
+                                    continue;
+                                }
+                            }
+                        }
+                        events.push(event);
+                    }
+                    batch.events = events;
+                    if batch.events.is_empty() {
+                        let items: Vec<_> = batch
+                            .ids
+                            .iter()
+                            .filter_map(|id| batch.errors.remove(id))
+                            .collect();
+                        let value = if batch.paste {
+                            json!({"folder_paste":true,"cut":batch.moving,"items":items})
+                        } else {
+                            json!({"direction":"to_folder","items":items,"interaction":self.interaction})
+                        };
+                        self.jobs.finish(ready, Ok(value))?;
+                        continue;
+                    }
+                    let fallback_ids = batch.ids.clone();
+                    let mut fallback_items = batch.errors.clone();
+                    let fallback_events: Vec<_> =
+                        batch.events.iter().map(|event| event.id).collect();
+                    let fallback_paste = batch.paste;
+                    let fallback_moving = batch.moving;
+                    let continued = self.jobs.authorize_claimed_effect(ready).and_then(|()| {
+                        self.jobs.continue_claimed(ready, move |_cancel| {
+                            let mut batch = batch;
+                            let mut events = Vec::new();
+                            for event in std::mem::take(&mut batch.events) {
+                                if let Some((path, root, hash)) = batch.lock_specs.remove(&event.id) {
+                                    match delete_selection::prepare_locked_original(&path, &root, &hash) {
+                                        Ok(lock) => { batch.locks.insert(event.id, lock); }
+                                        Err(error) => {
+                                            batch.errors.insert(event.id, json!({"id":event.id,"path":null,"status":"failed","error":error}));
+                                            continue;
+                                        }
+                                    }
+                                }
+                                events.push(event);
+                            }
+                            batch.events = events;
+                            let receipt = if batch.events.is_empty() {
+                                Ok(folder_transfer::TransferReceipt { items: Vec::new() })
+                            } else { folder_transfer::materialize(&batch.events, &batch.folder) };
+                            Ok(PreparedWork::FolderExportCopied { batch, receipt })
+                        })
+                    });
+                    if let Err(error) = continued {
+                        for id in fallback_events {
+                            fallback_items.insert(
+                                id,
+                                json!({"id":id,"path":null,"status":"failed","error":error}),
+                            );
+                        }
+                        let items: Vec<_> = fallback_ids
+                            .iter()
+                            .filter_map(|id| fallback_items.remove(id))
+                            .collect();
+                        let value = if fallback_paste {
+                            json!({"folder_paste":true,"cut":fallback_moving,"items":items})
+                        } else {
+                            json!({"direction":"to_folder","items":items,"interaction":self.interaction})
+                        };
+                        self.jobs.finish(ready, Ok(value))?;
+                    }
+                    continue;
+                }
+                Ok(PreparedWork::FolderExportCopied { mut batch, receipt }) => {
+                    match receipt {
+                        Ok(receipt) => {
+                            for item in receipt.items {
+                                let value = if batch.moving && item.status == "copied" {
+                                    let event = batch
+                                        .events
+                                        .iter()
+                                        .find(|event| event.id == item.id)
+                                        .expect("receipt event");
+                                    self.finish_cut(
+                                        event,
+                                        item.path,
+                                        item.content_hash,
+                                        batch.locks.remove(&item.id),
+                                        !batch.paste,
+                                    )
+                                } else {
+                                    serde_json::to_value(&item).map_err(|error| {
+                                        ApiError::new("serialization_error", error)
+                                    })?
+                                };
+                                batch.errors.insert(item.id, value);
+                            }
+                        }
+                        Err(error) => {
+                            for event in &batch.events {
+                                batch.errors.insert(event.id, json!({"id":event.id,"path":null,"status":"failed","error":error}));
+                            }
+                        }
+                    }
+                    let items: Vec<_> = batch
+                        .ids
+                        .iter()
+                        .filter_map(|id| batch.errors.remove(id))
+                        .collect();
+                    let interaction_error = if batch.moving && !batch.paste {
+                        self.select_tab(interaction::ShelfTab::All).err()
+                    } else {
+                        None
+                    };
+                    let value = if batch.paste {
+                        json!({"folder_paste":true,"cut":batch.moving,"items":items})
+                    } else {
+                        json!({"direction":"to_folder","items":items,"interaction":self.interaction,"interaction_error":interaction_error})
+                    };
+                    self.jobs.finish(ready, Ok(value))?;
+                    continue;
+                }
+                Ok(PreparedWork::FolderCopy {
+                    mut batch,
+                    id,
+                    prepared,
+                }) => {
+                    let result = prepared.and_then(|prepared| {
+                        if self.work_folder.current() != Some(batch.folder.as_path()) {
+                            return Err(ApiError::new(
+                                "stale_folder",
+                                "Working folder changed before import",
+                            ));
+                        }
+                        let current = self.get(id)?;
+                        if current.revision != prepared.event.revision
+                            || current.path != prepared.event.path
+                        {
+                            return Err(ApiError::new(
+                                "stale_selection",
+                                "Folder item changed before import",
+                            ));
+                        }
+                        self.jobs.authorize_claimed_effect(ready)?;
+                        let source = prepared.event.clone();
+                        let event = self.commit_folder_copy(prepared)?;
+                        Ok((source, event))
+                    });
+                    batch.items.push(match result {
+                        Ok((source, event)) => {
+                            if batch.moving && batch.target.is_none() && event["imported"].as_u64().unwrap_or(0) > 0 {
+                                batch.target = match event["kind"].as_str() {
+                                    Some("image") => Some(interaction::ShelfTab::Images),
+                                    Some("text") => Some(interaction::ShelfTab::Text),
+                                    Some("table") => Some(interaction::ShelfTab::Tables),
+                                    Some("links") => Some(interaction::ShelfTab::Links),
+                                    _ => None,
+                                };
+                            }
+                            let effect = if batch.moving {
+                                self.finish_prepared_folder_move(&source, &event)
+                            } else { Ok(json!({"status":"copied"})) };
+                            match effect {
+                                Ok(effect) => json!({"id":id,"ok":event["failed"].as_u64().unwrap_or(0)==0 && effect["status"] != "recycle_failed","status":effect["status"],"recycle":effect["recycle"],"error":null,"event":event}),
+                                Err(error) => json!({"id":id,"ok":false,"status":"source_not_moved","error":error,"event":event}),
+                            }
+                        }
+                        Err(error) => json!({"id":id,"ok":false,"error":error}),
+                    });
+                    if batch.pending.is_empty() {
+                        let interaction_error = if batch.moving
+                            && let Some(tab) = batch.target
+                        {
+                            self.select_tab(tab).err()
+                        } else {
+                            None
+                        };
+                        let value = if batch.direct {
+                            json!({"direction":"from_folder","items":batch.items,"interaction":self.interaction,"interaction_error":interaction_error})
+                        } else {
+                            json!({"folder_import":true,"items":batch.items})
+                        };
+                        self.jobs.finish(ready, Ok(value))?;
+                    } else {
+                        let direct = batch.direct;
+                        let fallback_items = batch.items.clone();
+                        let fallback_ids: Vec<_> =
+                            batch.pending.iter().map(|(id, _)| *id).collect();
+                        if let Err(error) = self.jobs.continue_claimed(ready, move |cancel| {
+                            prepare_folder_copy_step(batch, cancel)
+                        }) {
+                            let mut items = fallback_items;
+                            items.extend(
+                                fallback_ids
+                                    .into_iter()
+                                    .map(|id| json!({"id":id,"ok":false,"error":error})),
+                            );
+                            let value = if direct {
+                                json!({"direction":"from_folder","items":items,"interaction":self.interaction})
+                            } else {
+                                json!({"folder_import":true,"items":items})
+                            };
+                            self.jobs.finish(ready, Ok(value))?;
+                        }
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::DeletePrepared(prepared)) => {
                     let authorized = self.authorize_delete(prepared);
                     let trash = std::sync::Arc::clone(&self.trash);
@@ -1066,6 +1631,9 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::ExternalPasteReady{..} | PreparedWork::ExternalPasteFinished{..} => Err(ApiError::new("invalid_job_phase", "External paste requires continuation")),
+                PreparedWork::FolderExportReady(_) | PreparedWork::FolderExportCopied{..} => Err(ApiError::new("invalid_job_phase", "Folder export requires continuation")),
+                PreparedWork::FolderCopy{..}=>Err(ApiError::new("invalid_job_phase","Folder copy requires continuation")),
                 PreparedWork::FolderBrowse{snapshot,generation,view_generation,previous_query,query,sort,page,select_all,selection}=>{
                     if self.interaction.tab != interaction::ShelfTab::All || self.interaction.view_generation != view_generation || self.interaction.sort != sort || self.interaction.browse_query != previous_query {
                         return Err(ApiError::new("stale_folder", "Folder browsing context changed"));

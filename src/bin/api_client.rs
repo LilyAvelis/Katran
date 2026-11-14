@@ -85,6 +85,29 @@ mod folder_page_tests {
 }
 impl Shelf {
     pub(super) fn direct_transfer_input(&mut self, ctx: &egui::Context) {
+        if self.job.is_none()
+            && self.api.is_some()
+            && let Some((expected, tab, folder)) = self.pending_transfer_copies.pop_front()
+        {
+            let valid = self.state["tab"] == tab
+                && self.state["folder_path"] == folder
+                && self.selection_snapshot().is_some_and(|actual| {
+                    actual.len() == expected.len()
+                        && actual
+                            .iter()
+                            .zip(&expected)
+                            .all(|(a, b)| a.id == b.id && a.revision == b.revision)
+                });
+            if valid {
+                self.start_job(Command::CopySelection, false, ctx.clone());
+            } else {
+                self.message = tr(
+                    "Копия из очереди отменена: выбор или папка изменились",
+                    "Queued copy cancelled: selection or folder changed",
+                )
+                .into();
+            }
+        }
         if self.api.is_none()
             || self.modal_owns_input()
             || ctx
@@ -103,11 +126,25 @@ impl Shelf {
             .collect();
         if let Some(action) = shortcuts_ui::take_action_with_editing(ctx, &catalogue, false) {
             if self.job.is_some() {
-                self.message = tr(
-                    "Дождитесь завершения текущей операции",
-                    "Wait for the current operation to finish",
-                )
-                .into();
+                if action == "transfer_copy" && self.pending_transfer_copies.len() < 64 {
+                    if let Some(items) = self.selection_snapshot() {
+                        self.pending_transfer_copies.push_back((
+                            items,
+                            self.state["tab"].clone(),
+                            self.state["folder_path"].clone(),
+                        ));
+                        self.message =
+                            tr("Копирование добавлено в очередь", "Copy added to queue").into();
+                    } else {
+                        self.message = tr("Выбор устарел", "Selection is out of date").into();
+                    }
+                } else {
+                    self.message = tr(
+                        "Дождитесь завершения текущей операции",
+                        "Wait for the current operation to finish",
+                    )
+                    .into();
+                }
                 return;
             }
             if let Some(id) = ctx.memory(|memory| memory.focused()) {
@@ -350,6 +387,33 @@ impl Shelf {
             }
             return;
         }
+        if !capture && result["folder_paste"] == true {
+            self.workspace_transfer_result(result, false);
+            return;
+        }
+        if !capture && result["folder_import"] == true {
+            let items = result["items"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let failed = items.iter().filter(|item| item["ok"] != true).count();
+            self.message = format!(
+                "{}: {}. {}: {failed}. {}",
+                tr("Добавлено в Катран", "Added to Katran"),
+                items.len() - failed,
+                tr("Ошибок", "Failures"),
+                item_failures(&result["items"])
+            );
+            self.refresh();
+            return;
+        }
+        if !capture
+            && matches!(
+                result["direction"].as_str(),
+                Some("from_folder" | "to_folder")
+            )
+        {
+            self.direct_transfer_result(result);
+            self.refresh();
+            return;
+        }
         if capture {
             let errors = item_failures(&result["items"]);
             if !errors.is_empty() {
@@ -368,6 +432,65 @@ impl Shelf {
                 self.wallpaper_notice = Some((self.message.clone(), Instant::now()));
             }
             self.refresh();
+        }
+    }
+    fn direct_transfer_result(&mut self, result: &Value) {
+        if result["interaction"].is_object() {
+            self.state = result["interaction"].clone();
+        }
+        let items = result["items"].as_array().cloned().unwrap_or_default();
+        let from_folder = result["direction"] == "from_folder";
+        let failures = items
+            .iter()
+            .filter(|item| {
+                if from_folder {
+                    item["ok"] != true
+                } else {
+                    !matches!(
+                        item["status"].as_str(),
+                        Some("moved" | "copied" | "pinned_copy" | "same_folder")
+                    )
+                }
+            })
+            .count();
+        let pinned = items
+            .iter()
+            .filter(|item| item["status"] == "pinned_copy")
+            .count();
+        let moved = items
+            .iter()
+            .filter(|item| item["status"] == "moved")
+            .count();
+        let copied = items
+            .iter()
+            .filter(|item| item["status"] == "copied")
+            .count();
+        let details = items
+            .iter()
+            .filter_map(|item| item["error"]["message"].as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        self.message = if from_folder {
+            format!(
+                "{}: {} · {}: {failures}. {details}",
+                tr("Добавлено в Катран", "Added to Katran"),
+                items.len() - failures,
+                tr("Ошибок", "Failures")
+            )
+        } else {
+            if super::i18n::is_english() {
+                format!(
+                    "To Folder: moved {moved} · copied {copied} · pinned copied {pinned} · failures: {failures}. {details}"
+                )
+            } else {
+                format!(
+                    "В Folder: перемещено {moved} · скопировано {copied} · Закреплённых скопировано {pinned} · Ошибок: {failures}. {details}"
+                )
+            }
+        };
+        if let Some(error) = result["interaction_error"]["message"].as_str() {
+            self.message.push_str(" · ");
+            self.message.push_str(error);
         }
     }
     fn folder_page_context(&self) -> Value {
@@ -709,86 +832,44 @@ impl Shelf {
             return;
         }
         if matches!(id.as_str(), "transfer_selection" | "transfer_copy") {
-            let copying = id == "transfer_copy";
-            let result = self.call(if copying {
+            if self.job.is_some() {
+                if id == "transfer_copy" && self.pending_transfer_copies.len() < 64 {
+                    if let Some(items) = self.selection_snapshot() {
+                        self.pending_transfer_copies.push_back((
+                            items,
+                            self.state["tab"].clone(),
+                            self.state["folder_path"].clone(),
+                        ));
+                        self.message =
+                            tr("Копирование добавлено в очередь", "Copy added to queue").into();
+                    } else {
+                        self.message = tr("Выбор устарел", "Selection is out of date").into();
+                    }
+                } else {
+                    self.message = tr(
+                        "Дождитесь завершения текущей операции",
+                        "Wait for the current operation to finish",
+                    )
+                    .into();
+                }
+                return;
+            }
+            let command = if id == "transfer_copy" {
                 Command::CopySelection
             } else {
                 Command::TransferSelection
-            });
-            self.actions = false;
-            if result.is_null() {
-                return;
-            }
-            if result["interaction"].is_object() {
-                self.state = result["interaction"].clone();
-            }
-            let items = result["items"].as_array().cloned().unwrap_or_default();
-            let from_folder = result["direction"] == "from_folder";
-            let failures = items
-                .iter()
-                .filter(|item| {
-                    if from_folder {
-                        item["ok"] != true
-                    } else {
-                        !matches!(
-                            item["status"].as_str(),
-                            Some("moved" | "copied" | "pinned_copy" | "same_folder")
-                        )
-                    }
-                })
-                .count();
-            let pinned = items
-                .iter()
-                .filter(|item| item["status"] == "pinned_copy")
-                .count();
-            let moved = items
-                .iter()
-                .filter(|item| item["status"] == "moved")
-                .count();
-            let copied = items
-                .iter()
-                .filter(|item| item["status"] == "copied")
-                .count();
-            let details = items
-                .iter()
-                .filter_map(|item| item["error"]["message"].as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            self.message = if from_folder {
-                format!(
-                    "{}: {} · {}: {failures}. {details}",
-                    tr("Добавлено в Катран", "Added to Katran"),
-                    items.len() - failures,
-                    tr("Ошибок", "Failures")
-                )
-            } else {
-                if super::i18n::is_english() {
-                    format!(
-                        "To Folder: moved {moved} · copied {copied} · pinned copied {pinned} · failures: {failures}. {details}"
-                    )
-                } else {
-                    format!(
-                        "В Folder: перемещено {moved} · скопировано {copied} · Закреплённых скопировано {pinned} · Ошибок: {failures}. {details}"
-                    )
-                }
             };
-            self.refresh();
+            if self.start_job(command, false, ctx.clone()) {
+                self.actions = false;
+                self.message = tr("Перенос объектов…", "Transferring items…").into();
+            }
             return;
         }
         if id == "add_to_katran" {
-            let result = self.call(Command::RunAction { id });
-            self.actions = false;
-            if let Some(items) = result["items"].as_array() {
-                let failed = items.iter().filter(|item| item["ok"] != true).count();
-                self.message = format!(
-                    "{}: {}. {}: {failed}. {}",
-                    tr("Добавлено в Катран", "Added to Katran"),
-                    items.len() - failed,
-                    tr("Ошибок", "Failures"),
-                    item_failures(&result["items"])
-                );
+            if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
+                self.actions = false;
+                self.message = tr("Добавление в Катран…", "Adding to Katran…").into();
             }
-            self.refresh();
             return;
         }
         if id == "open_with" {
@@ -984,13 +1065,16 @@ impl Shelf {
             match clipboard["status"].as_str() {
                 Some("copied") => self.message.push_str(tr(" · Скопировано", " · Copied")),
                 Some("failed") => {
-                    self.message.push_str(tr(" · Буфер не скопирован", " · Clipboard copy failed"));
+                    self.message
+                        .push_str(tr(" · Буфер не скопирован", " · Clipboard copy failed"));
                     if let Some(error) = clipboard["error"]["message"].as_str() {
                         self.message.push_str(": ");
                         self.message.push_str(error);
                     }
                 }
-                _ => self.message.push_str(tr(" · Буфер не изменён", " · Clipboard unchanged")),
+                _ => self
+                    .message
+                    .push_str(tr(" · Буфер не изменён", " · Clipboard unchanged")),
             }
             let errors = item_failures(&r["items"]);
             if !errors.is_empty() {

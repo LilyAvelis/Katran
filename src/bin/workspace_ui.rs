@@ -99,7 +99,7 @@ impl Shelf {
         self.workspace_cancel();
         self.workspace.open = false;
     }
-    fn workspace_transfer_result(&mut self, result: &Value, import: bool) {
+    pub(super) fn workspace_transfer_result(&mut self, result: &Value, import: bool) {
         let Some(items) = result["items"].as_array() else {
             return;
         };
@@ -202,8 +202,9 @@ impl Shelf {
                 key || pasted
             })
         {
-            let result = self.call(Command::PasteToFolder);
-            self.workspace_transfer_result(&result, false);
+            if self.start_job(Command::PasteToFolder, false, ctx.clone()) {
+                self.message = tr("Вставка файлов…", "Pasting files…").into();
+            }
         }
     }
     pub(super) fn workspace_input(&mut self, ctx: &egui::Context) {

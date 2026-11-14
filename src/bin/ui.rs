@@ -231,6 +231,7 @@ struct Shelf {
     pending_file_pick: Option<Vec<PathBuf>>,
     pending_copy: Option<Vec<katran::SelectionRef>>,
     pending_copy_ids: Option<Vec<i64>>,
+    pending_transfer_copies: std::collections::VecDeque<(Vec<katran::SelectionRef>, Value, Value)>,
     sources: source_jobs::Sources,
     busy_text_editing: bool,
     pending_tab_action: Option<String>,
@@ -1950,6 +1951,7 @@ fn main() -> eframe::Result {
         pending_file_pick: None,
         pending_copy: None,
         pending_copy_ids: None,
+        pending_transfer_copies: std::collections::VecDeque::new(),
         sources: source_jobs::Sources::default(),
         busy_text_editing: false,
         pending_tab_action: None,
@@ -2192,6 +2194,7 @@ mod tests {
             pending_file_pick: None,
             pending_copy: None,
             pending_copy_ids: None,
+            pending_transfer_copies: std::collections::VecDeque::new(),
             sources: source_jobs::Sources::default(),
             busy_text_editing: false,
             pending_tab_action: None,
@@ -4125,6 +4128,13 @@ mod tests {
             assert_eq!(app.state["tab"], "images");
             assert_eq!(app.state["selected"][0], id);
         }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.job.is_some() || !app.pending_transfer_copies.is_empty() {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+            output.textures_delta.clear();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
         assert_eq!(
             std::fs::read_dir(folder.path())
                 .unwrap()
@@ -4794,6 +4804,18 @@ mod tests {
         frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert!(app.state["emoji_category"].is_null());
         assert_eq!(app.pods_ui.category_total, Some(3781));
+        app.open_emoji_categories();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        out.textures_delta.clear();
+        for selected in 1..=9 {
+            frame(&mut app, &ctx, egui::Key::ArrowDown, egui::Modifiers::NONE);
+            assert_eq!(app.pods_ui.category_selected, selected);
+            assert!(app.pods_ui.category_open);
+        }
+        frame(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
+        assert_eq!(app.state["emoji_category"], "Flags");
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        out.textures_delta.clear();
     }
     #[test]
     fn emoji_category_picker_mouse_selects_a_group() {
