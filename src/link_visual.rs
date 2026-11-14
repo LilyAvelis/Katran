@@ -3,11 +3,15 @@
 use crate::{ApiError, EventKind, Result, Service, favicon_fetch, link_fragments};
 use base64::Engine;
 use serde_json::{Value, json};
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use url::Url;
 
 const CACHE_ENTRIES: i64 = 256;
 const CACHE_BYTES: i64 = 256 * 1024;
+const NEGATIVE_TTL: i64 = 24 * 60 * 60;
 
 // Separate derived-data database: a read-only catalogue worker may safely update
 // it. SQLite transactions make replacements and eviction atomic across workers.
@@ -15,7 +19,8 @@ fn cache_connection(root: &Path) -> rusqlite::Result<rusqlite::Connection> {
     let db = rusqlite::Connection::open(root.join("favicon-cache.sqlite3"))?;
     db.busy_timeout(Duration::from_millis(500))?;
     db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS icons (host TEXT PRIMARY KEY, image BLOB NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS icons (host TEXT PRIMARY KEY, image BLOB NOT NULL);
+         CREATE TABLE IF NOT EXISTS missing_icons (host TEXT PRIMARY KEY, checked_at INTEGER NOT NULL)",
     )?;
     Ok(db)
 }
@@ -24,6 +29,24 @@ fn cached_fetch<F>(
     root: &Path,
     url: &str,
     force: bool,
+    fetch: F,
+) -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error>
+where
+    F: FnOnce(&str) -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error>,
+{
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64;
+    cached_fetch_at(root, url, force, now, fetch)
+}
+
+fn cached_fetch_at<F>(
+    root: &Path,
+    url: &str,
+    force: bool,
+    now: i64,
     fetch: F,
 ) -> std::result::Result<Option<Vec<u8>>, favicon_fetch::Error>
 where
@@ -42,9 +65,16 @@ where
         {
             return Ok(Some(image));
         }
+        let missing: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM missing_icons WHERE host = ?1 AND checked_at <= ?2 AND checked_at > ?3)",
+            rusqlite::params![host, now, now.saturating_sub(NEGATIVE_TTL)], |row| row.get(0)
+        ).unwrap_or(false);
+        if missing {
+            return Ok(None);
+        }
     }
     let result = fetch(url)?;
-    // Cache only fully decoded, bounded positive results; failure to persist is
+    // Store only fully decoded, bounded positive results. Persistence failure is
     // cosmetic and never changes the result returned to the caller.
     if let Some(image) = result
         .as_ref()
@@ -52,9 +82,22 @@ where
         && let Some(db) = db.as_mut()
         && let Ok(tx) = db.transaction()
     {
-        let written = tx.execute("DELETE FROM icons WHERE host = ?1", [&host])
+        let written = tx.execute("DELETE FROM missing_icons WHERE host = ?1", [&host])
+            .and_then(|_| tx.execute("DELETE FROM icons WHERE host = ?1", [&host]))
             .and_then(|_| tx.execute("INSERT INTO icons(host, image) VALUES (?1, ?2)", rusqlite::params![host, image]))
             .and_then(|_| tx.execute("DELETE FROM icons WHERE rowid IN (SELECT rowid FROM icons ORDER BY rowid DESC LIMIT -1 OFFSET ?1)", [CACHE_ENTRIES]));
+        if written.is_ok() {
+            let _ = tx.commit();
+        }
+    }
+    if result.is_none()
+        && let Some(db) = db.as_mut()
+        && let Ok(tx) = db.transaction()
+    {
+        let written = tx.execute("DELETE FROM icons WHERE host = ?1", [&host])
+            .and_then(|_| tx.execute("DELETE FROM missing_icons WHERE host = ?1 OR checked_at <= ?2 OR checked_at > ?3", rusqlite::params![host, now.saturating_sub(NEGATIVE_TTL), now]))
+            .and_then(|_| tx.execute("INSERT INTO missing_icons(host, checked_at) VALUES (?1, ?2)", rusqlite::params![host, now]))
+            .and_then(|_| tx.execute("DELETE FROM missing_icons WHERE rowid IN (SELECT rowid FROM missing_icons ORDER BY rowid DESC LIMIT -1 OFFSET ?1)", [CACHE_ENTRIES]));
         if written.is_ok() {
             let _ = tx.commit();
         }
@@ -207,6 +250,50 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn missing_icon_cache_expires_and_force_bypasses_it() {
+        let root = tempfile::tempdir().unwrap();
+        let url = "https://missing.example/path";
+        let calls = std::cell::Cell::new(0);
+        let missing = |_: &str| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        };
+        assert_eq!(
+            cached_fetch_at(root.path(), url, false, 100_000, missing).unwrap(),
+            None
+        );
+        assert_eq!(
+            cached_fetch_at(root.path(), url, false, 100_001, missing).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            cached_fetch_at(root.path(), url, true, 100_002, missing).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 2);
+        assert_eq!(
+            cached_fetch_at(root.path(), url, false, 100_002 + NEGATIVE_TTL, missing).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 3);
+        let err_url = "https://error.example/";
+        for _ in 0..2 {
+            assert!(
+                cached_fetch_at(root.path(), err_url, false, 100_000, |_| Err(
+                    favicon_fetch::Error::UnsafeAddress
+                ))
+                .is_err()
+            );
+        }
+        assert_eq!(
+            cached_fetch_at(root.path(), err_url, false, 100_000, missing).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 4);
     }
 
     #[test]
