@@ -40,7 +40,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Arbitrary-file gallery/stream visuals / Windows Shell thumbnail and icon boundary | `src/file_visual.rs`, `tests/file_visual.rs`, `docs/file-visuals.md` |
 | Video background import / hardware streaming adapter | `src/video_backgrounds.rs`, `src/bin/video_background_ui.rs`, [contract](video-backgrounds.md) |
 | Desktop wallpaper action / Windows COM adapter | `src/theme_backgrounds.rs`, `src/desktop_wallpaper.rs`, `src/theme_service.rs`, `src/actions.rs` |
-| Optional Wallpaper Engine video wallpaper action / process adapter | `src/wallpaper_engine.rs`, `src/theme_service.rs`, `src/actions.rs`, `src/bin/api_client.rs` |
+| Optional Wallpaper Engine video wallpaper action, silent remux and Desktop history | `src/wallpaper_engine.rs`, `src/desktop_assets.rs`, `src/desktop_projection.rs`, `src/actions.rs`, `src/bin/api_client.rs` |
 | Unified Desktop library (managed image/video backgrounds, independent of tab visibility) | `src/desktop_assets.rs`, `src/theme_backgrounds.rs`, `src/video_backgrounds.rs`, `src/bin/desktop_ui.rs`, `tests/desktop_assets_api.rs` |
 | Emoji font preferences / profile-local imports / private DirectWrite rendering | `src/emoji_fonts.rs`, `src/emoji_render.rs`, `tests/emoji_fonts_api.rs`, [contract](emoji-fonts.md) |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |

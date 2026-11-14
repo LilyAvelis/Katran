@@ -83,11 +83,13 @@ pub(crate) fn list(root: &Path) -> Result<Vec<Event>> {
     let images = crate::theme_backgrounds::list_fast(root)?;
     let videos =
         crate::video_backgrounds::catalogue(root).map_err(|e| ApiError::new("invalid_video", e))?;
+    let wallpaper_videos = crate::desktop_assets::wallpaper_catalogue(root)?;
     let mut events = Vec::new();
     let mut ids = HashSet::new();
     for (kind, items) in [
         ("image", images["backgrounds"].as_array()),
         ("video", videos.as_array()),
+        ("wallpaper_video", Some(&wallpaper_videos)),
     ] {
         for item in items.into_iter().flatten() {
             let digest = item["id"]
@@ -147,6 +149,13 @@ pub(crate) fn get(root: &Path, id: i64) -> Result<(Event, String)> {
         .and_then(|s| s.to_str())
         .ok_or_else(|| ApiError::new("invalid_background", "Missing asset ID"))?;
     let kind = if event
+        .path
+        .parent()
+        .and_then(|p| p.file_name())
+        .is_some_and(|n| n == "wallpaper-videos")
+    {
+        "wallpaper_video"
+    } else if event
         .path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))

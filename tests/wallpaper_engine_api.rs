@@ -35,6 +35,14 @@ fn select_and_check(api: &mut Service, id: i64) {
             .any(|a| a["id"] == "use_as_video_desktop_wallpaper"),
         "{actions}"
     );
+    assert!(
+        actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == "use_as_video_desktop_wallpaper_silent"),
+        "{actions}"
+    );
 }
 #[test]
 fn video_wallpaper_selection_contract() {
@@ -127,4 +135,17 @@ fn video_wallpaper_selection_contract() {
         },
     );
     select_and_check(&mut api, page["events"][0]["id"].as_i64().unwrap());
+}
+
+#[test]
+fn silent_wallpaper_rejects_empty_selection() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    let response = api.execute(Request {
+        api_version: 1,
+        request_id: "silent-empty".into(),
+        command: Command::UseSelectedVideoAsSilentDesktopWallpaper,
+    });
+    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["error"]["code"], "invalid_selection", "{response}");
 }

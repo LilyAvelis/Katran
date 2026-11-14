@@ -25,6 +25,10 @@ copy/drag-out, Folder transfer, preview, and delete. Declare any exception at
 the domain command boundary and test it through the API before adding a GUI path.
 Desktop pin/tag metadata is stored separately from capture-event rows, keyed by
 its stable managed-asset ID; `src/desktop_pins.rs` owns that projection state.
+Wallpaper Engine video handoffs use a durable ASCII-path copy and register
+successful sends as `wallpaper_video` Desktop assets. The separate silent action
+removes only the handed-off copy's audio stream. The last registered video is
+protected from Desktop deletion; external Wallpaper Engine state is not tracked.
 
 For each release or change to an architectural contract, update this current
 baseline, the affected README/development-map passage, and the relevant release

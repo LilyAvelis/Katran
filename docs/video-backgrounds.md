@@ -47,6 +47,13 @@ official CLI with `-control openWallpaper -file <absolute path>`. A successful
 API response is `{video_desktop_wallpaper_requested:true}`: it means the CLI
 process returned success, not that the video is visibly rendered on the desktop.
 The current CLI handoff targets the first monitor.
+`UseSelectedVideoAsSilentDesktopWallpaper` offers a separate action. It uses
+FFmpeg to create another copy containing the video stream but no audio stream;
+Wallpaper Engine's global mute command is not used. After a successful CLI
+handoff, Katran saves a managed copy in its Desktop catalogue. The last video
+registered through Katran is guarded against deletion. The catalogue does not
+observe Wallpaper Engine changes made outside Katran, and managed copies add
+disk usage. A failed catalogue save is reported separately from the CLI result.
 This is Wallpaper Engine video playback, not the Windows static-image wallpaper
 command (`UseSelectedImageAsDesktopWallpaper`).
 

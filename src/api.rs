@@ -34,6 +34,7 @@ pub enum Command {
     },
     UseSelectedVideoAsBackground,
     UseSelectedVideoAsDesktopWallpaper,
+    UseSelectedVideoAsSilentDesktopWallpaper,
     UseSelectedImageAsBackground,
     UseSelectedImageAsDesktopWallpaper,
     ListDesktopAssets,

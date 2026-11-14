@@ -224,6 +224,130 @@ fn stage_in(root: &Path, event: &crate::Event, directory: &Path) -> crate::Resul
     result
 }
 
+/// Remux only the video stream; no audio, subtitles, or global WE mute.
+fn silent_copy(source: &Path) -> crate::Result<PathBuf> {
+    use std::{
+        fs,
+        process::Stdio,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{Duration, Instant},
+    };
+    static NEXT_SILENT: AtomicU64 = AtomicU64::new(0);
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(ext.as_str(), "mp4" | "m4v" | "mov" | "mkv" | "webm") {
+        return Err(crate::ApiError::new(
+            "invalid_video",
+            "Unsupported video extension",
+        ));
+    }
+    let dir = source
+        .parent()
+        .ok_or_else(|| crate::ApiError::new("wallpaper_engine_error", "Missing video directory"))?;
+    let temp = dir.join(format!(
+        "katran-silent-{}-{}.{}",
+        std::process::id(),
+        NEXT_SILENT.fetch_add(1, Ordering::Relaxed),
+        ext
+    ));
+    let result = (|| -> crate::Result<PathBuf> {
+        let mut cmd = crate::media_runtime::command("ffmpeg")
+            .map_err(|e| crate::ApiError::new("video_background_error", e))?;
+        cmd.args(["-v", "error", "-nostdin", "-n", "-i"])
+            .arg(source)
+            .args([
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "copy",
+                "-an",
+                "-sn",
+                "-dn",
+                "-map_metadata",
+                "-1",
+                "-map_chapters",
+                "-1",
+            ])
+            .arg(&temp)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| crate::ApiError::new("video_background_error", e.to_string()))?;
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|e| crate::ApiError::new("video_background_error", e.to_string()))?
+            {
+                if !status.success() {
+                    return Err(crate::ApiError::new(
+                        "video_background_error",
+                        "Could not create a silent video copy",
+                    ));
+                }
+                break;
+            }
+            if start.elapsed() >= Duration::from_secs(120) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(crate::ApiError::new(
+                    "video_background_error",
+                    "Silent video preparation timed out",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let digest = crate::preview::content_hash(&temp)?;
+        let target = dir.join(format!("{digest}.{ext}"));
+        if target.exists() {
+            if crate::preview::content_hash(&target)? != digest {
+                return Err(crate::ApiError::new(
+                    "wallpaper_engine_error",
+                    "Existing silent copy does not match its content",
+                ));
+            }
+        } else if let Err(error) = fs::rename(&temp, &target) {
+            if !target.exists() || crate::preview::content_hash(&target)? != digest {
+                return Err(error.into());
+            }
+        }
+        Ok(target)
+    })();
+    let _ = fs::remove_file(temp);
+    result
+}
+
+pub(crate) fn stage_silent(root: &Path, event: &crate::Event) -> crate::Result<PathBuf> {
+    let source = stage(root, event)?;
+    let output = silent_copy(&source)?;
+    validate(root, event)?;
+    Ok(output)
+}
+
+pub(crate) fn registration_result(
+    root: &Path,
+    staged: &Path,
+    original: &Path,
+    muted: bool,
+) -> serde_json::Value {
+    let mut result = serde_json::json!({"video_desktop_wallpaper_requested": true, "muted": muted});
+    match crate::desktop_assets::register_wallpaper_video(root, staged, original) {
+        Ok(asset) => result["desktop_asset"] = asset,
+        Err(error) => result["desktop_asset_error"] = serde_json::json!(error),
+    }
+    result
+}
+
 pub fn apply(path: &Path) -> Result<(), String> {
     if !path.is_absolute() || !path.is_file() {
         return Err("Video path must be an existing absolute file".into());
@@ -276,5 +400,64 @@ mod tests {
         std::fs::write(&source, b"changed").unwrap();
         assert!(stage_in(root.path(), &event, &dest).is_err());
         assert_eq!(std::fs::read(&copy).unwrap(), bytes);
+    }
+}
+
+#[cfg(test)]
+mod silent_tests {
+    use super::*;
+    #[test]
+    fn remux_removes_audio_without_changing_original() {
+        if crate::media_runtime::command("ffmpeg").is_err() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("with-audio.mp4");
+        let status = crate::media_runtime::command("ffmpeg")
+            .unwrap()
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=32x32:rate=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440",
+                "-t",
+                "1",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-y",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let before = std::fs::read(&source).unwrap();
+        let output = silent_copy(&source).unwrap();
+        let probe = crate::media_runtime::command("ffprobe")
+            .unwrap()
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(probe.status.success());
+        assert!(probe.stdout.is_empty());
+        assert_eq!(std::fs::read(&source).unwrap(), before);
+        assert_ne!(source, output);
     }
 }

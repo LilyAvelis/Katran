@@ -788,10 +788,13 @@ impl Shelf {
                 | "use_as_desktop_wallpaper"
                 | "use_as_video_background"
                 | "use_as_video_desktop_wallpaper"
+                | "use_as_video_desktop_wallpaper_silent"
         ) {
             let wallpaper = matches!(
                 id.as_str(),
-                "use_as_desktop_wallpaper" | "use_as_video_desktop_wallpaper"
+                "use_as_desktop_wallpaper"
+                    | "use_as_video_desktop_wallpaper"
+                    | "use_as_video_desktop_wallpaper_silent"
             );
             if wallpaper {
                 self.wallpaper_job = true;
@@ -926,11 +929,24 @@ impl Shelf {
             .into();
         }
         if r["video_desktop_wallpaper_requested"] == true {
-            self.message = tr(
-                "Запрос передан Wallpaper Engine; проверьте рабочий стол",
-                "Request sent to Wallpaper Engine; check the desktop",
-            )
+            self.message = if r["muted"] == true {
+                tr(
+                    "Видео без звука передано Wallpaper Engine; проверьте рабочий стол",
+                    "Silent video sent to Wallpaper Engine; check the desktop",
+                )
+            } else {
+                tr(
+                    "Запрос передан Wallpaper Engine; проверьте рабочий стол",
+                    "Request sent to Wallpaper Engine; check the desktop",
+                )
+            }
             .into();
+            if let Some(error) = r["desktop_asset_error"]["message"].as_str() {
+                self.message.push_str(" · ");
+                self.message
+                    .push_str(tr("Не сохранено в Desktop: ", "Not saved in Desktop: "));
+                self.message.push_str(error);
+            }
         }
         if r["sort"].is_object() {
             self.message = sorting_ui::confirmation(&r["sort"]);

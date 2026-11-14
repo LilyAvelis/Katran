@@ -52,6 +52,7 @@ pub(crate) enum PreparedWork {
     VideoWallpaper {
         event: Event,
         path: PathBuf,
+        silent: bool,
     },
     EmojiFont(emoji_fonts::PreparedFont),
     ThemeBackground {
@@ -384,14 +385,24 @@ impl Service {
                     })
                 })?
             }
-            Command::UseSelectedVideoAsDesktopWallpaper => {
+            Command::UseSelectedVideoAsDesktopWallpaper
+            | Command::UseSelectedVideoAsSilentDesktopWallpaper => {
+                let silent = matches!(command, Command::UseSelectedVideoAsSilentDesktopWallpaper);
                 let event = self.selected_background_video()?;
                 let root = self.root.clone();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
-                    let path = wallpaper_engine::stage(&root, &event)?;
+                    let path = if silent {
+                        wallpaper_engine::stage_silent(&root, &event)?
+                    } else {
+                        wallpaper_engine::stage(&root, &event)?
+                    };
                     cancel.check()?;
-                    Ok(PreparedWork::VideoWallpaper { event, path })
+                    Ok(PreparedWork::VideoWallpaper {
+                        event,
+                        path,
+                        silent,
+                    })
                 })?
             }
             Command::UseSelectedImageAsDesktopWallpaper => {
@@ -986,17 +997,27 @@ impl Service {
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
         for (ready, result) in self.jobs.take_ready(8) {
             let result = match result {
-                Ok(PreparedWork::VideoWallpaper { event, path }) => {
-                    let continued = self.validate_job_events(&[event]).and_then(|()| {
-                        self.jobs.authorize_claimed_effect(ready)?;
-                        self.jobs.continue_claimed(ready, move |_cancel| {
-                            wallpaper_engine::apply(&path)
-                                .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
-                            Ok(PreparedWork::Value(
-                                json!({"video_desktop_wallpaper_requested": true}),
-                            ))
-                        })
-                    });
+                Ok(PreparedWork::VideoWallpaper {
+                    event,
+                    path,
+                    silent,
+                }) => {
+                    let root = self.root.clone();
+                    let continued = self
+                        .validate_job_events(std::slice::from_ref(&event))
+                        .and_then(|()| {
+                            self.jobs.authorize_claimed_effect(ready)?;
+                            self.jobs.continue_claimed(ready, move |_cancel| {
+                                wallpaper_engine::apply(&path)
+                                    .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
+                                Ok(PreparedWork::Value(wallpaper_engine::registration_result(
+                                    &root,
+                                    &path,
+                                    &event.path,
+                                    silent,
+                                )))
+                            })
+                        });
                     if let Err(error) = continued {
                         self.jobs.finish(ready, Err(error))?;
                     }
