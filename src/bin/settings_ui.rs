@@ -907,6 +907,16 @@ impl State {
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
          SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
           if ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")).changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
+          if ui.button(super::i18n::tr("Обновить", "Refresh")).clicked() {
+           let current=call(api,Command::GetSettings);
+           if current["ok"]!=true {self.error=current["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось прочитать настройки", "Could not read settings")).into();}
+           else if current["result"]["sharex_folder"]!=serde_json::to_value(&draft.sharex_folder).unwrap_or_default() {
+            self.error=super::i18n::tr("Сначала сохраните новый путь ShareX", "Save the new ShareX path first").into();
+           } else {
+            let result=call(api,Command::RescanSource{source_id:katran::source_policy::SourceId::Sharex});
+            self.error=if result["ok"]==true {super::i18n::tr("Обновление снимков запущено", "Screenshot refresh started").into()} else {result["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка обновления", "Refresh failed")).into()};
+           }
+          }
          });
          SettingsRow::show(ui,super::i18n::tr("Папка Downloads", "Downloads folder"),super::i18n::tr("Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.", "Leave empty to use the Windows Downloads folder, or enter another absolute path."),|ui|{
           if ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder"))).changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}

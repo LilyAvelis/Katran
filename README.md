@@ -62,6 +62,9 @@ and Downloads are live views of originals. Downloads uses the Windows Known
 Folder by default; Settings can disable it or override the root. Folder replaces the former All tab. Managed originals in Downloads,
 Screenshots, and Folder use Windows recycling. Single deletion is immediate;
 groups confirm with Enter. These operations report per-item failures and protect pinned objects.
+Changing the ShareX folder removes old screenshot references from Katran while
+leaving the original files untouched. Save the new folder in Settings, then use
+Refresh beside its path to request a rescan at any time.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 

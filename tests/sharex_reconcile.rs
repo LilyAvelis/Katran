@@ -21,6 +21,49 @@ fn browse(api: &mut Service, query: &str, after_id: Option<i64>) -> serde_json::
     )
 }
 #[test]
+fn changing_sharex_folder_discards_old_catalogue_without_touching_originals() {
+    let root = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let old_image = old.path().join("old.png");
+    let new_image = new.path().join("new.png");
+    std::fs::write(&old_image, b"old synthetic image").unwrap();
+    std::fs::write(&new_image, b"new synthetic image").unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let mut settings = katran::settings::Settings::defaults(100_000);
+    settings.downloads_enabled = false;
+    settings.sharex_folder = Some(old.path().to_path_buf());
+    call(
+        &mut api,
+        Command::SetSettings {
+            settings: settings.clone(),
+        },
+    );
+    let old_event = source_api::wait_event(
+        &mut api,
+        katran::source_policy::SourceId::Sharex,
+        &old_image,
+    );
+    settings.sharex_folder = Some(new.path().to_path_buf());
+    call(&mut api, Command::SetSettings { settings });
+    let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
+    let remaining: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM events WHERE id=?1",
+            [old_event["id"].as_i64().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0);
+    assert!(old_image.is_file());
+    source_api::wait_event(
+        &mut api,
+        katran::source_policy::SourceId::Sharex,
+        &new_image,
+    );
+    assert!(new_image.is_file());
+}
+#[test]
 fn live_projection_hides_clipboard_and_missing_references_without_deleting_history() {
     let root = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();
@@ -250,13 +293,12 @@ fn current_folder_only_and_reverted_content_gets_fresh_live_revision() {
             .is_empty()
     );
     assert!(path.is_file());
-    assert_eq!(
-        call(
-            &mut api,
-            Command::Get {
-                id: original["id"].as_i64().unwrap()
-            }
-        )["id"],
-        original["id"]
-    );
+    let removed = api.execute(Request {
+        api_version: 1,
+        request_id: "removed-old-sharex".into(),
+        command: Command::Get {
+            id: original["id"].as_i64().unwrap(),
+        },
+    });
+    assert_eq!(removed["error"]["code"], "not_found");
 }

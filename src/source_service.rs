@@ -46,7 +46,7 @@ impl Service {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
-            let generation = match previous {
+            let generation = match previous.clone() {
                 Some((generation, old_root, old_enabled))
                     if old_root == encoded && old_enabled == enabled =>
                 {
@@ -57,7 +57,25 @@ impl Service {
                 })?,
                 None => 1,
             };
-            self.db.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
+            // A new ShareX folder replaces the old live catalogue. Remove only
+            // Katran's source-owned rows; the original image files stay intact.
+            if source_id == SourceId::Sharex
+                && previous
+                    .as_ref()
+                    .is_some_and(|(_, old_root, _)| old_root != &encoded)
+            {
+                let tx = self.db.unchecked_transaction()?;
+                tx.execute(
+                    "DELETE FROM events WHERE source='sharex' AND json_extract(delete_policy_json,'$.kind')='live_original' AND json_extract(delete_policy_json,'$.source_id')='sharex'",
+                    [],
+                )?;
+                tx.execute("DELETE FROM source_projection WHERE source_id='sharex'", [])?;
+                tx.execute("DELETE FROM source_receipts WHERE source_id='sharex'", [])?;
+                tx.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
+                tx.commit()?;
+            } else {
+                self.db.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
+            }
             if source_id == SourceId::Sharex {
                 self.db.execute("DELETE FROM classification_work WHERE kind='source' AND (source_generation<>?1 OR ?2=0)",params![generation,enabled])?;
                 self.db.execute(

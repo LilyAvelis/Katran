@@ -168,3 +168,7 @@ ShareX recordings: the read-only scanner accepts MP4/MKV/WebM/AVI/MOV/M4V
 in addition to images. Video references remain in Screenshots, retain their
 original-file revision/deletion policy, and use the existing Quick Look path.
 Only image extensions enter screenshot image classification.
+Changing the ShareX root advances the source generation and transactionally removes
+old ShareX live events, projections and receipts. This only removes catalogue
+references, never filesystem originals. The Settings refresh control dispatches
+RescanSource for the saved root; PollSources delivers results asynchronously.

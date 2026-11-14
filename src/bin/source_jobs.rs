@@ -5,6 +5,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Sources {
     started: bool,
+    generations: Option<Vec<(String, u64)>>,
     pub(super) downloads_over_limit: bool,
     // Compatibility with capture completion until its refresh bookkeeping is removed.
     pub match_dirty: bool,
@@ -34,6 +35,26 @@ impl Shelf {
         // Poll also synchronizes settings in the domain; the client does not
         // fingerprint configuration, create watchers or accept worker receipts.
         let result = self.call(Command::PollSources { limit: 1 });
+        let generations = result["sources"].as_array().map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source["source_id"].as_str()?.to_owned(),
+                        source["generation"].as_u64()?,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        });
+        let configuration_changed = self
+            .sources
+            .generations
+            .as_ref()
+            .zip(generations.as_ref())
+            .is_some_and(|(previous, current)| previous != current);
+        if generations.is_some() {
+            self.sources.generations = generations;
+        }
         if let Some(sources) = result["sources"].as_array() {
             self.sources.downloads_over_limit = sources.iter().any(downloads_over_limit);
         }
@@ -49,7 +70,8 @@ impl Shelf {
                     .filter_map(|error| error["message"].as_str().map(str::to_owned)),
             );
         }
-        if result["refresh"] == true
+        if configuration_changed
+            || result["refresh"] == true
             || result["classification_changed"] == true
             || result["items"]
                 .as_array()
