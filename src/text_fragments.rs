@@ -182,6 +182,11 @@ pub(crate) fn merge_snapshot_kind(
 
 impl Service {
     pub(crate) fn get_text(&self, id: i64) -> Result<Value> {
+        if crate::pods::is_emoji_id(id) {
+            let event = self.get(id)?;
+            let text = event.text_preview.as_deref().unwrap_or("");
+            return Ok(json!({"id":id,"revision":event.revision,"title":title(text),"text":text}));
+        }
         let event = self.get(id)?;
         let text = read_text_event(&event)?;
         Ok(json!({"id":id,"revision":event.revision,"title":title(&text),"text":text}))

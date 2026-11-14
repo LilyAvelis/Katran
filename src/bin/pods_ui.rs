@@ -13,6 +13,7 @@ struct Entry {
 }
 #[derive(Default)]
 pub(super) struct State {
+    pub(super) selector_open: bool,
     sender: Option<SyncSender<Job>>,
     receiver: Option<Receiver<(Key, RenderResult)>>,
     pending: HashSet<Key>,

@@ -423,6 +423,7 @@ impl Shelf {
     /// Shared input ownership includes overlays before any early command handler.
     fn modal_owns_input(&self) -> bool {
         self.sorting_input.is_open()
+            || self.pods_ui.selector_open
             || self.shortcut_editor.is_some()
             || self.actions
             || self.open_apps.open
@@ -556,6 +557,61 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
         }
         self.poll_preloaded_tab(&ctx);
+        if self.api.is_some()
+            && !self.modal_owns_input()
+            && self.state["preview"].is_null()
+            && !ctx.egui_wants_keyboard_input()
+            && !ctx.memory(|m| {
+                m.focused().is_some_and(|id| {
+                    id == egui::Id::new("shelf-search")
+                        || egui::TextEdit::load_state(&ctx, id).is_some()
+                })
+            })
+        {
+            let action = ctx.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } if physical_key.unwrap_or(*key) == egui::Key::Backslash
+                        && !modifiers.alt
+                        && !modifiers.shift
+                        && !modifiers.mac_cmd =>
+                    {
+                        Some(modifiers.ctrl)
+                    }
+                    _ => None,
+                })
+            });
+            if let Some(selector) = action {
+                ctx.input_mut(shortcuts_ui::discard);
+                let already_pods = self.state["tab"] == "pods";
+                if !already_pods {
+                    let next = self.call(Command::SetTab {
+                        tab: katran::interaction::ShelfTab::Pods,
+                    });
+                    if next.is_object() {
+                        self.state = next;
+                    }
+                }
+                if self.state["tab"] == "pods" {
+                    if selector {
+                        self.pods_ui.selector_open = true;
+                    } else {
+                        let enabled = !already_pods || self.state["emoji_catalogue"] != true;
+                        self.state = self.call(Command::SetEmojiCatalogue { enabled });
+                        self.query.clear();
+                        self.loaded_query.clear();
+                        self.events.clear();
+                        self.refresh();
+                    }
+                }
+            }
+        }
         let sort_allowed = self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
@@ -642,7 +698,8 @@ impl Shelf {
             ctx.input_mut(shortcuts_ui::discard);
             self.open_tag_menu();
         }
-        let tab_input_allowed = self.shortcut_editor.is_none()
+        let tab_input_allowed = !self.pods_ui.selector_open
+            && self.shortcut_editor.is_none()
             && !self.actions
             && !self.open_apps.open
             && !self.workspace.open
@@ -812,6 +869,7 @@ impl Shelf {
                 self.shortcut_editor = None;
             }
             if self.shortcut_editor.is_none()
+                && !self.pods_ui.selector_open
                 && !self.workspace.open
                 && !self.info.is_open()
                 && !self.pinned_ui.open
@@ -847,7 +905,8 @@ impl Shelf {
             }
         }
         if self.api.is_some() {
-            if !self.open_apps.open
+            if !self.pods_ui.selector_open
+                && !self.open_apps.open
                 && !self.workspace.open
                 && !self.info.is_open()
                 && !self.pinned_ui.open
@@ -860,6 +919,7 @@ impl Shelf {
                 self.action_selected = 0;
             }
             if self.shortcut_editor.is_none()
+                && !self.pods_ui.selector_open
                 && !self.open_apps.open
                 && !self.workspace.open
                 && !self.info.is_open()
@@ -1038,6 +1098,13 @@ impl Shelf {
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
                     self.info_bar(ui);
+                    if self.state["tab"] == "pods" {
+                        ui.weak(if self.state["emoji_catalogue"] == true {
+                            i18n::tr("Все emoji", "All emoji")
+                        } else {
+                            i18n::tr("Мои Pods", "My Pods")
+                        });
+                    }
                     let selected = self.state["selected"].as_array().map_or(0, Vec::len);
                     if selected > 0 {
                         ui.weak(if i18n::is_english() {
@@ -1190,6 +1257,7 @@ impl Shelf {
             1
         };
         if self.api.is_some()
+            && !self.pods_ui.selector_open
             && !self.actions
             && !self.sorting_input.is_open()
             && !self.open_apps.open
@@ -1275,6 +1343,32 @@ impl Shelf {
             }
         }
         self.shelf_view(root, &ctx, &visible, gallery, columns);
+        if self.pods_ui.selector_open {
+            let mut chosen = None;
+            let modal =
+                egui::Modal::new(egui::Id::new("pods-collection-selector")).show(&ctx, |ui| {
+                    ui.heading(i18n::tr("Коллекция Pods", "Pods collection"));
+                    if ui.button(i18n::tr("Мои Pods", "My Pods")).clicked() {
+                        chosen = Some(false);
+                    }
+                    if ui
+                        .button(i18n::tr("Все emoji · Unicode 16", "All emoji · Unicode 16"))
+                        .clicked()
+                    {
+                        chosen = Some(true);
+                    }
+                });
+            if let Some(enabled) = chosen {
+                self.pods_ui.selector_open = false;
+                self.state = self.call(Command::SetEmojiCatalogue { enabled });
+                self.query.clear();
+                self.loaded_query.clear();
+                self.events.clear();
+                self.refresh();
+            } else if modal.should_close() {
+                self.pods_ui.selector_open = false;
+            }
+        }
         self.sort_notice(&ctx);
         if self.api.is_some() {
             self.info_panel(&ctx);
@@ -4304,5 +4398,101 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. }))
         );
+    }
+    #[test]
+    fn physical_backslash_toggles_pods_catalogue_and_ctrl_opens_selector() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.refresh();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let input = |ctrl| egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Slash,
+                physical_key: Some(egui::Key::Backslash),
+                pressed: true,
+                repeat: false,
+                modifiers: if ctrl {
+                    egui::Modifiers::CTRL
+                } else {
+                    egui::Modifiers::NONE
+                },
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(false), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert_eq!(app.state["emoji_catalogue"], true);
+        assert_eq!(app.state["tab"], "pods");
+        assert!(!app.tag_menu.open);
+        assert!(!app.events.is_empty());
+        let release = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Slash,
+                physical_key: Some(egui::Key::Backslash),
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(release, |ui| app.render(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input(true), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(app.pods_ui.selector_open);
+    }
+
+    #[test]
+    fn emoji_catalogue_ctrl_copy_adds_multiple_pods() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Pods,
+        });
+        app.state = app.call(Command::SetEmojiCatalogue { enabled: true });
+        app.refresh();
+        let ids: Vec<i64> = app
+            .events
+            .iter()
+            .take(2)
+            .map(|e| e["id"].as_i64().unwrap())
+            .collect();
+        app.call(Command::SetVisible { ids: ids.clone() });
+        app.call(Command::Select {
+            id: ids[0],
+            mode: SelectionMode::Replace,
+        });
+        app.state = app.call(Command::Select {
+            id: ids[1],
+            mode: SelectionMode::Toggle,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let input = egui::RawInput {
+            events: vec![egui::Event::Copy],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(app.message.contains('2'), "{}", app.message);
+        app.call(Command::SetEmojiCatalogue { enabled: false });
+        let saved = app.call(Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 100,
+            cursor: None,
+        });
+        assert_eq!(saved["events"].as_array().unwrap().len(), 2);
     }
 }

@@ -566,6 +566,19 @@ impl Shelf {
         self.snapshot_ids(self.selected_ids())
     }
     pub(super) fn copy_request(&mut self, ctx: &egui::Context) {
+        if self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true {
+            let result = self.call(Command::CopySelectedObjects);
+            if let Some(items) = result["items"].as_array() {
+                let copied = items.iter().filter(|item| item["ok"] == true).count();
+                let failed = items.len() - copied;
+                self.message = if super::i18n::is_english() {
+                    format!("Added to Pods: {copied}; failed: {failed}")
+                } else {
+                    format!("Добавлено в Pods: {copied}; ошибок: {failed}")
+                };
+            }
+            return;
+        }
         if self.pending_copy.is_some() || self.pending_copy_ids.is_some() {
             self.message = tr("Копирование уже в очереди", "Copy is already queued").into();
             return;

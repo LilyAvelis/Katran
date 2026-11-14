@@ -613,6 +613,53 @@ impl Service {
                 owner_window,
                 capture,
             } => self.toggle_resident_overlay(owner_window, capture),
+            Command::SetEmojiCatalogue { enabled } => {
+                if self.interaction.tab != interaction::ShelfTab::Pods {
+                    return Err(ApiError::new(
+                        "invalid_tab",
+                        "Emoji catalogue is available in Pods",
+                    ));
+                }
+                if enabled != self.interaction.emoji_catalogue {
+                    self.interaction.reset_context();
+                    self.interaction.emoji_catalogue = enabled;
+                }
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::CopyEmojiSelectionToPods => {
+                if self.interaction.tab != interaction::ShelfTab::Pods
+                    || !self.interaction.emoji_catalogue
+                {
+                    return Err(ApiError::new("invalid_tab", "Emoji catalogue is not open"));
+                }
+                let ids = if self.interaction.selected.is_empty() {
+                    self.interaction.cursor.into_iter().collect::<Vec<_>>()
+                } else {
+                    self.interaction.selected.clone()
+                };
+                if ids.is_empty() || ids.len() > 10000 {
+                    return Err(ApiError::new("invalid_selection", "Select 1..10000 emoji"));
+                }
+                let mut texts = Vec::new();
+                for id in ids {
+                    let (text, _) = pods::emoji_for_id(id).ok_or_else(|| {
+                        ApiError::new("invalid_selection", "Invalid emoji selection")
+                    })?;
+                    texts.push(text.clone());
+                }
+                let mut results = Vec::new();
+                for text in texts {
+                    let result = self.dispatch(Command::IngestText {
+                        text: text.clone(),
+                        source: "emoji_catalogue".into(),
+                    });
+                    results.push(match result {
+                        Ok(event) => serde_json::json!({"emoji":text,"ok":true,"event":event}),
+                        Err(error) => serde_json::json!({"emoji":text,"ok":false,"error":error}),
+                    });
+                }
+                Ok(serde_json::json!({"items":results}))
+            }
             Command::DescribePod { id } => self.describe_pod(id),
             Command::SummonCapturedOverlay {
                 owner_window,
@@ -674,7 +721,15 @@ impl Service {
                     Ok(serde_json::json!({"cleared":true}))
                 }
             }
-            Command::TogglePins { ids } => self.toggle_pins(ids),
+            Command::TogglePins { ids } => {
+                if ids.iter().any(|id| pods::is_emoji_id(*id)) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
+                self.toggle_pins(ids)
+            }
             Command::GetPinnedProperties { id } => Ok(
                 serde_json::json!({"properties":pinned::properties(&self.db,id)?,"tags":pinned::tags(&self.db,id)?}),
             ),
@@ -683,12 +738,24 @@ impl Service {
                 display_name,
                 opener,
             } => {
+                if pods::is_emoji_id(id) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
                 self.validate_pinned_opener(id, &opener)?;
                 let value = pinned::set_properties(&self.db, id, display_name, opener)?;
                 self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
                 Ok(serde_json::json!(value))
             }
             Command::SetPinnedTags { id, tags } => {
+                if pods::is_emoji_id(id) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
                 let value = pinned::set_tags(&self.db, id, &tags)?;
                 self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
                 Ok(serde_json::json!({"tags":value}))
@@ -716,7 +783,15 @@ impl Service {
             }
             Command::ListTagSlots => self.list_tag_slots(),
             Command::SaveTagSlot { slot } => self.save_tag_slot(slot),
-            Command::AssignTagSlot { ids, slot } => self.assign_tag_slot(ids, slot),
+            Command::AssignTagSlot { ids, slot } => {
+                if ids.iter().any(|id| pods::is_emoji_id(*id)) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
+                self.assign_tag_slot(ids, slot)
+            }
             Command::GetTagSlot { id } => self.get_tag_slot(id),
             Command::GetTagSlots { ids } => self.get_tag_slots(ids),
             Command::GetLinkVisual { id } => self.get_link_visual(id, false),
@@ -848,6 +923,11 @@ impl Service {
             Command::MergeText { items, separator } => self.merge_text(&items, &separator),
             Command::CopyText { items, separator } => self.copy_text(&items, &separator),
             Command::CopySelectedObjects => {
+                if self.interaction.tab == interaction::ShelfTab::Pods
+                    && self.interaction.emoji_catalogue
+                {
+                    return self.dispatch(Command::CopyEmojiSelectionToPods);
+                }
                 let items = self.selected_refs()?;
                 self.dispatch(Command::CopySmart { items })
             }
@@ -1245,6 +1325,12 @@ impl Service {
                 result
             }
             Command::DeleteSelection { ids, confirmed } => {
+                if ids.iter().any(|id| pods::is_emoji_id(*id)) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
                 if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
                     self.delete_desktop_selection(ids, confirmed)
                 } else if ids.iter().any(|id| *id < 0) {
@@ -1254,6 +1340,12 @@ impl Service {
                 }
             }
             Command::DeleteEvents { ids, confirmed } => {
+                if ids.iter().any(|id| pods::is_emoji_id(*id)) {
+                    return Err(ApiError::new(
+                        "read_only",
+                        "Emoji catalogue entries are read-only",
+                    ));
+                }
                 let result =
                     delete_shelf::delete_events(&mut self.db, &self.root, &ids, confirmed)?;
                 if result.deleted > 0 {
@@ -1664,6 +1756,9 @@ impl Service {
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
+        if pods::is_emoji_id(id) {
+            return pods::emoji_event(id);
+        }
         if desktop_projection::is_desktop_id(id) {
             Ok(desktop_projection::get(&self.root, id)?.0)
         } else if id < 0 {

@@ -26,6 +26,9 @@ fn emoji_base(c: char) -> bool {
 /// Unicode 16 symbol categories, plus structured emoji joining, modifiers,
 /// paired flags and keycaps. Lone punctuation/letters/numbers are not Pods.
 pub fn is_pod(text: &str) -> bool {
+    if crate::pod_metadata::is_official_emoji(text) {
+        return true;
+    }
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() || text.len() > crate::text_fragments::MAX_TEXT_BYTES {
         return false;
@@ -146,4 +149,69 @@ mod tests {
             assert!(!is_pod(input), "{input:?}");
         }
     }
+}
+
+// Stable, reserved session IDs; they never address stored events or Folder files.
+const EMOJI_ID_BASE: i64 = -(1_i64 << 61);
+pub(crate) fn is_emoji_id(id: i64) -> bool {
+    id <= EMOJI_ID_BASE && id > crate::desktop_projection::DESKTOP_ID_MAX
+}
+pub(crate) fn emoji_for_id(id: i64) -> Option<&'static (String, String)> {
+    if !is_emoji_id(id) {
+        return None;
+    }
+    let index = usize::try_from(EMOJI_ID_BASE.checked_sub(id)?).ok()?;
+    crate::pod_metadata::emoji_entries().get(index)
+}
+pub(crate) fn emoji_event(id: i64) -> crate::Result<crate::Event> {
+    let (text, name) = emoji_for_id(id)
+        .ok_or_else(|| crate::ApiError::new("not_found", "Emoji catalogue entry not found"))?;
+    Ok(crate::Event {
+        id,
+        kind: crate::EventKind::TextFragment,
+        text_preview: Some(text.clone()),
+        delete_policy: crate::source_policy::DeletePolicy::ShelfOnly,
+        revision: "unicode-16.0".into(),
+        origin: crate::origin::Origin::default(),
+        detected_at_ms: 0,
+        modified_at_ms: None,
+        source: "emoji_catalogue".into(),
+        name: name.clone(),
+        storage: "virtual".into(),
+        path: std::path::PathBuf::new(),
+        size: text.len() as u64,
+        available: true,
+    })
+}
+pub(crate) fn browse_emoji(
+    query: &str,
+    limit: u32,
+    cursor: Option<&str>,
+) -> crate::Result<serde_json::Value> {
+    if !(1..=1000).contains(&limit) {
+        return Err(crate::ApiError::new(
+            "invalid_argument",
+            "Expected limit 1..1000",
+        ));
+    }
+    let start = cursor
+        .map_or(Ok(0usize), |c| c.parse())
+        .map_err(|_| crate::ApiError::new("invalid_cursor", "Invalid emoji cursor"))?;
+    let query = query.to_lowercase();
+    let entries: Vec<_> = crate::pod_metadata::emoji_entries()
+        .iter()
+        .enumerate()
+        .filter(|(_, (emoji, name))| emoji.contains(&query) || name.to_lowercase().contains(&query))
+        .collect();
+    if start > entries.len() {
+        return Err(crate::ApiError::new(
+            "invalid_cursor",
+            "Emoji cursor out of range",
+        ));
+    }
+    let end = (start + limit as usize).min(entries.len());
+    let events: Vec<_> = entries[start..end].iter().map(|(index, (emoji, name))| serde_json::json!({"id":EMOJI_ID_BASE - *index as i64,"kind":"text_fragment","text_preview":emoji,"name":name,"revision":"unicode-16.0","source":"emoji_catalogue","storage":"virtual","path":"","size":emoji.len(),"available":true})).collect();
+    Ok(
+        serde_json::json!({"events":events,"next_cursor":(end < entries.len()).then(|| end.to_string()), "unicode_version":"16.0", "total":entries.len()}),
+    )
 }

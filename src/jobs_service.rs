@@ -230,6 +230,13 @@ impl Service {
         Ok(json!(self.get(id)?))
     }
     pub(crate) fn begin_job(&mut self, mut command: Command) -> Result<Value> {
+        if matches!(&command, Command::DeleteSelection { ids, .. } | Command::DeleteEvents { ids, .. } if ids.iter().any(|id| pods::is_emoji_id(*id)))
+        {
+            return Err(ApiError::new(
+                "read_only",
+                "Emoji catalogue entries are read-only",
+            ));
+        }
         if let Command::RunAction { id } = &command {
             match actions::resolve(id, &self.interaction, self.capture_enabled) {
                 Some(actions::Dispatch::Command(resolved)) => command = *resolved,
@@ -248,6 +255,12 @@ impl Service {
                 items: self.selected_refs()?,
                 separator: "\n\n".into(),
             };
+        }
+        if matches!(command, Command::CopySelectedObjects)
+            && self.interaction.tab == interaction::ShelfTab::Pods
+            && self.interaction.emoji_catalogue
+        {
+            command = Command::CopyEmojiSelectionToPods;
         }
         if matches!(command, Command::CopySelectedObjects) {
             command = Command::CopySmart {

@@ -65,6 +65,10 @@ pub enum Command {
         owner_window: u64,
         capture: Option<crate::overlay::SummonReceipt>,
     },
+    SetEmojiCatalogue {
+        enabled: bool,
+    },
+    CopyEmojiSelectionToPods,
     DescribePod {
         id: i64,
     },

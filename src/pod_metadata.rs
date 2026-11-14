@@ -15,6 +15,22 @@ fn names() -> &'static Names {
             .expect("bundled Unicode names")
     })
 }
+pub(crate) fn emoji_entries() -> &'static Vec<(String, String)> {
+    static ENTRIES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    ENTRIES.get_or_init(|| {
+        let mut items: Vec<_> = names()
+            .emoji
+            .iter()
+            .map(|(emoji, name)| (emoji.clone(), name.clone()))
+            .collect();
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        items
+    })
+}
+pub(crate) fn is_official_emoji(text: &str) -> bool {
+    names().emoji.contains_key(text)
+}
+
 impl Service {
     pub(crate) fn describe_pod(&self, id: i64) -> Result<Value> {
         let value = self.get_text(id)?;

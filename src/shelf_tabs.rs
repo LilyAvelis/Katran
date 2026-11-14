@@ -114,6 +114,11 @@ impl Service {
         limit: u32,
         cursor: Option<&str>,
     ) -> Result<serde_json::Value> {
+        if self.interaction.tab == crate::interaction::ShelfTab::Pods
+            && self.interaction.emoji_catalogue
+        {
+            return crate::pods::browse_emoji(query, limit, cursor);
+        }
         if self.interaction.tab == crate::interaction::ShelfTab::All {
             return self
                 .work_folder

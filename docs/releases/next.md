@@ -1,5 +1,7 @@
 # Unreleased local changes after 3.4.1
 
+- Pods now offers a read-only Unicode 16 emoji catalogue from the bundled official data. Physical `\` opens or toggles the catalogue and `Ctrl+\` selects between it and saved Pods. Ctrl+C adds the selected entries to ordinary Pods without removing catalogue entries.
+
 - Changing the ShareX screenshot folder now removes Katran's source-owned records for the previous folder, including stale pinned references, without deleting original files. Settings offers an explicit Refresh button next to the ShareX path; it applies an edited path before rescanning.
 - General settings now save automatically after a short pause; folder paths wait until the text field loses focus so a half-typed path cannot replace a source. Closing Settings flushes pending changes, and the Save settings button remains available. ShareX Refresh also saves the entered path before rescanning.
 - Actions can set one selected image as Windows static desktop wallpaper. The domain command validates the current selection, stores an immutable managed PNG, then asks Windows to use it on all monitors. The documented Windows API does not specify a virtual-desktop target; this command does not offer current-desktop targeting or native Windows video wallpaper.
