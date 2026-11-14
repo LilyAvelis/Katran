@@ -2,3 +2,5 @@
 
 - Actions can set one selected image as Windows desktop wallpaper. The domain command validates the current selection, stores an immutable managed PNG, then asks Windows to use it on all monitors. The documented API does not specify a virtual-desktop target; current-desktop and video wallpaper commands are not offered.
 - General offers main-window resizing. It is disabled by default, persists in settings, and applies after saving and at startup. Layouts remain optimized for the default window size.
+- The optional Desktop tab lists managed image and video backgrounds regardless of tab visibility. It can apply saved images to Katran or Windows, apply saved video to Katran, and delete inactive managed copies. Active Katran backgrounds and the last wallpaper installed by Katran are protected from deletion. The Windows API does not enumerate all virtual-desktop references, so external wallpaper changes cannot be fully tracked.
+- Desktop wallpaper success and errors now display briefly in the main window. Success means Windows accepted the request; visual presentation still depends on Windows and other desktop software.

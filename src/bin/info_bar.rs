@@ -77,6 +77,18 @@ impl Shelf {
         } else {
             self.message.clone()
         };
+        if let Some((message, started)) = &self.wallpaper_notice {
+            if started.elapsed() < std::time::Duration::from_secs(4) {
+                ui.add_sized(
+                    [ui.available_width().min(300.0), 20.0],
+                    egui::Label::new(message).truncate(),
+                );
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(200));
+            } else {
+                self.wallpaper_notice = None;
+            }
+        }
         // Compact IDE-style segments; detail belongs to the existing API-backed panels.
         let context = if folder {
             format!("Folder · {path}")

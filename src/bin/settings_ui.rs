@@ -168,6 +168,7 @@ fn localized_tab_label(label: &str) -> &str {
         "Tables" => super::i18n::tr("Таблицы", "Tables"),
         "Pods" => super::i18n::tr("Символы", "Pods"),
         "Files" => super::i18n::tr("Файлы", "Files"),
+        "Desktop" => super::i18n::tr("Рабочий стол", "Desktop"),
         other => other,
     }
 }
@@ -184,6 +185,7 @@ fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'static str {
         ShelfTab::Tables => super::i18n::tr("Таблицы", "Tables"),
         ShelfTab::Pods => super::i18n::tr("Символы", "Pods"),
         ShelfTab::Files => super::i18n::tr("Файлы", "Files"),
+        ShelfTab::Desktop => super::i18n::tr("Рабочий стол", "Desktop"),
     }
 }
 
@@ -383,6 +385,7 @@ fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.tables_enabled = current.tables_enabled;
     draft.pods_enabled = current.pods_enabled;
     draft.theme = current.theme.clone();
+    draft.desktop_wallpaper_id = current.desktop_wallpaper_id.clone();
     draft.sort = current.sort;
 }
 fn apply_theme(
@@ -942,7 +945,7 @@ impl State {
        }
       } else if self.section==2 {
        ui.heading(super::i18n::tr("Вкладки", "Tabs"));ui.add_space(8.0);
-       ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Saved data stays in place."));ui.add_space(16.0);
+       ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Исключение: фоны рабочего стола сохраняются и при скрытой вкладке. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Exception: Desktop backgrounds are still saved while its tab is hidden. Saved data stays in place."));ui.add_space(16.0);
        let result=call(api,Command::Tabs);
        if let Some(tabs)=result["result"]["tabs"].as_array() {
         SettingsSection::group(ui,super::i18n::tr("Доступные вкладки", "Available tabs"),|ui|{

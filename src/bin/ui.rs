@@ -5,6 +5,7 @@ mod api_client;
 mod app_identity;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
+mod desktop_ui;
 mod files_file_picker;
 mod gallery_card;
 mod glass_lab;
@@ -201,6 +202,9 @@ struct Shelf {
     pending_delete_permanent: bool,
     pending_delete_recycle: bool,
     settings_ui: settings_ui::State,
+    desktop_ui: desktop_ui::State,
+    wallpaper_job: bool,
+    wallpaper_notice: Option<(String, Instant)>,
     open_apps: open_apps_ui::State,
     workspace: workspace_ui::State,
     info: info_bar::State,
@@ -1188,6 +1192,7 @@ impl Shelf {
             1
         };
         if self.api.is_some()
+            && self.state["tab"] != "desktop"
             && !self.actions
             && !self.sorting_input.is_open()
             && !self.open_apps.open
@@ -1272,7 +1277,14 @@ impl Shelf {
                 }
             }
         }
-        self.shelf_view(root, &ctx, &visible, gallery, columns);
+        if self.state["tab"] == "desktop" {
+            if let Some(api) = self.api.as_mut() {
+                self.desktop_ui.show(root, api);
+            }
+        } else {
+            self.desktop_ui.leave();
+            self.shelf_view(root, &ctx, &visible, gallery, columns);
+        }
         self.sort_notice(&ctx);
         if self.api.is_some() {
             self.info_panel(&ctx);
@@ -1717,6 +1729,9 @@ fn main() -> eframe::Result {
         pending_delete_permanent: false,
         pending_delete_recycle: false,
         settings_ui: settings_ui::State::default(),
+        desktop_ui: Default::default(),
+        wallpaper_job: false,
+        wallpaper_notice: None,
         open_apps: open_apps_ui::State::default(),
         workspace: workspace_ui::State::default(),
         info: info_bar::State::default(),
@@ -1957,6 +1972,9 @@ mod tests {
             pending_delete_permanent: false,
             pending_delete_recycle: false,
             settings_ui: settings_ui::State::default(),
+            desktop_ui: Default::default(),
+            wallpaper_job: false,
+            wallpaper_notice: None,
             open_apps: open_apps_ui::State::default(),
             workspace: workspace_ui::State::default(),
             info: info_bar::State::default(),

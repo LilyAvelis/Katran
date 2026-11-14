@@ -285,11 +285,15 @@ impl Shelf {
         self.apply_job_reply(reply, capture);
     }
     fn apply_job_reply(&mut self, reply: Value, capture: bool) {
+        let wallpaper = !capture && std::mem::take(&mut self.wallpaper_job);
         if reply["ok"] == false {
             self.message = reply["error"]["message"]
                 .as_str()
                 .unwrap_or(tr("Ошибка", "Error"))
                 .into();
+            if wallpaper {
+                self.wallpaper_notice = Some((self.message.clone(), Instant::now()));
+            }
             return;
         }
         let result = &reply["result"];
@@ -360,6 +364,9 @@ impl Shelf {
             }
         } else {
             self.action_result(result.clone());
+            if wallpaper {
+                self.wallpaper_notice = Some((self.message.clone(), Instant::now()));
+            }
             self.refresh();
         }
     }
@@ -781,8 +788,23 @@ impl Shelf {
                 | "use_as_desktop_wallpaper"
                 | "use_as_video_background"
         ) {
+            let wallpaper = id == "use_as_desktop_wallpaper";
+            if wallpaper {
+                self.wallpaper_job = true;
+                self.message.clear();
+            }
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
+            } else if wallpaper {
+                self.wallpaper_job = false;
+                if self.message.is_empty() {
+                    self.message = tr(
+                        "Другая операция ещё выполняется",
+                        "Another operation is still running",
+                    )
+                    .into();
+                }
+                self.wallpaper_notice = Some((self.message.clone(), Instant::now()));
             }
             return;
         }
@@ -894,8 +916,8 @@ impl Shelf {
         }
         if r["desktop_wallpaper_applied"] == true {
             self.message = tr(
-                "Изображение установлено как обои рабочего стола",
-                "Image set as desktop wallpaper",
+                "Windows приняла запрос на смену обоев",
+                "Windows accepted the wallpaper request",
             )
             .into();
         }

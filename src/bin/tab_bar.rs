@@ -52,6 +52,7 @@ pub fn show(
                             ShelfTab::Tables => ("Tables", "tables"),
                             ShelfTab::Pods => ("Pods", "pods"),
                             ShelfTab::Files => ("Files", "files"),
+                            ShelfTab::Desktop => ("Desktop", "desktop"),
                         };
                         let response = ui.add_enabled(
                             enabled,
@@ -258,6 +259,7 @@ fn show_glass(
                         ShelfTab::Tables => ("Tables", "tables"),
                         ShelfTab::Pods => ("Pods", "pods"),
                         ShelfTab::Files => ("Files", "files"),
+                        ShelfTab::Desktop => ("Desktop", "desktop"),
                     };
                     let label = format!("{} {label}", index + 1);
                     let label_width = ui
