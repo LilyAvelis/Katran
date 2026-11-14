@@ -32,9 +32,9 @@ and lists successfully sent videos in Desktop; the source may later move or disa
 
 ## Local source hardening after 3.4.1
 
-The working source tree contains additional, unreleased hardening work. It does
-not change the installed public release: GitHub's public line remains 3.4.1,
-and the installed private E runtime `c1555b47dc04` predates this hardening.
+The working source tree contains additional, unreleased hardening work. GitHub's
+public line remains 3.4.1. The local Raycast/Start Menu launcher now selects
+private E runtime `81a5c4d200c5`, which includes the large-operation busy UI.
 These changes are still being integrated and have not been published or
 accepted as a new release. The [unreleased change log](docs/releases/next.md)
 records the implemented contracts and targeted evidence. A7 concerns private
@@ -46,10 +46,12 @@ preview selection, schema v12 migrations, complete build provenance, and
 safer managed-media publication/action checks. See the
 [wire v2 contract](docs/wire-v2.md) for client requirements. A9 product
 handoff and N1 Folder transfer responsiveness remain open; this is not a
-release-ready claim. Public and E share the Pods/Desktop/settings database:
-do not migrate a real profile to schema v12 until both installed editions can
-open it. The installed public 3.4.1 and E `c1555b47dc04` are both pre-v12, and
-no real user database has been migrated.
+release-ready claim. Public and E share the Pods/Desktop/settings database.
+The local shared profile reached schema v12 on 2026-11-15 after E installation;
+its integrity check passed and a pre-v12 backup was created. A compatible local
+public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.
+The published public 3.4.1 and old E runtime cannot open this v12 profile;
+neither is selected by the local launcher.
 
 Transfer, import, paste and move preparation now use background jobs, and the
 repeated Ctrl+Tab queue case is covered. Public targeted UI checks passed

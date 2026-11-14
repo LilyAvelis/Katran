@@ -23,11 +23,12 @@ Acrylic, GPU optics and video-background adapters.
 For builds, CI and release retries, follow [DevOps execution rules](devops.md).
 The public release remains **3.4.1**. The local source map below includes unreleased hardening after that baseline; it does not describe the installed 3.4.1 binary or authorize publication. See [unreleased changes](releases/next.md) for implementation status and evidence. The `1.5` labels and ownership section below are dated historical snapshots; historical reviews describe the snapshots they examined.
 
-The local schema v12 migration has synthetic upgrade/data-preservation evidence
-only. Public and private E share the Pods/Desktop/settings database. Do not open
-a real shared profile with v12 until both installed editions support it. The
-installed public 3.4.1 and E runtime `c1555b47dc04` are pre-v12; no real user DB
-has been migrated.
+Public and private E share the Pods/Desktop/settings database. The local launcher
+now selects E `81a5c4d200c5`, and the shared profile reached schema v12 on
+2026-11-15 with a pre-migration SQLite backup and a passing integrity check.
+The local public v12 binary is staged at `runtime/versions/28c8fb0b5446`.
+Published public 3.4.1 and previous E `c1555b47dc04` remain incompatible with
+the migrated profile; restoring either requires a controlled database rollback.
 
 Folder transfer/copy/import/paste preparation now runs through background jobs.
 Known file selections totaling at least 16 MiB or 20 distinct files get a

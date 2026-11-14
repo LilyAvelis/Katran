@@ -2,18 +2,19 @@
 
 ## PRODUCT-10 hardening in the local source
 
-This work is not a public release. The installed public release remains 3.4.1;
-the installed private E runtime `c1555b47dc04` predates these changes. There is
+This work is not a public release. The published public release remains 3.4.1;
+the local launcher selects private E runtime `81a5c4d200c5`. There is
 no release acceptance or GitHub publication claim here. Targeted checks passed
 for the listed boundaries, but the integrated source has not completed its final
 combined validation. An internal status ledger tracks session ownership and the
-remaining work. Public and private E share Pods/Desktop/settings storage, so
-the schema v12 migration must not be applied to a real user database until both
-installed editions support it. The installed public 3.4.1 and E runtime
-`c1555b47dc04` remain pre-v12; no real user database has been migrated.
+remaining work. Public and private E share Pods/Desktop/settings storage. The
+local profile reached schema v12 on 2026-11-15; the pre-v12 backup and integrity
+check succeeded. A compatible local public v12 build is staged as
+`runtime/versions/28c8fb0b5446`; published public 3.4.1 and previous E
+`c1555b47dc04` cannot open this profile without restoring its earlier database.
 Source checkpoint `e6453c5` includes the N1 job preparation, recoverable
-original moves, Wallpaper Engine and decoder-stop changes. No new release is
-installed.
+original moves, Wallpaper Engine and decoder-stop changes. No new public release
+is installed.
 
 - **A1 — public UI focus:** category selection now reads the focused widget ID
   before loading text-edit state, avoiding nested egui context locks. The
