@@ -348,6 +348,31 @@ pub(crate) fn registration_result(
     result
 }
 
+fn wait_for_command(
+    mut child: std::process::Child,
+    timeout: std::time::Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(std::time::Duration::from_millis(25))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Wallpaper Engine command timed out".into());
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Could not wait for Wallpaper Engine: {error}"));
+            }
+        }
+    }
+}
+
 pub fn apply(path: &Path) -> Result<(), String> {
     if !path.is_absolute() || !path.is_file() {
         return Err("Video path must be an existing absolute file".into());
@@ -355,11 +380,12 @@ pub fn apply(path: &Path) -> Result<(), String> {
     let executable = running_executable().ok_or(
         "Wallpaper Engine is not running or could not be found; install and start it first",
     )?;
-    let status = std::process::Command::new(executable)
+    let child = std::process::Command::new(executable)
         .args(["-control", "openWallpaper", "-file"])
         .arg(command_path(path))
-        .status()
+        .spawn()
         .map_err(|e| format!("Could not contact Wallpaper Engine: {e}"))?;
+    let status = wait_for_command(child, std::time::Duration::from_secs(30))?;
     if !status.success() {
         return Err(format!("Wallpaper Engine command failed: {status}"));
     }
@@ -370,6 +396,29 @@ pub fn apply(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::{Command, Request, Service};
+
+    #[test]
+    fn timeout_child_fixture() {
+        if std::env::var_os("KATRAN_TIMEOUT_CHILD").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+        }
+    }
+
+    #[test]
+    fn stalled_wallpaper_command_is_killed_and_reaped() {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "wallpaper_engine::tests::timeout_child_fixture"])
+            .env("KATRAN_TIMEOUT_CHILD", "1")
+            .spawn()
+            .unwrap();
+        let start = std::time::Instant::now();
+        assert!(
+            wait_for_command(child, std::time::Duration::from_millis(100))
+                .unwrap_err()
+                .contains("timed out")
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
 
     #[test]
     fn copies_unicode_source_to_durable_ascii_path_without_altering_source() {

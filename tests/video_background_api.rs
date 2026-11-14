@@ -16,6 +16,49 @@ fn call(api: &mut Service, command: Command) -> Value {
     assert_eq!(v["ok"], true, "{v}");
     v["result"].clone()
 }
+
+#[test]
+fn damaged_video_sidecar_does_not_break_desktop_catalogue() {
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    let profile = tempfile::tempdir().unwrap();
+    let dir = profile.path().join("video-backgrounds");
+    fs::create_dir(&dir).unwrap();
+    let bytes = b"synthetic video";
+    let id = format!("{:x}", Sha256::digest(bytes));
+    fs::write(dir.join(format!("{id}.mp4")), bytes).unwrap();
+    fs::write(dir.join(format!("{id}.json")), serde_json::json!({"id": id, "name": "video", "codec": "h264", "width": 10, "height": 10, "duration": 1.0}).to_string()).unwrap();
+    let broken = "f".repeat(64);
+    fs::write(dir.join(format!("{broken}.json")), b"partial").unwrap();
+    let mut api = Service::open(profile.path(), 10_000_000).unwrap();
+    let videos = call(&mut api, Command::VideoBackgrounds);
+    assert_eq!(videos["items"].as_array().unwrap().len(), 1);
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Desktop,
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    assert!(page["events"].as_array().unwrap().iter().any(|event| {
+        event["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(&format!("{id}.mp4")))
+    }));
+    let failed = api.execute(Request {
+        api_version: 1,
+        request_id: "broken-video".into(),
+        command: Command::GetVideoBackground { id: broken },
+    });
+    assert_eq!(failed["ok"], false);
+}
 #[test]
 fn folder_video_action_uses_original_without_importing_into_downloads() {
     use std::process::Command as Process;

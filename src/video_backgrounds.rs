@@ -278,6 +278,47 @@ fn dir(root: &Path) -> Result<PathBuf, String> {
     }
     Ok(p)
 }
+// Staging in the managed directory keeps publication on the same filesystem.
+// The suffix cannot be mistaken for a catalogue sidecar after an interruption.
+fn stage(d: &Path) -> Result<(Temp, File), String> {
+    for _ in 0..100 {
+        let path = d.join(format!(
+            ".pending-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((Temp(path), file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("Cannot create staged video background".into())
+}
+
+#[cfg(windows)]
+fn replace_sidecar(source: &Path, destination: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+    }
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 1 | 8) } == 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+#[cfg(not(windows))]
+fn replace_sidecar(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::rename(source, destination).map_err(|e| e.to_string())
+}
+
 pub fn commit(root: &Path, prepared: PreparedVideo) -> Result<Value, String> {
     let d = dir(root)?;
     let mut f = File::open(&prepared.file.0).map_err(|e| e.to_string())?;
@@ -285,17 +326,29 @@ pub fn commit(root: &Path, prepared: PreparedVideo) -> Result<Value, String> {
     std::io::copy(&mut f, &mut hash).map_err(|e| e.to_string())?;
     let id = format!("{:x}", hash.finalize());
     let path = d.join(format!("{id}.mp4"));
-    match OpenOptions::new().write(true).create_new(true).open(&path) {
-        Ok(mut out) => {
-            if let Err(e) = std::io::copy(
-                &mut File::open(&prepared.file.0).map_err(|e| e.to_string())?,
-                &mut out,
-            ) {
-                drop(out);
-                let _ = fs::remove_file(&path);
-                return Err(e.to_string());
-            }
-        }
+    let (staged_video, mut out) = stage(&d)?;
+    let copied = std::io::copy(
+        &mut File::open(&prepared.file.0).map_err(|e| e.to_string())?,
+        &mut out,
+    )
+    .map_err(|e| e.to_string())?;
+    if copied == 0 || copied > MAX_BYTES {
+        return Err("Prepared video exceeds size limit".into());
+    }
+    out.sync_all().map_err(|e| e.to_string())?;
+    drop(out);
+    let mut staged_hash = Sha256::new();
+    std::io::copy(
+        &mut File::open(&staged_video.0).map_err(|e| e.to_string())?,
+        &mut staged_hash,
+    )
+    .map_err(|e| e.to_string())?;
+    if format!("{:x}", staged_hash.finalize()) != id {
+        return Err("Prepared video changed during publication".into());
+    }
+    // A hard link is an atomic no-replace publication of the complete file.
+    match fs::hard_link(&staged_video.0, &path) {
+        Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let m = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
             if !m.is_file() || !safe(&m) || m.len() == 0 || m.len() > MAX_BYTES {
@@ -317,15 +370,23 @@ pub fn commit(root: &Path, prepared: PreparedVideo) -> Result<Value, String> {
     }
     let metadata = json!({"id":id,"name":prepared.name,"codec":"h264","width":prepared.width,"height":prepared.height,"duration":prepared.duration});
     let meta_path = d.join(format!("{id}.json"));
-    match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(meta_path)
-    {
-        Ok(mut f) => f
-            .write_all(metadata.to_string().as_bytes())
-            .map_err(|e| e.to_string())?,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+    let (staged_meta, mut f) = stage(&d)?;
+    f.write_all(metadata.to_string().as_bytes())
+        .map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())?;
+    drop(f);
+    match fs::hard_link(&staged_meta.0, &meta_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let m = fs::symlink_metadata(&meta_path).map_err(|e| e.to_string())?;
+            if !m.is_file() || !safe(&m) {
+                return Err("Unsafe existing video metadata".into());
+            }
+            // Reimport of a validated video repairs a damaged or incomplete sidecar.
+            if get(root, &id).is_err() {
+                replace_sidecar(&staged_meta.0, &meta_path)?;
+            }
+        }
         Err(e) => return Err(e.to_string()),
     }
     get(root, &id)
@@ -387,7 +448,10 @@ pub fn catalogue(root: &Path) -> Result<Value, String> {
     ids.sort();
     let mut items = Vec::new();
     for id in ids {
-        items.push(get(root, &id)?);
+        // One damaged or interrupted asset must not hide all other videos.
+        if let Ok(item) = get(root, &id) {
+            items.push(item);
+        }
     }
     Ok(json!(items))
 }
@@ -407,4 +471,66 @@ pub(crate) fn remove(root: &Path, id: &str) -> Result<(), String> {
     fs::remove_file(video).map_err(|e| e.to_string())?;
     fs::remove_file(sidecar).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prepared(bytes: &[u8]) -> PreparedVideo {
+        let (file, mut out) = temp("mp4").unwrap();
+        out.write_all(bytes).unwrap();
+        drop(out);
+        PreparedVideo {
+            file,
+            width: 100,
+            height: 100,
+            duration: 1.0,
+            name: "Synthetic".into(),
+        }
+    }
+
+    #[test]
+    fn interrupted_video_publication_is_hidden_and_reimport_repairs_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let d = dir(root.path()).unwrap();
+        let bytes = b"synthetic video bytes";
+        let id = format!("{:x}", Sha256::digest(bytes));
+        // A crash after video publication and before the sidecar is harmless.
+        fs::write(d.join(format!("{id}.mp4")), bytes).unwrap();
+        fs::write(d.join(".pending-interrupted"), b"partial").unwrap();
+        assert!(
+            catalogue(root.path())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        fs::write(d.join(format!("{id}.json")), b"partial json").unwrap();
+        assert!(get(root.path(), &id).is_err());
+        assert!(
+            catalogue(root.path())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let repaired = commit(root.path(), prepared(bytes)).unwrap();
+        assert_eq!(repaired["id"], id);
+        assert_eq!(catalogue(root.path()).unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(fs::read(d.join(format!("{id}.mp4"))).unwrap(), bytes);
+    }
+
+    #[test]
+    fn broken_sidecar_does_not_hide_valid_videos() {
+        let root = tempfile::tempdir().unwrap();
+        let good = commit(root.path(), prepared(b"valid asset")).unwrap();
+        let d = dir(root.path()).unwrap();
+        let bad = "f".repeat(64);
+        fs::write(d.join(format!("{bad}.json")), b"{}").unwrap();
+        let items = catalogue(root.path()).unwrap();
+        assert_eq!(items.as_array().unwrap().len(), 1);
+        assert_eq!(items[0]["id"], good["id"]);
+        assert!(get(root.path(), &bad).is_err());
+    }
 }

@@ -7,6 +7,37 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Stage complete bytes in the same directory so published names never expose
+// partially written content. Temporary names are ignored by the catalogue.
+fn staged_file(dir: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> Result<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = dir.join(format!(
+        ".katran-{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        write(&mut file)?;
+        file.sync_all()?;
+        Ok(path.clone())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result
+}
+
+fn publish_new(temp: &Path, target: &Path) -> std::io::Result<()> {
+    // A hard link provides an atomic no-replace publication on all supported
+    // platforms; both paths are in the same managed directory.
+    fs::hard_link(temp, target)
+}
+
 // Wallpaper Engine accepts more formats and lengths than Katran's own video
 // background player. Keep their catalogues and typed identities separate.
 fn safe_metadata(meta: &fs::Metadata) -> bool {
@@ -141,44 +172,37 @@ pub(crate) fn register_wallpaper_video(
     let id = crate::preview::content_hash(staged_path)?;
     let dir = wallpaper_dir(root)?;
     let path = dir.join(format!("{id}.{ext}"));
-    // Reuse existing content only after verifying it; never overwrite it.
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-    {
-        Ok(mut output) => {
-            let result = (|| -> Result<()> {
-                std::io::copy(&mut fs::File::open(staged_path)?, &mut output)?;
-                output.sync_all()?;
-                if crate::preview::content_hash(&path)? != id {
+    let temp = staged_file(&dir, |output| {
+        std::io::copy(&mut fs::File::open(staged_path)?, output)?;
+        Ok(())
+    })?;
+    let publication = (|| -> Result<()> {
+        if crate::preview::content_hash(&temp)? != id {
+            return Err(ApiError::new(
+                "stale_selection",
+                "Wallpaper video changed while saving",
+            ));
+        }
+        match publish_new(&temp, &path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let meta = fs::symlink_metadata(&path)?;
+                if !meta.is_file()
+                    || !safe_metadata(&meta)
+                    || crate::preview::content_hash(&path)? != id
+                {
                     return Err(ApiError::new(
-                        "stale_selection",
-                        "Wallpaper video changed while saving",
+                        "invalid_video",
+                        "Existing wallpaper copy does not match",
                     ));
                 }
                 Ok(())
-            })();
-            if result.is_err() {
-                drop(output);
-                let _ = fs::remove_file(&path);
             }
-            result?;
+            Err(e) => Err(e.into()),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let meta = fs::symlink_metadata(&path)?;
-            if !meta.is_file()
-                || !safe_metadata(&meta)
-                || crate::preview::content_hash(&path)? != id
-            {
-                return Err(ApiError::new(
-                    "invalid_video",
-                    "Existing wallpaper copy does not match",
-                ));
-            }
-        }
-        Err(e) => return Err(e.into()),
-    }
+    })();
+    let _ = fs::remove_file(&temp);
+    publication?;
     let name: String = original_path
         .file_name()
         .and_then(|s| s.to_str())
@@ -188,35 +212,34 @@ pub(crate) fn register_wallpaper_video(
         .take(255)
         .collect();
     let sidecar = dir.join(format!("{id}.json"));
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&sidecar)
-    {
-        Ok(mut file) => {
-            file.write_all(
-                json!({"id":id,"name":name,"extension":ext})
-                    .to_string()
-                    .as_bytes(),
-            )?;
-            file.sync_all()?;
-        }
+    let temp = staged_file(&dir, |file| {
+        file.write_all(
+            json!({"id":id,"name":name,"extension":ext})
+                .to_string()
+                .as_bytes(),
+        )?;
+        Ok(())
+    })?;
+    let publication = match publish_new(&temp, &sidecar) {
+        Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            wallpaper_video(root, &id)?;
+            wallpaper_video(root, &id).map(|_| ())
         }
-        Err(e) => return Err(e.into()),
-    }
+        Err(e) => Err(e.into()),
+    };
+    let _ = fs::remove_file(&temp);
+    publication?;
     // If a previous receipt cannot be read safely, fail closed rather than
     // replacing it and accidentally authorizing deletion.
     wallpaper_active(root)?;
     let active = dir.join("active");
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(active)?;
-    file.write_all(id.as_bytes())?;
-    file.sync_all()?;
+    let temp = staged_file(&dir, |file| {
+        file.write_all(id.as_bytes())?;
+        Ok(())
+    })?;
+    let publication = fs::rename(&temp, active);
+    let _ = fs::remove_file(&temp);
+    publication?;
     let mut item = wallpaper_video(root, &id)?;
     item["id"] = json!(format!("wallpaper_video:{id}"));
     item["kind"] = json!("wallpaper_video");
@@ -333,6 +356,19 @@ pub(crate) fn lookup(root: &Path, typed_id: &str) -> Result<Value> {
             ));
         }
     };
+    // Listing stays metadata-only; validate managed bytes when an action
+    // resolves the asset, including direct ApplyDesktopAsset calls.
+    if matches!(kind, "image" | "video") {
+        let path = item["path"].as_str().ok_or_else(|| {
+            ApiError::new("stale_selection", "Managed Desktop asset has no path")
+        })?;
+        if crate::preview::content_hash(Path::new(path))? != id {
+            return Err(ApiError::new(
+                "stale_selection",
+                "Desktop asset contents changed",
+            ));
+        }
+    }
     item["id"] = json!(typed_id);
     item["kind"] = json!(kind);
     Ok(item)
@@ -406,6 +442,34 @@ pub(crate) fn delete(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn interrupted_publication_keeps_existing_asset_and_receipt() {
+        let root = tempfile::tempdir().unwrap();
+        let staged = tempfile::tempdir().unwrap();
+        let first = staged.path().join("first.mp4");
+        let second = staged.path().join("second.mp4");
+        fs::write(&first, b"first video").unwrap();
+        fs::write(&second, b"second video").unwrap();
+        let existing =
+            register_wallpaper_video(root.path(), &first, Path::new("first.mp4")).unwrap();
+        let previous = wallpaper_active(root.path()).unwrap();
+        let dir = wallpaper_dir(root.path()).unwrap();
+        let partial = dir.join(".katran-interrupted.tmp");
+        fs::write(&partial, b"partial").unwrap();
+        assert_eq!(wallpaper_catalogue(root.path()).unwrap().len(), 1);
+        let id = crate::preview::content_hash(&second).unwrap();
+        fs::write(dir.join(format!("{id}.mp4")), b"not the expected video").unwrap();
+        assert!(register_wallpaper_video(root.path(), &second, Path::new("second.mp4")).is_err());
+        assert_eq!(wallpaper_active(root.path()).unwrap(), previous);
+        assert_eq!(
+            lookup(root.path(), existing["id"].as_str().unwrap()).unwrap()["id"],
+            existing["id"]
+        );
+        assert_eq!(
+            fs::read(dir.join(format!("{id}.mp4"))).unwrap(),
+            b"not the expected video"
+        );
+    }
     #[test]
     fn wallpaper_videos_keep_separate_identity_and_protect_last_applied() {
         let root = tempfile::tempdir().unwrap();
