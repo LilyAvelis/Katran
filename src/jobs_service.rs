@@ -1012,6 +1012,7 @@ impl Service {
                         let path = result["path"].as_str().ok_or_else(|| ApiError::new("wallpaper_error", "Managed wallpaper path is missing"))?;
                         desktop_wallpaper::set_wallpaper(std::path::Path::new(path), &desktop_wallpaper::NativeWallpaperHost)
                             .map_err(|e| ApiError::new("wallpaper_error", e))?;
+                        self.record_desktop_wallpaper(result["id"].as_str().unwrap_or(""))?;
                         Ok(json!({"desktop_wallpaper_applied":true,"background":result}))
                     } else if activate {self.activate_background(result)}else{Ok(result)}
                 },

@@ -155,6 +155,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "tables" => "Tables tab",
         "pods" => "Pods tab",
         "files" => "Files tab",
+        "desktop" => "Desktop tab",
         "sort_arrival" => "Sort by arrival",
         "sort_arrival_reverse" => "Sort by arrival · reverse",
         "sort_pinned" => "Pinned in custom order, then by arrival",
@@ -294,6 +295,14 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "files",
         label: "Таб: Files",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
+        id: "desktop",
+        label: "Таб: Desktop",
         default_binding: "",
         rebindable: true,
         group: "Вид",
@@ -868,6 +877,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
         "files" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Files,
+        }),
+        "desktop" => command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Desktop,
         }),
         "select_all" => command(Command::SelectAll),
         "transfer_selection" => command(Command::TransferSelection),

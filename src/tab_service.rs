@@ -13,6 +13,7 @@ pub fn label(tab: ShelfTab) -> &'static str {
         ShelfTab::Tables => "Tables",
         ShelfTab::Pods => "Pods",
         ShelfTab::Files => "Files",
+        ShelfTab::Desktop => "Desktop",
     }
 }
 
@@ -50,6 +51,7 @@ impl Service {
             "tables" => self.settings.tab_enabled(ShelfTab::Tables),
             "pods" => self.settings.tab_enabled(ShelfTab::Pods),
             "files" => self.settings.tab_enabled(ShelfTab::Files),
+            "desktop" => self.settings.tab_enabled(ShelfTab::Desktop),
             _ => true,
         }
     }
@@ -65,6 +67,7 @@ impl Service {
             "toggle_tables" => Some(ShelfTab::Tables),
             "toggle_pods" => Some(ShelfTab::Pods),
             "toggle_files" => Some(ShelfTab::Files),
+            "toggle_desktop" => Some(ShelfTab::Desktop),
             _ => None,
         };
         if let Some(tab) = tab {

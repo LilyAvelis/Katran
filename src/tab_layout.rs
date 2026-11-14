@@ -11,6 +11,7 @@ pub fn default_order() -> Vec<ShelfTab> {
         ShelfTab::Tables,
         ShelfTab::Pods,
         ShelfTab::Files,
+        ShelfTab::Desktop,
     ]
 }
 
@@ -32,6 +33,9 @@ pub fn deserialize_order<'de, D: serde::Deserializer<'de>>(
     }
     if !order.contains(&ShelfTab::Files) {
         order.push(ShelfTab::Files);
+    }
+    if !order.contains(&ShelfTab::Desktop) {
+        order.push(ShelfTab::Desktop);
     }
     Ok(order)
 }

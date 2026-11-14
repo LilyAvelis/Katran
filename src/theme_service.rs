@@ -1,6 +1,12 @@
 //! Background selection is a domain operation shared by Actions and API jobs.
 use crate::*;
 impl Service {
+    pub(crate) fn record_desktop_wallpaper(&mut self, id: &str) -> Result<()> {
+        let mut settings = self.settings.clone();
+        settings.desktop_wallpaper_id = Some(id.to_owned());
+        self.dispatch(Command::SetSettings { settings })?;
+        Ok(())
+    }
     pub(crate) fn selected_background_image(&self) -> Result<Event> {
         let items = self.selected_refs()?;
         if items.len() != 1 {

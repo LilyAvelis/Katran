@@ -88,6 +88,7 @@ pub mod storage;
 pub mod table_view;
 pub mod updater;
 pub use api::*;
+mod desktop_assets;
 pub mod desktop_wallpaper;
 pub mod emoji_fonts;
 pub mod emoji_render;
@@ -440,6 +441,7 @@ impl Service {
                     | Command::GetLink { .. }
                     | Command::GetLinkVisual { .. }
                     | Command::RefreshLinkVisual { .. }
+                    | Command::ListDesktopAssets
                     | Command::ListLinkIds { .. }
                     | Command::GetTable { .. }
                     | Command::GetDocumentText { .. }
@@ -497,7 +499,69 @@ impl Service {
                     &desktop_wallpaper::NativeWallpaperHost,
                 )
                 .map_err(|e| ApiError::new("wallpaper_error", e))?;
+                self.record_desktop_wallpaper(result["id"].as_str().unwrap_or(""))?;
                 Ok(serde_json::json!({"desktop_wallpaper_applied": true, "background": result}))
+            }
+            Command::ListDesktopAssets => {
+                let wallpapers = desktop_wallpaper::current_wallpapers().unwrap_or_default();
+                desktop_assets::list(
+                    &self.root,
+                    &self.settings.theme,
+                    self.settings.desktop_wallpaper_id.as_deref(),
+                    &wallpapers,
+                )
+                .or_else(|_| {
+                    desktop_assets::list(
+                        &self.root,
+                        &self.settings.theme,
+                        self.settings.desktop_wallpaper_id.as_deref(),
+                        &[],
+                    )
+                })
+            }
+            Command::DeleteDesktopAsset { id } => {
+                let wallpapers = if id.starts_with("image:") {
+                    desktop_wallpaper::current_wallpapers().unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                desktop_assets::delete(
+                    &self.root,
+                    &id,
+                    &self.settings.theme,
+                    self.settings.desktop_wallpaper_id.as_deref(),
+                    &wallpapers,
+                )
+            }
+            Command::ApplyDesktopAsset { id, target } => {
+                let asset = desktop_assets::lookup(&self.root, &id)?;
+                let kind = asset["kind"].as_str().unwrap_or("");
+                let raw_id = id.split_once(':').map(|(_, raw)| raw).unwrap_or("");
+                match (kind, target.as_str()) {
+                    ("image", "katran") => {
+                        self.activate_background(theme_backgrounds::get(&self.root, raw_id)?)
+                    }
+                    ("video", "katran") => self.activate_video_background(
+                        video_backgrounds::get(&self.root, raw_id)
+                            .map_err(|e| ApiError::new("invalid_video", e))?,
+                    ),
+                    ("image", "windows") => {
+                        let path = asset["path"].as_str().ok_or_else(|| {
+                            ApiError::new("invalid_background", "Missing managed image path")
+                        })?;
+                        desktop_wallpaper::set_wallpaper(
+                            std::path::Path::new(path),
+                            &desktop_wallpaper::NativeWallpaperHost,
+                        )
+                        .map_err(|e| ApiError::new("wallpaper_error", e))?;
+                        self.record_desktop_wallpaper(raw_id)?;
+                        Ok(serde_json::json!({"desktop_wallpaper_applied":true,"background":asset}))
+                    }
+                    _ => Err(ApiError::new(
+                        "invalid_target",
+                        "Unsupported background target for this asset",
+                    )),
+                }
             }
             Command::ImportThemeBackground { path } => theme_backgrounds::import(&self.root, &path),
             Command::ListThemeBackgrounds => theme_backgrounds::list(&self.root),

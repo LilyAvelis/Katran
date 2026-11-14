@@ -35,6 +35,8 @@ pub struct Settings {
     pub overlay_hotkey: String,
     /// Allow the user to resize the main shelf window. Defaults to a fixed window.
     pub window_resizable: bool,
+    /// Last wallpaper installed by Katran; retained even when Desktop tab is hidden.
+    pub desktop_wallpaper_id: Option<String>,
     pub emoji_font: String,
     pub sort_notifications: bool,
     /// Legacy preference retained so existing settings documents still load.
@@ -85,6 +87,7 @@ impl Settings {
             },
             overlay_hotkey: String::new(),
             window_resizable: false,
+            desktop_wallpaper_id: None,
             emoji_font: "apple".into(),
             sort_notifications: true,
             pods_tile_size: 96,
@@ -237,6 +240,13 @@ impl Settings {
         if !self.overlay_hotkey.trim().is_empty() {
             crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error| error.message)?;
         }
+        if self
+            .desktop_wallpaper_id
+            .as_ref()
+            .is_some_and(|id| id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err("Invalid managed desktop wallpaper ID".into());
+        }
         crate::tab_layout::validate_order(&self.tab_order)?;
         crate::tab_layout::validate_visible(&self.hidden_tabs)?;
         if self.tab_preferences.values().any(|prefs| {
@@ -293,5 +303,20 @@ mod tests {
         legacy.as_object_mut().unwrap().remove("window_resizable");
         let decoded: Settings = serde_json::from_value(legacy).unwrap();
         assert!(!decoded.window_resizable);
+    }
+
+    #[test]
+    fn desktop_wallpaper_tracking_round_trips() {
+        let mut settings = Settings::default();
+        assert!(settings.desktop_wallpaper_id.is_none());
+        settings.desktop_wallpaper_id = Some("a".repeat(64));
+        assert_eq!(settings.validate(0), Ok(()));
+        let encoded = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Settings>(&encoded)
+                .unwrap()
+                .desktop_wallpaper_id,
+            settings.desktop_wallpaper_id
+        );
     }
 }

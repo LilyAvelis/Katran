@@ -391,3 +391,20 @@ pub fn catalogue(root: &Path) -> Result<Value, String> {
     }
     Ok(json!(items))
 }
+
+/// Remove only a validated managed video and its metadata sidecar.
+pub(crate) fn remove(root: &Path, id: &str) -> Result<(), String> {
+    get(root, id)?;
+    let dir = dir(root)?;
+    let video = dir.join(format!("{id}.mp4"));
+    let sidecar = dir.join(format!("{id}.json"));
+    for path in [&video, &sidecar] {
+        let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() || !safe(&metadata) {
+            return Err("Unsafe video background file".into());
+        }
+    }
+    fs::remove_file(video).map_err(|e| e.to_string())?;
+    fs::remove_file(sidecar).map_err(|e| e.to_string())?;
+    Ok(())
+}

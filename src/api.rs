@@ -35,6 +35,14 @@ pub enum Command {
     UseSelectedVideoAsBackground,
     UseSelectedImageAsBackground,
     UseSelectedImageAsDesktopWallpaper,
+    ListDesktopAssets,
+    DeleteDesktopAsset {
+        id: String,
+    },
+    ApplyDesktopAsset {
+        id: String,
+        target: String,
+    },
     ImportThemeBackground {
         path: std::path::PathBuf,
     },

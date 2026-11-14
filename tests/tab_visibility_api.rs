@@ -28,6 +28,13 @@ fn setup() -> (tempfile::TempDir, Service) {
 #[test]
 fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
     let (root, mut api) = setup();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Desktop,
+            enabled: false,
+        },
+    );
     assert!(
         call(&mut api, Command::Tabs)["visible_tabs"]
             .as_array()
