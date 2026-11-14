@@ -5,6 +5,17 @@ use katran::{Command, Request, Service};
 use serde_json::Value;
 use std::{collections::HashMap, sync::mpsc};
 
+const CARD_GAP: f32 = 12.0;
+const CARD_HEIGHT: f32 = 164.0;
+const CARD_TARGET_WIDTH: f32 = 190.0;
+
+fn grid_dimensions(width: f32) -> (usize, f32) {
+    let width = width.max(1.0);
+    let columns = (((width + CARD_GAP) / (CARD_TARGET_WIDTH + CARD_GAP)).floor() as usize).max(1);
+    let card_width = ((width - CARD_GAP * (columns - 1) as f32) / columns as f32).min(220.0);
+    (columns, card_width)
+}
+
 #[derive(Default)]
 pub struct State {
     items: Vec<Value>,
@@ -200,71 +211,102 @@ impl State {
             }
             return;
         }
-        let gallery_height = (ui.available_height() - 55.0).max(80.0);
+        // Keep a separate fixed-height action region, including the delete confirmation.
+        let gallery_height = (ui.available_height() - 95.0).max(50.0);
         egui::ScrollArea::vertical()
             .max_height(gallery_height)
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for item in &self.items {
+                let (columns, card_width) = grid_dimensions(ui.available_width());
+                for (row_index, row) in self.items.chunks(columns).enumerate() {
+                    let (row_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), CARD_HEIGHT),
+                        egui::Sense::hover(),
+                    );
+                    for (column, item) in row.iter().enumerate() {
                         let Some(id) = item["id"].as_str() else {
                             continue;
                         };
+                        let card = egui::Rect::from_min_size(
+                            row_rect.min + egui::vec2(column as f32 * (card_width + CARD_GAP), 0.0),
+                            egui::vec2(card_width, CARD_HEIGHT),
+                        );
+                        let response = ui.interact(
+                            card,
+                            ui.make_persistent_id(("desktop-card", id)),
+                            egui::Sense::click(),
+                        );
                         let selected = self.selected.as_deref() == Some(id);
-                        ui.group(|ui| {
-                            ui.set_width(170.0);
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(170.0, 100.0),
-                                egui::Sense::click(),
+                        ui.painter()
+                            .rect_filled(card, 5.0, ui.visuals().faint_bg_color);
+                        if selected {
+                            ui.painter().rect_stroke(
+                                card,
+                                5.0,
+                                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                                egui::StrokeKind::Inside,
                             );
-                            ui.painter()
-                                .rect_filled(rect, 4.0, ui.visuals().faint_bg_color);
-                            if let Some(texture) = self.textures.get(id) {
-                                let size = texture.size_vec2();
-                                let scale = (rect.width() / size.x).min(rect.height() / size.y);
-                                let target =
-                                    egui::Rect::from_center_size(rect.center(), size * scale);
-                                ui.painter().image(
-                                    texture.id(),
-                                    target,
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(0.0, 0.0),
-                                        egui::pos2(1.0, 1.0),
-                                    ),
-                                    egui::Color32::WHITE,
-                                );
-                            } else {
-                                ui.painter().text(
-                                    rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    if item["kind"] == "video" {
-                                        "▶ Video"
-                                    } else {
-                                        "Image"
-                                    },
-                                    egui::FontId::proportional(16.0),
-                                    ui.visuals().text_color(),
-                                );
-                            }
-                            if selected {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    4.0,
-                                    egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            let label = item["name"].as_str().unwrap_or(id);
-                            if response.clicked() || ui.selectable_label(selected, label).clicked()
-                            {
-                                self.selected = Some(id.to_owned());
-                                self.pending_delete = None;
-                            }
-                            if item["in_use"] == true {
-                                ui.weak(tr("Используется", "In use"));
-                            }
-                        });
+                        }
+                        let inner = card.shrink(8.0);
+                        let image_rect =
+                            egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), 100.0));
+                        if let Some(texture) = self.textures.get(id) {
+                            let target =
+                                super::gallery_card::fit_rect(image_rect, texture.size_vec2());
+                            ui.painter().image(
+                                texture.id(),
+                                target,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
+                        } else {
+                            ui.painter().text(
+                                image_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                if item["kind"] == "video" {
+                                    "▶ Video"
+                                } else {
+                                    "Image"
+                                },
+                                egui::FontId::proportional(16.0),
+                                ui.visuals().text_color(),
+                            );
+                        }
+                        let name_rect = egui::Rect::from_min_size(
+                            egui::pos2(inner.left(), image_rect.bottom() + 6.0),
+                            egui::vec2(inner.width(), 20.0),
+                        );
+                        super::gallery_card::text(
+                            ui,
+                            name_rect,
+                            item["name"].as_str().unwrap_or(id),
+                            13.0,
+                            ui.visuals().text_color(),
+                        );
+                        if item["in_use"] == true {
+                            let badge = egui::Rect::from_min_size(
+                                egui::pos2(inner.left(), name_rect.bottom() + 2.0),
+                                egui::vec2(inner.width(), 18.0),
+                            );
+                            super::gallery_card::text(
+                                ui,
+                                badge,
+                                tr("Используется", "In use"),
+                                11.0,
+                                ui.visuals().weak_text_color(),
+                            );
+                        }
+                        if response.clicked() {
+                            self.selected = Some(id.to_owned());
+                            self.pending_delete = None;
+                        }
                     }
-                });
+                    if row_index + 1 < self.items.len().div_ceil(columns) {
+                        ui.add_space(CARD_GAP);
+                    }
+                }
             });
         let Some(id) = self.selected.clone() else {
             return;
@@ -326,6 +368,24 @@ impl State {
                     .unwrap_or(tr("Ошибка", "Error"))
                     .to_owned();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gallery_grid_fits_narrow_and_wide_windows_without_overlap() {
+        for width in [80.0_f32, 190.0, 400.0, 800.0, 1920.0] {
+            let (columns, card_width) = grid_dimensions(width);
+            assert!(columns >= 1 && card_width > 0.0 && card_width <= 220.0);
+            let occupied = columns as f32 * card_width + (columns - 1) as f32 * CARD_GAP;
+            assert!(
+                occupied <= width + 0.01,
+                "{columns} cards exceed width {width}"
+            );
         }
     }
 }
