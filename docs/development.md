@@ -172,3 +172,6 @@ Changing the ShareX root advances the source generation and transactionally remo
 old ShareX live events, projections and receipts. This only removes catalogue
 references, never filesystem originals. The Settings refresh control dispatches
 RescanSource for the saved root; PollSources delivers results asynchronously.
+The General settings UI debounces SetSettings and flushes edits on close. Path
+text fields defer autosave until focus leaves the field; explicit Refresh saves
+the draft through SetSettings before requesting RescanSource.

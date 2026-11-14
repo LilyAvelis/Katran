@@ -2,6 +2,7 @@
 use super::ui_foundation::{SettingsRow, SettingsSection};
 use eframe::egui::{self, Color32, RichText};
 use katran::{Command, Request, Service, interaction::View, settings::Settings};
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct State {
@@ -33,7 +34,9 @@ pub struct State {
     sharex_folder: String,
     downloads_folder: String,
     refresh_links_requested: bool,
+    pending_save: Option<Instant>,
 }
+const AUTOSAVE_DELAY: Duration = Duration::from_millis(450);
 fn apply_editor_intent(
     api: &mut Service,
     editor: &mut super::shortcuts_ui::Editor,
@@ -388,6 +391,33 @@ fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.desktop_wallpaper_id = current.desktop_wallpaper_id.clone();
     draft.sort = current.sort;
 }
+fn save_general_settings(api: &mut Service, draft: &Settings) -> Result<(Settings, bool), String> {
+    let response = call(api, Command::GetSettings);
+    let current: Settings = serde_json::from_value(response["result"].clone()).map_err(|_| {
+        response["error"]["message"]
+            .as_str()
+            .unwrap_or("Could not read settings")
+            .to_owned()
+    })?;
+    let mut settings = draft.clone();
+    merge_tab_settings(&mut settings, &current);
+    let resize_changed = settings.window_resizable != current.window_resizable;
+    if serde_json::to_value(&settings).ok() != serde_json::to_value(&current).ok() {
+        let saved = call(
+            api,
+            Command::SetSettings {
+                settings: settings.clone(),
+            },
+        );
+        if saved["ok"] != true {
+            return Err(saved["error"]["message"]
+                .as_str()
+                .unwrap_or("Save failed")
+                .to_owned());
+        }
+    }
+    Ok((settings, resize_changed))
+}
 fn apply_theme(
     api: &mut Service,
     draft: &mut Option<Settings>,
@@ -711,11 +741,12 @@ impl State {
                     if let Some(id) = status["result"]["id"].as_str() {
                         if let Some(draft) = self.draft.as_mut() {
                             draft.emoji_font = id.to_owned();
+                            self.pending_save = Some(Instant::now() + AUTOSAVE_DELAY);
                         }
                         self.emoji_fonts = None;
                         self.error = super::i18n::tr(
-                            "Шрифт добавлен. Сохраните настройки, чтобы применить его.",
-                            "Font added. Save settings to apply it.",
+                            "Шрифт добавлен; настройки применятся автоматически.",
+                            "Font added; settings will apply automatically.",
                         )
                         .into();
                     } else {
@@ -756,6 +787,7 @@ impl State {
             self.tags.reset();
             self.confirm_history = false;
             self.draft = None;
+            self.pending_save = None;
             self.custom_backgrounds = None;
             self.video_backgrounds = None;
             self.media_runtime = None;
@@ -800,6 +832,13 @@ impl State {
         let mut tabs_changed = false;
         let mut global_intent = None;
         let mut theme_intent = None;
+        let mut explicit_save = false;
+        let mut refresh_sharex = false;
+        let mut path_editing = false;
+        let draft_before = self
+            .draft
+            .as_ref()
+            .and_then(|draft| serde_json::to_value(draft).ok());
         let root_ctx = ctx.clone();
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title(super::i18n::tr("Настройки Katran", "Katran Settings")).with_decorations(false).with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
    if self.restart_confirmation {
@@ -853,7 +892,7 @@ impl State {
        ui.heading(super::i18n::tr("Основные", "General"));ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
         SettingsSection::group(ui,super::i18n::tr("Язык интерфейса", "Interface language"),|ui|{
-         SettingsRow::show(ui,super::i18n::tr("Язык", "Language"),super::i18n::tr("Изменение вступит в силу после сохранения.", "Changes take effect after saving."),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Язык", "Language"),super::i18n::tr("Применяется автоматически.", "Applies automatically."),|ui|{
           egui::ComboBox::from_id_salt("settings-language").selected_text(match draft.language{katran::settings::Language::English=>"English",katran::settings::Language::Russian=>"Русский"}).show_ui(ui,|ui|{
            ui.selectable_value(&mut draft.language,katran::settings::Language::English,"English");
            ui.selectable_value(&mut draft.language,katran::settings::Language::Russian,"Русский");
@@ -869,7 +908,7 @@ impl State {
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
-         SettingsRow::show(ui,super::i18n::tr("Изменение размера окна", "Window resizing"),super::i18n::tr("Можно менять размер главного окна мышью. Настройка применяется после сохранения.", "Allow resizing the main window with the mouse. Applies after saving."),|ui|{ui.checkbox(&mut draft.window_resizable,super::i18n::tr("Разрешить изменение размера", "Allow resizing"));});
+         SettingsRow::show(ui,super::i18n::tr("Изменение размера окна", "Window resizing"),super::i18n::tr("Можно менять размер главного окна мышью. Применяется автоматически.", "Allow resizing the main window with the mouse. Applies automatically."),|ui|{ui.checkbox(&mut draft.window_resizable,super::i18n::tr("Разрешить изменение размера", "Allow resizing"));});
          SettingsRow::show(ui,super::i18n::tr("Захват при запуске", "Capture on startup"),super::i18n::tr("По умолчанию включён. Текущий захват переключается через Actions.", "On by default. Toggle the current capture from Actions."),|ui|{ui.checkbox(&mut draft.capture_on_start,super::i18n::tr("Включать", "Enable"));});
          SettingsRow::show(ui,super::i18n::tr("Подсказка сортировки", "Sort hint"),super::i18n::tr("Показывать выбранный порядок на две секунды.", "Show the selected sort order for two seconds."),|ui|{ui.checkbox(&mut draft.sort_notifications,super::i18n::tr("Показывать", "Show"));});
          SettingsRow::show(ui,super::i18n::tr("Поиск на полке", "Shelf search"),super::i18n::tr("Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.", "Usually, use the search field with the mouse or Ctrl+T. In keyboard-only mode, the mouse moves the window and Ctrl+T opens search."),|ui|{ui.checkbox(&mut draft.search_keyboard_only,super::i18n::tr("Только через Ctrl+T", "Ctrl+T only"));});
@@ -887,7 +926,7 @@ impl State {
          let selected_font=entries.and_then(|items|items.iter().find(|item|item["id"].as_str()==Some(draft.emoji_font.as_str())));
          let font_label=selected_font.and_then(|item|item["label"].as_str()).unwrap_or(super::i18n::tr("Шрифт недоступен", "Font unavailable"));
          let font_available=selected_font.is_some_and(|item|item["available"]==true);
-         SettingsRow::show(ui,super::i18n::tr("Шрифт эмодзи", "Emoji font"),if font_available {super::i18n::tr("Применяется после сохранения настроек.", "Applied after saving settings.")} else {super::i18n::tr("Шрифт недоступен; используется системный.", "Font unavailable; using the system font.")},|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Шрифт эмодзи", "Emoji font"),if font_available {super::i18n::tr("Применяется автоматически.", "Applies automatically.")} else {super::i18n::tr("Шрифт недоступен; используется системный.", "Font unavailable; using the system font.")},|ui|{
           egui::ComboBox::from_id_salt("emoji-font-picker").width(180.0).selected_text(font_label).show_ui(ui,|ui|{
            for item in entries.into_iter().flatten(){if let Some(id)=item["id"].as_str(){let label=item["label"].as_str().unwrap_or(id);let display=if item["available"]==true {label.to_owned()} else {format!("{label}{}",super::i18n::tr(" · недоступен", " · unavailable"))};ui.selectable_value(&mut draft.emoji_font,id.to_owned(),display);}}
           });
@@ -906,20 +945,17 @@ impl State {
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
          SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
-          if ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")).changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
+          let response=ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots"));
+          path_editing |= response.has_focus();
+          if response.changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
           if ui.button(super::i18n::tr("Обновить", "Refresh")).clicked() {
-           let current=call(api,Command::GetSettings);
-           if current["ok"]!=true {self.error=current["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось прочитать настройки", "Could not read settings")).into();}
-           else if current["result"]["sharex_folder"]!=serde_json::to_value(&draft.sharex_folder).unwrap_or_default() {
-            self.error=super::i18n::tr("Сначала сохраните новый путь ShareX", "Save the new ShareX path first").into();
-           } else {
-            let result=call(api,Command::RescanSource{source_id:katran::source_policy::SourceId::Sharex});
-            self.error=if result["ok"]==true {super::i18n::tr("Обновление снимков запущено", "Screenshot refresh started").into()} else {result["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка обновления", "Refresh failed")).into()};
-           }
+           refresh_sharex=true;
           }
          });
          SettingsRow::show(ui,super::i18n::tr("Папка Downloads", "Downloads folder"),super::i18n::tr("Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.", "Leave empty to use the Windows Downloads folder, or enter another absolute path."),|ui|{
-          if ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder"))).changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
+          let response=ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder")));
+          path_editing |= response.has_focus();
+          if response.changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
          });
          let mut mib=draft.quota_bytes as f64/(1024.0*1024.0);
          SettingsRow::show(ui,super::i18n::tr("Квота кэша · МиБ", "Cache quota · MiB"),super::i18n::tr("Снижение ниже текущего объёма отклоняется. Исходники не удаляются.", "Values below current usage are rejected. Source files are not deleted."),|ui|{if ui.add(egui::DragValue::new(&mut mib).range(1.0..=1048576.0)).changed(){draft.quota_bytes=(mib*1024.0*1024.0)as u64;}});
@@ -941,18 +977,8 @@ impl State {
        }
        });
        ui.add_space(16.0);
-       if ui.button(super::i18n::tr("Сохранить настройки", "Save settings")).clicked()&&let Some(mut settings)=self.draft.clone(){
-        let current=call(api,Command::GetSettings);
-        if current["ok"]==true {
-         if let Ok(saved)=serde_json::from_value::<Settings>(current["result"].clone()) {
-          merge_tab_settings(&mut settings,&saved);
-          let language = settings.language;
-          let resize_changed=saved.window_resizable!=settings.window_resizable;
-          let resize_enabled=settings.window_resizable;
-          let r=call(api,Command::SetSettings{settings});self.error=if r["ok"]==true{super::i18n::set(language);if resize_changed{root_ctx.send_viewport_cmd_to(egui::ViewportId::ROOT,egui::ViewportCommand::Resizable(resize_enabled));}super::i18n::tr("Настройки сохранены", "Settings saved").into()}else{r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed")).into()};
-         } else {self.error=super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings").into();}
-        } else {self.error=current["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings")).into();}
-       }
+       ui.weak(super::i18n::tr("Изменения сохраняются автоматически", "Changes save automatically"));
+       if ui.button(super::i18n::tr("Сохранить настройки", "Save settings")).clicked(){explicit_save=true;}
       } else if self.section==2 {
        ui.heading(super::i18n::tr("Вкладки", "Tabs"));ui.add_space(8.0);
        ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Исключение: фоны рабочего стола сохраняются и при скрытой вкладке. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Exception: Desktop backgrounds are still saved while its tab is hidden. Saved data stays in place."));ui.add_space(16.0);
@@ -1173,9 +1199,73 @@ impl State {
             self.editor = None;
             ctx.request_repaint();
         }
+        let draft_after = self
+            .draft
+            .as_ref()
+            .and_then(|draft| serde_json::to_value(draft).ok());
+        if draft_before != draft_after {
+            self.pending_save = Some(Instant::now() + AUTOSAVE_DELAY);
+        }
+        let save_now = explicit_save
+            || refresh_sharex
+            || close
+            || (!path_editing
+                && self
+                    .pending_save
+                    .is_some_and(|deadline| Instant::now() >= deadline));
+        if save_now {
+            if let Some(draft) = self.draft.as_ref() {
+                match save_general_settings(api, draft) {
+                    Ok((saved, resize_changed)) => {
+                        self.pending_save = None;
+                        super::i18n::set(saved.language);
+                        if resize_changed {
+                            ctx.send_viewport_cmd_to(
+                                egui::ViewportId::ROOT,
+                                egui::ViewportCommand::Resizable(saved.window_resizable),
+                            );
+                        }
+                        if refresh_sharex {
+                            let result = call(
+                                api,
+                                Command::RescanSource {
+                                    source_id: katran::source_policy::SourceId::Sharex,
+                                },
+                            );
+                            self.error = if result["ok"] == true {
+                                super::i18n::tr(
+                                    "Обновление снимков запущено",
+                                    "Screenshot refresh started",
+                                )
+                                .into()
+                            } else {
+                                result["error"]["message"]
+                                    .as_str()
+                                    .unwrap_or("Refresh failed")
+                                    .into()
+                            };
+                        } else if explicit_save {
+                            self.error =
+                                super::i18n::tr("Настройки сохранены", "Settings saved").into();
+                        } else {
+                            self.error.clear();
+                        }
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                    Err(error) => {
+                        self.pending_save = None;
+                        self.error = error;
+                        close = false;
+                    }
+                }
+            }
+        } else if let Some(deadline) = self.pending_save.filter(|_| !path_editing) {
+            ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+        }
         if close {
             call(api, Command::CloseSettings);
             self.draft = None;
+            self.pending_save = None;
             self.custom_backgrounds = None;
             self.sharex_folder.clear();
             self.downloads_folder.clear();
@@ -1190,6 +1280,37 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn automatic_save_uses_domain_settings_and_preserves_concurrent_tab_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        let mut draft: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        draft.search_keyboard_only = true;
+        let mut concurrent = draft.clone();
+        concurrent.search_keyboard_only = false;
+        concurrent
+            .hidden_tabs
+            .push(katran::interaction::ShelfTab::Pods);
+        assert_eq!(
+            call(
+                &mut api,
+                Command::SetSettings {
+                    settings: concurrent
+                }
+            )["ok"],
+            true
+        );
+        save_general_settings(&mut api, &draft).unwrap();
+        let saved: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        assert!(saved.search_keyboard_only);
+        assert!(
+            saved
+                .hidden_tabs
+                .contains(&katran::interaction::ShelfTab::Pods)
+        );
+    }
     #[test]
     fn general_overlay_recording_runs_through_settings_viewport_and_persists() {
         let root = tempfile::tempdir().unwrap();

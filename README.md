@@ -63,8 +63,10 @@ Folder by default; Settings can disable it or override the root. Folder replaces
 Screenshots, and Folder use Windows recycling. Single deletion is immediate;
 groups confirm with Enter. These operations report per-item failures and protect pinned objects.
 Changing the ShareX folder removes old screenshot references from Katran while
-leaving the original files untouched. Save the new folder in Settings, then use
-Refresh beside its path to request a rescan at any time.
+leaving the original files untouched. Refresh beside its path applies the entered
+folder and requests a rescan at any time. General settings save
+automatically; folder paths apply after leaving their text field. Save settings
+remains available for an explicit save.
 [Downloads](docs/downloads.md), [file visuals](docs/file-visuals.md), and
 [hardening contracts](docs/domain-jobs.md) and [current measurements](docs/reviews/latency-1.3-hardening.md) describe the accepted 1.5.0 boundaries. The older latency document records its measured snapshot.
 
