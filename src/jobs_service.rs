@@ -49,6 +49,10 @@ pub(crate) enum PreparedWork {
         event: Option<Event>,
         activate: bool,
     },
+    VideoWallpaper {
+        event: Event,
+        path: PathBuf,
+    },
     EmojiFont(emoji_fonts::PreparedFont),
     ThemeBackground {
         prepared: theme_backgrounds::PreparedBackground,
@@ -378,6 +382,16 @@ impl Service {
                         event: Some(event),
                         activate: true,
                     })
+                })?
+            }
+            Command::UseSelectedVideoAsDesktopWallpaper => {
+                let event = self.selected_background_video()?;
+                let root = self.root.clone();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let path = wallpaper_engine::validate(&root, &event)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::VideoWallpaper { event, path })
                 })?
             }
             Command::UseSelectedImageAsDesktopWallpaper => {
@@ -972,6 +986,22 @@ impl Service {
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
         for (ready, result) in self.jobs.take_ready(8) {
             let result = match result {
+                Ok(PreparedWork::VideoWallpaper { event, path }) => {
+                    let continued = self.validate_job_events(&[event]).and_then(|()| {
+                        self.jobs.authorize_claimed_effect(ready)?;
+                        self.jobs.continue_claimed(ready, move |_cancel| {
+                            wallpaper_engine::apply(&path)
+                                .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
+                            Ok(PreparedWork::Value(
+                                json!({"video_desktop_wallpaper_requested": true}),
+                            ))
+                        })
+                    });
+                    if let Err(error) = continued {
+                        self.jobs.finish(ready, Err(error))?;
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::UpdateReady { updater, prepared }) => {
                     let continued = self.jobs.authorize_claimed_effect(ready).and_then(|()| {
                         self.jobs.continue_claimed(ready, move |_cancel| {
@@ -1034,6 +1064,7 @@ impl Service {
                     let result=video_backgrounds::commit(&self.root,prepared).map_err(|e|ApiError::new("video_background_error",e))?;
                     if activate {self.activate_video_background(result)}else{Ok(result)}
                 },
+                PreparedWork::VideoWallpaper{..}=>Err(ApiError::new("invalid_job_phase","Wallpaper request must be authorized before effect")),
                 PreparedWork::EmojiFont(font)=> {self.jobs.authorize_claimed_effect(ready)?; emoji_fonts::commit(&self.root,font)},
                 PreparedWork::Value(value)=>Ok(value),
                 PreparedWork::UpdateChecked(status)=>self.accept_update_check(status),

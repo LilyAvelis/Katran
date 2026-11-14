@@ -44,6 +44,7 @@ pub fn palette_order(id: &str) -> usize {
         "use_as_background",
         "use_as_desktop_wallpaper",
         "use_as_video_background",
+        "use_as_video_desktop_wallpaper",
         "settings",
         "tabs_settings",
         "capture",
@@ -67,9 +68,10 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         }
         "gallery" | "list" | "density_less" | "density_more" => "Отображение",
         "pinned_move_up" | "pinned_move_down" => "Закреплённые",
-        "use_as_background" | "use_as_desktop_wallpaper" | "use_as_video_background" => {
-            "Оформление"
-        }
+        "use_as_background"
+        | "use_as_desktop_wallpaper"
+        | "use_as_video_background"
+        | "use_as_video_desktop_wallpaper" => "Оформление",
         "settings" | "tabs_settings" | "capture" | "cleanup" | "restart" | "quit" => "Приложение",
         _ => fallback,
     }
@@ -94,6 +96,7 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
         "use_as_background" => "Использовать как фон Катрана",
         "use_as_desktop_wallpaper" => "Использовать как обои рабочего стола",
         "use_as_video_background" => "Использовать как видеофон Катрана",
+        "use_as_video_desktop_wallpaper" => "Передать в Wallpaper Engine",
         "cleanup" => "Повторить очистку кэша",
         _ => fallback,
     }
@@ -105,9 +108,10 @@ pub fn palette_terms(id: &str) -> &'static str {
         "transfer_copy" | "transfer_selection" | "add_to_katran" | "save" => {
             "папка folder импорт перенос копия"
         }
-        "use_as_background" | "use_as_video_background" | "use_as_desktop_wallpaper" => {
-            "фон background обои desktop wallpaper видео"
-        }
+        "use_as_background"
+        | "use_as_video_background"
+        | "use_as_desktop_wallpaper"
+        | "use_as_video_desktop_wallpaper" => "фон background обои desktop wallpaper видео",
         "quit" => "выход закрыть",
         "restart" => "перезапуск перезагрузить",
         "quicklook" | "preview" => "просмотр превью preview",
@@ -138,6 +142,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "pinned_move_down" => "Move pinned item later",
         "select_all" => "Select all",
         "use_as_video_background" => "Use as video background",
+        "use_as_video_desktop_wallpaper" => "Send to Wallpaper Engine",
         "restart" => "Restart Katran",
         "transfer_copy" => "Copy between shelf and Folder",
         "use_as_background" => "Use as background",
@@ -226,6 +231,14 @@ pub const DEFS: &[Definition] = &[
         default_binding: "Ctrl A",
         rebindable: true,
         group: "Выделение",
+        in_palette: true,
+    },
+    Definition {
+        id: "use_as_video_desktop_wallpaper",
+        label: "Передать в Wallpaper Engine",
+        default_binding: "",
+        rebindable: true,
+        group: "Оформление",
         in_palette: true,
     },
     Definition {
@@ -982,6 +995,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),
         "use_as_video_background" => command(Command::UseSelectedVideoAsBackground),
+        "use_as_video_desktop_wallpaper" => command(Command::UseSelectedVideoAsDesktopWallpaper),
         "settings" => command(Command::ShowSettings),
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),
         _ => return None,

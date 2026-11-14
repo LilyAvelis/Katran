@@ -28,6 +28,25 @@ video stream with `-an -sn -dn -c:v copy`. Audio is removed from the stored copy
 not merely muted during playback. FFmpeg tools have process timeouts. File
 names/paths are passed as separate arguments without a command shell.
 
+## Wallpaper Engine handoff
+
+`UseSelectedVideoAsDesktopWallpaper` (`use_selected_video_as_desktop_wallpaper`)
+is a separate command from `UseSelectedVideoAsBackground`: it sends one selected
+video from Desktop, Folder, Downloads, or Files to Wallpaper Engine. Its Actions
+entry is `use_as_video_desktop_wallpaper`. The selection's content revision is
+checked before dispatch. This command does not import or copy the video into
+Katran; Wallpaper Engine opens the original absolute path, which must remain
+available.
+
+Wallpaper Engine is optional, but must already be installed and running.
+Katran finds the running `wallpaper32.exe` or `wallpaper64.exe` and invokes its
+official CLI with `-control openWallpaper -file <absolute path>`. A successful
+API response is `{video_desktop_wallpaper_requested:true}`: it means the CLI
+accepted the request, not that the video is visibly rendered on the desktop.
+The current CLI handoff targets the first monitor.
+This is Wallpaper Engine video playback, not the Windows static-image wallpaper
+command (`UseSelectedImageAsDesktopWallpaper`).
+
 ## Rendering and limits
 
 Version 3.1 portable/setup bundles pinned `ffmpeg` and `ffprobe` with shared DLLs.
@@ -65,6 +84,11 @@ background and optics and reject stale IDs. The explicit
 `KATRAN_TEST_VIDEO_D3D11VA=1` worker test uses synthetic H.264 to check a real
 decoded frame, nonblocking pause and child-process cleanup. Ordinary headless
 UI tests do not launch media processes.
+
+The Windows `cargo test --test wallpaper_engine_api` API test passed. Its
+synthetic cases verify action availability for selected videos in Folder, Files,
+Downloads and Desktop, and rejection of empty or stale selections. It does not
+launch Wallpaper Engine or verify that a video appears on the desktop.
 
 The owner's local Grok clip was probed as H.264,1168×784,15.041667seconds. The
 exact D3D11VA/download/scale pipeline decoded it successfully. Its rendering

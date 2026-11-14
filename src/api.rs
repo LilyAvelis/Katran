@@ -33,6 +33,7 @@ pub enum Command {
         path: PathBuf,
     },
     UseSelectedVideoAsBackground,
+    UseSelectedVideoAsDesktopWallpaper,
     UseSelectedImageAsBackground,
     UseSelectedImageAsDesktopWallpaper,
     ListDesktopAssets,

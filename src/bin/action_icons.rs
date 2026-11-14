@@ -9,6 +9,7 @@ pub fn icon(id: &str) -> Lucide {
         "all" => Lucide::LayoutGrid,
         "use_as_background" => Lucide::Image,
         "use_as_desktop_wallpaper" => Lucide::Monitor,
+        "use_as_video_desktop_wallpaper" => Lucide::Monitor,
         "use_as_video_background" => Lucide::Video,
         "images" => Lucide::Image,
         "screenshots" => Lucide::Camera,

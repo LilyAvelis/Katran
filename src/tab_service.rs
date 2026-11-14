@@ -42,6 +42,7 @@ impl Service {
             "use_as_background" => self.selected_background_image().is_ok(),
             "use_as_desktop_wallpaper" => self.selected_background_image().is_ok(),
             "use_as_video_background" => self.selected_background_video().is_ok(),
+            "use_as_video_desktop_wallpaper" => self.selected_background_video().is_ok(),
             "add_to_katran" => self.interaction.tab == ShelfTab::All,
             "images" => self.settings.tab_enabled(ShelfTab::Images),
             "screenshots" => self.settings.tab_enabled(ShelfTab::Screenshots),

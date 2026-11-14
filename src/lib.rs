@@ -105,6 +105,7 @@ pub mod theme_backgrounds;
 mod theme_service;
 pub mod tray;
 pub mod video_backgrounds;
+pub mod wallpaper_engine;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
@@ -483,6 +484,14 @@ impl Service {
                 let result = video_backgrounds::commit(&self.root, prepared)
                     .map_err(|e| ApiError::new("video_background_error", e))?;
                 self.activate_video_background(result)
+            }
+            Command::UseSelectedVideoAsDesktopWallpaper => {
+                let event = self.selected_background_video()?;
+                let path = wallpaper_engine::validate(&self.root, &event)?;
+                self.validate_job_events(&[event])?;
+                wallpaper_engine::apply(&path)
+                    .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;
+                Ok(serde_json::json!({"video_desktop_wallpaper_requested": true}))
             }
             Command::UseSelectedImageAsBackground => {
                 let event = self.selected_background_image()?;

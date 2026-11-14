@@ -787,8 +787,12 @@ impl Shelf {
                 | "use_as_background"
                 | "use_as_desktop_wallpaper"
                 | "use_as_video_background"
+                | "use_as_video_desktop_wallpaper"
         ) {
-            let wallpaper = id == "use_as_desktop_wallpaper";
+            let wallpaper = matches!(
+                id.as_str(),
+                "use_as_desktop_wallpaper" | "use_as_video_desktop_wallpaper"
+            );
             if wallpaper {
                 self.wallpaper_job = true;
                 self.message.clear();
@@ -918,6 +922,13 @@ impl Shelf {
             self.message = tr(
                 "Windows приняла запрос на смену обоев",
                 "Windows accepted the wallpaper request",
+            )
+            .into();
+        }
+        if r["video_desktop_wallpaper_requested"] == true {
+            self.message = tr(
+                "Видео передано Wallpaper Engine",
+                "Video sent to Wallpaper Engine",
             )
             .into();
         }
