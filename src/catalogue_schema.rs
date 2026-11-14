@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 11;
+pub(crate) const VERSION: i64 = 12;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -163,7 +163,16 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
     if !has_opacity {
         tx.execute_batch("ALTER TABLE tag_slots ADD COLUMN opacity INTEGER NOT NULL DEFAULT 55 CHECK(opacity BETWEEN 0 AND 100);")?;
     }
-    tx.execute_batch("PRAGMA user_version=11;")?;
+    if version < 11 {
+        tx.execute_batch("PRAGMA user_version=11;")?;
+    }
+    if version < 12 {
+        // Projection tables and triggers must be committed together with the
+        // catalogue version so a failed migration cannot leave a partial schema.
+        crate::pinned_order::ensure_schema(&tx)?;
+        crate::desktop_pins::ensure_schema(&tx)?;
+        tx.execute_batch("PRAGMA user_version=12;")?;
+    }
     tx.commit()?;
     Ok(())
 }

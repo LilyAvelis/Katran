@@ -264,6 +264,7 @@ pub enum Command {
         items: Vec<SelectionRef>,
     },
     CopySelectedObjects,
+    CopySelectionAction,
     ListOpenApps {
         id: i64,
     },
@@ -578,3 +579,6 @@ pub enum EventKind {
     LinkFragment,
     TableFragment,
 }
+
+#[path = "api_wire_v2.rs"]
+pub mod wire_v2;

@@ -226,8 +226,6 @@ impl Service {
         }
         storage::initialize(&db, &root)?;
         catalogue_schema::migrate(&db)?;
-        pinned_order::ensure_schema(&db)?;
-        desktop_pins::ensure_schema(&db)?;
         classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
         let stored: Option<String> = db
@@ -947,6 +945,29 @@ impl Service {
             Command::CopySelectedObjects => {
                 let items = self.selected_refs()?;
                 self.dispatch(Command::CopySmart { items })
+            }
+            Command::CopySelectionAction => {
+                if self.interaction.tab != interaction::ShelfTab::Pods
+                    || !self.interaction.emoji_catalogue
+                {
+                    return self.dispatch(Command::CopySelectedObjects);
+                }
+                let saved = self.dispatch(Command::CopyEmojiSelectionToPods)?;
+                let all_saved = saved["items"].as_array().is_some_and(|items| {
+                    items.iter().all(|item| item["ok"] == true)
+                });
+                let clipboard = if all_saved {
+                    match self.dispatch(Command::CopySelectedObjects) {
+                        Ok(result) if result["text_copied"] == true => {
+                            serde_json::json!({"status":"copied", "result":result})
+                        }
+                        Ok(result) => serde_json::json!({"status":"failed", "result":result}),
+                        Err(error) => serde_json::json!({"status":"failed", "error":error}),
+                    }
+                } else {
+                    serde_json::json!({"status":"skipped"})
+                };
+                Ok(serde_json::json!({"emoji_copy":true, "items":saved["items"], "clipboard":clipboard}))
             }
             Command::CopySmart { items } => {
                 if self.selection_is_tables(&items)? {

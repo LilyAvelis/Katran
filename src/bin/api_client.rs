@@ -580,18 +580,9 @@ impl Shelf {
                 .into();
                 return;
             }
-            let result = self.call(Command::CopyEmojiSelectionToPods);
-            if let Some(items) = result["items"].as_array() {
-                let copied = items.iter().filter(|item| item["ok"] == true).count();
-                let failed = items.len() - copied;
-                self.message = if super::i18n::is_english() {
-                    format!("Added to Pods: {copied}; failed: {failed}")
-                } else {
-                    format!("Добавлено в Pods: {copied}; ошибок: {failed}")
-                };
-                if failed == 0 {
-                    self.start_job(Command::CopySelectedObjects, false, ctx.clone());
-                }
+            let result = self.call(Command::CopySelectionAction);
+            if !result.is_null() {
+                self.action_result(result);
             }
             return;
         }
@@ -979,6 +970,34 @@ impl Shelf {
         }
         if r["sort"].is_object() {
             self.message = sorting_ui::confirmation(&r["sort"]);
+        }
+        if r["emoji_copy"] == true {
+            let items = r["items"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let copied = items.iter().filter(|item| item["ok"] == true).count();
+            let failed = items.len() - copied;
+            self.message = if super::i18n::is_english() {
+                format!("Added to Pods: {copied}; failed: {failed}")
+            } else {
+                format!("Добавлено в Pods: {copied}; ошибок: {failed}")
+            };
+            let clipboard = &r["clipboard"];
+            match clipboard["status"].as_str() {
+                Some("copied") => self.message.push_str(tr(" · Скопировано", " · Copied")),
+                Some("failed") => {
+                    self.message.push_str(tr(" · Буфер не скопирован", " · Clipboard copy failed"));
+                    if let Some(error) = clipboard["error"]["message"].as_str() {
+                        self.message.push_str(": ");
+                        self.message.push_str(error);
+                    }
+                }
+                _ => self.message.push_str(tr(" · Буфер не изменён", " · Clipboard unchanged")),
+            }
+            let errors = item_failures(&r["items"]);
+            if !errors.is_empty() {
+                self.message.push_str(" · ");
+                self.message.push_str(&errors);
+            }
+            return;
         }
         if let Some(copied) = r["text_copied"].as_bool() {
             self.message = if copied && r["kind"] == "link_fragment" {

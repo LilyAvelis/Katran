@@ -515,6 +515,79 @@ impl katran::drag_out::Runner for Drag {
     }
 }
 #[test]
+fn copy_action_imports_catalogue_selection_and_reports_clipboard_outcomes() {
+    use std::sync::{Arc, Mutex};
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    let state = Arc::new(Mutex::new(OutputState::default()));
+    api.set_text_clipboard_sink(Box::new(Clipboard(state.clone())));
+    call(&mut api, Command::SetTabEnabled { tab: ShelfTab::Pods, enabled: true });
+    call(&mut api, Command::SetTab { tab: ShelfTab::Pods });
+    call(&mut api, Command::SetEmojiCatalogue { enabled: true });
+    let page = call(&mut api, Command::BrowseShelfSorted { query: "".into(), limit: 2, cursor: None });
+    let events = page["events"].as_array().unwrap();
+    let ids: Vec<i64> = events.iter().map(|e| e["id"].as_i64().unwrap()).collect();
+    let expected: String = events.iter().map(|e| e["text_preview"].as_str().unwrap()).collect();
+    call(&mut api, Command::SetVisible { ids: ids.clone() });
+    for (index, id) in ids.iter().enumerate() {
+        call(&mut api, Command::Select {
+            id: *id,
+            mode: if index == 0 { SelectionMode::Replace } else { SelectionMode::Toggle },
+        });
+    }
+    let result = call(&mut api, Command::RunAction { id: "copy".into() });
+    assert_eq!(result["emoji_copy"], true);
+    assert_eq!(result["items"].as_array().unwrap().len(), 2);
+    assert!(result["items"].as_array().unwrap().iter().all(|item| item["ok"] == true));
+    assert_eq!(result["clipboard"]["status"], "copied");
+    assert_eq!(state.lock().unwrap().text, expected);
+
+    state.lock().unwrap().fail_copy = true;
+    let job = call(&mut api, Command::BeginJob {
+        command: Box::new(Command::RunAction { id: "copy".into() }),
+    });
+    assert_eq!(job["state"], "succeeded");
+    let result = job["result"].clone();
+    assert_eq!(result["emoji_copy"], true);
+    assert_eq!(result["items"].as_array().unwrap().len(), 2);
+    assert!(result["items"].as_array().unwrap().iter().all(|item| item["ok"] == true));
+    assert_eq!(result["clipboard"]["status"], "failed");
+    assert_eq!(result["clipboard"]["error"]["code"], "synthetic_copy_failure");
+    assert_eq!(state.lock().unwrap().text, expected);
+    call(&mut api, Command::SetEmojiCatalogue { enabled: false });
+    let saved = call(&mut api, Command::BrowseShelfSorted { query: "".into(), limit: 100, cursor: None });
+    let saved_texts: Vec<_> = saved["events"].as_array().unwrap().iter()
+        .filter_map(|event| event["text_preview"].as_str()).collect();
+    for event in events { assert!(saved_texts.contains(&event["text_preview"].as_str().unwrap())); }
+}
+
+#[test]
+fn copy_action_reports_partial_import_and_skips_clipboard() {
+    use std::sync::{Arc, Mutex};
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 4).unwrap();
+    let state = Arc::new(Mutex::new(OutputState::default()));
+    api.set_text_clipboard_sink(Box::new(Clipboard(state.clone())));
+    call(&mut api, Command::SetTabEnabled { tab: ShelfTab::Pods, enabled: true });
+    call(&mut api, Command::SetTab { tab: ShelfTab::Pods });
+    call(&mut api, Command::SetEmojiCatalogue { enabled: true });
+    let page = call(&mut api, Command::BrowseShelfSorted { query: "".into(), limit: 2, cursor: None });
+    let ids: Vec<_> = page["events"].as_array().unwrap().iter()
+        .map(|event| event["id"].as_i64().unwrap()).collect();
+    call(&mut api, Command::SetVisible { ids: ids.clone() });
+    for (index, id) in ids.into_iter().enumerate() {
+        call(&mut api, Command::Select { id, mode: if index == 0 { SelectionMode::Replace } else { SelectionMode::Toggle } });
+    }
+    let result = call(&mut api, Command::CopySelectionAction);
+    let items = result["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items.iter().filter(|item| item["ok"] == true).count(), 1, "{result}");
+    assert_eq!(items.iter().filter(|item| item["error"]["code"] == "quota_exceeded").count(), 1);
+    assert_eq!(result["clipboard"]["status"], "skipped");
+    assert!(state.lock().unwrap().text.is_empty());
+}
+
+#[test]
 fn catalogue_copy_paste_and_drag_share_exact_unicode_selection() {
     use katran::{
         SelectionRef,

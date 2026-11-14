@@ -410,7 +410,7 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        11
+        12
     );
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();
@@ -424,6 +424,41 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
         assert!(Instant::now() < deadline, "{r}");
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[test]
+fn v11_projection_schema_is_upgraded_in_numbered_migration() {
+    let data = tempfile::tempdir().unwrap();
+    drop(Service::open(data.path(), 1_000_000).unwrap());
+    let db_path = data.path().join("index.sqlite3");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute("INSERT INTO desktop_pins(asset_id,position) VALUES(123,1)", [])
+        .unwrap();
+    db.execute_batch("DROP INDEX desktop_pins_order; ALTER TABLE desktop_pins DROP COLUMN slot_number; PRAGMA user_version=11;")
+        .unwrap();
+    drop(db);
+
+    drop(Service::open(data.path(), 1_000_000).unwrap());
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        12
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('desktop_pins') WHERE name='slot_number'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT position FROM desktop_pins WHERE asset_id=123", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }
 
 #[test]

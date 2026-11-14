@@ -250,6 +250,15 @@ impl Service {
             let value = self.dispatch(command)?;
             return self.ready_value_job(value);
         }
+        if matches!(command, Command::CopySelectionAction) {
+            if self.interaction.tab == interaction::ShelfTab::Pods
+                && self.interaction.emoji_catalogue
+            {
+                let value = self.dispatch(command)?;
+                return self.ready_value_job(value);
+            }
+            command = Command::CopySelectedObjects;
+        }
         if matches!(command, Command::CopySelectedText) {
             command = Command::CopyText {
                 items: self.selected_refs()?,

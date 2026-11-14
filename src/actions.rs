@@ -990,7 +990,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "toggle_downloads" => command(Command::ToggleTabEnabled {
             tab: crate::interaction::ShelfTab::Downloads,
         }),
-        "copy" => command(Command::CopySelectedObjects),
+        "copy" => command(Command::CopySelectionAction),
         "delete" => command(Command::DeleteSelection {
             ids: selected(),
             confirmed: false,
