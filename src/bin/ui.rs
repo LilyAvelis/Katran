@@ -79,6 +79,12 @@ const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events-test") {
 fn clipboard_changed(result: &Value) -> bool {
     result["captured"].as_u64().is_some_and(|count| count > 0)
 }
+fn search_or_text_edit_focused(ctx: &egui::Context) -> bool {
+    let focused = ctx.memory(|memory| memory.focused());
+    focused.is_some_and(|id| {
+        id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(ctx, id).is_some()
+    })
+}
 fn item_failures(items: &Value) -> String {
     items
         .as_array()
@@ -562,7 +568,7 @@ impl Shelf {
         }
         self.poll_preloaded_tab(&ctx);
         if self.api.is_some() && self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true
-            && (self.pods_ui.category_open || (!self.modal_owns_input() && self.state["preview"].is_null() && !ctx.egui_wants_keyboard_input() && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(&ctx, id).is_some()))))
+            && (self.pods_ui.category_open || (!self.modal_owns_input() && self.state["preview"].is_null() && !ctx.egui_wants_keyboard_input() && !search_or_text_edit_focused(&ctx)))
             && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if physical_key.unwrap_or(*key) == egui::Key::Backslash && modifiers.shift && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd))) {
             ctx.input_mut(shortcuts_ui::discard);
             if self.pods_ui.category_open { self.pods_ui.category_open = false; }
@@ -573,12 +579,7 @@ impl Shelf {
             && !self.modal_owns_input()
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
-            && !ctx.memory(|m| {
-                m.focused().is_some_and(|id| {
-                    id == egui::Id::new("shelf-search")
-                        || egui::TextEdit::load_state(&ctx, id).is_some()
-                })
-            })
+            && !search_or_text_edit_focused(&ctx)
         {
             let action = ctx.input(|i| {
                 i.events.iter().find_map(|e| match e {
@@ -698,7 +699,7 @@ impl Shelf {
             && self.state["tab"] != "folder"
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
-            && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(&ctx, id).is_some()))
+            && !search_or_text_edit_focused(&ctx)
             && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if modifiers.is_none() && physical_key.unwrap_or(*key) == egui::Key::Slash)))
         {
             ctx.input_mut(shortcuts_ui::discard);
@@ -896,12 +897,7 @@ impl Shelf {
                             && (s.id != "toggle_pinned_view"
                                 || (self.state["preview"].is_null()
                                     && !ctx.egui_wants_keyboard_input()
-                                    && !ctx.memory(|m| {
-                                        m.focused().is_some_and(|id| {
-                                            id == egui::Id::new("shelf-search")
-                                                || egui::TextEdit::load_state(&ctx, id).is_some()
-                                        })
-                                    })))
+                                    && !search_or_text_edit_focused(&ctx)))
                     })
                     .cloned()
                     .collect();
@@ -1756,7 +1752,7 @@ impl eframe::App for Shelf {
         let starts_tag = !self.modal_owns_input()
             && self.state["preview"].is_null()
             && !ctx.egui_wants_keyboard_input()
-            && !ctx.memory(|m| m.focused().is_some_and(|id| id == egui::Id::new("shelf-search") || egui::TextEdit::load_state(ctx, id).is_some()))
+            && !search_or_text_edit_focused(ctx)
             && input.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } if modifiers.is_none() && physical_key.unwrap_or(*key) == egui::Key::Slash));
         let modal = self.modal_owns_input() || starts_sort || starts_tag;
         let copying_bound = self.shortcuts.iter().any(|s| {
@@ -4718,6 +4714,16 @@ mod tests {
                 .all(|event| event["category"]["group"] == "Animals & Nature")
         );
         assert!(app.pods_ui.category_total.unwrap() > 100);
+        let focused = ctx.memory(|memory| memory.focused()).expect("category search retains focus");
+        assert!(egui::TextEdit::load_state(&ctx, focused).is_some());
+        // The closed picker can leave its TextEdit focused until a later frame.
+        // Rendering those frames must not reacquire the Context lock recursively.
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+            out.textures_delta.clear();
+            assert!(!app.pods_ui.category_open);
+            assert_eq!(app.state["emoji_category"], "Animals & Nature");
+        }
     }
     #[test]
     fn emoji_category_shortcut_does_nothing_outside_catalogue() {
