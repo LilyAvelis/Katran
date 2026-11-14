@@ -69,15 +69,17 @@ pub(super) fn layout(
                     &mut top,
                 );
             }
-            push(
-                Kind::Divider {
-                    level: "subgroup",
-                    label: next_subgroup.into(),
-                },
-                24.0,
-                &mut rows,
-                &mut top,
-            );
+            if !next_subgroup.is_empty() {
+                push(
+                    Kind::Divider {
+                        level: "subgroup",
+                        label: next_subgroup.into(),
+                    },
+                    24.0,
+                    &mut rows,
+                    &mut top,
+                );
+            }
             group = next_group;
             subgroup = next_subgroup;
             start = i;
@@ -159,5 +161,14 @@ mod tests {
                 .windows(2)
                 .all(|r| r[1].top >= r[0].top + r[0].height)
         );
+    }
+
+    #[test]
+    fn group_without_subgroup_has_no_empty_divider() {
+        let items = vec![serde_json::json!({"category":{"group":"A","subgroup":""}})];
+        let layout = layout(&items, 3, 80.0, 4.0, true);
+        assert_eq!(layout.rows.len(), 2);
+        assert!(matches!(&layout.rows[0].kind, Kind::Divider { level: "group", label } if label == "A"));
+        assert!(matches!(&layout.rows[1].kind, Kind::Cards(range) if range == &(0..1)));
     }
 }
