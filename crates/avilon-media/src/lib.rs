@@ -133,16 +133,102 @@ fn seam_smoother(source: &VideoSource, policy: PlaybackPolicy) -> Option<SeamSmo
 #[cfg(feature = "egui")]
 struct Worker {
     child: Arc<Mutex<Option<Child>>>,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<child_job::Job>>>,
     stopped: Arc<AtomicBool>,
     rx: Receiver<Message>,
     latest: Arc<Mutex<Option<Message>>>,
     #[cfg(test)]
     finished: Arc<AtomicBool>,
 }
+
+#[cfg(windows)]
+mod child_job {
+    use std::{ffi::c_void, os::windows::io::AsRawHandle, process::Child};
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimits {
+        process_time: i64,
+        job_time: i64,
+        flags: u32,
+        minimum: usize,
+        maximum: usize,
+        active: u32,
+        affinity: usize,
+        priority: u32,
+        scheduling: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimits {
+        basic: BasicLimits,
+        io: [u64; 6],
+        process_memory: usize,
+        job_memory: usize,
+        peak_process: usize,
+        peak_job: usize,
+    }
+    unsafe extern "system" {
+        fn CreateJobObjectW(attributes: *const c_void, name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(
+            job: *mut c_void,
+            class: i32,
+            information: *const c_void,
+            length: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+    // The uniquely owned kernel handle may be moved between threads.
+    pub(super) struct Job(usize);
+    impl Job {
+        pub(super) fn new() -> Result<Self, String> {
+            let job =
+                Self(unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) } as usize);
+            if job.0 == 0 {
+                return Err("FFmpeg process containment unavailable".into());
+            }
+            let mut limits = ExtendedLimits::default();
+            limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if unsafe {
+                SetInformationJobObject(
+                    job.0 as *mut c_void,
+                    9,
+                    (&limits as *const ExtendedLimits).cast(),
+                    std::mem::size_of::<ExtendedLimits>() as u32,
+                )
+            } == 0
+            {
+                return Err("FFmpeg process containment unavailable".into());
+            }
+            Ok(job)
+        }
+        pub(super) fn assign(&self, child: &Child) -> Result<(), String> {
+            if unsafe { AssignProcessToJobObject(self.0 as *mut c_void, child.as_raw_handle()) }
+                == 0
+            {
+                return Err("FFmpeg process containment unavailable".into());
+            }
+            Ok(())
+        }
+    }
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0 as *mut c_void) };
+        }
+    }
+}
 #[cfg(feature = "egui")]
 impl Worker {
     fn stop(&mut self) {
         self.stopped.store(true, Ordering::SeqCst);
+        // Close the job before waiting for a blocked reader: descendants may
+        // still hold the stdout pipe even after the direct child exits.
+        #[cfg(windows)]
+        if let Ok(mut job) = self.job.lock() {
+            drop(job.take());
+        }
         if let Ok(mut child) = self.child.lock()
             && let Some(c) = child.as_mut()
         {
@@ -325,6 +411,10 @@ fn start(
     let latest_writer = latest.clone();
     let child = Arc::new(Mutex::new(None::<Child>));
     let shared = child.clone();
+    #[cfg(windows)]
+    let job = Arc::new(Mutex::new(None::<child_job::Job>));
+    #[cfg(windows)]
+    let shared_job = job.clone();
     let stopped = Arc::new(AtomicBool::new(false));
     let stop_flag = stopped.clone();
     #[cfg(test)]
@@ -336,6 +426,15 @@ fn start(
         let _finished = Finished(finish_flag);
         let mut cmd = match command_factory() {
             Ok(command) => command,
+            Err(error) => {
+                let _ = tx.try_send(Message::Error(error));
+                ctx.request_repaint();
+                return;
+            }
+        };
+        #[cfg(windows)]
+        let job = match child_job::Job::new() {
+            Ok(job) => job,
             Err(error) => {
                 let _ = tx.try_send(Message::Error(error));
                 ctx.request_repaint();
@@ -390,6 +489,28 @@ fn start(
                 return;
             }
         };
+        #[cfg(windows)]
+        if let Err(error) = job.assign(&proc) {
+            let _ = proc.kill();
+            let _ = proc.wait();
+            let _ = tx.try_send(Message::Error(error));
+            ctx.request_repaint();
+            return;
+        }
+        #[cfg(windows)]
+        {
+            let mut unpublished_job = Some(job);
+            if let Ok(mut slot) = shared_job.lock()
+                && !stop_flag.load(Ordering::SeqCst)
+            {
+                *slot = unpublished_job.take();
+            }
+            if unpublished_job.is_some() {
+                drop(unpublished_job);
+                let _ = proc.wait();
+                return;
+            }
+        }
         let mut stdout = proc.stdout.take().unwrap();
         // Check cancellation while holding the same lock used by stop().
         let mut unpublished = Some(proc);
@@ -463,6 +584,10 @@ fn start(
             let _ = p.kill();
             let _ = p.wait();
         }
+        #[cfg(windows)]
+        if let Ok(mut job) = shared_job.lock() {
+            drop(job.take());
+        }
         if !stop_flag.load(Ordering::SeqCst) {
             let _ = tx.try_send(Message::Error(
                 "Hardware video decoding failed; check D3D11VA and FFmpeg".into(),
@@ -472,6 +597,8 @@ fn start(
     });
     Worker {
         child,
+        #[cfg(windows)]
+        job,
         stopped,
         rx,
         latest,
@@ -494,6 +621,48 @@ mod tests {
     use super::*;
     use std::process::Command;
     use std::time::{Duration, Instant};
+
+    #[cfg(windows)]
+    #[test]
+    fn child_job_fixture() {
+        if std::env::var_os("AVILON_JOB_FIXTURE").is_some() {
+            std::thread::sleep(Duration::from_secs(20));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stop_closes_job_and_terminates_child() {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::child_job_fixture"])
+            .env("AVILON_JOB_FIXTURE", "1")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let job = child_job::Job::new().unwrap();
+        job.assign(&child).unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        let (_, rx) = mpsc::sync_channel(1);
+        let mut worker = Worker {
+            // The worker has no direct child handle: only closing the job can
+            // stop this process, including while a reader is blocked.
+            child: Arc::new(Mutex::new(None)),
+            job: Arc::new(Mutex::new(Some(job))),
+            stopped: Arc::new(AtomicBool::new(false)),
+            rx,
+            latest: Arc::new(Mutex::new(None)),
+            finished: Arc::new(AtomicBool::new(false)),
+        };
+        worker.stop();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "child survived job closure");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn hidden_playback_presenter_uses_latest_frame_after_queued_first() {
@@ -518,6 +687,8 @@ mod tests {
             source: Some(source.clone()),
             worker: Some(Worker {
                 child: Arc::new(Mutex::new(None)),
+                #[cfg(windows)]
+                job: Arc::new(Mutex::new(None)),
                 stopped: Arc::new(AtomicBool::new(false)),
                 rx,
                 latest,
@@ -809,6 +980,8 @@ mod tests {
             size: [2, 2],
             worker: Some(Worker {
                 child: Arc::new(Mutex::new(None)),
+                #[cfg(windows)]
+                job: Arc::new(Mutex::new(None)),
                 stopped: stopped.clone(),
                 rx,
                 latest: Arc::new(Mutex::new(None)),
