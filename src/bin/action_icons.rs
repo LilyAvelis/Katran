@@ -16,6 +16,7 @@ pub fn icon(id: &str) -> Lucide {
         "screenshots" => Lucide::Camera,
         "downloads" => Lucide::Download,
         "files" => Lucide::File,
+        "desktop" => Lucide::Monitor,
         "toggle_pinned_view" => Lucide::Pin,
         "pinned_move_up" => Lucide::ArrowUp,
         "pinned_move_down" => Lucide::ArrowDown,
