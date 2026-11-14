@@ -407,6 +407,13 @@ fn selected_image_action_copies_and_applies_background_through_sync_and_job_api(
                 .iter()
                 .any(|a| a["id"] == "use_as_background")
         );
+        assert!(
+            call(&mut api, Command::Actions)
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a["id"] == "use_as_desktop_wallpaper")
+        );
         let result = if worker {
             let job = call(
                 &mut api,

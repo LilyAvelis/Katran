@@ -34,6 +34,7 @@ pub enum Command {
     },
     UseSelectedVideoAsBackground,
     UseSelectedImageAsBackground,
+    UseSelectedImageAsDesktopWallpaper,
     ImportThemeBackground {
         path: std::path::PathBuf,
     },

@@ -54,6 +54,7 @@ pub(crate) enum PreparedWork {
         prepared: theme_backgrounds::PreparedBackground,
         event: Option<Event>,
         activate: bool,
+        desktop_wallpaper: bool,
     },
     UpdateInstalled(updater::InstalledUpdate),
     UpdateChecked(updater::UpdateStatus),
@@ -367,6 +368,20 @@ impl Service {
                     })
                 })?
             }
+            Command::UseSelectedImageAsDesktopWallpaper => {
+                let event = self.selected_background_image()?;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let prepared = theme_backgrounds::prepare_event(&event)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::ThemeBackground {
+                        prepared,
+                        event: Some(event),
+                        activate: false,
+                        desktop_wallpaper: true,
+                    })
+                })?
+            }
             Command::ImportEmojiFont { path } => {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
@@ -384,6 +399,7 @@ impl Service {
                         prepared,
                         event: None,
                         activate: false,
+                        desktop_wallpaper: false,
                     })
                 })?
             }
@@ -397,6 +413,7 @@ impl Service {
                         prepared,
                         event: Some(event),
                         activate: true,
+                        desktop_wallpaper: false,
                     })
                 })?
             }
@@ -987,11 +1004,16 @@ impl Service {
                         Ok(json!(self.interaction))
                     } else { Ok(page) }
                 },
-                PreparedWork::ThemeBackground{prepared,event,activate}=>{
+                PreparedWork::ThemeBackground{prepared,event,activate,desktop_wallpaper}=>{
                     if let Some(event)=event {self.validate_job_events(&[event])?;}
                     self.jobs.authorize_claimed_effect(ready)?;
                     let result=theme_backgrounds::commit(&self.root,prepared)?;
-                    if activate {self.activate_background(result)}else{Ok(result)}
+                    if desktop_wallpaper {
+                        let path = result["path"].as_str().ok_or_else(|| ApiError::new("wallpaper_error", "Managed wallpaper path is missing"))?;
+                        desktop_wallpaper::set_wallpaper(std::path::Path::new(path), &desktop_wallpaper::NativeWallpaperHost)
+                            .map_err(|e| ApiError::new("wallpaper_error", e))?;
+                        Ok(json!({"desktop_wallpaper_applied":true,"background":result}))
+                    } else if activate {self.activate_background(result)}else{Ok(result)}
                 },
                 PreparedWork::VideoBackground{prepared,event,activate}=>{
                     if let Some(event)=event {self.validate_job_events(&[event])?;}

@@ -774,7 +774,12 @@ impl Shelf {
         }
         if matches!(
             id.as_str(),
-            "cleanup" | "delete" | "copy_text" | "use_as_background" | "use_as_video_background"
+            "cleanup"
+                | "delete"
+                | "copy_text"
+                | "use_as_background"
+                | "use_as_desktop_wallpaper"
+                | "use_as_video_background"
         ) {
             if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
                 self.actions = false;
@@ -884,6 +889,13 @@ impl Shelf {
             self.message = tr(
                 "Изображение сохранено и установлено на фон",
                 "Image saved and set as background",
+            )
+            .into();
+        }
+        if r["desktop_wallpaper_applied"] == true {
+            self.message = tr(
+                "Изображение установлено как обои рабочего стола",
+                "Image set as desktop wallpaper",
             )
             .into();
         }

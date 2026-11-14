@@ -88,6 +88,7 @@ pub mod storage;
 pub mod table_view;
 pub mod updater;
 pub use api::*;
+pub mod desktop_wallpaper;
 pub mod emoji_fonts;
 pub mod emoji_render;
 pub mod overlay;
@@ -482,6 +483,21 @@ impl Service {
                 let prepared = theme_backgrounds::prepare_event(&event)?;
                 let result = theme_backgrounds::commit(&self.root, prepared)?;
                 self.activate_background(result)
+            }
+            Command::UseSelectedImageAsDesktopWallpaper => {
+                let event = self.selected_background_image()?;
+                let prepared = theme_backgrounds::prepare_event(&event)?;
+                self.validate_job_events(&[event])?;
+                let result = theme_backgrounds::commit(&self.root, prepared)?;
+                let path = result["path"].as_str().ok_or_else(|| {
+                    ApiError::new("wallpaper_error", "Managed wallpaper path is missing")
+                })?;
+                desktop_wallpaper::set_wallpaper(
+                    std::path::Path::new(path),
+                    &desktop_wallpaper::NativeWallpaperHost,
+                )
+                .map_err(|e| ApiError::new("wallpaper_error", e))?;
+                Ok(serde_json::json!({"desktop_wallpaper_applied": true, "background": result}))
             }
             Command::ImportThemeBackground { path } => theme_backgrounds::import(&self.root, &path),
             Command::ListThemeBackgrounds => theme_backgrounds::list(&self.root),
