@@ -42,7 +42,7 @@ Current source structure and1.5 contracts are listed below. Historical reviews d
 | Desktop wallpaper action / Windows COM adapter | `src/theme_backgrounds.rs`, `src/desktop_wallpaper.rs`, `src/theme_service.rs`, `src/actions.rs` |
 | Optional Wallpaper Engine video wallpaper action, silent remux and Desktop history | `src/wallpaper_engine.rs`, `src/desktop_assets.rs`, `src/desktop_projection.rs`, `src/actions.rs`, `src/bin/api_client.rs` |
 | Unified Desktop library (managed image/video backgrounds, independent of tab visibility) | `src/desktop_assets.rs`, `src/theme_backgrounds.rs`, `src/video_backgrounds.rs`, `src/bin/desktop_ui.rs`, `tests/desktop_assets_api.rs` |
-| Pods Unicode catalogue / virtual IDs / import into saved Pods | `src/pods.rs`, `src/pod_metadata.rs`, `src/interaction.rs`, `src/bin/pods_ui.rs`, `src/bin/category_divider.rs`, `tests/emoji_catalogue_api.rs`, [contract](pods.md) |
+| Pods Unicode catalogue / virtual IDs / import into saved Pods | `src/pods.rs`, `src/pod_metadata.rs`, `src/interaction.rs`, `src/bin/pods_ui.rs`, `src/bin/category_divider.rs`, `src/bin/emoji_categories_ui.rs`, `tests/emoji_catalogue_api.rs`, [contract](pods.md) |
 | Emoji font preferences / profile-local imports / private DirectWrite rendering | `src/emoji_fonts.rs`, `src/emoji_render.rs`, `tests/emoji_fonts_api.rs`, [contract](emoji-fonts.md) |
 | Native input adapter / action definitions and routing | `src/capture.rs`, `src/actions.rs` |
 | Clipboard signals / bounded retry API / hidden-window client (default backend) | `src/clipboard_listener.rs`, `src/capture_events.rs`, `src/bin/clipboard_events_ui.rs` |

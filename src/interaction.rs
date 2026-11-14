@@ -35,6 +35,7 @@ pub enum SelectionMode {
 #[derive(Default, Serialize)]
 pub struct Interaction {
     pub emoji_catalogue: bool,
+    pub emoji_category: Option<String>,
     pub pinned_only: bool,
     pub tag_filter: Option<String>,
     pub tag_slot_filter: Option<u8>,
@@ -72,6 +73,7 @@ impl Interaction {
         }
         if tab != ShelfTab::Pods {
             self.emoji_catalogue = false;
+            self.emoji_category = None;
         }
         self.tab = tab;
         if let Some(preferences) = self.tab_preferences.get(&tab) {

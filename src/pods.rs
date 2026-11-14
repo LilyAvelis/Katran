@@ -189,6 +189,7 @@ pub(crate) fn browse_emoji(
     query: &str,
     limit: u32,
     cursor: Option<&str>,
+    group: Option<&str>,
 ) -> crate::Result<serde_json::Value> {
     if !(1..=1000).contains(&limit) {
         return Err(crate::ApiError::new(
@@ -196,18 +197,35 @@ pub(crate) fn browse_emoji(
             "Expected limit 1..1000",
         ));
     }
-    let start = cursor
-        .map_or(Ok(0usize), |c| c.parse())
-        .map_err(|_| crate::ApiError::new("invalid_cursor", "Invalid emoji cursor"))?;
+    use sha2::{Digest, Sha256};
     let query = query.to_lowercase();
+    let digest = Sha256::digest(format!("{}\0{}", group.unwrap_or(""), query).as_bytes());
+    let scope = format!("{:x}", digest);
+    let start = if let Some(cursor) = cursor {
+        let (offset, cursor_scope) = cursor
+            .split_once(':')
+            .ok_or_else(|| crate::ApiError::new("invalid_cursor", "Invalid emoji cursor"))?;
+        if cursor_scope != &scope[..16] {
+            return Err(crate::ApiError::new(
+                "invalid_cursor",
+                "Emoji cursor belongs to another category or search",
+            ));
+        }
+        offset
+            .parse::<usize>()
+            .map_err(|_| crate::ApiError::new("invalid_cursor", "Invalid emoji cursor"))?
+    } else {
+        0
+    };
     let entries: Vec<_> = crate::pod_metadata::emoji_entries()
         .iter()
         .enumerate()
         .filter(|(_, entry)| {
-            entry.text.contains(&query)
-                || entry.name.to_lowercase().contains(&query)
-                || entry.group.to_lowercase().contains(&query)
-                || entry.subgroup.to_lowercase().contains(&query)
+            group.is_none_or(|g| entry.group == g)
+                && (entry.text.contains(&query)
+                    || entry.name.to_lowercase().contains(&query)
+                    || entry.group.to_lowercase().contains(&query)
+                    || entry.subgroup.to_lowercase().contains(&query))
         })
         .collect();
     if start > entries.len() {
@@ -227,6 +245,6 @@ pub(crate) fn browse_emoji(
         serde_json::json!({"id":EMOJI_ID_BASE - *index as i64,"kind":"text_fragment","text_preview":entry.text,"name":entry.name,"category":{"group":entry.group,"subgroup":entry.subgroup},"revision":"unicode-16.0","source":"emoji_catalogue","storage":"virtual","path":"","size":entry.text.len(),"available":true})
     }).collect();
     Ok(
-        serde_json::json!({"events":events,"dividers":dividers,"next_cursor":(end < entries.len()).then(|| end.to_string()),"unicode_version":"16.0","total":entries.len()}),
+        serde_json::json!({"events":events,"dividers":dividers,"next_cursor":(end < entries.len()).then(|| format!("{end}:{}", &scope[..16])),"unicode_version":"16.0","total":entries.len()}),
     )
 }

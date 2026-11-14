@@ -117,7 +117,12 @@ impl Service {
         if self.interaction.tab == crate::interaction::ShelfTab::Pods
             && self.interaction.emoji_catalogue
         {
-            return crate::pods::browse_emoji(query, limit, cursor);
+            return crate::pods::browse_emoji(
+                query,
+                limit,
+                cursor,
+                self.interaction.emoji_category.as_deref(),
+            );
         }
         if self.interaction.tab == crate::interaction::ShelfTab::All {
             return self

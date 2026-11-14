@@ -613,6 +613,27 @@ impl Service {
                 owner_window,
                 capture,
             } => self.toggle_resident_overlay(owner_window, capture),
+            Command::EmojiCategories => {
+                Ok(serde_json::json!({"groups":pod_metadata::emoji_groups()}))
+            }
+            Command::SetEmojiCategory { group } => {
+                if self.interaction.tab != interaction::ShelfTab::Pods
+                    || !self.interaction.emoji_catalogue
+                {
+                    return Err(ApiError::new("invalid_tab", "Emoji catalogue is not open"));
+                }
+                if group
+                    .as_ref()
+                    .is_some_and(|name| !pod_metadata::emoji_groups().contains(name))
+                {
+                    return Err(ApiError::new("invalid_category", "Unknown emoji category"));
+                }
+                if self.interaction.emoji_category != group {
+                    self.interaction.reset_context();
+                    self.interaction.emoji_category = group;
+                }
+                Ok(serde_json::json!(self.interaction))
+            }
             Command::SetEmojiCatalogue { enabled } => {
                 if self.interaction.tab != interaction::ShelfTab::Pods {
                     return Err(ApiError::new(
@@ -623,6 +644,7 @@ impl Service {
                 if enabled != self.interaction.emoji_catalogue {
                     self.interaction.reset_context();
                     self.interaction.emoji_catalogue = enabled;
+                    self.interaction.emoji_category = None;
                 }
                 Ok(serde_json::json!(self.interaction))
             }

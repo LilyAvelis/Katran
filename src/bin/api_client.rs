@@ -496,6 +496,11 @@ impl Shelf {
             cursor: None,
         });
         if let Some(events) = r["events"].as_array() {
+            self.pods_ui.category_total = if self.state["emoji_catalogue"] == true {
+                r["total"].as_u64()
+            } else {
+                None
+            };
             self.events = events.clone();
             self.next_cursor = r["next_cursor"].as_str().map(str::to_owned);
             self.loaded_query = self.query.clone();

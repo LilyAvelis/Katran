@@ -65,6 +65,10 @@ pub enum Command {
         owner_window: u64,
         capture: Option<crate::overlay::SummonReceipt>,
     },
+    EmojiCategories,
+    SetEmojiCategory {
+        group: Option<String>,
+    },
     SetEmojiCatalogue {
         enabled: bool,
     },

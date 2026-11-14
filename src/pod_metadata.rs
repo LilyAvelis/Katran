@@ -68,6 +68,18 @@ pub(crate) fn emoji_entries() -> &'static Vec<EmojiEntry> {
         entries
     })
 }
+pub(crate) fn emoji_groups() -> &'static Vec<String> {
+    static GROUPS: OnceLock<Vec<String>> = OnceLock::new();
+    GROUPS.get_or_init(|| {
+        let mut groups = Vec::new();
+        for entry in emoji_entries() {
+            if groups.last() != Some(&entry.group) {
+                groups.push(entry.group.clone());
+            }
+        }
+        groups
+    })
+}
 pub(crate) fn is_official_emoji(text: &str) -> bool {
     names().emoji.contains_key(text)
 }

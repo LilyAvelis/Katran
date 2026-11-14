@@ -15,6 +15,12 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct State {
     pub(super) selector_open: bool,
+    pub(super) category_open: bool,
+    pub(super) category_just_opened: bool,
+    pub(super) category_query: String,
+    pub(super) category_selected: usize,
+    pub(super) category_focus: bool,
+    pub(super) category_total: Option<u64>,
     sender: Option<SyncSender<Job>>,
     receiver: Option<Receiver<(Key, RenderResult)>>,
     pending: HashSet<Key>,

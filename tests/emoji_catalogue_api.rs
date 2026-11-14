@@ -278,3 +278,148 @@ fn range_selection_and_search_cross_category_dividers() {
             .all(|e| e["ok"] == true)
     );
 }
+
+#[test]
+fn category_filter_is_validated_and_pagination_is_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut api = Service::open(dir.path(), 1_000_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pods,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Pods,
+        },
+    );
+    call(&mut api, Command::SetEmojiCatalogue { enabled: true });
+    let categories = call(&mut api, Command::EmojiCategories);
+    assert_eq!(categories["groups"].as_array().unwrap().len(), 9);
+    let full = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    let stale_cursor = full["next_cursor"].as_str().unwrap().to_owned();
+    let id = full["events"][0]["id"].as_i64().unwrap();
+    call(&mut api, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut api,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let selected = call(
+        &mut api,
+        Command::SetEmojiCategory {
+            group: Some("Animals & Nature".into()),
+        },
+    );
+    assert_eq!(selected["emoji_category"], "Animals & Nature");
+    assert!(selected["selected"].as_array().unwrap().is_empty());
+    let bad = api.execute(Request {
+        api_version: 1,
+        request_id: "stale-page".into(),
+        command: Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: Some(stale_cursor),
+        },
+    });
+    assert_eq!(bad["error"]["code"], "invalid_cursor", "{bad}");
+    let mut cursor = None;
+    let mut count = 0;
+    loop {
+        let page = call(
+            &mut api,
+            Command::BrowseShelfSorted {
+                query: "".into(),
+                limit: 7,
+                cursor,
+            },
+        );
+        let entries = page["events"].as_array().unwrap();
+        assert!(
+            entries
+                .iter()
+                .all(|e| e["category"]["group"] == "Animals & Nature")
+        );
+        count += entries.len();
+        cursor = page["next_cursor"].as_str().map(str::to_owned);
+        if cursor.is_none() {
+            assert_eq!(count as u64, page["total"].as_u64().unwrap());
+            break;
+        }
+    }
+    assert!(count > 100);
+    let search = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "cat".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    assert!(search["total"].as_u64().unwrap() > 0);
+    assert!(
+        search["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["category"]["group"] == "Animals & Nature")
+    );
+    let invalid = api.execute(Request {
+        api_version: 1,
+        request_id: "invalid-group".into(),
+        command: Command::SetEmojiCategory {
+            group: Some("not real".into()),
+        },
+    });
+    assert_eq!(invalid["error"]["code"], "invalid_category");
+    call(
+        &mut api,
+        Command::SetEmojiCategory {
+            group: Some("People & Body".into()),
+        },
+    );
+    let mut cursor = None;
+    let mut people = std::collections::HashSet::new();
+    loop {
+        let page = call(
+            &mut api,
+            Command::BrowseShelfSorted {
+                query: "".into(),
+                limit: 1000,
+                cursor,
+            },
+        );
+        for event in page["events"].as_array().unwrap() {
+            assert_eq!(event["category"]["group"], "People & Body");
+            assert!(people.insert(event["id"].as_i64().unwrap()));
+        }
+        cursor = page["next_cursor"].as_str().map(str::to_owned);
+        if cursor.is_none() {
+            assert_eq!(people.len() as u64, page["total"].as_u64().unwrap());
+            break;
+        }
+    }
+    assert_eq!(people.len(), 2261);
+    call(&mut api, Command::SetEmojiCategory { group: None });
+    let reset = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    assert_eq!(reset["total"], 3781);
+}
