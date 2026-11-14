@@ -17,8 +17,8 @@ impl Service {
     }
 }
 
-/// Hash and delete the same opened Windows file. Replacement/writes are denied
-/// until FileDispositionInfo marks this handle, closing the pathname TOCTOU gap.
+/// Hold a verified original against replacement and writes while a move or
+/// recycle operation proceeds through the authorized handle.
 pub(crate) struct LockedOriginal {
     file: fs::File,
     #[cfg(not(windows))]
@@ -215,67 +215,9 @@ pub(crate) fn prepare_locked_original(
         path: path.into(),
     })
 }
-pub(crate) fn dispose_locked_original(original: LockedOriginal) -> Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
-        };
-        let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-        if unsafe {
-            SetFileInformationByHandle(
-                original.file.as_raw_handle(),
-                FileDispositionInfo,
-                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
-                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
-            )
-        } == 0
-        {
-            return Err(std::io::Error::last_os_error().into());
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        drop(original.file);
-        fs::remove_file(original.path)?;
-    }
-    Ok(())
-}
-#[cfg(all(test, windows))]
-fn remove_locked_original_with_hook(
-    path: &Path,
-    folder: &Path,
-    expected: &str,
-    before_disposition: impl FnOnce(),
-) -> Result<()> {
-    let original = prepare_locked_original(path, folder, expected)?;
-    before_disposition();
-    dispose_locked_original(original)
-}
-
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
-    #[test]
-    fn opened_original_cannot_be_replaced_or_written_between_hash_and_disposition() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("original.png");
-        fs::write(&path, b"verified synthetic original").unwrap();
-        let replacement = temp.path().join("replacement.png");
-        fs::write(&replacement, b"preserve replacement").unwrap();
-        let hash = preview::content_hash(&path).unwrap();
-        let folder = temp.path().canonicalize().unwrap();
-        remove_locked_original_with_hook(&path, &folder, &hash, || {
-            assert!(fs::write(&path, b"changed").is_err());
-            assert!(fs::remove_file(&path).is_err());
-            assert!(fs::rename(&replacement, &path).is_err());
-        })
-        .unwrap();
-        assert!(!path.exists());
-        assert_eq!(fs::read(replacement).unwrap(), b"preserve replacement");
-    }
-
     #[test]
     fn handle_rename_preserves_identity_and_never_replaces_a_file() {
         let temp = tempfile::tempdir().unwrap();

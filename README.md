@@ -59,6 +59,10 @@ uses the Service thread, so transfers are not fully nonblocking. Synthetic
 debug medians (1/16/64 MiB: 48/458/2,078 ms) are not release or real-Recycle-Bin
 measurements. See [the development map](docs/development.md) for the remaining
 worker ownership constraint.
+The local source now recycles verified external originals during moves and
+reports any recovery location per item; direct deletion of those originals was
+removed from this path. Synthetic fake-Trash API checks passed 2/2, with no
+user files involved.
 
 Prepare an updated build without overwriting a running executable:
 

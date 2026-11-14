@@ -41,6 +41,10 @@ evidence is limited to the stop fixture, and does not close the spawn-to-assign
 window.
 Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Pods has a read-only, fully-qualified Unicode 16 emoji catalogue grouped from the bundled official emoji-test file; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. The catalogue category picker uses Shift+physical backslash only in the full catalogue; its session-only group filter must remain scoped to search and pagination. See `docs/pods.md`.
+External-original moves from Downloads, Screenshots and explicitly permitted
+references use the verified, handle-bound recycle path. `finish_cut` reports a
+per-item recycle receipt and recovery location; it must not directly dispose
+of the locked original. The final recycle/cleanup stage remains Service-bound.
 Catalogue emoji use the ordinary revision-checked copy, previous-window paste and native drag paths. Ctrl+C additionally imports them into saved Pods; Enter uses the ordinary previous-window paste flow, and all-Pods native drag offers Unicode text alongside the existing `pods.txt` file. No AI search command, UI or model belongs in this public source tree; Katran E is a separate private distribution.
 Local unreleased work after 3.4.1 adds the Desktop background library; see
 `docs/releases/next.md` before changing background storage or tab routing.

@@ -48,6 +48,12 @@ local Wallpaper Engine and decoder-stop changes. No new release is installed.
   nonblocking. Synthetic debug medians were 48 ms (1 MiB), 458 ms (16 MiB) and
   2,078 ms (64 MiB); they are not release or real-Recycle-Bin measurements.
   Worker ownership still needs an owner-job lease and ready-commit deferral.
+  Transfer completion now sends verified Downloads, Screenshots and explicitly
+  movable reference originals through the existing handle-bound recycle path
+  instead of direct file disposition. Its per-item API result records recycle
+  and recovery details; the UI shows a recovery path when needed. Synthetic
+  fake-Trash API tests passed 2/2 across direct/job moves and failure modes,
+  and the focused UI check passed 1/1. No real originals were used.
 - **N2/N3/N4 — managed media:** media bytes and sidecars publish from staged
   files; a pending receipt is recorded before Wallpaper Engine apply, with
   active and pending assets protected from deletion. Ambiguous delivery returns
@@ -64,7 +70,10 @@ local Wallpaper Engine and decoder-stop changes. No new release is installed.
   public source tree; no model or implementation details are documented here.
 
 **Still open:** N1 final `safe_recycle` / `finish_cut` still runs in Service;
-owner-job lease and ready-commit deferral remain needed. The A9 handoff check
+owner-job lease and ready-commit deferral remain needed. Moving this effect to
+a worker also requires cross-process protection for destructive file paths and
+durable intent/outcome reconciliation; a SQLite writer lock alone is insufficient.
+The A9 handoff check
 had zero open findings before the latest E UI/runtime work and needs a final
 recheck after source freeze. The private E runtime manifest contract has
 synthetic checks 3/3; real-model execution, Python environment portability and

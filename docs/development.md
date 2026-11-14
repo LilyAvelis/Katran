@@ -30,6 +30,11 @@ installed public 3.4.1 and E runtime `c1555b47dc04` are pre-v12; no real user DB
 has been migrated.
 
 Folder transfer/copy/import/paste preparation now runs through background jobs.
+Transfer completion uses handle-bound recycling for verified Downloads,
+Screenshots and explicitly movable reference originals. `finish_cut` returns
+per-item recycle/recovery details; `tests/transfer_recycle_api.rs` covers direct
+and job moves with synthetic fake Trash. Do not use direct file disposition for
+these originals.
 The final `safe_recycle` / `finish_cut` stage remains Service-bound; do not claim
 the entire operation is nonblocking. Synthetic debug medians were 48 ms for
 1 MiB, 458 ms for 16 MiB and 2,078 ms for 64 MiB; these are not release or real
@@ -41,6 +46,10 @@ divider handling now omits empty subgroup labels. Avilon Windows decoder stop
 closes an assigned process tree; its stop fixture does not prove containment
 before process assignment. Keep that process-spawn window separate from the
 Folder job ownership requirement.
+An in-memory lease or SQLite writer transaction alone cannot guard a second
+Service's file deletion, and a DB rollback cannot undo a completed file effect.
+Any worker move needs cross-process effect coordination and durable recovery
+before it can replace this Service-bound boundary.
 
 | Responsibility | Current owner files |
 | --- | --- |
