@@ -945,11 +945,6 @@ impl Service {
             Command::MergeText { items, separator } => self.merge_text(&items, &separator),
             Command::CopyText { items, separator } => self.copy_text(&items, &separator),
             Command::CopySelectedObjects => {
-                if self.interaction.tab == interaction::ShelfTab::Pods
-                    && self.interaction.emoji_catalogue
-                {
-                    return self.dispatch(Command::CopyEmojiSelectionToPods);
-                }
                 let items = self.selected_refs()?;
                 self.dispatch(Command::CopySmart { items })
             }

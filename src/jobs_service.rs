@@ -256,12 +256,6 @@ impl Service {
                 separator: "\n\n".into(),
             };
         }
-        if matches!(command, Command::CopySelectedObjects)
-            && self.interaction.tab == interaction::ShelfTab::Pods
-            && self.interaction.emoji_catalogue
-        {
-            command = Command::CopyEmojiSelectionToPods;
-        }
         if matches!(command, Command::CopySelectedObjects) {
             command = Command::CopySmart {
                 items: self.selected_refs()?,

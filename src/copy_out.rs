@@ -88,6 +88,7 @@ fn active_plans() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf
 pub struct Plan {
     pub paths: Vec<PathBuf>,
     pub failures: Vec<ItemFailure>,
+    pub(crate) text_payload: Option<String>,
     directory: PathBuf,
     previous: Vec<PathBuf>,
     published: Cell<bool>,
@@ -96,19 +97,20 @@ pub struct Plan {
 impl Plan {
     /// Replace a fully verified link-only snapshot batch with one owned UTF-8 file.
     pub(crate) fn group_links(&mut self, quota: u64) -> Result<(), String> {
-        self.group_text(quota, "links.txt", "\n", |text| {
+        self.group_text(quota, "links.txt", "\n", false, |text| {
             crate::link_fragments::recognize(text).is_some()
         })
     }
     /// Replace a fully verified Pods-only batch with one exact UTF-8 sequence.
     pub(crate) fn group_pods(&mut self, quota: u64) -> Result<(), String> {
-        self.group_text(quota, "pods.txt", "", crate::pods::is_pod)
+        self.group_text(quota, "pods.txt", "", true, crate::pods::is_pod)
     }
     fn group_text(
         &mut self,
         quota: u64,
         filename: &str,
         separator: &str,
+        offer_text: bool,
         valid: impl Fn(&str) -> bool,
     ) -> Result<(), String> {
         use std::io::Write;
@@ -174,13 +176,17 @@ impl Plan {
             .create_new(true)
             .open(&destination)
             .map_err(|e| e.to_string())?;
-        file.write_all(urls.join(separator).as_bytes())
+        let text = urls.join(separator);
+        file.write_all(text.as_bytes())
             .and_then(|_| file.sync_all())
             .map_err(|e| e.to_string())?;
         for path in &self.paths {
             std::fs::remove_file(path).map_err(|e| e.to_string())?;
         }
         self.paths = vec![destination.canonicalize().map_err(|e| e.to_string())?];
+        if offer_text {
+            self.text_payload = Some(text);
+        }
         Ok(())
     }
     /// An external application may read the path asynchronously or keep editing
@@ -313,6 +319,7 @@ pub fn prepare_with_budget(
     let mut plan = Plan {
         paths: vec![],
         failures: vec![],
+        text_payload: None,
         directory: directory.clone(),
         previous,
         published: Cell::new(false),
@@ -321,6 +328,25 @@ pub fn prepare_with_budget(
     for (index, event) in events.iter().enumerate() {
         let mut attempted_path = None;
         let result = (|| -> Result<PathBuf, String> {
+            if crate::pods::is_emoji_id(event.id) {
+                use std::io::Write;
+                let text = crate::text_fragments::read_text_event(event).map_err(|e| e.message)?;
+                if text.len() as u64 > quota - used {
+                    return Err("Export quota exceeded".into());
+                }
+                let destination = directory.join(format!("emoji-{index}.txt"));
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&destination)
+                    .map_err(|e| e.to_string())?;
+                attempted_path = Some(destination.clone());
+                file.write_all(text.as_bytes())
+                    .and_then(|_| file.sync_all())
+                    .map_err(|e| e.to_string())?;
+                used += text.len() as u64;
+                return destination.canonicalize().map_err(|e| e.to_string());
+            }
             if !event.path.is_file() {
                 return Err("File unavailable".into());
             }

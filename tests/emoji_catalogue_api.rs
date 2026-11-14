@@ -132,7 +132,7 @@ fn full_catalogue_is_read_only_and_copies_selected_entries_to_pods() {
         command: Command::TogglePins { ids: two.clone() },
     });
     assert_eq!(pin["error"]["code"], "read_only");
-    let result = call(&mut api, Command::CopySelectedObjects);
+    let result = call(&mut api, Command::CopyEmojiSelectionToPods);
     assert!(
         result["items"]
             .as_array()
@@ -268,7 +268,7 @@ fn range_selection_and_search_cross_category_dividers() {
         },
     );
     assert_eq!(selection["selected"].as_array().unwrap().len(), 2);
-    let copied = call(&mut api, Command::CopySelectedObjects);
+    let copied = call(&mut api, Command::CopyEmojiSelectionToPods);
     assert_eq!(copied["items"].as_array().unwrap().len(), 2);
     assert!(
         copied["items"]
@@ -422,4 +422,281 @@ fn category_filter_is_validated_and_pagination_is_scoped() {
         },
     );
     assert_eq!(reset["total"], 3781);
+}
+
+#[derive(Default)]
+struct OutputState {
+    text: String,
+    sequence: u32,
+    sent: usize,
+    drag_text: Option<String>,
+    drag_files: Vec<String>,
+    fail_copy: bool,
+}
+struct Clipboard(std::sync::Arc<std::sync::Mutex<OutputState>>);
+impl katran::text_fragments::ClipboardSink for Clipboard {
+    fn write(&self, text: &str) -> katran::Result<u32> {
+        let mut state = self.0.lock().unwrap();
+        if state.fail_copy {
+            return Err(katran::ApiError {
+                code: "synthetic_copy_failure".into(),
+                message: "clipboard unavailable".into(),
+            });
+        }
+        state.text = text.into();
+        state.sequence = 42;
+        Ok(42)
+    }
+}
+struct Overlay(std::sync::Arc<std::sync::Mutex<OutputState>>);
+impl katran::overlay::Host for Overlay {
+    fn foreground(&mut self) -> katran::overlay::Result<u64> {
+        Ok(7)
+    }
+    fn identity(&mut self, hwnd: u64) -> katran::overlay::Result<katran::overlay::Target> {
+        Ok(katran::overlay::Target {
+            hwnd,
+            pid: hwnd as u32,
+            process_started: hwnd,
+        })
+    }
+    fn work_area(&mut self, _: u64) -> katran::overlay::Result<katran::overlay::WorkArea> {
+        Ok(katran::overlay::WorkArea {
+            left: 0,
+            top: 0,
+            right: 100,
+            bottom: 100,
+        })
+    }
+    fn wait_modifiers_released(&mut self) -> katran::overlay::Result<()> {
+        Ok(())
+    }
+    fn activate(&mut self, _: u64) -> katran::overlay::Result<()> {
+        Ok(())
+    }
+    fn send_paste(
+        &mut self,
+        _: katran::overlay::Target,
+        sequence: u32,
+    ) -> katran::overlay::Result<()> {
+        let mut state = self.0.lock().unwrap();
+        assert_eq!(sequence, state.sequence);
+        state.sent += 1;
+        Ok(())
+    }
+}
+struct Drag(std::sync::Arc<std::sync::Mutex<OutputState>>);
+impl katran::drag_out::Runner for Drag {
+    fn run(
+        &mut self,
+        _: &[std::path::PathBuf],
+        _: Option<&katran::drag_out::Preview>,
+        _: u64,
+    ) -> Result<katran::drag_out::Outcome, String> {
+        panic!("drag must include Unicode text")
+    }
+    fn run_with_text(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        _: Option<&katran::drag_out::Preview>,
+        _: u64,
+        text: Option<&str>,
+    ) -> Result<katran::drag_out::Outcome, String> {
+        let mut state = self.0.lock().unwrap();
+        state.drag_text = text.map(str::to_owned);
+        state.drag_files = paths
+            .iter()
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect();
+        Ok(katran::drag_out::Outcome {
+            dropped: true,
+            warnings: vec![],
+        })
+    }
+}
+#[test]
+fn catalogue_copy_paste_and_drag_share_exact_unicode_selection() {
+    use katran::{
+        SelectionRef,
+        overlay::{SummonReceipt, Target, WorkArea},
+    };
+    use std::sync::{Arc, Mutex};
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 1_000_000).unwrap();
+    let state = Arc::new(Mutex::new(OutputState::default()));
+    api.set_text_clipboard_sink(Box::new(Clipboard(state.clone())));
+    api.set_overlay_host(Box::new(Overlay(state.clone())));
+    api.set_drag_runner(Box::new(Drag(state.clone())));
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pods,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Pods,
+        },
+    );
+    call(&mut api, Command::SetEmojiCatalogue { enabled: true });
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 2,
+            cursor: None,
+        },
+    );
+    let items: Vec<SelectionRef> = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| SelectionRef {
+            id: event["id"].as_i64().unwrap(),
+            revision: event["revision"].as_str().unwrap().into(),
+        })
+        .collect();
+    let expected: String = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["text_preview"].as_str().unwrap())
+        .collect();
+    call(
+        &mut api,
+        Command::SetVisible {
+            ids: items.iter().map(|e| e.id).collect(),
+        },
+    );
+    for (index, item) in items.iter().enumerate() {
+        call(
+            &mut api,
+            Command::Select {
+                id: item.id,
+                mode: if index == 0 {
+                    SelectionMode::Replace
+                } else {
+                    SelectionMode::Toggle
+                },
+            },
+        );
+    }
+    let copied = call(&mut api, Command::CopySelectedObjects);
+    assert_eq!(copied["text_copied"], true);
+    assert_eq!(state.lock().unwrap().text, expected);
+    call(
+        &mut api,
+        Command::SummonCapturedOverlay {
+            owner_window: 8,
+            capture: SummonReceipt {
+                previous: Target {
+                    hwnd: 7,
+                    pid: 7,
+                    process_started: 7,
+                },
+                work_area: WorkArea {
+                    left: 0,
+                    top: 0,
+                    right: 100,
+                    bottom: 100,
+                },
+            },
+        },
+    );
+    call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let result = call(&mut api, Command::CompletePastePrevious { owner_window: 8 });
+        if result["state"] != "copying" {
+            assert_eq!(result["state"], "sent");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(state.lock().unwrap().sent, 1);
+    assert_eq!(state.lock().unwrap().text, expected);
+    let ready = call(
+        &mut api,
+        Command::DragEventsChecked {
+            items: items.clone(),
+        },
+    );
+    call(
+        &mut api,
+        Command::RunPreparedDrag {
+            token: ready["drag_token"].as_str().unwrap().into(),
+            owner_window: 0,
+        },
+    );
+    let result = state.lock().unwrap();
+    assert_eq!(result.drag_text.as_deref(), Some(expected.as_str()));
+    assert_eq!(result.drag_files, vec![expected]);
+    drop(result);
+    // A failed clipboard publication must never send a paste to the target.
+    state.lock().unwrap().fail_copy = true;
+    call(
+        &mut api,
+        Command::SummonCapturedOverlay {
+            owner_window: 8,
+            capture: SummonReceipt {
+                previous: Target {
+                    hwnd: 7,
+                    pid: 7,
+                    process_started: 7,
+                },
+                work_area: WorkArea {
+                    left: 0,
+                    top: 0,
+                    right: 100,
+                    bottom: 100,
+                },
+            },
+        },
+    );
+    call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let response = api.execute(Request {
+            api_version: 1,
+            request_id: "failed-paste".into(),
+            command: Command::CompletePastePrevious { owner_window: 8 },
+        });
+        if response["result"]["state"] != "copying" {
+            assert_eq!(response["error"]["code"], "copy_failed");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(state.lock().unwrap().sent, 1);
+    state.lock().unwrap().fail_copy = false;
+    let previous_text = state.lock().unwrap().text.clone();
+    let mut stale = items[0].clone();
+    stale.revision = "stale".into();
+    let stale_copy = api.execute(Request {
+        api_version: 1,
+        request_id: "stale-copy".into(),
+        command: Command::CopySmart {
+            items: vec![stale.clone()],
+        },
+    });
+    assert_eq!(stale_copy["ok"], false);
+    assert_eq!(state.lock().unwrap().text, previous_text);
+    let reply = api.execute(Request {
+        api_version: 1,
+        request_id: "stale".into(),
+        command: Command::DragEventsChecked { items: vec![stale] },
+    });
+    assert_eq!(reply["ok"], false);
+    let saved = call(&mut api, Command::CopyEmojiSelectionToPods);
+    assert!(
+        saved["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["ok"] == true)
+    );
 }

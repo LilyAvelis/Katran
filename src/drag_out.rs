@@ -19,6 +19,15 @@ pub trait Runner: Send {
         preview: Option<&Preview>,
         owner_window: u64,
     ) -> Result<Outcome, String>;
+    fn run_with_text(
+        &mut self,
+        paths: &[PathBuf],
+        preview: Option<&Preview>,
+        owner_window: u64,
+        _text: Option<&str>,
+    ) -> Result<Outcome, String> {
+        self.run(paths, preview, owner_window)
+    }
 }
 pub struct NativeRunner;
 impl Runner for NativeRunner {
@@ -33,12 +42,29 @@ impl Runner for NativeRunner {
         }
         #[cfg(windows)]
         {
-            native::run(paths, preview, owner_window)
+            native::run(paths, preview, owner_window, None)
         }
         #[cfg(not(windows))]
         {
             let _ = (preview, owner_window);
             Err("Native drag requires Windows".into())
+        }
+    }
+    fn run_with_text(
+        &mut self,
+        paths: &[PathBuf],
+        preview: Option<&Preview>,
+        owner_window: u64,
+        text: Option<&str>,
+    ) -> Result<Outcome, String> {
+        #[cfg(windows)]
+        {
+            native::run(paths, preview, owner_window, text)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = text;
+            self.run(paths, preview, owner_window)
         }
     }
 }
@@ -47,10 +73,13 @@ pub(crate) struct RunnerSink<'a> {
     pub runner: &'a mut dyn Runner,
     pub preview: Option<&'a Preview>,
     pub owner_window: u64,
+    pub text: Option<&'a str>,
 }
 impl crate::copy_out::ClipboardSink for RunnerSink<'_> {
     fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
-        let result = self.runner.run(paths, self.preview, self.owner_window)?;
+        let result =
+            self.runner
+                .run_with_text(paths, self.preview, self.owner_window, self.text)?;
         if result.dropped {
             Ok((0, result.warnings))
         } else {
@@ -111,7 +140,7 @@ mod native {
             }
         }
     }
-    fn build_data(paths: &[PathBuf]) -> Result<IDataObject, String> {
+    fn build_data(paths: &[PathBuf], text: Option<&str>) -> Result<IDataObject, String> {
         unsafe {
             let mut items = Items(Vec::new());
             for path in paths {
@@ -137,13 +166,63 @@ mod native {
                 .and_then(|items| items.BindToHandler(None, &BHID_DataObject))
                 .map_err(|e| e.to_string())?;
 
+            if let Some(text) = text {
+                add_unicode_text(&data, text)?;
+            }
             Ok(data)
         }
+    }
+    fn add_unicode_text(data: &IDataObject, text: &str) -> Result<(), String> {
+        use windows::Win32::System::Com::{
+            DVASPECT_CONTENT, FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+        };
+        use windows_sys::Win32::{
+            Foundation::GlobalFree,
+            System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        };
+        if text.contains('\0') {
+            return Err("Drag text cannot contain NUL".into());
+        }
+        let words: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        let bytes = words.len().checked_mul(2).ok_or("Drag text is too large")?;
+        unsafe {
+            let handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            if handle.is_null() {
+                return Err("Could not allocate drag text".into());
+            }
+            let memory = GlobalLock(handle);
+            if memory.is_null() {
+                GlobalFree(handle);
+                return Err("Could not lock drag text".into());
+            }
+            std::ptr::copy_nonoverlapping(words.as_ptr(), memory.cast::<u16>(), words.len());
+            GlobalUnlock(handle);
+            let format = FORMATETC {
+                cfFormat: 13,
+                ptd: std::ptr::null_mut(),
+                dwAspect: DVASPECT_CONTENT.0,
+                lindex: -1,
+                tymed: TYMED_HGLOBAL.0 as u32,
+            };
+            let medium = STGMEDIUM {
+                tymed: TYMED_HGLOBAL.0 as u32,
+                u: STGMEDIUM_0 {
+                    hGlobal: windows::Win32::Foundation::HGLOBAL(handle),
+                },
+                pUnkForRelease: std::mem::ManuallyDrop::new(None),
+            };
+            if let Err(error) = data.SetData(&format, &medium, true) {
+                GlobalFree(handle);
+                return Err(format!("Cannot attach drag text: {error}"));
+            }
+        }
+        Ok(())
     }
     pub fn run(
         paths: &[PathBuf],
         preview: Option<&super::Preview>,
         owner_window: u64,
+        text: Option<&str>,
     ) -> Result<super::Outcome, String> {
         unsafe {
             use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -173,7 +252,7 @@ mod native {
             }
             OleInitialize(None).map_err(|e| e.to_string())?;
             let _apartment = Apartment;
-            let data = build_data(paths)?;
+            let data = build_data(paths, text)?;
             let mut warnings = Vec::new();
             if let Some(preview) = preview
                 && let Err(error) = super::drag_image::attach(&data, preview)
@@ -206,8 +285,41 @@ mod native {
         use super::*;
         #[test]
         fn ownerless_native_call_is_rejected_before_any_drag_loop() {
-            let error = run(&[], None, 0).err().unwrap();
+            let error = run(&[], None, 0, None).err().unwrap();
             assert!(error.contains("owner window thread"));
+        }
+        #[test]
+        fn shell_payload_offers_unicode_text_and_file_together() {
+            use windows::Win32::System::{
+                Com::{DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL},
+                Ole::ReleaseStgMedium,
+            };
+            use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+            let root = tempfile::tempdir().unwrap();
+            let file = root.path().join("pods.txt");
+            std::fs::write(&file, "🐄🇰🇿").unwrap();
+            unsafe {
+                OleInitialize(None).unwrap();
+                let _guard = Apartment;
+                let data = build_data(&[file], Some("🐄🇰🇿")).unwrap();
+                let format = |id| FORMATETC {
+                    cfFormat: id,
+                    ptd: std::ptr::null_mut(),
+                    dwAspect: DVASPECT_CONTENT.0,
+                    lindex: -1,
+                    tymed: TYMED_HGLOBAL.0 as u32,
+                };
+                data.QueryGetData(&format(15)).ok().unwrap();
+                data.QueryGetData(&format(13)).ok().unwrap();
+                let mut medium = data.GetData(&format(13)).unwrap();
+                let raw = medium.u.hGlobal.0;
+                let ptr = GlobalLock(raw).cast::<u16>();
+                assert!(!ptr.is_null());
+                let expected: Vec<u16> = "🐄🇰🇿".encode_utf16().chain(Some(0)).collect();
+                assert_eq!(std::slice::from_raw_parts(ptr, expected.len()), expected);
+                GlobalUnlock(raw);
+                ReleaseStgMedium(&mut medium);
+            }
         }
         #[test]
         fn shell_payload_contains_group_without_touching_clipboard() {
@@ -227,7 +339,7 @@ mod native {
             unsafe {
                 OleInitialize(None).unwrap();
                 let _guard = Apartment;
-                let data = build_data(&paths).unwrap();
+                let data = build_data(&paths, None).unwrap();
                 let format = FORMATETC {
                     cfFormat: 15,
                     ptd: std::ptr::null_mut(),

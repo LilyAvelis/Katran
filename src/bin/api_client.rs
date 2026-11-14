@@ -572,7 +572,15 @@ impl Shelf {
     }
     pub(super) fn copy_request(&mut self, ctx: &egui::Context) {
         if self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true {
-            let result = self.call(Command::CopySelectedObjects);
+            if self.job.is_some() {
+                self.message = tr(
+                    "Дождитесь завершения текущей операции",
+                    "Wait for the current operation to finish",
+                )
+                .into();
+                return;
+            }
+            let result = self.call(Command::CopyEmojiSelectionToPods);
             if let Some(items) = result["items"].as_array() {
                 let copied = items.iter().filter(|item| item["ok"] == true).count();
                 let failed = items.len() - copied;
@@ -581,6 +589,9 @@ impl Shelf {
                 } else {
                     format!("Добавлено в Pods: {copied}; ошибок: {failed}")
                 };
+                if failed == 0 {
+                    self.start_job(Command::CopySelectedObjects, false, ctx.clone());
+                }
             }
             return;
         }

@@ -102,6 +102,12 @@ impl Service {
             if event.kind != crate::EventKind::TextFragment {
                 return Ok(false);
             }
+            if crate::pods::is_emoji_id(item.id) {
+                if !crate::pods::is_pod(&crate::text_fragments::read_text_event(&event)?) {
+                    return Ok(false);
+                }
+                continue;
+            }
             let content: String = self.db.query_row(
                 "SELECT c.content FROM text_fragments t JOIN events e ON e.id=t.event_id JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=?1",
                 [item.id], |row| row.get(0),

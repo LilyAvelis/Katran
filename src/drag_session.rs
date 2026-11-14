@@ -162,6 +162,7 @@ impl Service {
             runner: self.drag_runner.as_mut(),
             preview: prepared.preview.as_ref(),
             owner_window,
+            text: prepared.plan.text_payload.as_deref(),
         };
         let result = copy_out::commit(&prepared.plan, &mut sink);
         if let Some(log) = &self.diagnostics {

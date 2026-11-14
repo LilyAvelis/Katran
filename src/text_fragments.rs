@@ -89,6 +89,23 @@ pub(crate) fn read_text_event(event: &Event) -> Result<String> {
     if event.kind != crate::EventKind::TextFragment {
         return Err(ApiError::new("not_text", "Item is not a text fragment"));
     }
+    if crate::pods::is_emoji_id(event.id) {
+        let expected = crate::pods::emoji_event(event.id)?;
+        if event.revision != expected.revision
+            || event.text_preview != expected.text_preview
+            || event.source != expected.source
+            || event.storage != expected.storage
+            || event.path != expected.path
+        {
+            return Err(ApiError::new(
+                "source_changed",
+                "Emoji catalogue entry changed",
+            ));
+        }
+        return expected
+            .text_preview
+            .ok_or_else(|| ApiError::new("not_text", "Emoji text is missing"));
+    }
     crate::open_file::validate(event)?;
     let mut bytes = Vec::new();
     std::fs::File::open(&event.path)?

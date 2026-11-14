@@ -237,7 +237,7 @@ Afio UI/components and clipboard conventions are reused under the retained
 
 Ctrl+Shift+Left/Right moves between visible categories in saved order and exits pinned, including at the ends. It never enters Folder; use Tab for Folder. Tab is routed before widget focus traversal when returning from another application; search editing and dialogs retain their own keyboard focus.
 
-Optional Pods captures emoji and symbol-only content, deduplicates it and renders it in color. Local unreleased work also adds a read-only Unicode 16 emoji catalogue with category filtering; see [Pods controls](docs/pods.md). [Classification, limits and graphics attribution](docs/pods.md). Settings → General can assign a global summon chord. Enter pastes the selection into the previous application; Alt+Enter opens the selected item. [Summon, residency, quit and Windows limits](docs/overlay.md).
+Optional Pods captures emoji and symbol-only content, deduplicates it and renders it in color. Local unreleased work also adds a read-only Unicode 16 emoji catalogue with category filtering. Ctrl+C adds selected catalogue emoji to saved Pods and copies them; Enter pastes into the previous application, and drag-out offers text and a pods.txt file. See [Pods controls, classification and graphics attribution](docs/pods.md). Settings → General can assign a global summon chord. Alt+Enter opens the selected item. [Summon, residency, quit and Windows limits](docs/overlay.md).
 
 Resident mode: Katran has a system-tray icon with Show / Hide / Quit. The assigned global chord shows Katran from another app and hides it when Katran is active. Closing the resident window hides it; Quit exits. No startup registration is installed.
 

@@ -879,7 +879,7 @@ impl Shelf {
                                         criterion.as_deref().unwrap_or(""),
                                         tag_name
                                     ));
-                                    if response.drag_started() && self.state["emoji_catalogue"] != true {
+                                    if response.drag_started() {
                                         if !selected {
                                             self.state = self.call(Command::Select {
                                                 id,
