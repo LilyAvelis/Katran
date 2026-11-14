@@ -127,6 +127,12 @@ fn selected_desktop_image_uses_existing_background_action() {
         },
     );
     let id = page["events"][0]["id"].as_i64().unwrap();
+    let mut event: katran::Event = serde_json::from_value(page["events"][0].clone()).unwrap();
+    assert_eq!(event.name, "portrait");
+    assert!(katran::file_types::has_internal_preview(&event));
+    // A path extension alone must not broaden external reference behavior.
+    event.id = 1;
+    assert!(!katran::file_types::has_internal_preview(&event));
     call(&mut service, Command::SetVisible { ids: vec![id] });
     call(
         &mut service,
@@ -135,6 +141,9 @@ fn selected_desktop_image_uses_existing_background_action() {
             mode: SelectionMode::Replace,
         },
     );
+    assert_eq!(call(&mut service, Command::TogglePreview)["preview"], id);
+    call(&mut service, Command::PreviewImage { id, max_edge: 64 });
+    call(&mut service, Command::ClosePreview);
     let result = call(&mut service, Command::UseSelectedImageAsBackground);
     assert_eq!(result["background_applied"], true);
 }

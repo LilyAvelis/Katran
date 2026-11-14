@@ -8,6 +8,10 @@ pub fn has_internal_preview(event: &crate::Event) -> bool {
             | crate::EventKind::TableFragment
     ) || is_markdown(Path::new(&event.name))
         || is_native_image(Path::new(&event.name))
+        // Desktop labels preserve the original name, which may lack an extension.
+        // Only the reserved managed-asset projection may use its path here.
+        || (crate::desktop_projection::is_desktop_id(event.id)
+            && is_native_image(&event.path))
 }
 pub fn is_markdown(path: &Path) -> bool {
     path.extension()
