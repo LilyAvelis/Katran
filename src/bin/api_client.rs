@@ -927,8 +927,8 @@ impl Shelf {
         }
         if r["video_desktop_wallpaper_requested"] == true {
             self.message = tr(
-                "Видео передано Wallpaper Engine",
-                "Video sent to Wallpaper Engine",
+                "Запрос передан Wallpaper Engine; проверьте рабочий стол",
+                "Request sent to Wallpaper Engine; check the desktop",
             )
             .into();
         }

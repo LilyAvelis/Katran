@@ -34,15 +34,18 @@ names/paths are passed as separate arguments without a command shell.
 is a separate command from `UseSelectedVideoAsBackground`: it sends one selected
 video from Desktop, Folder, Downloads, or Files to Wallpaper Engine. Its Actions
 entry is `use_as_video_desktop_wallpaper`. The selection's content revision is
-checked before dispatch. This command does not import or copy the video into
-Katran; Wallpaper Engine opens the original absolute path, which must remain
-available.
+checked before dispatch. Katran keeps an unchanged, durable copy under
+`%LOCALAPPDATA%/Katran/WallpaperEngine/` with an ASCII file path, because
+Wallpaper Engine can misread non-ASCII paths passed through its CLI. The source
+file is not changed and need not remain in place after the copy is made. Copies
+are not yet cleaned up automatically; if Local AppData itself has a non-ASCII
+path, the command returns an explicit error.
 
 Wallpaper Engine is optional, but must already be installed and running.
 Katran finds the running `wallpaper32.exe` or `wallpaper64.exe` and invokes its
 official CLI with `-control openWallpaper -file <absolute path>`. A successful
 API response is `{video_desktop_wallpaper_requested:true}`: it means the CLI
-accepted the request, not that the video is visibly rendered on the desktop.
+process returned success, not that the video is visibly rendered on the desktop.
 The current CLI handoff targets the first monitor.
 This is Wallpaper Engine video playback, not the Windows static-image wallpaper
 command (`UseSelectedImageAsDesktopWallpaper`).

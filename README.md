@@ -26,8 +26,8 @@ users upgrading through the in-app updater can prepare them explicitly in
 Settings → Themes → Video background. No video is downloaded automatically.
 With Wallpaper Engine installed and running, Actions can send one selected video
 from Desktop, Folder, Downloads or Files to it as a Windows video wallpaper.
-Wallpaper Engine applies the video to its first monitor by default; the source
-file must remain available at its original path.
+Wallpaper Engine applies the video to its first monitor by default. Katran
+keeps a separate durable copy for it, so the source may later move or disappear.
 
 Prepare an updated build without overwriting a running executable:
 

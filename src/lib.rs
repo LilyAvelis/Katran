@@ -487,7 +487,7 @@ impl Service {
             }
             Command::UseSelectedVideoAsDesktopWallpaper => {
                 let event = self.selected_background_video()?;
-                let path = wallpaper_engine::validate(&self.root, &event)?;
+                let path = wallpaper_engine::stage(&self.root, &event)?;
                 self.validate_job_events(&[event])?;
                 wallpaper_engine::apply(&path)
                     .map_err(|e| ApiError::new("wallpaper_engine_error", e))?;

@@ -389,7 +389,7 @@ impl Service {
                 let root = self.root.clone();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
-                    let path = wallpaper_engine::validate(&root, &event)?;
+                    let path = wallpaper_engine::stage(&root, &event)?;
                     cancel.check()?;
                     Ok(PreparedWork::VideoWallpaper { event, path })
                 })?
