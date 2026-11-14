@@ -866,6 +866,7 @@ impl State {
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
+         SettingsRow::show(ui,super::i18n::tr("Изменение размера окна", "Window resizing"),super::i18n::tr("Можно менять размер главного окна мышью. Настройка применяется после сохранения.", "Allow resizing the main window with the mouse. Applies after saving."),|ui|{ui.checkbox(&mut draft.window_resizable,super::i18n::tr("Разрешить изменение размера", "Allow resizing"));});
          SettingsRow::show(ui,super::i18n::tr("Захват при запуске", "Capture on startup"),super::i18n::tr("По умолчанию включён. Текущий захват переключается через Actions.", "On by default. Toggle the current capture from Actions."),|ui|{ui.checkbox(&mut draft.capture_on_start,super::i18n::tr("Включать", "Enable"));});
          SettingsRow::show(ui,super::i18n::tr("Подсказка сортировки", "Sort hint"),super::i18n::tr("Показывать выбранный порядок на две секунды.", "Show the selected sort order for two seconds."),|ui|{ui.checkbox(&mut draft.sort_notifications,super::i18n::tr("Показывать", "Show"));});
          SettingsRow::show(ui,super::i18n::tr("Поиск на полке", "Shelf search"),super::i18n::tr("Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.", "Usually, use the search field with the mouse or Ctrl+T. In keyboard-only mode, the mouse moves the window and Ctrl+T opens search."),|ui|{ui.checkbox(&mut draft.search_keyboard_only,super::i18n::tr("Только через Ctrl+T", "Ctrl+T only"));});
@@ -933,7 +934,9 @@ impl State {
          if let Ok(saved)=serde_json::from_value::<Settings>(current["result"].clone()) {
           merge_tab_settings(&mut settings,&saved);
           let language = settings.language;
-          let r=call(api,Command::SetSettings{settings});self.error=if r["ok"]==true{super::i18n::set(language);super::i18n::tr("Настройки сохранены", "Settings saved").into()}else{r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed")).into()};
+          let resize_changed=saved.window_resizable!=settings.window_resizable;
+          let resize_enabled=settings.window_resizable;
+          let r=call(api,Command::SetSettings{settings});self.error=if r["ok"]==true{super::i18n::set(language);if resize_changed{root_ctx.send_viewport_cmd_to(egui::ViewportId::ROOT,egui::ViewportCommand::Resizable(resize_enabled));}super::i18n::tr("Настройки сохранены", "Settings saved").into()}else{r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed")).into()};
          } else {self.error=super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings").into();}
         } else {self.error=current["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось прочитать текущие настройки", "Could not read current settings")).into();}
        }

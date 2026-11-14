@@ -33,6 +33,8 @@ pub struct Settings {
     pub language: Language,
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
+    /// Allow the user to resize the main shelf window. Defaults to a fixed window.
+    pub window_resizable: bool,
     pub emoji_font: String,
     pub sort_notifications: bool,
     /// Legacy preference retained so existing settings documents still load.
@@ -82,6 +84,7 @@ impl Settings {
                 ..Default::default()
             },
             overlay_hotkey: String::new(),
+            window_resizable: false,
             emoji_font: "apple".into(),
             sort_notifications: true,
             pods_tile_size: 96,
@@ -268,5 +271,27 @@ impl Settings {
             return Err("Размер карточки должен быть от 160 до 360".into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn window_resizable_defaults_off_and_round_trips() {
+        let defaults = Settings::default();
+        assert!(!defaults.window_resizable);
+
+        let mut enabled = defaults;
+        enabled.window_resizable = true;
+        let encoded = serde_json::to_value(&enabled).unwrap();
+        let decoded: Settings = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.window_resizable);
+
+        let mut legacy = serde_json::to_value(Settings::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("window_resizable");
+        let decoded: Settings = serde_json::from_value(legacy).unwrap();
+        assert!(!decoded.window_resizable);
     }
 }

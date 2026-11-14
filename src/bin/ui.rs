@@ -1782,6 +1782,7 @@ fn main() -> eframe::Result {
     app.refresh();
     let theme: katran::theme::ThemePreferences =
         serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
+    let window_resizable = app.call(Command::GetSettings)["window_resizable"] == true;
     app.video_play_hidden = theme.video_play_hidden;
     let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
     app.transparent_viewport = glass_start;
@@ -1792,6 +1793,7 @@ fn main() -> eframe::Result {
                 .with_icon(app_identity::window_icon())
                 .with_inner_size([940.0, 680.0])
                 .with_min_inner_size([640.0, 440.0])
+                .with_resizable(window_resizable)
                 .with_decorations(false)
                 .with_transparent(glass_start),
             ..Default::default()
