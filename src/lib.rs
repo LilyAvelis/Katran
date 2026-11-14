@@ -89,6 +89,7 @@ pub mod table_view;
 pub mod updater;
 pub use api::*;
 mod desktop_assets;
+mod desktop_pins;
 mod desktop_projection;
 mod desktop_selection;
 pub mod desktop_wallpaper;
@@ -225,6 +226,7 @@ impl Service {
         storage::initialize(&db, &root)?;
         catalogue_schema::migrate(&db)?;
         pinned_order::ensure_schema(&db)?;
+        desktop_pins::ensure_schema(&db)?;
         classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
         let stored: Option<String> = db
@@ -510,18 +512,27 @@ impl Service {
                 self.settings.desktop_wallpaper_id.as_deref(),
             ),
             Command::DeleteDesktopAsset { id } => {
+                let event_id = desktop_projection::id_for_typed(&id);
+                if desktop_pins::rank(&self.db, event_id)?.is_some() {
+                    return Err(ApiError::new(
+                        "pinned",
+                        "Unpin this Desktop asset before deleting it",
+                    ));
+                }
                 let wallpapers = if id.starts_with("image:") {
                     desktop_wallpaper::current_wallpapers().unwrap_or_default()
                 } else {
                     Vec::new()
                 };
-                desktop_assets::delete(
+                let result = desktop_assets::delete(
                     &self.root,
                     &id,
                     &self.settings.theme,
                     self.settings.desktop_wallpaper_id.as_deref(),
                     &wallpapers,
-                )
+                )?;
+                desktop_pins::remove(&self.db, event_id)?;
+                Ok(result)
             }
             Command::ApplyDesktopAsset { id, target } => {
                 let asset = desktop_assets::lookup(&self.root, &id)?;

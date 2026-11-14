@@ -19,6 +19,7 @@ pub(crate) fn browse(
     limit: u32,
     cursor: Option<&str>,
     sort: crate::sorting::SortSpec,
+    pinned_ranks: &std::collections::HashMap<i64, i64>,
 ) -> Result<(Vec<Event>, Option<String>)> {
     use crate::sorting::{self, SortMode};
     if !(1..=1000).contains(&limit) {
@@ -28,9 +29,13 @@ pub(crate) fn browse(
     events.retain(|event| event.name.to_lowercase().contains(&needle));
     events.sort_by(|a, b| {
         let order = match sort.mode {
-            SortMode::Arrival | SortMode::Pinned | SortMode::Modified => {
-                a.modified_at_ms.cmp(&b.modified_at_ms)
-            }
+            SortMode::Arrival | SortMode::Modified => a.modified_at_ms.cmp(&b.modified_at_ms),
+            SortMode::Pinned => match (pinned_ranks.get(&a.id), pinned_ranks.get(&b.id)) {
+                (Some(left), Some(right)) => left.cmp(right),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => b.detected_at_ms.cmp(&a.detected_at_ms),
+            },
             SortMode::Extension => {
                 sorting::extension_key(&a.name).cmp(&sorting::extension_key(&b.name))
             }
@@ -43,7 +48,11 @@ pub(crate) fn browse(
             SortMode::Origin => a.source.cmp(&b.source),
         };
         let order = order.then_with(|| a.id.cmp(&b.id));
-        if sort.reverse { order.reverse() } else { order }
+        if sort.reverse && sort.mode != SortMode::Pinned {
+            order.reverse()
+        } else {
+            order
+        }
     });
     let start = cursor
         .map_or(Ok(0usize), |value| value.parse::<usize>())
@@ -64,6 +73,9 @@ fn stable_id(typed_id: &str) -> i64 {
     let bits =
         u64::from_be_bytes(digest[..8].try_into().expect("digest size")) & ((1_u64 << 62) - 1);
     i64::MIN + bits as i64
+}
+pub(crate) fn id_for_typed(typed_id: &str) -> i64 {
+    stable_id(typed_id)
 }
 
 /// Read and validate the current managed catalogue. Never imports or copies source files.

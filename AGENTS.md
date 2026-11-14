@@ -19,6 +19,12 @@ Desktop browsing must remain metadata-only; do not hash or decode every managed
 image during selection or Actions palette construction. Validate selected bytes
 at the action boundary, and detect image/video types from managed paths rather
 than display names (which may have no extension).
+New shelf tabs must satisfy the standard Event interaction contract: browse,
+navigation, multi-selection, pins, tag slots where pinning is available,
+copy/drag-out, Folder transfer, preview, and delete. Declare any exception at
+the domain command boundary and test it through the API before adding a GUI path.
+Desktop pin/tag metadata is stored separately from capture-event rows, keyed by
+its stable managed-asset ID; `src/desktop_pins.rs` owns that projection state.
 
 For each release or change to an architectural contract, update this current
 baseline, the affected README/development-map passage, and the relevant release

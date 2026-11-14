@@ -324,8 +324,9 @@ pub fn prepare_with_budget(
             if !event.path.is_file() {
                 return Err("File unavailable".into());
             }
-            let folder_file =
-                event.id < 0 && event.source == "work_folder" && event.storage == "reference";
+            let folder_file = event.id < 0
+                && matches!(event.source.as_str(), "work_folder" | "desktop")
+                && event.storage == "reference";
             let folder_digest = if folder_file {
                 if std::fs::metadata(&event.path)
                     .map_err(|e| e.to_string())?
@@ -356,8 +357,22 @@ pub fn prepare_with_budget(
                     "source_changed: reference has no verified content identity; ingest it again",
                 )?)
             };
-            let name: String = event
-                .name
+            let display_name = if event.source == "desktop"
+                && std::path::Path::new(&event.name).extension().is_none()
+            {
+                format!(
+                    "{}.{}",
+                    event.name,
+                    event
+                        .path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("bin")
+                )
+            } else {
+                event.name.clone()
+            };
+            let name: String = display_name
                 .chars()
                 .map(|c| {
                     if c.is_control() || "<>:\"/\\|?*".contains(c) {

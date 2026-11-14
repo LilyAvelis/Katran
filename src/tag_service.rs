@@ -33,6 +33,26 @@ impl Service {
     }
 
     pub(crate) fn get_tag_slots(&self, ids: Vec<i64>) -> Result<Value> {
+        if ids
+            .iter()
+            .any(|id| crate::desktop_projection::is_desktop_id(*id))
+        {
+            if ids.len() > 1000
+                || ids
+                    .iter()
+                    .any(|id| !crate::desktop_projection::is_desktop_id(*id))
+            {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Cannot mix Desktop and catalogue IDs",
+                ));
+            }
+            let mut items = Vec::new();
+            for id in ids {
+                items.push(json!({"id":id,"slot":crate::desktop_pins::slot(&self.db,id)?}));
+            }
+            return Ok(json!({"items":items}));
+        }
         if ids.len() > 1000 || ids.iter().any(|id| *id <= 0) {
             return Err(ApiError::new(
                 "invalid_argument",
@@ -62,6 +82,31 @@ impl Service {
     }
 
     pub(crate) fn assign_tag_slot(&mut self, ids: Vec<i64>, slot: Option<u8>) -> Result<Value> {
+        if ids
+            .iter()
+            .any(|id| crate::desktop_projection::is_desktop_id(*id))
+        {
+            if ids
+                .iter()
+                .any(|id| !crate::desktop_projection::is_desktop_id(*id))
+            {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Cannot mix Desktop and catalogue IDs",
+                ));
+            }
+            for id in &ids {
+                crate::desktop_projection::get(&self.root, *id)?;
+            }
+            let items = crate::desktop_pins::assign_slot(&self.db, &ids, slot)?;
+            if items
+                .iter()
+                .any(|item| item.outcome == tag_slots::Outcome::Applied)
+            {
+                self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+            }
+            return Ok(json!({"items":items,"slot":slot,"atomic":false}));
+        }
         let items = tag_slots::assign(&mut self.db, &ids, slot).map_err(error)?;
         if items
             .iter()
@@ -74,6 +119,9 @@ impl Service {
 
     pub(crate) fn get_tag_slot(&self, id: i64) -> Result<Value> {
         self.get(id)?;
+        if crate::desktop_projection::is_desktop_id(id) {
+            return Ok(json!({"slot":crate::desktop_pins::slot(&self.db,id)?}));
+        }
         let number = tag_slots::visible_slot(&self.db, id).map_err(error)?;
         Ok(json!({"slot":number}))
     }

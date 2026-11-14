@@ -42,6 +42,20 @@ impl Service {
                 "Wait for active operations before changing pins",
             ));
         }
+        if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
+            if ids.iter().any(|id| !desktop_projection::is_desktop_id(*id)) {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Cannot mix Desktop and catalogue selections",
+                ));
+            }
+            for id in &ids {
+                desktop_projection::get(&self.root, *id)?;
+            }
+            let result = desktop_pins::toggle(&self.db, &ids)?;
+            self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+            return Ok(json!({"items":result}));
+        }
         if ids.iter().any(|id| *id < 0) {
             return Err(ApiError::new(
                 "folder_has_no_pins",
@@ -93,9 +107,14 @@ impl Service {
     pub(crate) fn decorate_page(&self, mut value: Value) -> Result<Value> {
         if let Some(events) = value["events"].as_array_mut() {
             for event in events {
-                if let Some(id) = event["id"].as_i64().filter(|id| *id > 0) {
-                    event["properties"] = json!(pinned::properties(&self.db, id)?);
-                    event["tags"] = json!(pinned::tags(&self.db, id)?);
+                if let Some(id) = event["id"].as_i64() {
+                    if desktop_projection::is_desktop_id(id) {
+                        event["properties"] = json!({"pinned":desktop_pins::rank(&self.db, id)?.is_some(),"display_name":null,"opener":null});
+                        event["tags"] = json!([]);
+                    } else if id > 0 {
+                        event["properties"] = json!(pinned::properties(&self.db, id)?);
+                        event["tags"] = json!(pinned::tags(&self.db, id)?);
+                    }
                 }
             }
         }

@@ -18,6 +18,46 @@ impl Service {
                 "Folder has no pinned order",
             ));
         }
+        if self.interaction.tab == ShelfTab::Desktop {
+            let events = crate::desktop_projection::list(&self.root)?;
+            let mut ranks = std::collections::HashMap::new();
+            for event in &events {
+                if let Some(rank) = crate::desktop_pins::rank(&self.db, event.id)? {
+                    ranks.insert(event.id, rank);
+                }
+            }
+            let mut ids = Vec::new();
+            let query = self.interaction.browse_query.to_lowercase();
+            for event in events {
+                if !ranks.contains_key(&event.id)
+                    || !event.name.to_lowercase().contains(&query)
+                    || self.interaction.tag_filter.is_some()
+                {
+                    continue;
+                }
+                if let Some(slot) = self.interaction.tag_slot_filter {
+                    if crate::desktop_pins::slot(&self.db, event.id)? != Some(slot) {
+                        continue;
+                    }
+                }
+                ids.push(event.id);
+            }
+            ids.sort_by_key(|id| ranks[id]);
+            let index = ids
+                .iter()
+                .position(|candidate| *candidate == id)
+                .ok_or_else(|| {
+                    crate::ApiError::new("not_visible", "Pinned asset is outside the Desktop view")
+                })?;
+            let other = match direction {
+                crate::pinned_order::Direction::Up => index.checked_sub(1),
+                crate::pinned_order::Direction::Down => {
+                    (index + 1 < ids.len()).then_some(index + 1)
+                }
+            }
+            .map_or(id, |position| ids[position]);
+            return crate::desktop_pins::swap_visible(&self.db, id, other);
+        }
         if crate::pinned_order::rank(&self.db, id)?.is_none() {
             return crate::pinned_order::swap(&self.db, id, id);
         }
@@ -80,13 +120,35 @@ impl Service {
                 .browse(query, limit, cursor, self.interaction.sort);
         }
         if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
-            let events = crate::desktop_projection::list(&self.root)?;
+            let mut events = crate::desktop_projection::list(&self.root)?;
+            let mut ranks = std::collections::HashMap::new();
+            for event in &events {
+                if let Some(rank) = crate::desktop_pins::rank(&self.db, event.id)? {
+                    ranks.insert(event.id, rank);
+                }
+            }
+            if self.interaction.pinned_only {
+                events.retain(|event| ranks.contains_key(&event.id));
+            }
+            if let Some(slot) = self.interaction.tag_slot_filter {
+                let mut matching = std::collections::HashSet::new();
+                for event in &events {
+                    if crate::desktop_pins::slot(&self.db, event.id)? == Some(slot) {
+                        matching.insert(event.id);
+                    }
+                }
+                events.retain(|event| matching.contains(&event.id));
+            }
+            if self.interaction.tag_filter.is_some() {
+                events.clear();
+            }
             let (events, next) = crate::desktop_projection::browse(
                 events,
                 query,
                 limit,
                 cursor,
                 self.interaction.sort,
+                &ranks,
             )?;
             return self.decorate_page(serde_json::json!({"events":events,"next_cursor":next,"sort":self.interaction.sort}));
         }

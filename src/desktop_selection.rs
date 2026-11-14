@@ -29,6 +29,11 @@ impl Service {
         for id in &ids {
             let result = (|| {
                 let (event, typed) = desktop_projection::get(&self.root, *id)?;
+                if desktop_pins::rank(&self.db, *id)?.is_some() {
+                    return Ok(
+                        json!({"id":id,"ok":false,"skipped_pinned":true,"status":"skipped_pinned"}),
+                    );
+                }
                 let (_, typed_checked) =
                     desktop_projection::resolve(&self.root, *id, &event.revision)?;
                 if typed != typed_checked {
@@ -46,10 +51,12 @@ impl Service {
                     self.settings.desktop_wallpaper_id.as_deref(),
                     &wallpapers,
                 )?;
+                desktop_pins::remove(&self.db, *id)?;
                 removed.push(*id);
                 Ok(value)
             })();
             results.push(match result {
+                Ok(value) if value["skipped_pinned"] == true => value,
                 Ok(value) => json!({"id":id,"ok":true,"result":value}),
                 Err(error) => json!({"id":id,"ok":false,"error":error}),
             });

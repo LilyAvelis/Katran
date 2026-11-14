@@ -17,7 +17,11 @@ impl Service {
         // A rejected replacement must not leave an older, surprising cut armed.
         self.transfer_intent = None;
         self.transfer_sequence = None;
-        if cut && items.iter().any(|item| item.id < 0) {
+        if cut
+            && items
+                .iter()
+                .any(|item| item.id < 0 && !crate::desktop_projection::is_desktop_id(item.id))
+        {
             return Err(ApiError::new(
                 "folder_cut_unavailable",
                 "Folder cut is unavailable; use ordinary file copy",
@@ -206,6 +210,7 @@ impl Service {
                     event.delete_policy,
                     crate::source_policy::DeletePolicy::ShelfOnly
                 )
+                && event.source != "desktop"
                 && let Err(error) = self.validate_reference_move_source(&event)
             {
                 results[index] = Some(failed(event.id, error));
@@ -508,13 +513,15 @@ impl Service {
         source_lock: Option<crate::delete_selection::LockedOriginal>,
         allow_reference_move: bool,
     ) -> Result<&'static str> {
-        if event.id < 0 {
+        if event.id < 0 && !crate::desktop_projection::is_desktop_id(event.id) {
             return Err(ApiError::new(
                 "source_not_movable",
                 "Folder source retained; move is not available yet",
             ));
         }
-        if crate::delete_shelf::protected_by_pin(&self.db, event.id)? {
+        if !crate::desktop_projection::is_desktop_id(event.id)
+            && crate::delete_shelf::protected_by_pin(&self.db, event.id)?
+        {
             return Ok("pinned_copy");
         }
         let current = self.get(event.id)?;
@@ -548,6 +555,21 @@ impl Service {
             // through source disposition and shelf deletion.
             let _destination =
                 crate::delete_selection::prepare_locked_original(output, &root, digest)?;
+            if crate::desktop_projection::is_desktop_id(event.id) {
+                let current = self.get(event.id)?;
+                if current.revision != event.revision {
+                    return Err(ApiError::new(
+                        "stale_selection",
+                        "Desktop asset changed before move",
+                    ));
+                }
+                let deletion = self.delete_desktop_selection(vec![event.id], true)?;
+                return if deletion["deleted"].as_u64() == Some(1) {
+                    Ok("moved")
+                } else {
+                    Ok("source_retained_copy")
+                };
+            }
             if crate::delete_shelf::protected_by_pin(&self.db, event.id)? {
                 return Ok("pinned_copy");
             }

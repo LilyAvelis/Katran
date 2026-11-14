@@ -174,6 +174,17 @@ fn materialize_one(
                 extension(&event.name, "txt")
             }
         }
+        _ if event.source == "desktop" && Path::new(&event.name).extension().is_none() => {
+            format!(
+                "{}.{}",
+                event.name,
+                event
+                    .path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("bin")
+            )
+        }
         _ => event.name.clone(),
     };
     let source = if bytes.is_none() {
