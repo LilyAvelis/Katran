@@ -87,8 +87,13 @@ ordinary confirmation; shelf-only removal and small selections do not flash a
 card. Unknown-size external Ctrl+V does not currently get this cue. Folder
 Ctrl+Shift+C uses its existing background `AddFolderFiles` job instead of the
 direct UI call. The overlay is a dim layer, not full-frame optical blur.
+Public and E targeted UI checks passed for a painted frame before `BeginJob`,
+20 small Folder originals with confirmation and fake Trash, one small file
+without an overlay, operation-specific RU/EN labels, duplicate-move rejection
+and the existing Ctrl+Tab copy queue. The owner has not yet visually accepted
+the new UI in her installed application.
 The A9 public/E source handoff check has zero unresolved findings at
-`e6453c5`. The private E runtime manifest contract has
+the tested source checkpoint `4bf7ba6`. The private E runtime manifest contract has
 synthetic checks 3/3; real-model execution, Python environment portability and
 signed distribution remain unverified. The latest E full UI suite passed
 203/203 after repairs. No E update is installed; regenerate its manifest only
