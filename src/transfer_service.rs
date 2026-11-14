@@ -609,20 +609,38 @@ impl Service {
         source_lock: Option<crate::delete_selection::LockedOriginal>,
         allow_reference_move: bool,
     ) -> Value {
+        let mut recycle = None;
         let result = self.finish_cut_inner(
             event,
             path.as_deref(),
             hash.as_deref(),
             source_lock,
             allow_reference_move,
+            &mut recycle,
         );
         match result {
             Ok(status) => {
-                json!({"id":event.id,"path":path,"status":status,"destination_created":true,"original_removed":status == "moved" && event.storage != "cached","error":null})
+                let removed = recycle.as_ref().is_some_and(
+                    |receipt: &crate::safe_recycle::RecycleReceipt| receipt.original_removed,
+                );
+                json!({"id":event.id,"path":path,"status":status,"destination_created":true,"original_removed":removed,"recovery_path":recycle.as_ref().and_then(|receipt| receipt.recovery_path.as_ref()),"recycle":recycle,"error":null})
             }
             Err(e) => {
-                let removed = e.code == "source_removed_shelf_retained";
-                json!({"id":event.id,"path":path,"status":if removed { "source_removed_shelf_retained" } else { "source_not_moved" },"destination_created":true,"original_removed":removed,"error":e})
+                let removed = e.code == "source_removed_shelf_retained"
+                    || recycle
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.original_removed);
+                let status = if e.code == "source_removed_shelf_retained" {
+                    "source_removed_shelf_retained"
+                } else if recycle
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.recovery_path.is_some())
+                {
+                    "recovery_required"
+                } else {
+                    "source_not_moved"
+                };
+                json!({"id":event.id,"path":path,"status":status,"destination_created":true,"original_removed":removed,"recovery_path":recycle.as_ref().and_then(|receipt| receipt.recovery_path.as_ref()),"recycle":recycle,"error":e})
             }
         }
     }
@@ -634,6 +652,7 @@ impl Service {
         hash: Option<&str>,
         source_lock: Option<crate::delete_selection::LockedOriginal>,
         allow_reference_move: bool,
+        recycle_receipt: &mut Option<crate::safe_recycle::RecycleReceipt>,
     ) -> Result<&'static str> {
         if event.id < 0 && !crate::desktop_projection::is_desktop_id(event.id) {
             return Err(ApiError::new(
@@ -655,7 +674,13 @@ impl Service {
         }
         #[cfg(not(windows))]
         {
-            let _ = (path, hash, source_lock, allow_reference_move);
+            let _ = (
+                path,
+                hash,
+                source_lock,
+                allow_reference_move,
+                recycle_receipt,
+            );
             return Err(ApiError::new(
                 "unsupported_platform",
                 "Safe move requires Windows file handles",
@@ -705,25 +730,33 @@ impl Service {
             crate::open_file::validate(&current)?;
             let mut original_removed = false;
             if current.storage != "cached" {
-                match &current.delete_policy {
+                let source_root = match &current.delete_policy {
                     DeletePolicy::LiveOriginal {
                         source_id,
                         generation,
                         ..
                     } => {
-                        let _: String = self.db.query_row(
+                        let configured: String = self.db.query_row(
                             "SELECT c.root FROM source_configurations c JOIN source_projection p ON p.source_id=c.source_id AND p.generation=c.generation WHERE c.source_id=?1 AND c.generation=?2 AND c.enabled=1 AND p.event_id=?3",
                             rusqlite::params![source_id.as_str(), generation, current.id], |row| row.get(0)
                         ).map_err(|_| ApiError::new("stale_source_generation", "Original no longer belongs to the configured source"))?;
+                        std::path::Path::new(&configured).canonicalize()?
                     }
-                    DeletePolicy::ShelfOnly if allow_reference_move => {}
+                    DeletePolicy::ShelfOnly if allow_reference_move => {
+                        self.validate_reference_move_source(&current)?;
+                        current
+                            .path
+                            .parent()
+                            .ok_or_else(|| ApiError::new("unsafe_source", "Missing source parent"))?
+                            .canonicalize()?
+                    }
                     _ => {
                         return Err(ApiError::new(
                             "source_not_movable",
                             "External reference is not a managed original",
                         ));
                     }
-                }
+                };
                 let source = source_lock.ok_or_else(|| {
                     ApiError::new(
                         "source_not_locked",
@@ -740,18 +773,39 @@ impl Service {
                         "Selection changed before source removal",
                     ));
                 }
-                if matches!(current.delete_policy, DeletePolicy::ShelfOnly) {
-                    self.validate_reference_move_source(&current)?;
-                    if crate::delete_selection::locked_path(&source)?
+                if matches!(current.delete_policy, DeletePolicy::ShelfOnly)
+                    && crate::delete_selection::locked_path(&source)?
                         .starts_with(self.root.canonicalize()?)
-                    {
-                        return Err(ApiError::new(
-                            "managed_source",
-                            "Move source is inside Katran managed storage",
-                        ));
-                    }
+                {
+                    return Err(ApiError::new(
+                        "managed_source",
+                        "Move source is inside Katran managed storage",
+                    ));
                 }
-                crate::delete_selection::dispose_locked_original(source)?;
+                let source_hash = current
+                    .revision
+                    .strip_prefix("ref:")
+                    .ok_or_else(|| ApiError::new("stale_selection", "Missing source hash"))?;
+                let trash = self
+                    .trash
+                    .lock()
+                    .map_err(|_| ApiError::new("recycle_failed", "Trash adapter lock poisoned"))?;
+                let receipt = crate::safe_recycle::recycle_locked(
+                    source,
+                    &current.path,
+                    &source_root,
+                    source_hash,
+                    trash.as_ref(),
+                )?;
+                let recycled = receipt.recycled;
+                let message = receipt
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Original was not recycled".to_owned());
+                *recycle_receipt = Some(receipt);
+                if !recycled {
+                    return Err(ApiError::new("recycle_failed", message));
+                }
                 original_removed = true;
             }
             let deleted = self.dispatch(Command::DeleteEvents {

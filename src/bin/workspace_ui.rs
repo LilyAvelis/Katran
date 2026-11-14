@@ -129,10 +129,18 @@ impl Shelf {
                     _ => tr("ошибка", "error"),
                 }
             };
-            let detail = item["error"]["message"]
+            let mut detail = item["error"]["message"]
                 .as_str()
                 .or_else(|| item["error"].as_str())
-                .unwrap_or("");
+                .unwrap_or("")
+                .to_owned();
+            if let Some(path) = item["recovery_path"].as_str() {
+                if !detail.is_empty() {
+                    detail.push_str(" · ");
+                }
+                detail.push_str(tr("Файл сохранён: ", "File saved: "));
+                detail.push_str(path);
+            }
             let name = item["path"]
                 .as_str()
                 .map(str::to_owned)
@@ -143,8 +151,9 @@ impl Shelf {
                 format!("{name}: {status} · {detail}")
             });
         }
-        self.message = lines.join("; ");
+        let message = lines.join("; ");
         self.refresh();
+        self.message = message;
     }
     fn workspace_transfer_input(&mut self, ctx: &egui::Context) {
         if self.workspace.open

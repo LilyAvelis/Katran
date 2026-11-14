@@ -17,6 +17,29 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn transfer_result_exposes_recovery_path() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.direct_transfer_result(&serde_json::json!({
+            "direction":"to_folder", "items":[{
+                "status":"recovery_required", "error":{"message":"synthetic failure"},
+                "recovery_path":"C:/synthetic/recovery.bin"
+            }]
+        }));
+        assert!(app.message.contains("synthetic failure"));
+        assert!(app.message.contains("C:/synthetic/recovery.bin"));
+        app.workspace_transfer_result(
+            &serde_json::json!({
+                "items":[{"status":"recovery_required", "error":{"message":"synthetic failure"},
+                    "recovery_path":"C:/synthetic/recovery.bin"}]
+            }),
+            false,
+        );
+        assert!(app.message.contains("synthetic failure"));
+        assert!(app.message.contains("C:/synthetic/recovery.bin"));
+    }
+
+    #[test]
     fn folder_refresh_discards_old_query_and_loads_more_asynchronously() {
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
@@ -467,7 +490,15 @@ impl Shelf {
             .count();
         let details = items
             .iter()
-            .filter_map(|item| item["error"]["message"].as_str())
+            .filter_map(|item| {
+                let error = item["error"]["message"].as_str()?;
+                Some(match item["recovery_path"].as_str() {
+                    Some(path) => {
+                        format!("{error} · {}: {path}", tr("Файл сохранён", "File saved"))
+                    }
+                    None => error.to_owned(),
+                })
+            })
             .collect::<Vec<_>>()
             .join("; ");
         self.message = if from_folder {
