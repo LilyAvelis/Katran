@@ -1,6 +1,10 @@
 function Get-KatranSources([string]$Root) {
     $files = @((Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File).FullName) + @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/branding') -Recurse -File).FullName) + @('Cargo.toml','Cargo.lock','build.rs','scripts/build-working.ps1','scripts/install-build.ps1' | ForEach-Object { Join-Path $Root $_ })
     if (Test-Path -LiteralPath (Join-Path $Root 'assets/emoji-flags')) { $files += @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/emoji-flags') -Recurse -File).FullName) }
+    foreach ($assetDir in @('assets/themes/lilies','assets/everything')) {
+        $files += @((Get-ChildItem -LiteralPath (Join-Path $Root $assetDir) -Recurse -File).FullName)
+    }
+    if ($env:KATRAN_BUNDLE_APPLE -eq '1') { $files += (Get-Item -LiteralPath (Join-Path $Root 'assets/emoji-bundle/apple.zip')).FullName }
     if (Test-Path -LiteralPath (Join-Path $Root 'assets/unicode')) { $files += @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/unicode') -Recurse -File).FullName) }
     foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         $crateRoot = Join-Path $Root "crates/$crate"
@@ -12,6 +16,13 @@ function Get-KatranSources([string]$Root) {
 function Invoke-KatranInstall {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][scriptblock]$Build, [Parameter(Mandatory)][scriptblock]$Register)
     $Root = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $rustc = (& rustc -vV | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $rustc -notmatch '(?m)^host: (\S+)$') { throw 'Cannot determine Rust toolchain and host target' }
+    $targetOverride = $env:CARGO_BUILD_TARGET
+    $target = if ($targetOverride) { $targetOverride } else { $Matches[1] }
+    $cargoVersion = (& cargo --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot determine Cargo version' }
+    $appleBundle = ($env:KATRAN_BUNDLE_APPLE -eq '1')
     $before = @(Get-KatranSources $Root)
     $beforeJson = ConvertTo-Json -InputObject $before -Depth 5 -Compress
     $cargo = Get-Content -LiteralPath (Join-Path $Root 'Cargo.toml') -Raw
@@ -19,6 +30,7 @@ function Invoke-KatranInstall {
     $version = $Matches[1]
     & $Build
     if ((ConvertTo-Json -InputObject @(Get-KatranSources $Root) -Depth 5 -Compress) -cne $beforeJson) { throw 'Sources changed during build; refusing installation' }
+    if ((& rustc -vV | Out-String).Trim() -cne $rustc -or (& cargo --version | Out-String).Trim() -cne $cargoVersion -or ($env:KATRAN_BUNDLE_APPLE -eq '1') -ne $appleBundle -or ($env:CARGO_BUILD_TARGET -cne $targetOverride)) { throw 'Build configuration changed during build; refusing installation' }
     $built = Join-Path $Root 'target/build/release/katran-ui.exe'
     $hash = (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash.ToLowerInvariant()
     $id = $hash.Substring(0,12)
@@ -41,7 +53,7 @@ function Invoke-KatranInstall {
             Copy-Item -LiteralPath (Join-Path $Root 'assets/emoji-flags/ATTRIBUTION.md') -Destination (Join-Path $stage 'ATTRIBUTION-EMOJI-FLAGS.md')
         }
         if ((Get-FileHash -LiteralPath (Join-Path $stage 'katran-ui.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw 'Copied executable hash mismatch' }
-        $manifest = [ordered]@{ profile = 'release'; version = $version; update_format = 1; minimum_launcher_protocol = 1; capture_backend = 'windows-events'; shell_visual_protocol = 1; executable_sha256 = $hash; sources = $before }
+        $manifest = [ordered]@{ profile = 'release'; rustc = $rustc; cargo = $cargoVersion; target = $target; features = @('ui','clipboard-events'); default_features = $true; bundled_apple = $appleBundle; version = $version; update_format = 1; minimum_launcher_protocol = 1; capture_backend = 'windows-events'; shell_visual_protocol = 1; executable_sha256 = $hash; sources = $before }
         $manifestJson = ConvertTo-Json -InputObject $manifest -Depth 5
         Set-Content -LiteralPath (Join-Path $stage 'build-manifest.json') -Value $manifestJson -Encoding utf8
         if (Test-Path -LiteralPath $destination) {

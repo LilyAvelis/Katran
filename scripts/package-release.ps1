@@ -18,6 +18,10 @@ if (!$Version) {
     if ($cargo -notmatch '(?ms)^\[package\].*?^version\s*=\s*"([^"]+)"') { throw 'Missing package version' }
     $Version = $Matches[1]
 }
+$schemaSource = Get-Content -LiteralPath (Join-Path $Root 'src/catalogue_schema.rs') -Raw
+$schemaMatches = [regex]::Matches($schemaSource, '(?m)^pub\(crate\) const VERSION: i64 = ([1-9][0-9]*);\s*$')
+if ($schemaMatches.Count -ne 1) { throw 'Cannot uniquely determine catalogue schema version' }
+$dataSchemaVersion = [int]$schemaMatches[0].Groups[1].Value
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release version must be numeric major.minor.patch' }
 if (![IO.Path]::IsPathRooted($BinaryDirectory)) { $BinaryDirectory = Join-Path $Root $BinaryDirectory }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
@@ -83,9 +87,20 @@ foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windo
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
 }
 $sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt')
-$sourceFiles += @('assets/branding/katran.ico','assets/branding/katran.rc' | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
+foreach ($assetDir in @('assets/branding','assets/themes/lilies','assets/emoji-flags','assets/unicode')) {
+    $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $Root $assetDir) -Recurse -File | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+}
 $sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })
-$manifest = [ordered]@{profile='release';version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash (Join-Path $portable 'THIRD-PARTY-NOTICES.txt'));everything_es_sha256=(Hash (Join-Path $Root 'assets/everything/es.exe'));everything_license_sha256=(Hash (Join-Path $Root 'assets/everything/LICENSE'));everything_notice_sha256=(Hash (Join-Path $Root 'assets/everything/NOTICE.txt'));sources=$sources}
+if ($AppleBundleSha256) { $sources += [ordered]@{path='assets/emoji-bundle/apple.zip';sha256=$AppleBundleSha256} }
+# A release receipt describes the producer; the packaging machine's toolchain does not.
+$receiptPath = Join-Path $BinaryDirectory 'receipt.json'
+$buildIdentity = $null
+if (Test-Path -LiteralPath $receiptPath -PathType Leaf) {
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    if ($receipt.files.'katran-ui.exe' -cne $hash -or $receipt.cargo_lock_sha256 -cne (Hash (Join-Path $Root 'Cargo.lock')) -or $receipt.profile -cne 'release' -or $receipt.apple_bundle_sha256 -cne $AppleBundleSha256) { throw 'Build receipt does not match packaging inputs' }
+    $buildIdentity = [ordered]@{toolchain=$receipt.toolchain;target=$receipt.target;features=$receipt.features;profile=$receipt.profile;source_sha=$receipt.source_sha}
+}
+$manifest = [ordered]@{profile='release';build_identity=$buildIdentity;version=$Version;update_format=1;minimum_launcher_protocol=1;capture_backend='windows-events';shell_visual_protocol=1;executable_sha256=$hash;third_party_notices_sha256=(Hash (Join-Path $portable 'THIRD-PARTY-NOTICES.txt'));everything_es_sha256=(Hash (Join-Path $Root 'assets/everything/es.exe'));everything_license_sha256=(Hash (Join-Path $Root 'assets/everything/LICENSE'));everything_notice_sha256=(Hash (Join-Path $Root 'assets/everything/NOTICE.txt'));sources=$sources}
 if ($AppleBundleSha256) {
     if ($AppleBundleSha256 -cne '8cb7eb78303459c10a90d70cd2ee85adae6c331985692570024487f3656c7474') { throw 'Unexpected Apple resource digest' }
     $manifest.bundled_apple_sha256 = $AppleBundleSha256
@@ -96,7 +111,7 @@ Copy-Item -LiteralPath (Join-Path $portable 'THIRD-PARTY-NOTICES.txt') -Destinat
 Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/es.exe') -Destination (Join-Path $versionDir 'es.exe')
 Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Destination (Join-Path $versionDir 'Everything-ES-LICENSE.txt')
 Copy-Item -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Destination (Join-Path $versionDir 'Everything-ES-NOTICE.txt')
-Write-Json (Join-Path $versionDir 'build-manifest.json') $manifest
+[IO.File]::WriteAllText((Join-Path $versionDir 'build-manifest.json'), (ConvertTo-Json -InputObject $manifest -Depth 8 -Compress) + "`n", $utf8)
 if ((Get-Item -LiteralPath (Join-Path $versionDir 'build-manifest.json')).Length -gt 64KB) { throw 'Build manifest exceeds the updater 64 KiB limit' }
 Copy-Item -LiteralPath (Join-Path $versionDir 'katran-ui.exe'),(Join-Path $versionDir 'build-manifest.json'),(Join-Path $versionDir 'THIRD-PARTY-NOTICES.txt') -Destination $update
 foreach ($notice in @('AFIO-LICENSE','LICENSE')) {
@@ -108,7 +123,7 @@ $updateZip = Join-Path $OutputDirectory $updateName
 Write-Zip $portable $portableZip
 Write-Zip $update $updateZip
 if ((Get-Item -LiteralPath $updateZip).Length -ge 100MB -or (Get-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-ui.exe')).Length -ge 200MB) { throw 'Legacy update ZIP or UI executable exceeds updater limits' }
-Write-Json (Join-Path $OutputDirectory 'release.json') ([ordered]@{schema_version=1;data_schema_version=6;minimum_launcher_protocol=1;version=$Version;tag="v$Version";repository='LilyAvelis/Katran';update=[ordered]@{url="https://github.com/LilyAvelis/Katran/releases/download/v$Version/$updateName";size_bytes=(Get-Item -LiteralPath $updateZip).Length;sha256=(Hash $updateZip)}})
+Write-Json (Join-Path $OutputDirectory 'release.json') ([ordered]@{schema_version=1;data_schema_version=$dataSchemaVersion;minimum_launcher_protocol=1;version=$Version;tag="v$Version";repository='LilyAvelis/Katran';update=[ordered]@{url="https://github.com/LilyAvelis/Katran/releases/download/v$Version/$updateName";size_bytes=(Get-Item -LiteralPath $updateZip).Length;sha256=(Hash $updateZip)}})
 if ($BuildInstaller) {
     if (!(Test-Path -LiteralPath $IsccPath -PathType Leaf)) { throw 'Inno Setup 6 compiler missing; pass -IsccPath' }
     & $IsccPath "/DAppVersion=$Version" "/DPackageRoot=$portable" "/DOutputRoot=$OutputDirectory" (Join-Path $Root 'installer/katran.iss')

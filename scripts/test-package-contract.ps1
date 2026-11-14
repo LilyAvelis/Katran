@@ -14,6 +14,19 @@ foreach($name in @('es.exe','Everything-ES-LICENSE.txt','Everything-ES-NOTICE.tx
  if(!(Test-Path -LiteralPath (Join-Path $version.FullName $name) -PathType Leaf)){throw "Missing $name"}
 }
 $manifest=Get-Content -LiteralPath (Join-Path $version.FullName 'build-manifest.json') -Raw | ConvertFrom-Json
+$root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$schemaSource=Get-Content -Raw -LiteralPath (Join-Path $root 'src/catalogue_schema.rs')
+$schemaMatches=[regex]::Matches($schemaSource, '(?m)^pub\(crate\) const VERSION: i64 = ([1-9][0-9]*);\s*$')
+if($schemaMatches.Count -ne 1){throw 'Cannot uniquely determine catalogue schema version'}
+$release=Get-Content -Raw -LiteralPath (Join-Path $PackageDirectory 'release.json') | ConvertFrom-Json
+if($release.data_schema_version -ne [int]$schemaMatches[0].Groups[1].Value){throw 'Release catalogue schema version mismatch'}
+foreach($path in @('assets/everything/es.exe','assets/themes/lilies/lily-1.png','assets/emoji-flags/flags.rs','assets/unicode/emoji-test.txt')){
+ if($path -cnotin $manifest.sources.path){throw "Build manifest missing input: $path"}
+}
+if($manifest.PSObject.Properties.Name -contains 'bundled_apple_sha256'){
+ $apple=@($manifest.sources | Where-Object path -CEQ 'assets/emoji-bundle/apple.zip')
+ if($apple.Count -ne 1 -or $apple[0].sha256 -cne $manifest.bundled_apple_sha256){throw 'Bundled Apple input digest mismatch'}
+}
 if((Get-FileHash -LiteralPath (Join-Path $version.FullName 'es.exe')).Hash -ine $manifest.everything_es_sha256){throw 'ES hash mismatch'}
 if((Get-FileHash -LiteralPath (Join-Path $version.FullName 'THIRD-PARTY-NOTICES.txt')).Hash -ine $manifest.third_party_notices_sha256){throw 'Notices hash mismatch'}
 $media=Join-Path $version.FullName 'media-runtime'
