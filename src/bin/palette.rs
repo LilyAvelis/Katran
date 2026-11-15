@@ -205,8 +205,8 @@ impl Shelf {
                 ui.set_width((ctx.content_rect().width() - 40.0).clamp(200.0, 420.0));
                 ui.heading(tr("Сортировка", "Sorting"));
                 ui.weak(tr(
-                    "Клавиша — выбрать · Shift — обратный порядок · Esc — назад",
-                    "Key — select · Shift — reverse order · Esc — back",
+                    "Клавиша — выбрать · Shift — обратный порядок · , / Esc — закрыть",
+                    "Key — select · Shift — reverse order · , / Esc — close",
                 ));
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 160.0).clamp(80.0, 420.0))

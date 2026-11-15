@@ -74,6 +74,10 @@ impl State {
                         self.scroll = true;
                         return false;
                     }
+                    if plain && physical == Key::Comma {
+                        self.close();
+                        return false;
+                    }
                     if plain && physical == Key::Enter {
                         action = Some(choices[self.selected].to_owned());
                         self.close();
@@ -100,6 +104,10 @@ impl State {
                             return false;
                         }
                         return true;
+                    }
+                    if text == "," || text == "<" {
+                        self.close();
+                        return false;
                     }
                     if let Some(mode) = text_mode(text) {
                         action = Some(action_id(
@@ -306,6 +314,23 @@ mod tests {
             .0,
             Some("sort_arrival".into())
         );
+    }
+    #[test]
+    fn pressing_comma_again_closes_without_sorting_or_leaking_text() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let comma = || {
+            vec![
+                key(Key::Comma, egui::Modifiers::NONE),
+                egui::Event::Text(",".into()),
+            ]
+        };
+        assert_eq!(frame(&ctx, &mut state, comma(), true), (None, 0));
+        assert!(state.is_open());
+        assert_eq!(frame(&ctx, &mut state, comma(), true), (None, 0));
+        assert!(!state.is_open());
+        assert_eq!(frame(&ctx, &mut state, comma(), true), (None, 0));
+        assert!(state.is_open());
     }
     #[test]
     fn repeats_in_selection_frame_do_not_escape_modal() {

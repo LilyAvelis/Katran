@@ -170,7 +170,7 @@ Reusable [UI patterns](docs/design-patterns.md) and the
 | Ctrl . / . | Pin selection / show only pinned items |
 | Ctrl Alt Up/Down | Move selected pinned item earlier/later in custom pinned order (visible with pinned sort) |
 | Shift Tab / Ctrl Tab | Move / copy between the shelf and Folder |
-| Comma | Sort menu: arrows + Enter or a sort key; Y shows pinned in custom order first |
+| Comma | Open/close Sort menu; arrows + Enter or a sort key; Y shows pinned in custom order first |
 | Ctrl Shift , in Actions | Record shortcut for selected command |
 | 1..9 | Select numbered tab in compact visible order |
 | Arrow keys | Navigate gallery; Up/Down in stream |

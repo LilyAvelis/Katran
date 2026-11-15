@@ -33,6 +33,7 @@ cannot represent other sort orders. Changing any bound input resets pagination.
 The native key adapter uses comma followed by `t`, `e`, `m`, `r`, `n`, `s`,
 `a`, `o` (origin), or `y` (custom pinned order). Shift on the second key
 reverses the corresponding order except shuffle and custom pinned order.
+Pressing comma again closes the menu without changing the sort.
 Custom pinned order puts pins in their saved sequence before unpinned arrival
 order. Actions and Ctrl+Alt+Up/Down move a pinned card one visible position in
 the current tab; moves persist and invalidate old sorted cursors. Folder has no
@@ -69,13 +70,13 @@ for a large matching catalogue. Browsing performs no filesystem metadata reads
 for sorting. Concurrent changes to a row's ordering metadata can move it across
 a cursor boundary; paging is a live view rather than a pinned snapshot.
 
-The comma prefix expires after two seconds and is cancelled by Escape, a
-modified shortcut, or entering a text field/dialog. Ctrl comma opens Settings.
+The sort menu stays open until a sort is chosen or it is closed with comma or
+Escape. Entering a text field or another modal cancels it. Ctrl comma opens Settings.
 Commands in Actions can be rebound individually through the existing catalogue;
 comma sequences are an input adapter and do not alter the shortcut chord grammar.
 
-An explicitly rebound bare `Comma` shortcut takes precedence over the sequence
-adapter. Sorting remains available through Actions in that case.
+The physical comma opens Sorting even if another action has a bare `Comma`
+binding. Sorting remains available through Actions too.
 
 ## Working build verification · 2026-11-10
 
