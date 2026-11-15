@@ -33,7 +33,7 @@ runtime manifest contract has targeted synthetic evidence; the current source
 handoff check has no unresolved boundary findings. N1 Folder transfer remains partially open. No release or push
 is authorized by this work.
 Public and E share Pods/Desktop/settings storage. The local launcher selects E
-`81a5c4d200c5`; the shared profile reached schema v12 on 2026-11-15 with a
+`4f53749f7293`; the shared profile reached schema v12 on 2026-11-15 with a
 pre-migration backup and passing integrity check. A compatible local public v12
 binary is staged separately. Published public 3.4.1 and prior E `c1555b47dc04`
 cannot open the migrated profile without controlled rollback.

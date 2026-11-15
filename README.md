@@ -34,7 +34,8 @@ and lists successfully sent videos in Desktop; the source may later move or disa
 
 The working source tree contains additional, unreleased hardening work. GitHub's
 public line remains 3.4.1. The local Raycast/Start Menu launcher now selects
-private E runtime `81a5c4d200c5`, which includes the large-operation busy UI.
+private E runtime `4f53749f7293`, which includes the large-operation busy UI
+and restored background Actions for saved Images.
 These changes are still being integrated and have not been published or
 accepted as a new release. The [unreleased change log](docs/releases/next.md)
 records the implemented contracts and targeted evidence. A7 concerns private
@@ -53,7 +54,7 @@ public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.
 The published public 3.4.1 and old E runtime cannot open this v12 profile;
 neither is selected by the local launcher.
 
-Saved images in Images use extensionless internal blob paths. Local source now
+Saved images in Images use extensionless internal blob paths. The local E now
 offers both Katran background and Windows desktop wallpaper Actions for these
 images using their managed image type; the selected bytes are checked when the
 action runs. Files lists file pointers, so a saved image normally appears in

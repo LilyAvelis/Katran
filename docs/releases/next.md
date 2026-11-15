@@ -3,7 +3,7 @@
 ## PRODUCT-10 hardening in the local source
 
 This work is not a public release. The published public release remains 3.4.1;
-the local launcher selects private E runtime `81a5c4d200c5`. There is
+the local launcher selects private E runtime `4f53749f7293`. There is
 no release acceptance or GitHub publication claim here. Targeted checks passed
 for the listed boundaries, but the integrated source has not completed its final
 combined validation. An internal status ledger tracks session ownership and the
