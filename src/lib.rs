@@ -264,7 +264,9 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
-            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(emoji_ai::Resident::new(root.clone())))),
+            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                emoji_ai::Resident::new(root.clone()),
+            ))),
             emoji_ai_backend_injected: false,
             window_visible: true,
             overlay_session: Default::default(),
@@ -346,7 +348,9 @@ impl Service {
             .validate(0)
             .map_err(|error| ApiError::new("settings_error", error))?;
         Ok(Self {
-            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(emoji_ai::Resident::new(root.clone())))),
+            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                emoji_ai::Resident::new(root.clone()),
+            ))),
             emoji_ai_backend_injected: false,
             window_visible: true,
             overlay_session: Default::default(),
@@ -619,13 +623,26 @@ impl Service {
             Command::EmojiCategories => {
                 Ok(serde_json::json!({"groups":pod_metadata::emoji_groups()}))
             }
-            Command::EmojiAiStatus if self.emoji_ai_backend_injected => Ok(serde_json::json!({"available":true})),
+            Command::EmojiAiStatus if self.emoji_ai_backend_injected => {
+                Ok(serde_json::json!({"available":true}))
+            }
             Command::EmojiAiStatus => emoji_ai::status(&self.root),
-            Command::SearchEmojiAi { query, offset, limit } => {
-                if self.interaction.tab != interaction::ShelfTab::Pods || !self.interaction.emoji_catalogue {
+            Command::SearchEmojiAi {
+                query,
+                offset,
+                limit,
+            } => {
+                if self.interaction.tab != interaction::ShelfTab::Pods
+                    || !self.interaction.emoji_catalogue
+                {
                     return Err(ApiError::new("invalid_tab", "Emoji catalogue is not open"));
                 }
-                let mut backend = self.emoji_ai.lock().map_err(|_| ApiError::new("emoji_ai_unavailable", "Local emoji AI backend is unavailable"))?;
+                let mut backend = self.emoji_ai.lock().map_err(|_| {
+                    ApiError::new(
+                        "emoji_ai_unavailable",
+                        "Local emoji AI backend is unavailable",
+                    )
+                })?;
                 emoji_ai::search(&mut **backend, &query, offset, limit)
             }
             Command::SetEmojiCategory { group } => {

@@ -229,7 +229,8 @@ impl Shelf {
                         .and_then(|value| u32::try_from(value).ok());
                     self.emoji_ai_rebuild_events();
                     if job.offset == 0
-                        && let Some(first) = self.events.first().and_then(|event| event["id"].as_i64())
+                        && let Some(first) =
+                            self.events.first().and_then(|event| event["id"].as_i64())
                     {
                         self.state = self.call(Command::Select {
                             id: first,
@@ -402,7 +403,12 @@ mod tests {
         let mut app = super::super::tests::test_shelf(root.path());
         let ctx = egui::Context::default();
         ui_style::install(&ctx);
-        key(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        key(
+            &mut app,
+            &ctx,
+            egui::Key::T,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
         assert!(!app.emoji_ai.enabled);
         release(&mut app, &ctx, egui::Key::T);
 
@@ -428,7 +434,12 @@ mod tests {
         assert_eq!(app.state["tab"], "pods");
         assert_eq!(app.state["emoji_catalogue"], true);
         assert!(!app.modal_owns_input());
-        key(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        key(
+            &mut app,
+            &ctx,
+            egui::Key::T,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
         assert!(app.emoji_ai.enabled, "{}", app.message);
         assert!(ctx.memory(|memory| memory.has_focus(egui::Id::new("shelf-search"))));
         release(&mut app, &ctx, egui::Key::T);
@@ -543,7 +554,12 @@ mod tests {
             reset: false,
         });
         app.shortcuts = serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
-        key(&mut app, &ctx, egui::Key::T, egui::Modifiers::CTRL | egui::Modifiers::SHIFT);
+        key(
+            &mut app,
+            &ctx,
+            egui::Key::T,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        );
         assert!(!app.emoji_ai.enabled);
         release(&mut app, &ctx, egui::Key::T);
         key(&mut app, &ctx, egui::Key::T, egui::Modifiers::ALT);

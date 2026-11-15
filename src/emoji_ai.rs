@@ -25,7 +25,10 @@ pub trait Backend: Send {
     /// Implementations that can interrupt work should override this method.
     /// The default preserves compatibility but cannot interrupt a blocked backend.
     fn search_cancellable(
-        &mut self, query: &str, offset: u32, limit: u32,
+        &mut self,
+        query: &str,
+        offset: u32,
+        limit: u32,
         cancel: &crate::domain_jobs::Cancellation,
     ) -> Result<Value> {
         cancel.check()?;
@@ -47,7 +50,10 @@ struct Worker {
 }
 
 impl Worker {
-    fn start(profile_root: &std::path::Path, cancel: Option<&crate::domain_jobs::Cancellation>) -> Result<Self> {
+    fn start(
+        profile_root: &std::path::Path,
+        cancel: Option<&crate::domain_jobs::Cancellation>,
+    ) -> Result<Self> {
         let runtime = runtime::resolve(profile_root, cancel)?;
         let mut command = Command::new(runtime.python);
         command
@@ -117,11 +123,24 @@ impl Worker {
         }
         Ok(worker)
     }
-    fn receive(&self, timeout: Duration, cancel: Option<&crate::domain_jobs::Cancellation>) -> Result<Value> {
-        wait_for(&self.reader, timeout, cancel)?.ok_or_else(|| ApiError::new(
-            "emoji_ai_unavailable", "Local emoji AI worker did not respond"))
+    fn receive(
+        &self,
+        timeout: Duration,
+        cancel: Option<&crate::domain_jobs::Cancellation>,
+    ) -> Result<Value> {
+        wait_for(&self.reader, timeout, cancel)?.ok_or_else(|| {
+            ApiError::new(
+                "emoji_ai_unavailable",
+                "Local emoji AI worker did not respond",
+            )
+        })
     }
-    fn send(&self, value: &Value, timeout: Duration, cancel: Option<&crate::domain_jobs::Cancellation>) -> Result<()> {
+    fn send(
+        &self,
+        value: &Value,
+        timeout: Duration,
+        cancel: Option<&crate::domain_jobs::Cancellation>,
+    ) -> Result<()> {
         let mut bytes = serde_json::to_vec(value)
             .map_err(|_| ApiError::new("emoji_ai_protocol", "Cannot encode request"))?;
         bytes.push(b'\n');
@@ -143,19 +162,32 @@ impl Worker {
 }
 // Poll cancellation without adding a thread for each request. Deadlines cover both
 // startup and requests; dropping a failed Worker kills and reaps the child.
-fn wait_for<T>(receiver: &Receiver<T>, timeout: Duration, cancel: Option<&crate::domain_jobs::Cancellation>) -> Result<T> {
+fn wait_for<T>(
+    receiver: &Receiver<T>,
+    timeout: Duration,
+    cancel: Option<&crate::domain_jobs::Cancellation>,
+) -> Result<T> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(cancel) = cancel { cancel.check()?; }
+        if let Some(cancel) = cancel {
+            cancel.check()?;
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(ApiError::new("emoji_ai_unavailable", "Local emoji AI worker did not respond"));
+            return Err(ApiError::new(
+                "emoji_ai_unavailable",
+                "Local emoji AI worker did not respond",
+            ));
         }
         match receiver.recv_timeout(remaining.min(Duration::from_millis(25))) {
             Ok(value) => return Ok(value),
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(ApiError::new(
-                "emoji_ai_unavailable", "Local emoji AI worker is unavailable")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(ApiError::new(
+                    "emoji_ai_unavailable",
+                    "Local emoji AI worker is unavailable",
+                ));
+            }
         }
     }
 }
@@ -175,16 +207,34 @@ impl Backend for Resident {
     fn search(&mut self, query: &str, offset: u32, limit: u32) -> Result<Value> {
         self.search_inner(query, offset, limit, None)
     }
-    fn search_cancellable(&mut self, query: &str, offset: u32, limit: u32, cancel: &crate::domain_jobs::Cancellation) -> Result<Value> {
+    fn search_cancellable(
+        &mut self,
+        query: &str,
+        offset: u32,
+        limit: u32,
+        cancel: &crate::domain_jobs::Cancellation,
+    ) -> Result<Value> {
         self.search_inner(query, offset, limit, Some(cancel))
     }
 }
 impl Resident {
     pub fn new(profile_root: std::path::PathBuf) -> Self {
-        Self { profile_root, process: None, next_id: 0 }
+        Self {
+            profile_root,
+            process: None,
+            next_id: 0,
+        }
     }
-    fn search_inner(&mut self, query: &str, offset: u32, limit: u32, cancel: Option<&crate::domain_jobs::Cancellation>) -> Result<Value> {
-        if let Some(cancel) = cancel { cancel.check()?; }
+    fn search_inner(
+        &mut self,
+        query: &str,
+        offset: u32,
+        limit: u32,
+        cancel: Option<&crate::domain_jobs::Cancellation>,
+    ) -> Result<Value> {
+        if let Some(cancel) = cancel {
+            cancel.check()?;
+        }
         if self.process.is_none() {
             self.process = Some(Worker::start(&self.profile_root, cancel)?);
         }
@@ -251,14 +301,24 @@ pub(crate) fn search(
 }
 
 pub(crate) fn search_cancellable(
-    backend: &mut dyn Backend, query: &str, offset: u32, limit: u32,
+    backend: &mut dyn Backend,
+    query: &str,
+    offset: u32,
+    limit: u32,
     cancel: &crate::domain_jobs::Cancellation,
 ) -> Result<Value> {
     validate(query, offset, limit)?;
     let result = backend.search_cancellable(query, offset, limit, cancel)?;
     cancel.check()?;
-    let checked = validate_result(result, crate::pod_metadata::emoji_entries().len(), offset, limit);
-    if checked.is_err() { backend.invalidate(); }
+    let checked = validate_result(
+        result,
+        crate::pod_metadata::emoji_entries().len(),
+        offset,
+        limit,
+    );
+    if checked.is_err() {
+        backend.invalidate();
+    }
     checked
 }
 

@@ -65,9 +65,8 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
-        "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view" | "refresh" => {
-            "Навигация и выделение"
-        }
+        "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view"
+        | "refresh" => "Навигация и выделение",
         "gallery" | "list" | "density_less" | "density_more" => "Отображение",
         "pinned_move_up" | "pinned_move_down" => "Закреплённые",
         "use_as_background"

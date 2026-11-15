@@ -1267,8 +1267,7 @@ impl Shelf {
                                 ctx.input(|input| input.time),
                             );
                         } else if self.emoji_ai.enabled
-                            && self.emoji_ai.submitted_query.as_deref()
-                                != Some(self.query.as_str())
+                            && self.emoji_ai.submitted_query.as_deref() != Some(self.query.as_str())
                         {
                             ui.weak(i18n::tr("Enter — начать поиск", "Enter — search"));
                         } else {
