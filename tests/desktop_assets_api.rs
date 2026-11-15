@@ -91,7 +91,11 @@ fn direct_apply_rejects_modified_managed_video() {
     let digest = format!("{:x}", sha2::Sha256::digest(original));
     let directory = root.path().join("video-backgrounds");
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(directory.join(format!("{digest}.mp4")), b"changed video bytes").unwrap();
+    std::fs::write(
+        directory.join(format!("{digest}.mp4")),
+        b"changed video bytes",
+    )
+    .unwrap();
     std::fs::write(
         directory.join(format!("{digest}.json")),
         serde_json::json!({"id":digest,"name":"video.mp4","codec":"h264","width":2,"height":2,"duration":1.0}).to_string(),

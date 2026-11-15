@@ -103,7 +103,12 @@ fn queued_original_delete_rejects_settings_change_before_authorization() {
     assert_eq!(result["deleted"], 0);
     assert_eq!(result["items"][0]["ok"], false);
     assert!(path.is_file());
-    assert_eq!(call(&mut service, Command::Get { id })["id"], id);
+    let old = service.execute(katran::Request {
+        api_version: 1,
+        request_id: "revoked".into(),
+        command: Command::Get { id },
+    });
+    assert_eq!(old["error"]["code"], "not_found", "{old}");
 }
 #[cfg(windows)]
 #[test]

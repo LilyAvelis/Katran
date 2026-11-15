@@ -3,6 +3,7 @@ use super::i18n::tr;
 use super::*;
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod folder_page_tests {
     use super::*;
     use std::time::{Duration, Instant};
@@ -800,6 +801,7 @@ mod folder_page_tests {
         assert_eq!(app.state["selected"].as_array().unwrap().len(), 1);
     }
 }
+
 impl Shelf {
     pub(super) fn queue_transfer_copy(&mut self) {
         if self.transfer_busy.as_ref().is_some_and(|busy| {
@@ -953,7 +955,7 @@ impl Shelf {
                     return false;
                 }
                 !matches!(event["storage"].as_str(), Some("cached" | "reference"))
-                    || !event["path"].as_str().is_some_and(|path| !path.is_empty())
+                    || event["path"].as_str().is_none_or(|path| path.is_empty())
             }
             Some("text_fragment" | "link_fragment" | "table_fragment") => false,
             _ => true,
@@ -1434,14 +1436,14 @@ impl Shelf {
         serde_json::json!({"tab":self.state["tab"], "path":self.state["folder_path"], "sort":self.state["sort"], "query":self.query})
     }
     fn cancel_folder_page(&mut self) {
-        if let Some(job) = self.folder_page_job.take() {
-            if let Some(api) = self.api.as_mut() {
-                api.execute(Request {
-                    api_version: 1,
-                    request_id: "ui-folder-cancel".into(),
-                    command: Command::CancelJob { job_id: job.id },
-                });
-            }
+        if let Some(job) = self.folder_page_job.take()
+            && let Some(api) = self.api.as_mut()
+        {
+            api.execute(Request {
+                api_version: 1,
+                request_id: "ui-folder-cancel".into(),
+                command: Command::CancelJob { job_id: job.id },
+            });
         }
     }
     fn start_folder_page(&mut self, cursor: Option<String>, target: usize) {

@@ -105,6 +105,18 @@ fn owned_cut_moves_only_after_copy_and_unpinned_check() {
 #[cfg(windows)]
 #[test]
 fn managed_download_move_and_mixed_pin_same_folder_are_reported() {
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            assert!(path.components().any(|part| {
+                part.as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".katran-recovery-")
+            }));
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+    }
     use katran::source_policy::SourceId;
     let root = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
@@ -114,6 +126,7 @@ fn managed_download_move_and_mixed_pin_same_folder_are_reported() {
     let local = target.path().join("already.txt");
     std::fs::write(&local, b"already there").unwrap();
     let mut api = Service::open(root.path(), 1024 * 1024).unwrap();
+    api.set_trash(Box::new(SyntheticTrash));
     let mut settings: katran::settings::Settings =
         serde_json::from_value(call(&mut api, Command::GetSettings)).unwrap();
     settings.sharex_folder = None;

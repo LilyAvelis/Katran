@@ -28,11 +28,11 @@ pub(super) fn window_icon() -> Arc<egui::IconData> {
 mod tests {
     use super::*;
     #[test]
-    fn bundled_icon_is_square_with_transparent_corners() {
+    fn bundled_icon_is_square_and_opaque() {
         let icon = window_icon();
         assert_eq!((icon.width, icon.height), (256, 256));
         assert_eq!(icon.rgba.len(), 256 * 256 * 4);
-        assert_eq!(icon.rgba[3], 0);
-        assert!(icon.rgba.chunks_exact(4).any(|p| p[3] == 255));
+        assert_eq!(icon.rgba[3], 255);
+        assert!(icon.rgba.chunks_exact(4).all(|p| p[3] == 255));
     }
 }

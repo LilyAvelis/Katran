@@ -613,8 +613,10 @@ mod tests {
         )
         .unwrap();
         let typed = format!("video:{id}");
-        let mut theme = ThemePreferences::default();
-        theme.video_background = Some(id);
+        let mut theme = ThemePreferences {
+            video_background: Some(id),
+            ..Default::default()
+        };
         assert_eq!(
             list(root.path(), &theme, None, &[]).unwrap()["items"][0]["in_use"],
             true

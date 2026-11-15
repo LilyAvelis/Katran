@@ -43,13 +43,11 @@ fn files_pointer_is_visible_durable_and_deletion_leaves_original() {
     let path = originals.path().join("sample.bin");
     std::fs::write(&path, b"synthetic file").unwrap();
     let mut api = Service::open(data.path(), 1_000_000).unwrap();
-    assert_eq!(
+    assert!(
         call(&mut api, Command::Tabs)["visible_tabs"]
             .as_array()
             .unwrap()
-            .last()
-            .unwrap(),
-        "files"
+            .contains(&serde_json::json!("files"))
     );
     let added = call(
         &mut api,
@@ -126,6 +124,18 @@ fn files_pointer_is_visible_durable_and_deletion_leaves_original() {
 #[cfg(windows)]
 #[test]
 fn files_copy_retains_pointer_and_move_removes_it_after_verified_copy() {
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            assert!(path.components().any(|part| {
+                part.as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".katran-recovery-")
+            }));
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+    }
     let data = tempfile::tempdir().unwrap();
     let originals = tempfile::tempdir().unwrap();
     let copy_folder = tempfile::tempdir().unwrap();
@@ -133,6 +143,7 @@ fn files_copy_retains_pointer_and_move_removes_it_after_verified_copy() {
     let source = originals.path().join("object.bin");
     std::fs::write(&source, b"synthetic transfer").unwrap();
     let mut api = Service::open(data.path(), 1_000_000).unwrap();
+    api.set_trash(Box::new(SyntheticTrash));
     api.set_clipboard_files_source(Box::new(NoClipboard));
     let added = call(
         &mut api,

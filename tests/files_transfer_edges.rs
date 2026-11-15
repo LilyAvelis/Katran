@@ -97,6 +97,18 @@ fn pinned_external_alias_makes_files_move_copy_only() {
 #[cfg(windows)]
 #[test]
 fn move_batch_removes_only_successful_pointer_and_preserves_failed_one() {
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            assert!(path.components().any(|part| {
+                part.as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".katran-recovery-")
+            }));
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+    }
     let data = tempfile::tempdir().unwrap();
     let originals = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();
@@ -105,6 +117,7 @@ fn move_batch_removes_only_successful_pointer_and_preserves_failed_one() {
     std::fs::write(&good, b"synthetic good").unwrap();
     std::fs::write(&missing, b"synthetic missing").unwrap();
     let mut api = Service::open(data.path(), 1_000_000).unwrap();
+    api.set_trash(Box::new(SyntheticTrash));
     api.set_clipboard_files_source(Box::new(NoClipboard));
     let added = call(
         &mut api,

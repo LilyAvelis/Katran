@@ -1261,6 +1261,8 @@ impl Shelf {
                             }
                         });
                     });
+                    #[cfg(not(test))]
+                    let _ = bar;
                     #[cfg(test)]
                     ctx.data_mut(|d| {
                         d.insert_temp(egui::Id::new("test-emoji-mode-bar-rect"), bar.response.rect)
@@ -1292,11 +1294,7 @@ impl Shelf {
                     if self.state["emoji_catalogue"] == true
                         && let Some(total) = self.pods_ui.category_total
                     {
-                        ui.weak(if i18n::is_english() {
-                            format!("{total} emoji")
-                        } else {
-                            format!("{total} emoji")
-                        });
+                        ui.weak(format!("{total} emoji"));
                     }
                     if self.state["tab"] == "pods" {
                         ui.weak(if self.state["emoji_catalogue"] == true {
@@ -1860,13 +1858,19 @@ impl eframe::App for Shelf {
             let repeated_copy = copy_bound && input.focused && input.events.iter().any(|event| matches!(event,
                 egui::Event::Key { key: egui::Key::Tab, pressed: true, repeat: false, modifiers, .. }
                     if *modifiers == egui::Modifiers::CTRL));
-            input.events.retain(|event| matches!(event,
-                egui::Event::Key { pressed: false, .. }
-                | egui::Event::PointerButton { pressed: false, .. }
-                | egui::Event::PointerMoved(_)
-                | egui::Event::PointerGone
-                | egui::Event::WindowFocused(_)));
-            if repeated_copy { self.queue_transfer_copy(); }
+            input.events.retain(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key { pressed: false, .. }
+                        | egui::Event::PointerButton { pressed: false, .. }
+                        | egui::Event::PointerMoved(_)
+                        | egui::Event::PointerGone
+                        | egui::Event::WindowFocused(_)
+                )
+            });
+            if repeated_copy {
+                self.queue_transfer_copy();
+            }
         }
         // Eframe invokes this before Context::run_ui, outside egui locks.
         self.finish_job();
@@ -4854,7 +4858,9 @@ mod tests {
                 .all(|event| event["category"]["group"] == "Animals & Nature")
         );
         assert!(app.pods_ui.category_total.unwrap() > 100);
-        let focused = ctx.memory(|memory| memory.focused()).expect("category search retains focus");
+        let focused = ctx
+            .memory(|memory| memory.focused())
+            .expect("category search retains focus");
         assert!(egui::TextEdit::load_state(&ctx, focused).is_some());
         // The closed picker can leave its TextEdit focused until a later frame.
         // Rendering those frames must not reacquire the Context lock recursively.

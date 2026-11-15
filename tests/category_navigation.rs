@@ -69,7 +69,7 @@ fn arrows_follow_visible_order_exit_pinned_and_never_enter_folder() {
     );
     assert_eq!(
         call(&mut api, Command::NavigateTab { delta: 1 })["tab"],
-        "images"
+        "desktop"
     );
     call(&mut api, Command::SetTab { tab: ShelfTab::All });
     assert_eq!(

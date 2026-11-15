@@ -111,46 +111,6 @@ pub(crate) fn register_sql(db: &rusqlite::Connection) -> crate::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_pod;
-    #[test]
-    fn emoji_and_symbols_without_text_or_dangling_controls() {
-        for input in [
-            "🐄",
-            "👨‍👩‍👧‍👦",
-            "👍🏽",
-            "🇰🇿",
-            "1️⃣",
-            "#️⃣",
-            "∑",
-            "€",
-            "→",
-            "©",
-            "🐄 🐄",
-        ] {
-            assert!(is_pod(input), "{input:?}");
-        }
-        for input in [
-            "",
-            " ",
-            "1",
-            "#",
-            "*",
-            "!?",
-            "a🐄",
-            "1🐄",
-            "🐄‍",
-            "‍🐄",
-            "🐄️️",
-            "🇰",
-            "🏽",
-        ] {
-            assert!(!is_pod(input), "{input:?}");
-        }
-    }
-}
-
 // Stable, reserved session IDs; they never address stored events or Folder files.
 const EMOJI_ID_BASE: i64 = -(1_i64 << 61);
 pub(crate) fn is_emoji_id(id: i64) -> bool {
@@ -247,4 +207,44 @@ pub(crate) fn browse_emoji(
     Ok(
         serde_json::json!({"events":events,"dividers":dividers,"next_cursor":(end < entries.len()).then(|| format!("{end}:{}", &scope[..16])),"unicode_version":"16.0","total":entries.len()}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pod;
+    #[test]
+    fn emoji_and_symbols_without_text_or_dangling_controls() {
+        for input in [
+            "🐄",
+            "👨‍👩‍👧‍👦",
+            "👍🏽",
+            "🇰🇿",
+            "1️⃣",
+            "#️⃣",
+            "∑",
+            "€",
+            "→",
+            "©",
+            "🐄 🐄",
+        ] {
+            assert!(is_pod(input), "{input:?}");
+        }
+        for input in [
+            "",
+            " ",
+            "1",
+            "#",
+            "*",
+            "!?",
+            "a🐄",
+            "1🐄",
+            "🐄‍",
+            "‍🐄",
+            "🐄️️",
+            "🇰",
+            "🏽",
+        ] {
+            assert!(!is_pod(input), "{input:?}");
+        }
+    }
 }

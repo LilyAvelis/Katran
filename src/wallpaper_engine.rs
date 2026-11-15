@@ -196,13 +196,12 @@ fn stage_in(root: &Path, event: &crate::Event, directory: &Path) -> crate::Resul
             .revision
             .strip_prefix("ref:")
             .or_else(|| event.revision.strip_prefix("blob:"))
+            && digest != expected
         {
-            if digest != expected {
-                return Err(crate::ApiError::new(
-                    "stale_selection",
-                    "Video changed while copying",
-                ));
-            }
+            return Err(crate::ApiError::new(
+                "stale_selection",
+                "Video changed while copying",
+            ));
         }
         validate(root, event)?;
         let target = directory.join(format!("{digest}.{suffix}"));
@@ -213,10 +212,10 @@ fn stage_in(root: &Path, event: &crate::Event, directory: &Path) -> crate::Resul
                     "Existing Wallpaper Engine copy does not match its content",
                 ));
             }
-        } else if let Err(error) = fs::rename(&tmp, &target) {
-            if !target.exists() || crate::preview::content_hash(&target)? != digest {
-                return Err(error.into());
-            }
+        } else if let Err(error) = fs::rename(&tmp, &target)
+            && (!target.exists() || crate::preview::content_hash(&target)? != digest)
+        {
+            return Err(error.into());
         }
         Ok(target)
     })();
@@ -316,10 +315,10 @@ fn silent_copy(source: &Path) -> crate::Result<PathBuf> {
                     "Existing silent copy does not match its content",
                 ));
             }
-        } else if let Err(error) = fs::rename(&temp, &target) {
-            if !target.exists() || crate::preview::content_hash(&target)? != digest {
-                return Err(error.into());
-            }
+        } else if let Err(error) = fs::rename(&temp, &target)
+            && (!target.exists() || crate::preview::content_hash(&target)? != digest)
+        {
+            return Err(error.into());
         }
         Ok(target)
     })();

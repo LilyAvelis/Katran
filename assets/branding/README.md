@@ -1,12 +1,13 @@
-# Katran application identity · 1.0.4
+# Katran application identity · 3.7.0
 
-- `katran-logo.png`: generated square master, RGBA with transparent corners.
+- `katran-logo.png`: owner-supplied square master for 3.7.0.
 - `katran-icon.png`: 256px window/taskbar texture, embedded into the GUI binary.
 - `katran.ico`: 16/20/24/32/40/48/64/96/128/256px Windows icon resources.
 - `katran.rc`: icon and file/product metadata template. `build.rs` fills version
   from Cargo and compiles it only for `katran-ui` on Windows when UI is enabled.
 
-Optional authoring export: `python scripts/export-icon.py` (Pillow). Builds use
+Windows authoring export: `pwsh scripts/export-icon.ps1` (System.Drawing).
+The older `python scripts/export-icon.py` (Pillow) remains available. Builds use
 the committed PNG/ICO and need no Python. Windows UI builds require the Windows
 SDK resource compiler; missing resources fail the build rather than silently
 shipping a generic executable icon. Non-Windows and CLI-only builds skip RC.
@@ -21,7 +22,7 @@ can be added separately. The owner verifies actual taskbar/Alt+Tab appearance.
 References: [Microsoft application IDs](https://learn.microsoft.com/en-us/windows/win32/shell/appids),
 [resource compilation](https://docs.rs/embed-resource/3.0.12/embed_resource/fn.compile_for.html).
 
-## Generation record
+## Previous icon generation record · 1.0.4
 
 Generated with the built-in image generation tool. No API/CLI fallback used.
 PNG/ICO variants are mechanical resizes/format exports of the same artwork.

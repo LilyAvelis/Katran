@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('katran-release-test-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode') | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/branding'),(Join-Path $sandbox 'assets/themes/lilies'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode') | Out-Null
 try {
     foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $sandbox $dir) -Force | Out-Null }
@@ -9,6 +9,7 @@ try {
     }
     foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) { [IO.File]::WriteAllText((Join-Path $sandbox "binaries/$file"), "synthetic-$file") }
     foreach ($file in @('Cargo.toml','Cargo.lock','build.rs','AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','src/lib.rs','.env.local','katran-data/private.txt','runtime/old/private.exe','binaries/private.pdb')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), 'synthetic-private-canary') }
+    [IO.File]::WriteAllText((Join-Path $sandbox 'src/catalogue_schema.rs'), 'pub(crate) const VERSION: i64 = 12;')
     foreach ($file in @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt','assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
     $out = Join-Path $sandbox 'output'
     & (Join-Path $root 'scripts/package-release.ps1') -Root $sandbox -BinaryDirectory 'binaries' -OutputDirectory $out -Version '2.0.0' -DependencyNoticesPath (Join-Path $sandbox 'THIRD-PARTY-NOTICES.txt')
@@ -21,6 +22,7 @@ try {
         if (@(Compare-Object ($names | Sort-Object) ($expected | Sort-Object)).Count) { throw 'Portable whitelist differs' }
     } finally { $zip.Dispose() }
     $release = Get-Content -LiteralPath (Join-Path $out 'release.json') -Raw | ConvertFrom-Json
+    if ($release.data_schema_version -ne 12) { throw 'Release data schema version differs' }
     $update = Join-Path $out 'Katran-2.0.0-update.zip'
     if ($release.update.sha256 -cne (Get-FileHash -LiteralPath $update -Algorithm SHA256).Hash.ToLowerInvariant() -or $release.update.size_bytes -ne (Get-Item -LiteralPath $update).Length) { throw 'Update metadata does not match ZIP' }
     $zip = [IO.Compression.ZipFile]::OpenRead($update)

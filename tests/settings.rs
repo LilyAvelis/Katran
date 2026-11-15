@@ -13,6 +13,8 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let settings = Settings {
         language: katran::settings::Language::English,
         theme: Default::default(),
+        window_resizable: false,
+        desktop_wallpaper_id: None,
         sort_notifications: true,
         pods_enabled: false,
         pods_tile_size: 96,

@@ -35,10 +35,10 @@ impl Service {
                 {
                     continue;
                 }
-                if let Some(slot) = self.interaction.tag_slot_filter {
-                    if crate::desktop_pins::slot(&self.db, event.id)? != Some(slot) {
-                        continue;
-                    }
+                if let Some(slot) = self.interaction.tag_slot_filter
+                    && crate::desktop_pins::slot(&self.db, event.id)? != Some(slot)
+                {
+                    continue;
                 }
                 ids.push(event.id);
             }

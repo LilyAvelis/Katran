@@ -533,6 +533,18 @@ fn batch_can_repeat_moves_through_different_folders_after_return_import() {
 #[cfg(windows)]
 #[test]
 fn explicit_move_allows_legacy_reference_but_clipboard_cut_keeps_old_protection() {
+    struct SyntheticTrash;
+    impl katran::downloads::Trash for SyntheticTrash {
+        fn recycle(&self, path: &std::path::Path) -> katran::Result<()> {
+            assert!(path.components().any(|part| {
+                part.as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".katran-recovery-")
+            }));
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+    }
     struct Clipboard;
     impl clipboard_files::Source for Clipboard {
         fn sequence(&self) -> u32 {
@@ -550,6 +562,7 @@ fn explicit_move_allows_legacy_reference_but_clipboard_cut_keeps_old_protection(
         .save(&path)
         .unwrap();
     let mut api = Service::open(root.path(), 1000000).unwrap();
+    api.set_trash(Box::new(SyntheticTrash));
     api.set_clipboard_files_source(Box::new(Clipboard));
     let e = call(
         &mut api,

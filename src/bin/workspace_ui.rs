@@ -212,10 +212,9 @@ impl Shelf {
                 }
                 key || pasted
             })
+            && self.start_job(Command::PasteToFolder, false, ctx.clone())
         {
-            if self.start_job(Command::PasteToFolder, false, ctx.clone()) {
-                self.message = tr("Вставка файлов…", "Pasting files…").into();
-            }
+            self.message = tr("Вставка файлов…", "Pasting files…").into();
         }
     }
     pub(super) fn workspace_input(&mut self, ctx: &egui::Context) {

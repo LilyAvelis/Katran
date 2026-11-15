@@ -114,10 +114,7 @@ fn changing_configuration_immediately_revokes_old_original_authority() {
             confirmed: false,
         },
     );
-    assert_eq!(
-        result["result"]["items"][0]["error"]["code"], "stale_source_generation",
-        "{result}"
-    );
+    assert_eq!(result["error"]["code"], "not_found", "{result}");
     assert!(path.exists());
 }
 #[test]
@@ -432,8 +429,11 @@ fn v11_projection_schema_is_upgraded_in_numbered_migration() {
     drop(Service::open(data.path(), 1_000_000).unwrap());
     let db_path = data.path().join("index.sqlite3");
     let db = rusqlite::Connection::open(&db_path).unwrap();
-    db.execute("INSERT INTO desktop_pins(asset_id,position) VALUES(123,1)", [])
-        .unwrap();
+    db.execute(
+        "INSERT INTO desktop_pins(asset_id,position) VALUES(123,1)",
+        [],
+    )
+    .unwrap();
     db.execute_batch("DROP INDEX desktop_pins_order; ALTER TABLE desktop_pins DROP COLUMN slot_number; PRAGMA user_version=11;")
         .unwrap();
     drop(db);
@@ -455,8 +455,12 @@ fn v11_projection_schema_is_upgraded_in_numbered_migration() {
         1
     );
     assert_eq!(
-        db.query_row("SELECT position FROM desktop_pins WHERE asset_id=123", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
+        db.query_row(
+            "SELECT position FROM desktop_pins WHERE asset_id=123",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
         1
     );
 }

@@ -47,66 +47,68 @@ fn stdio_v2_emoji_id_round_trips_without_changing_v1() {
         .unwrap();
     let mut input = child.stdin.take().unwrap();
     let mut output = BufReader::new(child.stdout.take().unwrap());
-    let mut send = |version: u32, command: Value| -> Value {
-        writeln!(
-            input,
-            "{}",
-            json!({"api_version":version,"request_id":"test","command":command})
-        )
-        .unwrap();
-        input.flush().unwrap();
-        let mut line = String::new();
-        output.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
-    };
-    let image_path = root.path().join("synthetic.png");
-    image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]))
-        .save(&image_path)
-        .unwrap();
-    assert_eq!(
-        send(
+    {
+        let mut send = |version: u32, command: Value| -> Value {
+            writeln!(
+                input,
+                "{}",
+                json!({"api_version":version,"request_id":"test","command":command})
+            )
+            .unwrap();
+            input.flush().unwrap();
+            let mut line = String::new();
+            output.read_line(&mut line).unwrap();
+            serde_json::from_str(&line).unwrap()
+        };
+        let image_path = root.path().join("synthetic.png");
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]))
+            .save(&image_path)
+            .unwrap();
+        assert_eq!(
+            send(
+                2,
+                json!({"type":"import_theme_background","path":image_path})
+            )["ok"],
+            true
+        );
+        assert_eq!(
+            send(2, json!({"type":"set_tab","tab":"desktop"}))["ok"],
+            true
+        );
+        let desktop = send(
             2,
-            json!({"type":"import_theme_background","path":image_path})
-        )["ok"],
-        true
-    );
-    assert_eq!(
-        send(2, json!({"type":"set_tab","tab":"desktop"}))["ok"],
-        true
-    );
-    let desktop = send(
-        2,
-        json!({"type":"browse_shelf_sorted","query":"","limit":10,"cursor":null}),
-    );
-    let desktop_id = desktop["result"]["events"][0]["id"].as_str().unwrap();
-    assert!(desktop_id.parse::<i64>().unwrap().unsigned_abs() > 9_007_199_254_740_991);
-    assert_eq!(send(2, json!({"type":"get","id":desktop_id}))["ok"], true);
-    for command in [
-        json!({"type":"set_tab_enabled","tab":"pods","enabled":true}),
-        json!({"type":"set_tab","tab":"pods"}),
-        json!({"type":"set_emoji_catalogue","enabled":true}),
-    ] {
-        assert_eq!(send(2, command)["ok"], true);
+            json!({"type":"browse_shelf_sorted","query":"","limit":10,"cursor":null}),
+        );
+        let desktop_id = desktop["result"]["events"][0]["id"].as_str().unwrap();
+        assert!(desktop_id.parse::<i64>().unwrap().unsigned_abs() > 9_007_199_254_740_991);
+        assert_eq!(send(2, json!({"type":"get","id":desktop_id}))["ok"], true);
+        for command in [
+            json!({"type":"set_tab_enabled","tab":"pods","enabled":true}),
+            json!({"type":"set_tab","tab":"pods"}),
+            json!({"type":"set_emoji_catalogue","enabled":true}),
+        ] {
+            assert_eq!(send(2, command)["ok"], true);
+        }
+        let browse =
+            json!({"type":"browse_shelf_sorted","query":"cow face","limit":10,"cursor":null});
+        let v2 = send(2, browse.clone());
+        assert_eq!(v2["api_version"], 2);
+        let id = v2["result"]["events"][0]["id"].as_str().unwrap();
+        assert!(id.parse::<i64>().unwrap().unsigned_abs() > 9_007_199_254_740_991);
+        let desc = send(2, json!({"type":"describe_pod","id":id}));
+        assert_eq!(desc["ok"], true, "{desc}");
+        assert_eq!(
+            desc["result"]["text"],
+            v2["result"]["events"][0]["text_preview"]
+        );
+        let bad = send(
+            2,
+            json!({"type":"describe_pod","id":id.parse::<i64>().unwrap()}),
+        );
+        assert_eq!(bad["error"]["code"], "invalid_request");
+        let v1 = send(1, browse);
+        assert!(v1["result"]["events"][0]["id"].as_i64().is_some());
     }
-    let browse = json!({"type":"browse_shelf_sorted","query":"cow face","limit":10,"cursor":null});
-    let v2 = send(2, browse.clone());
-    assert_eq!(v2["api_version"], 2);
-    let id = v2["result"]["events"][0]["id"].as_str().unwrap();
-    assert!(id.parse::<i64>().unwrap().unsigned_abs() > 9_007_199_254_740_991);
-    let desc = send(2, json!({"type":"describe_pod","id":id}));
-    assert_eq!(desc["ok"], true, "{desc}");
-    assert_eq!(
-        desc["result"]["text"],
-        v2["result"]["events"][0]["text_preview"]
-    );
-    let bad = send(
-        2,
-        json!({"type":"describe_pod","id":id.parse::<i64>().unwrap()}),
-    );
-    assert_eq!(bad["error"]["code"], "invalid_request");
-    let v1 = send(1, browse);
-    assert!(v1["result"]["events"][0]["id"].as_i64().is_some());
-    drop(send);
     drop(input);
     child.wait().unwrap();
 }

@@ -946,9 +946,9 @@ impl Service {
                     return self.dispatch(Command::CopySelectedObjects);
                 }
                 let saved = self.dispatch(Command::CopyEmojiSelectionToPods)?;
-                let all_saved = saved["items"].as_array().is_some_and(|items| {
-                    items.iter().all(|item| item["ok"] == true)
-                });
+                let all_saved = saved["items"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().all(|item| item["ok"] == true));
                 let clipboard = if all_saved {
                     match self.dispatch(Command::CopySelectedObjects) {
                         Ok(result) if result["text_copied"] == true => {
@@ -960,7 +960,9 @@ impl Service {
                 } else {
                     serde_json::json!({"status":"skipped"})
                 };
-                Ok(serde_json::json!({"emoji_copy":true, "items":saved["items"], "clipboard":clipboard}))
+                Ok(
+                    serde_json::json!({"emoji_copy":true, "items":saved["items"], "clipboard":clipboard}),
+                )
             }
             Command::CopySmart { items } => {
                 if self.selection_is_tables(&items)? {

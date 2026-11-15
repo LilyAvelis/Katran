@@ -168,7 +168,9 @@ mod tests {
         let items = vec![serde_json::json!({"category":{"group":"A","subgroup":""}})];
         let layout = layout(&items, 3, 80.0, 4.0, true);
         assert_eq!(layout.rows.len(), 2);
-        assert!(matches!(&layout.rows[0].kind, Kind::Divider { level: "group", label } if label == "A"));
+        assert!(
+            matches!(&layout.rows[0].kind, Kind::Divider { level: "group", label } if label == "A")
+        );
         assert!(matches!(&layout.rows[1].kind, Kind::Cards(range) if range == &(0..1)));
     }
 }

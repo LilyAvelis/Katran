@@ -437,6 +437,29 @@ pub(crate) fn list_fast(root: &Path) -> Result<Value> {
     Ok(json!({"backgrounds":backgrounds}))
 }
 
+/// Remove only an existing managed image and its optional metadata sidecar.
+pub(crate) fn remove(root: &Path, id: &str) -> Result<()> {
+    // Validate the content and directory before touching either entry.
+    get(root, id)?;
+    let dir = directory(root)?;
+    let image = dir.join(format!("{id}.png"));
+    let sidecar = dir.join(format!("{id}.json"));
+    checked_file(&image)?;
+    match fs::symlink_metadata(&sidecar) {
+        Ok(_) => {
+            checked_file(&sidecar)?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    fs::remove_file(image)?;
+    match fs::remove_file(sidecar) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,28 +655,5 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(target.path(), root.path().join("theme-backgrounds")).unwrap();
         assert!(list(root.path()).is_err());
-    }
-}
-
-/// Remove only an existing managed image and its optional metadata sidecar.
-pub(crate) fn remove(root: &Path, id: &str) -> Result<()> {
-    // Validate the content and directory before touching either entry.
-    get(root, id)?;
-    let dir = directory(root)?;
-    let image = dir.join(format!("{id}.png"));
-    let sidecar = dir.join(format!("{id}.json"));
-    checked_file(&image)?;
-    match fs::symlink_metadata(&sidecar) {
-        Ok(_) => {
-            checked_file(&sidecar)?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
-    }
-    fs::remove_file(image)?;
-    match fs::remove_file(sidecar) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
     }
 }
