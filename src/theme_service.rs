@@ -24,7 +24,10 @@ impl Service {
         {
             return Err(ApiError::new("invalid_image", "Выберите изображение"));
         }
-        if !file_types::is_native_image(&event.path) {
+        // Managed image blobs are named by digest and have no extension. Their
+        // domain kind is metadata-only; preparation still checks the revision
+        // and decodes the actual bytes before applying either action.
+        if event.kind != EventKind::ManagedImage && !file_types::is_native_image(&event.path) {
             return Err(ApiError::new("invalid_image", "Выберите изображение"));
         }
         Ok(event)

@@ -30,6 +30,11 @@ The local public v12 binary is staged at `runtime/versions/28c8fb0b5446`.
 Published public 3.4.1 and previous E `c1555b47dc04` remain incompatible with
 the migrated profile; restoring either requires a controlled database rollback.
 
+Images stores copied image bytes under extensionless digest paths. Background
+Actions admit `ManagedImage` at the metadata boundary; external/Desktop images
+still use path type, and `theme_backgrounds::prepare_event` validates revision
+and bytes before either Katran background or native wallpaper changes.
+
 Folder transfer/copy/import/paste preparation now runs through background jobs.
 Known file selections totaling at least 16 MiB or 20 distinct files get a
 busy presentation frame before Folder transfer or physical deletion starts.

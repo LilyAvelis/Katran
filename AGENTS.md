@@ -3,7 +3,8 @@
 ## Public release baseline · 3.4.1 · 2026-11-12
 
 The latest public release remains 3.4.1. The local source also contains
-unreleased PRODUCT-10 hardening; do not describe it as installed or published.
+unreleased PRODUCT-10 hardening; distinguish local E installation from public
+publication.
 Read `README.md`, `docs/development.md`, and `docs/releases/next.md` for its
 current implementation and evidence. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
 is valuable product context; it currently labels itself 3.2.3, so reconcile
@@ -28,13 +29,18 @@ spawn-to-assignment window. Targeted evidence and limitations are listed in
 PRODUCT-10 status ledger. These contracts are local and unreleased. A7 applies
 only to private E and must not add model,
 AI command, UI, or implementation to this public source tree. A9's private E
-runtime manifest contract has targeted synthetic evidence; final handoff checks
-remain pending. N1 Folder transfer remains partially open. No release or push
+runtime manifest contract has targeted synthetic evidence; the current source
+handoff check has no unresolved boundary findings. N1 Folder transfer remains partially open. No release or push
 is authorized by this work.
-Public and E share Pods/Desktop/settings storage. Schema v12 must not be applied
-to a real user database until both installed editions support v12; installed
-public 3.4.1 and E runtime `c1555b47dc04` remain pre-v12, and no real database
-has been migrated. Synthetic migration tests do not satisfy this gate.
+Public and E share Pods/Desktop/settings storage. The local launcher selects E
+`81a5c4d200c5`; the shared profile reached schema v12 on 2026-11-15 with a
+pre-migration backup and passing integrity check. A compatible local public v12
+binary is staged separately. Published public 3.4.1 and prior E `c1555b47dc04`
+cannot open the migrated profile without controlled rollback.
+For image background Actions, saved Images blobs have extensionless digest paths:
+`EventKind::ManagedImage` admits them at the metadata boundary, while external
+and Desktop images use their path type. Actual bytes and revision are validated
+at the action boundary before applying Katran or Windows wallpaper.
 The public category divider omits empty subgroup labels (scoped UI regression).
 Avilon Windows media stop closes the assigned decoder process tree; its current
 evidence is limited to the stop fixture, and does not close the spawn-to-assign

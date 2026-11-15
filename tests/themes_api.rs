@@ -451,6 +451,120 @@ fn selected_image_action_copies_and_applies_background_through_sync_and_job_api(
 }
 
 #[test]
+fn images_tab_managed_blob_exposes_background_actions_and_checks_bytes() {
+    use katran::interaction::{SelectionMode, ShelfTab};
+    let root = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let png = source.path().join("synthetic.png");
+    image::RgbaImage::new(8, 6).save(&png).unwrap();
+    let bytes = std::fs::read(&png).unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let event = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: bytes.clone(),
+            source: "synthetic".into(),
+        },
+    );
+    let id = event["id"].as_i64().unwrap();
+    assert_eq!(event["kind"], "managed_image");
+    assert!(
+        std::path::Path::new(event["path"].as_str().unwrap())
+            .extension()
+            .is_none()
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: "".into(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    assert!(
+        page["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["id"] == id)
+    );
+    call(&mut api, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut api,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let actions = call(&mut api, Command::Actions);
+    for action in ["use_as_background", "use_as_desktop_wallpaper"] {
+        assert!(
+            actions
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == action),
+            "{action}: {actions}"
+        );
+    }
+    let result = call(
+        &mut api,
+        Command::RunAction {
+            id: "use_as_background".into(),
+        },
+    );
+    assert_eq!(result["background_applied"], true);
+    assert_eq!(
+        call(&mut api, Command::Themes)["current"]["custom_background"],
+        result["id"]
+    );
+    assert_eq!(
+        std::fs::read(event["path"].as_str().unwrap()).unwrap(),
+        bytes
+    );
+
+    // Preparation is admitted without invoking the native wallpaper effect.
+    // Cancelling before PollJob prevents the dispatcher from publishing it.
+    let job = call(
+        &mut api,
+        Command::BeginJob {
+            command: Box::new(Command::RunAction {
+                id: "use_as_desktop_wallpaper".into(),
+            }),
+        },
+    );
+    assert_eq!(job["state"], "queued");
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    assert_eq!(
+        call(&mut api, Command::CancelJob { job_id })["state"],
+        "cancelled"
+    );
+
+    // Corruption is detected before any native wallpaper call, even though
+    // Actions deliberately remains based on the selected object's metadata.
+    std::fs::write(event["path"].as_str().unwrap(), b"synthetic corruption").unwrap();
+    for command in [
+        Command::UseSelectedImageAsBackground,
+        Command::UseSelectedImageAsDesktopWallpaper,
+    ] {
+        let response = api.execute(Request {
+            api_version: 1,
+            request_id: "stale-image".into(),
+            command,
+        });
+        assert_eq!(response["ok"], false, "{response}");
+        assert_eq!(response["error"]["code"], "source_changed", "{response}");
+    }
+}
+
+#[test]
 fn cancelled_background_job_never_commits_a_managed_copy() {
     let root = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();

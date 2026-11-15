@@ -53,6 +53,12 @@ public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.
 The published public 3.4.1 and old E runtime cannot open this v12 profile;
 neither is selected by the local launcher.
 
+Saved images in Images use extensionless internal blob paths. Local source now
+offers both Katran background and Windows desktop wallpaper Actions for these
+images using their managed image type; the selected bytes are checked when the
+action runs. Files lists file pointers, so a saved image normally appears in
+Images instead.
+
 Transfer, import, paste and move preparation now use background jobs, and the
 repeated Ctrl+Tab queue case is covered. Public targeted UI checks passed
 201/201 and transfer/import/Wallpaper Engine checks passed 23/23; E N1 API

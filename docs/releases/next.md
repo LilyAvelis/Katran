@@ -16,6 +16,14 @@ Source checkpoint `e6453c5` includes the N1 job preparation, recoverable
 original moves, Wallpaper Engine and decoder-stop changes. No new public release
 is installed.
 
+- **Images background Actions:** copied image blobs have extensionless digest
+  paths. Both Katran background and Windows wallpaper Actions now accept their
+  `ManagedImage` type while validating actual bytes at execution. A focused
+  Images browse/select API regression covers both Actions, successful Katran
+  apply, safe Windows job cancellation and stale bytes without changing real
+  desktop wallpaper. Files remains the shelf for file pointers; saved images
+  belong to Images.
+
 - **A1 — public UI focus:** category selection now reads the focused widget ID
   before loading text-edit state, avoiding nested egui context locks. The
   targeted UI regression passed 1/1; Windows owner acceptance remains separate.
