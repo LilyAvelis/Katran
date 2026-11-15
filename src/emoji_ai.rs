@@ -151,7 +151,7 @@ impl Worker {
                 "Local emoji AI worker is unavailable",
             )
         })?;
-        if wait_for(&received, timeout, cancel)? != true {
+        if !wait_for(&received, timeout, cancel)? {
             return Err(ApiError::new(
                 "emoji_ai_unavailable",
                 "Local emoji AI worker did not accept request",
