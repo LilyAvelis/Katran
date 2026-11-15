@@ -81,6 +81,10 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    EmojiAi {
+        value: Value,
+        view_generation: u64,
+    },
     ExternalPasteReady {
         folder: PathBuf,
         ids: Vec<i64>,
@@ -565,6 +569,42 @@ impl Service {
             };
         }
         let id = match command {
+            Command::SearchEmojiAi {
+                query,
+                offset,
+                limit,
+            } => {
+                if self.interaction.tab != interaction::ShelfTab::Pods
+                    || !self.interaction.emoji_catalogue
+                {
+                    return Err(ApiError::new("invalid_tab", "Emoji catalogue is not open"));
+                }
+                emoji_ai::validate(&query, offset, limit)?;
+                let view_generation = self.interaction.view_generation;
+                let backend = std::sync::Arc::clone(&self.emoji_ai);
+                self.jobs.submit(Lane::EmojiAi, move |cancel| {
+                    cancel.check()?;
+                    let mut backend = backend.lock().map_err(|_| {
+                        ApiError::new(
+                            "emoji_ai_unavailable",
+                            "Local emoji AI backend is unavailable",
+                        )
+                    })?;
+                    cancel.check()?;
+                    let value = emoji_ai::search_cancellable(
+                        &mut **backend,
+                        &query,
+                        offset,
+                        limit,
+                        &cancel,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::EmojiAi {
+                        value,
+                        view_generation,
+                    })
+                })?
+            }
             Command::ListDesktopAssets => {
                 let root = self.root.clone();
                 let theme = self.settings.theme.clone();
@@ -1669,6 +1709,12 @@ impl Service {
                 },
                 PreparedWork::VideoWallpaper{..}=>Err(ApiError::new("invalid_job_phase","Wallpaper request must be authorized before effect")),
                 PreparedWork::EmojiFont(font)=> {self.jobs.authorize_claimed_effect(ready)?; emoji_fonts::commit(&self.root,font)},
+                PreparedWork::EmojiAi{value,view_generation}=>{
+                    if self.interaction.tab != interaction::ShelfTab::Pods || !self.interaction.emoji_catalogue || self.interaction.view_generation != view_generation {
+                        return Err(ApiError::new("stale_context", "Emoji catalogue context changed during search"));
+                    }
+                    Ok(value)
+                },
                 PreparedWork::Value(value)=>Ok(value),
                 PreparedWork::UpdateChecked(status)=>self.accept_update_check(status),
                 PreparedWork::UpdateReady{..}=>Err(ApiError::new("invalid_job_phase","Update preparation must be authorized before effect")),

@@ -1,5 +1,9 @@
 # Development log leading to 3.7.0
 
+## Local 3.7.1 candidate · unified application (unreleased)
+
+Lilia chose one Katran application after the separate local E build developed a native background regression while the compatible public build still played the same video. The 3.7.0 release is unchanged. The next patch carries emoji AI search into the public host as an optional local feature, with no authorization or payment gate yet. Model weights, Python environment and generated index are installed separately, never bundled with Katran. The `EmojiAiStatus` command and AI mode explain when the model is missing; ordinary Pods and wallpaper functionality remain independent. The active profile is the stable home for the runtime, so app updates do not have to copy it. See [model setup](../emoji-ai.md). This integration still needs complete validation and owner GUI acceptance before release.
+
 This page preserves pre-release checkpoints and their then-current status.
 For the published 3.7.0 behavior, see [3.7.0 release notes](3.7.0.md).
 

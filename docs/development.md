@@ -1,5 +1,7 @@
 # Developer and agent entry point
 
+Owner decision 2026-11-15: use the public 3.7 source as the sole Katran host. The optional emoji AI mode now follows `SearchEmojiAi` through the standard dispatcher and job service, with `src/bin/emoji_ai_ui.rs` as its UI client. Its runtime lives under the active profile's `emoji-ai-runtime` directory, outside versioned executables; a missing model must not break ordinary Katran. The earlier separate E distribution plan is superseded for 3.7. See [the model setup](emoji-ai.md).
+
 Public release baseline: **3.7.0** (2026-11-15). For each new release, update this
 baseline and the current section of `AGENTS.md` together with the README and
 release note. Older numbered sections and reviews are dated evidence, not

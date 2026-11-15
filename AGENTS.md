@@ -2,6 +2,10 @@
 
 ## Public release baseline · 3.7.0 · 2026-11-15
 
+## Owner decision · unified Katran · 2026-11-15
+
+Lilia replaced the earlier two-application and A7 private-only decision for the 3.7 line. Continue from the public 3.7 source as one application; move emoji AI search into this codebase and keep the model/runtime as an optional, separately downloaded local component. If missing, show a useful error and installation instructions. No Notion authentication or paid gate in 3.7; revisit entitlement and private distribution in 4.0. Earlier statements below that forbid AI code in public or require a separate E app are historical and no longer govern this work. Published 3.7.0 assets remain immutable; a later merge needs a new patch version and verified artifact.
+
 The public 3.7.0 release source includes PRODUCT-10 hardening. Distinguish the
 public release from the locally installed private E build.
 Read `README.md`, `docs/development.md`, and `docs/releases/next.md` for its

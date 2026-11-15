@@ -1533,6 +1533,13 @@ impl Shelf {
         self.pending_folder_select_all = false;
         self.preloaded_has_more = false;
         self.tab_preload.waiting = None;
+        if self.emoji_ai.enabled
+            && self.state["tab"] == "pods"
+            && self.state["emoji_catalogue"] == true
+        {
+            self.emoji_ai_refresh();
+            return;
+        }
         let target = if self.query == self.loaded_query {
             self.events.len().max(1000)
         } else {
@@ -1580,6 +1587,10 @@ impl Shelf {
         self.capture = self.call(Command::Status)["capture_enabled"] == true;
     }
     pub(super) fn load_more(&mut self) {
+        if self.emoji_ai.enabled {
+            self.emoji_ai_load_more();
+            return;
+        }
         if self.state["tab"] == "folder" && self.folder_page_job.is_some() {
             return;
         }
@@ -1728,7 +1739,32 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "search_with_ai" {
+            if self.state["tab"] == "pods"
+                && self.state["emoji_catalogue"] == true
+                && self.state["preview"].is_null()
+            {
+                self.emoji_ai_toggle(ctx);
+            } else {
+                self.message = tr(
+                    "Поиск с ИИ доступен в каталоге эмодзи Pods",
+                    "AI search is available in the Pods emoji catalogue",
+                )
+                .into();
+            }
+            return;
+        }
         if id == "shelf_search" {
+            if self.emoji_ai.enabled {
+                self.emoji_ai_leave();
+                self.query.clear();
+                self.loaded_query.clear();
+                self.refresh();
+                ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("shelf-search")));
+                self.actions = false;
+                ctx.request_repaint();
+                return;
+            }
             self.toggle_search_focus(ctx);
             return;
         }

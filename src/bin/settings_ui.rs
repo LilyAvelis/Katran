@@ -136,6 +136,7 @@ fn localized_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
     if super::i18n::is_english() {
         let direct = match id {
             "pods" => "Tab: Pods",
+            "search_with_ai" => "Search with AI",
             "files" => "Tab: Files",
             "tables" => "Tab: Tables",
             "text" => "Tab: Text",

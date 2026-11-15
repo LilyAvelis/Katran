@@ -66,6 +66,12 @@ pub enum Command {
         capture: Option<crate::overlay::SummonReceipt>,
     },
     EmojiCategories,
+    EmojiAiStatus,
+    SearchEmojiAi {
+        query: String,
+        offset: u32,
+        limit: u32,
+    },
     SetEmojiCategory {
         group: Option<String>,
     },

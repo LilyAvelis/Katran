@@ -31,6 +31,7 @@ pub fn palette_order(id: &str) -> usize {
         "transfer_selection",
         "add_to_katran",
         "shelf_search",
+        "search_with_ai",
         "select_all",
         "tab_toggle",
         "toggle_pinned_view",
@@ -64,7 +65,7 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
-        "shelf_search" | "select_all" | "tab_toggle" | "toggle_pinned_view" | "refresh" => {
+        "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view" | "refresh" => {
             "Навигация и выделение"
         }
         "gallery" | "list" | "density_less" | "density_more" => "Отображение",
@@ -198,6 +199,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "tab_previous" => "Previous tab",
         "tab_next" => "Next tab",
         "shelf_search" => "Search shelf",
+        "search_with_ai" => "Search with AI",
         "preview" => "Open preview / return to shelf",
         "gallery" => "Gallery",
         "list" => "Stream",
@@ -791,6 +793,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "search_with_ai",
+        label: "Поиск с ИИ",
+        default_binding: "Ctrl Shift T",
+        rebindable: true,
+        group: "Вид",
+        in_palette: false,
+    },
+    Definition {
         id: "all",
         label: "Таб: Folder",
         default_binding: "",
@@ -901,6 +911,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }),
         "toggle_pinned_view" => command(Command::TogglePinnedView),
         "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
+        "search_with_ai" => Dispatch::Intent(serde_json::json!({"intent":"search_with_ai"})),
         "files" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Files,
         }),

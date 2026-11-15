@@ -170,6 +170,27 @@ impl Shelf {
             .unwrap_or("")
             .trim()
             .to_owned();
+        let ai_binding = self
+            .shortcuts
+            .iter()
+            .find(|shortcut| shortcut.id == "search_with_ai")
+            .and_then(|shortcut| shortcut.binding.as_deref())
+            .and_then(|binding| katran::overlay::Hotkey::parse(binding).ok());
+        if ai_binding.is_some() && ai_binding == katran::overlay::Hotkey::parse(&binding).ok() {
+            #[cfg(windows)]
+            {
+                self.overlay_ui.listener = None;
+            }
+            self.overlay_ui.configured = Some(binding);
+            self.overlay_ui.registration_status = tr(
+                "Это сочетание занято поиском эмодзи с ИИ; выберите другую глобальную клавишу",
+                "This shortcut is used by emoji AI search; choose another global shortcut",
+            )
+            .into();
+            self.settings_ui
+                .set_overlay_status(self.overlay_ui.registration_status.clone());
+            return;
+        }
         let retry = self.settings_ui.take_overlay_retry();
         let timed_retry = self
             .overlay_ui

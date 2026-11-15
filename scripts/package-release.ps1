@@ -34,6 +34,9 @@ foreach ($file in @('katran-ui.exe','katran-launcher.exe','katran.exe')) {
 foreach ($file in @('es.exe','LICENSE','NOTICE.txt')) {
     if (!(Test-Path -LiteralPath (Join-Path $Root "assets/everything/$file") -PathType Leaf)) { throw "Missing Everything asset: $file" }
 }
+foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')) {
+    if (!(Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) { throw "Missing emoji AI installer input: $file" }
+}
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 $utf8 = New-Object Text.UTF8Encoding($false)
 function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Value -Depth 8) + "`n", $utf8) }
@@ -70,7 +73,14 @@ Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Desti
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Destination (Join-Path $portable 'runtime/Katran.exe')
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran.exe') -Destination (Join-Path $portable 'katran-cli.exe')
 [IO.File]::WriteAllText((Join-Path $portable 'portable.flag'), '', $utf8)
+# The optional model and generated runtime are never part of either release ZIP.
+foreach ($dir in @('scripts/emoji-ai','assets/emoji-ai/cldr','assets/unicode')) { New-Item -ItemType Directory -Path (Join-Path $portable $dir) -Force | Out-Null }
+foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')) {
+    Copy-Item -LiteralPath (Join-Path $Root $file) -Destination (Join-Path $portable $file)
+}
 $combinedNotices = (Get-Content -LiteralPath $DependencyNoticesPath -Raw) + "`n`nEverything ES:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Raw) + "`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Raw)
+$combinedNotices += "`n`nUnicode CLDR annotations:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/emoji-ai/cldr/LICENSE') -Raw)
+$combinedNotices += "`n`nOptional separately downloaded emoji search model: intfloat/multilingual-e5-small, MIT license, revision 614241f622f53c4eeff9890bdc4f31cfecc418b3, https://huggingface.co/intfloat/multilingual-e5-small/tree/614241f622f53c4eeff9890bdc4f31cfecc418b3 . The model is not included in this package.`n"
 if ($AppleBundleSha256) {
     $combinedNotices += "`n`nApple emoji artwork: Apple Inc. Source conversion: https://github.com/samuelngs/apple-emoji-ttf/releases/tag/macos-26-20260722-484daf4e . Compact resource retains the 96px bitmap strike. The converter code license does not grant rights to Apple's artwork. Source SHA256: 18e48f1785564fbf511241e0963b265057bfe742036d8543406c6ce07e48ec0b . Resource SHA256: $AppleBundleSha256 .`n"
 }
@@ -87,6 +97,7 @@ foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windo
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
 }
 $sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt')
+$sourceFiles += @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')
 foreach ($assetDir in @('assets/branding','assets/themes/lilies','assets/emoji-flags','assets/unicode')) {
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $Root $assetDir) -Recurse -File | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
 }

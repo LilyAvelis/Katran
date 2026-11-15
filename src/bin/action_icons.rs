@@ -8,6 +8,7 @@ pub fn icon(id: &str) -> Lucide {
         "density_less" => Lucide::ZoomIn,
         "all" => Lucide::LayoutGrid,
         "use_as_background" => Lucide::Image,
+        "search_with_ai" => Lucide::Sparkles,
         "use_as_desktop_wallpaper" => Lucide::Monitor,
         "use_as_video_desktop_wallpaper" => Lucide::Monitor,
         "use_as_video_desktop_wallpaper_silent" => Lucide::Monitor,

@@ -6,6 +6,7 @@ mod app_identity;
 mod category_divider;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
+mod emoji_ai_ui;
 mod emoji_categories_ui;
 mod files_file_picker;
 mod gallery_card;
@@ -245,6 +246,7 @@ struct Shelf {
     navigation_input: navigation_input::State,
     overlay_ui: overlay_ui::State,
     pods_ui: pods_ui::State,
+    emoji_ai: emoji_ai_ui::State,
     video_background: video_background_ui::State,
     video_background_id: Option<String>,
     video_background_source: Option<video_background_ui::VideoSource>,
@@ -465,7 +467,7 @@ impl Shelf {
         let active = self.video_play_hidden
             || (self.video_visible && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)));
         // Headless GUI tests never start a real media process; decoder tests opt in separately.
-        let active = active && !cfg!(test);
+        let active = active && !self.emoji_ai.enabled && !cfg!(test);
         let texture = self
             .video_background
             .tick(ctx, self.video_background_source.clone(), active);
@@ -669,8 +671,11 @@ impl Shelf {
         if self.api.is_some() {
             self.state = self.call(Command::Interaction);
         }
+        self.emoji_ai_input(&ctx);
+        self.emoji_ai_tick(&ctx);
         self.poll_preloaded_tab(&ctx);
         if self.api.is_some() && self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true
+            && !self.emoji_ai.enabled
             && (self.pods_ui.category_open || (!self.modal_owns_input() && self.state["preview"].is_null() && !ctx.egui_wants_keyboard_input() && !search_or_text_edit_focused(&ctx)))
             && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers, .. } if physical_key.unwrap_or(*key) == egui::Key::Backslash && modifiers.shift && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd))) {
             ctx.input_mut(shortcuts_ui::discard);
@@ -794,7 +799,15 @@ impl Shelf {
                 .cloned()
                 .collect();
             if shortcuts_ui::take_action_with_editing(&ctx, &search_binding, false).is_some() {
-                self.toggle_search_focus(&ctx);
+                if self.emoji_ai.enabled {
+                    self.emoji_ai_leave();
+                    self.query.clear();
+                    self.loaded_query.clear();
+                    self.refresh();
+                    ctx.memory_mut(|memory| memory.request_focus(search_id));
+                } else {
+                    self.toggle_search_focus(&ctx);
+                }
             }
         }
         if self.api.is_some()
@@ -1113,7 +1126,10 @@ impl Shelf {
                     });
                 }
                 // Search retains the full header width in every shelf mode.
-                if self.search_keyboard_only && !ctx.memory(|m| m.has_focus(search_id)) {
+                if self.search_keyboard_only
+                    && !self.emoji_ai.enabled
+                    && !ctx.memory(|m| m.has_focus(search_id))
+                {
                     let (rect, response) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), 31.0),
                         egui::Sense::drag(),
@@ -1139,10 +1155,15 @@ impl Shelf {
                         "Ctrl+T — activate search",
                     ));
                 } else {
+                    let hint = if self.emoji_ai.enabled {
+                        i18n::tr("Поиск эмодзи с ИИ…", "Search emoji with AI…")
+                    } else {
+                        i18n::tr("Поиск на полке…", "Search shelf…")
+                    };
                     let search = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(search_id)
-                            .hint_text(i18n::tr("Поиск на полке…", "Search shelf…"))
+                            .hint_text(hint)
                             .font(egui::FontId::proportional(22.0))
                             .frame(egui::Frame::NONE)
                             .desired_width(ui.available_width()),
@@ -1151,6 +1172,19 @@ impl Shelf {
                     ctx.data_mut(|data| {
                         data.insert_temp(egui::Id::new("test-search-rect"), search.rect)
                     });
+                    if self.emoji_ai.enabled {
+                        let accent = theme_ui::color(
+                            &ctx,
+                            theme_ui::Role::Accent,
+                            Color32::from_rgb(171, 122, 250),
+                        );
+                        ui.painter().rect_stroke(
+                            search.rect.expand(3.0),
+                            8.0,
+                            egui::Stroke::new(1.5, accent),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
                     if search.changed() {
                         self.refresh();
                     }
@@ -1215,28 +1249,67 @@ impl Shelf {
                 let emoji_catalogue =
                     self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true;
                 if emoji_catalogue {
-                    let more_available = self.next_cursor.is_some() || self.preloaded_has_more;
+                    let more_available = if self.emoji_ai.enabled {
+                        self.emoji_ai.next_offset.is_some() && !self.emoji_ai.loading
+                    } else {
+                        self.next_cursor.is_some() || self.preloaded_has_more
+                    };
                     let bar = special_mode_bar::show(ui, |ui| {
-                        let more = special_mode_bar::action(
-                            ui,
-                            i18n::tr("Загрузить ещё", "Load more"),
-                            None,
-                            more_available,
-                            false,
-                            140.0,
-                        );
-                        #[cfg(test)]
-                        ctx.data_mut(|d| {
-                            d.insert_temp(egui::Id::new("test-emoji-load-more-rect"), more.rect)
-                        });
-                        if more.clicked() {
-                            if self.preloaded_has_more {
-                                self.preloaded_has_more = false;
-                                self.refresh();
+                        if self.emoji_ai.model_missing {
+                            ui.weak(i18n::tr(
+                                "Модель не установлена — см. docs/emoji-ai.md",
+                                "Model missing — see docs/emoji-ai.md",
+                            ));
+                        } else if self.emoji_ai.loading {
+                            special_mode_bar::loading_dots(
+                                ui,
+                                i18n::tr("ИИ ищет", "AI searching"),
+                                ctx.input(|input| input.time),
+                            );
+                        } else if self.emoji_ai.enabled
+                            && self.emoji_ai.submitted_query.as_deref()
+                                != Some(self.query.as_str())
+                        {
+                            ui.weak(i18n::tr("Enter — начать поиск", "Enter — search"));
+                        } else {
+                            let more = special_mode_bar::action(
+                                ui,
+                                i18n::tr("Загрузить ещё", "Load more"),
+                                None,
+                                more_available,
+                                false,
+                                140.0,
+                            );
+                            #[cfg(test)]
+                            ctx.data_mut(|d| {
+                                d.insert_temp(egui::Id::new("test-emoji-load-more-rect"), more.rect)
+                            });
+                            if more.clicked() {
+                                if self.preloaded_has_more {
+                                    self.preloaded_has_more = false;
+                                    self.refresh();
+                                }
+                                self.load_more();
                             }
-                            self.load_more();
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if self.emoji_ai.enabled {
+                                let response = special_mode_bar::action(
+                                    ui,
+                                    i18n::tr("ИИ · все категории", "AI · all categories"),
+                                    None,
+                                    true,
+                                    true,
+                                    190.0,
+                                );
+                                if response.clicked() {
+                                    self.emoji_ai_leave();
+                                    self.query.clear();
+                                    self.loaded_query.clear();
+                                    self.refresh();
+                                }
+                                return;
+                            }
                             let label = self.state["emoji_category"]
                                 .as_str()
                                 .unwrap_or(i18n::tr("Все категории", "All Categories"));
@@ -1258,6 +1331,21 @@ impl Shelf {
                             });
                             if response.clicked() && !self.modal_owns_input() {
                                 self.open_emoji_categories();
+                            }
+                            let ai = special_mode_bar::action(
+                                ui,
+                                i18n::tr("Поиск с ИИ", "AI search"),
+                                Some(egui_lucide::Lucide::Sparkles),
+                                true,
+                                false,
+                                160.0,
+                            );
+                            #[cfg(test)]
+                            ctx.data_mut(|d| {
+                                d.insert_temp(egui::Id::new("emoji-ai-button-rect"), ai.rect)
+                            });
+                            if ai.clicked() && !self.modal_owns_input() {
+                                self.emoji_ai_activate(&ctx);
                             }
                         });
                     });
@@ -1297,7 +1385,9 @@ impl Shelf {
                         ui.weak(format!("{total} emoji"));
                     }
                     if self.state["tab"] == "pods" {
-                        ui.weak(if self.state["emoji_catalogue"] == true {
+                        ui.weak(if self.emoji_ai.enabled {
+                            i18n::tr("Поиск эмодзи с ИИ", "Emoji AI search")
+                        } else if self.state["emoji_catalogue"] == true {
                             i18n::tr("Все emoji", "All emoji")
                         } else {
                             i18n::tr("Мои Pods", "My Pods")
@@ -2046,6 +2136,7 @@ fn main() -> eframe::Result {
         navigation_input: navigation_input::State::default(),
         overlay_ui: overlay_ui::State::default(),
         pods_ui: pods_ui::State::default(),
+        emoji_ai: emoji_ai_ui::State::default(),
         video_background: Default::default(),
         video_background_id: None,
         video_background_source: None,
@@ -2292,6 +2383,7 @@ mod tests {
             navigation_input: navigation_input::State::default(),
             overlay_ui: overlay_ui::State::default(),
             pods_ui: pods_ui::State::default(),
+            emoji_ai: emoji_ai_ui::State::default(),
             video_background: Default::default(),
             video_background_id: None,
             video_background_source: None,

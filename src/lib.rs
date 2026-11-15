@@ -93,6 +93,7 @@ mod desktop_pins;
 mod desktop_projection;
 mod desktop_selection;
 pub mod desktop_wallpaper;
+pub mod emoji_ai;
 pub mod emoji_fonts;
 pub mod emoji_render;
 pub mod overlay;
@@ -109,6 +110,8 @@ pub mod wallpaper_engine;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    emoji_ai: std::sync::Arc<std::sync::Mutex<Box<dyn emoji_ai::Backend>>>,
+    emoji_ai_backend_injected: bool,
     window_visible: bool,
     overlay_session: overlay::Session,
     overlay_host: Box<dyn overlay::Host + Send>,
@@ -158,6 +161,11 @@ impl Service {
         self.checked_update = None;
         self.update_status =
             serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")});
+    }
+    /// Inject a search backend, including synthetic backends for API testing.
+    pub fn set_emoji_ai_backend(&mut self, backend: Box<dyn emoji_ai::Backend>) {
+        self.emoji_ai = std::sync::Arc::new(std::sync::Mutex::new(backend));
+        self.emoji_ai_backend_injected = true;
     }
     fn accept_update_check(&mut self, status: updater::UpdateStatus) -> Result<serde_json::Value> {
         self.checked_update = status.release.clone();
@@ -256,6 +264,8 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(emoji_ai::Resident::new(root.clone())))),
+            emoji_ai_backend_injected: false,
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -336,6 +346,8 @@ impl Service {
             .validate(0)
             .map_err(|error| ApiError::new("settings_error", error))?;
         Ok(Self {
+            emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(emoji_ai::Resident::new(root.clone())))),
+            emoji_ai_backend_injected: false,
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -606,6 +618,15 @@ impl Service {
             } => self.toggle_resident_overlay(owner_window, capture),
             Command::EmojiCategories => {
                 Ok(serde_json::json!({"groups":pod_metadata::emoji_groups()}))
+            }
+            Command::EmojiAiStatus if self.emoji_ai_backend_injected => Ok(serde_json::json!({"available":true})),
+            Command::EmojiAiStatus => emoji_ai::status(&self.root),
+            Command::SearchEmojiAi { query, offset, limit } => {
+                if self.interaction.tab != interaction::ShelfTab::Pods || !self.interaction.emoji_catalogue {
+                    return Err(ApiError::new("invalid_tab", "Emoji catalogue is not open"));
+                }
+                let mut backend = self.emoji_ai.lock().map_err(|_| ApiError::new("emoji_ai_unavailable", "Local emoji AI backend is unavailable"))?;
+                emoji_ai::search(&mut **backend, &query, offset, limit)
             }
             Command::SetEmojiCategory { group } => {
                 if self.interaction.tab != interaction::ShelfTab::Pods

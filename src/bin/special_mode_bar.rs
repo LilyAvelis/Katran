@@ -75,3 +75,30 @@ pub(super) fn action(
         );
     response.on_hover_text(label)
 }
+
+pub(super) fn loading_dots(ui: &mut egui::Ui, label: &str, time: f64) {
+    let font = egui::FontId::proportional(12.0);
+    let color = ui.visuals().text_color();
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, color);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 48.0, 28.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().galley(
+        egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0),
+        galley.clone(),
+        color,
+    );
+    for index in 0..3 {
+        let phase = time * 8.0 - index as f64 * 0.75;
+        let lift = ((phase.sin() + 1.0) * 2.0) as f32;
+        ui.painter().circle_filled(
+            egui::pos2(
+                rect.left() + galley.size().x + 18.0 + index as f32 * 8.0,
+                rect.center().y + 2.0 - lift,
+            ),
+            2.4,
+            color,
+        );
+    }
+}

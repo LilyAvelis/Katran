@@ -32,12 +32,16 @@ An additional action sends a copy with its audio track removed. Wallpaper Engine
 applies the video to its first monitor by default. Katran keeps a durable copy
 and lists successfully sent videos in Desktop; the source may later move or disappear.
 
-## 3.7 implementation and local E
+## Local 3.7.1 candidate · one Katran
 
-The 3.7 source includes the hardening recorded in the
-[development log](docs/releases/next.md). The local Raycast/Start Menu launcher
-currently selects private E runtime `4f53749f7293`, a separate application
-build. Its AI components are absent from this public source tree.
+The next local patch is merging the former E emoji AI search into this public application. It uses the existing Pods catalogue and a separately installed local model; the installer will not contain model weights. Without the model, ordinary Katran and literal emoji search continue to work and AI search explains how to install it. See [optional emoji AI setup](docs/emoji-ai.md). No account or payment check is planned for this 3.7 patch; authorization is a separate 4.0 decision. The published 3.7.0 release does not yet contain this change.
+
+## 3.7 implementation history
+
+The published 3.7.0 source includes the hardening recorded in the
+[development log](docs/releases/next.md). A separate local E build was used for
+the first emoji AI experiment; the 3.7.1 candidate merges that feature into this
+source. That E build is historical migration input rather than the future app.
 
 Local contracts include the opt-in lossless JSON stdio protocol v2 for large
 IDs, domain-owned Copy behavior, context-bound Desktop cursors, managed-path
