@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('katran-release-test-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/branding'),(Join-Path $sandbox 'assets/themes/lilies'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode') | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/branding'),(Join-Path $sandbox 'assets/themes/lilies'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode'),(Join-Path $sandbox 'assets/emoji-ai/cldr'),(Join-Path $sandbox 'scripts/emoji-ai') | Out-Null
 try {
     foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $sandbox $dir) -Force | Out-Null }
@@ -11,6 +11,8 @@ try {
     foreach ($file in @('Cargo.toml','Cargo.lock','build.rs','AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','src/lib.rs','.env.local','katran-data/private.txt','runtime/old/private.exe','binaries/private.pdb')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), 'synthetic-private-canary') }
     [IO.File]::WriteAllText((Join-Path $sandbox 'src/catalogue_schema.rs'), 'pub(crate) const VERSION: i64 = 12;')
     foreach ($file in @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt','assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
+    $emojiInputs = @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')
+    foreach ($file in $emojiInputs) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
     $out = Join-Path $sandbox 'output'
     & (Join-Path $root 'scripts/package-release.ps1') -Root $sandbox -BinaryDirectory 'binaries' -OutputDirectory $out -Version '2.0.0' -DependencyNoticesPath (Join-Path $sandbox 'THIRD-PARTY-NOTICES.txt')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -18,7 +20,7 @@ try {
     try {
         $names = @($zip.Entries.FullName)
         $hash = (Get-FileHash -LiteralPath (Join-Path $sandbox 'binaries/katran-ui.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-        $expected = @('AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','Katran.exe','katran-cli.exe','portable.flag','runtime/Katran.exe','runtime/current-version.txt',"runtime/versions/$($hash.Substring(0,12))/katran-ui.exe","runtime/versions/$($hash.Substring(0,12))/build-manifest.json","runtime/versions/$($hash.Substring(0,12))/THIRD-PARTY-NOTICES.txt","runtime/versions/$($hash.Substring(0,12))/es.exe","runtime/versions/$($hash.Substring(0,12))/Everything-ES-LICENSE.txt","runtime/versions/$($hash.Substring(0,12))/Everything-ES-NOTICE.txt")
+        $expected = @('AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','Katran.exe','katran-cli.exe','portable.flag','runtime/Katran.exe','runtime/current-version.txt',"runtime/versions/$($hash.Substring(0,12))/katran-ui.exe","runtime/versions/$($hash.Substring(0,12))/build-manifest.json","runtime/versions/$($hash.Substring(0,12))/THIRD-PARTY-NOTICES.txt","runtime/versions/$($hash.Substring(0,12))/es.exe","runtime/versions/$($hash.Substring(0,12))/Everything-ES-LICENSE.txt","runtime/versions/$($hash.Substring(0,12))/Everything-ES-NOTICE.txt") + $emojiInputs
         if (@(Compare-Object ($names | Sort-Object) ($expected | Sort-Object)).Count) { throw 'Portable whitelist differs' }
     } finally { $zip.Dispose() }
     $release = Get-Content -LiteralPath (Join-Path $out 'release.json') -Raw | ConvertFrom-Json
@@ -31,6 +33,11 @@ try {
         $reader = New-Object IO.StreamReader($zip.GetEntry('build-manifest.json').Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $sourcePaths = @($manifest.sources | ForEach-Object { $_.path.Replace('\','/') })
+        foreach ($file in $emojiInputs) {
+            if ($file -eq 'assets/unicode/emoji-test.txt') { continue }
+            $entry = @($manifest.sources | Where-Object { $_.path.Replace('\','/') -eq $file })
+            if ($entry.Count -ne 1 -or $entry[0].sha256 -cne (Get-FileHash -LiteralPath (Join-Path $sandbox $file) -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Missing or incorrect emoji input hash: $file" }
+        }
         foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
             foreach ($file in @('Cargo.toml','LICENSE','src/lib.rs','src/nested/module.rs')) {
                 $path = "crates/$crate/$file"
@@ -46,6 +53,7 @@ try {
         $reader = New-Object IO.StreamReader($noticesEntry.Open())
         try { $notices = $reader.ReadToEnd() } finally { $reader.Dispose() }
         foreach ($file in @('assets/everything/NOTICE.txt','assets/everything/LICENSE','assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) { if (!$notices.Contains("synthetic-$file")) { throw "Missing combined notice: $file" } }
+        if (!$notices.Contains('synthetic-assets/emoji-ai/cldr/LICENSE')) { throw 'Missing CLDR license notice' }
         if (!$notices.Contains('synthetic-private-canary')) { throw 'Missing dependency notices' }
     } finally { $zip.Dispose() }
     $second = Join-Path $sandbox 'second'
