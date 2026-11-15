@@ -41,7 +41,8 @@ and `THIRD-PARTY-NOTICES.txt`. The manifest binds notices with
 executable. Notice text is limited to 8 MiB; JSON manifests remain limited to 64 KiB.
 The manual updater installs an immutable version and changes the launch pointer;
 it never overwrites the running executable or stable launcher. `release.json` has
-`schema_version: 1`, `data_schema_version: 6`, `minimum_launcher_protocol: 1`,
+`schema_version: 1`, `data_schema_version` derived from the current catalogue
+schema (12 for 3.7.0), `minimum_launcher_protocol: 1`,
 `version`, `tag`, `repository`, and `update: {url, size_bytes, sha256}`. Its URL is
 the version-tagged GitHub Releases asset in `LilyAvelis/Katran`. Launcher protocol
 changes require full setup/portable replacement. Data schema metadata is informational;

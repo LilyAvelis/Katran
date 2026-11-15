@@ -1,4 +1,7 @@
-# Unreleased local changes after 3.4.1
+# Development log leading to 3.7.0
+
+This page preserves pre-release checkpoints and their then-current status.
+For the published 3.7.0 behavior, see [3.7.0 release notes](3.7.0.md).
 
 ## PRODUCT-10 hardening in the local source
 

@@ -1,6 +1,6 @@
 # Developer and agent entry point
 
-Public release baseline: **3.4.1** (2026-11-12). For each new release, update this
+Public release baseline: **3.7.0** (2026-11-15). For each new release, update this
 baseline and the current section of `AGENTS.md` together with the README and
 release note. Older numbered sections and reviews are dated evidence, not
 current product instructions. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
@@ -21,7 +21,11 @@ For the local reusable-component workspace, see [Avilon framework](garden-framew
 Its [design SDK index](../crates/README.md) covers semantic colors, responsive layout,
 Acrylic, GPU optics and video-background adapters.
 For builds, CI and release retries, follow [DevOps execution rules](devops.md).
-The public release remains **3.4.1**. The local source map below includes unreleased hardening after that baseline; it does not describe the installed 3.4.1 binary or authorize publication. See [unreleased changes](releases/next.md) for implementation status and evidence. The `1.5` labels and ownership section below are dated historical snapshots; historical reviews describe the snapshots they examined.
+The public 3.7.0 source includes the hardening described below. See the
+[3.7.0 release notes](releases/3.7.0.md) for user-facing changes and the
+[development log](releases/next.md) for implementation evidence and remaining
+limitations. The `1.5` labels and ownership section below are dated historical
+snapshots; historical reviews describe the snapshots they examined.
 
 Public and private E share the Pods/Desktop/settings database. The local launcher
 now selects E `4f53749f7293`, and the shared profile reached schema v12 on

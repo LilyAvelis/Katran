@@ -1,8 +1,8 @@
 # Katran
 
-**Katran 3.4** adds English interface language support and gives new profiles a
-blue theme with Lily background 1. See [3.4.1 release notes](docs/releases/3.4.1.md) and the
-[3.2 milestone](docs/releases/3.2.0.md).
+**Katran 3.7** adds an emoji catalogue in Pods, a Desktop background library,
+stronger file operations, and a new application icon. See the
+[3.7.0 release notes](docs/releases/3.7.0.md).
 
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and integrations use one Rust command dispatcher. Clipboard events are the
@@ -15,11 +15,13 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Updates checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 3.4.1
+## Current release · 3.7.0
 
 Close the previous window yourself once after this update, then use **Katran** in
-the Start Menu/Raycast or **Start Katran.cmd**. The title strip
-reports **3.4.1** in Settings (compact themes hide the title strip). Existing data stays in `katran-data`.
+the Start Menu/Raycast or **Start Katran.cmd**. The title strip reports **3.7.0**
+in Settings (compact themes hide the title strip). Existing data stays in its
+configured profile. A full setup or fresh portable extraction updates the
+launcher icon; the in-app updater changes the application executable only.
 
 Video backgrounds use your own file. Portable/setup include FFmpeg components;
 users upgrading through the in-app updater can prepare them explicitly in
@@ -30,24 +32,20 @@ An additional action sends a copy with its audio track removed. Wallpaper Engine
 applies the video to its first monitor by default. Katran keeps a durable copy
 and lists successfully sent videos in Desktop; the source may later move or disappear.
 
-## Local source hardening after 3.4.1
+## 3.7 implementation and local E
 
-The working source tree contains additional, unreleased hardening work. GitHub's
-public line remains 3.4.1. The local Raycast/Start Menu launcher now selects
-private E runtime `4f53749f7293`, which includes the large-operation busy UI
-and restored background Actions for saved Images.
-These changes are still being integrated and have not been published or
-accepted as a new release. The [unreleased change log](docs/releases/next.md)
-records the implemented contracts and targeted evidence. A7 concerns private
-E only; no E model or implementation is part of this public source tree.
+The 3.7 source includes the hardening recorded in the
+[development log](docs/releases/next.md). The local Raycast/Start Menu launcher
+currently selects private E runtime `4f53749f7293`, a separate application
+build. Its AI components are absent from this public source tree.
 
 Local contracts include the opt-in lossless JSON stdio protocol v2 for large
 IDs, domain-owned Copy behavior, context-bound Desktop cursors, managed-path
 preview selection, schema v12 migrations, complete build provenance, and
 safer managed-media publication/action checks. See the
 [wire v2 contract](docs/wire-v2.md) for client requirements. A9 product
-handoff and N1 Folder transfer responsiveness remain open; this is not a
-release-ready claim. Public and E share the Pods/Desktop/settings database.
+handoff automation and N1 Folder transfer responsiveness remain open. Public
+and E share the Pods/Desktop/settings database.
 The local shared profile reached schema v12 on 2026-11-15 after E installation;
 its integrity check passed and a pre-v12 backup was created. A compatible local
 public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.

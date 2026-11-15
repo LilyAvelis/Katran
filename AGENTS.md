@@ -1,10 +1,9 @@
 # Katran development rules
 
-## Public release baseline · 3.4.1 · 2026-11-12
+## Public release baseline · 3.7.0 · 2026-11-15
 
-The latest public release remains 3.4.1. The local source also contains
-unreleased PRODUCT-10 hardening; distinguish local E installation from public
-publication.
+The public 3.7.0 release source includes PRODUCT-10 hardening. Distinguish the
+public release from the locally installed private E build.
 Read `README.md`, `docs/development.md`, and `docs/releases/next.md` for its
 current implementation and evidence. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
 is valuable product context; it currently labels itself 3.2.3, so reconcile
@@ -12,7 +11,7 @@ individual claims with the code before using it as a 3.4 technical contract.
 Earlier dated sections below record decisions at the time, not the current
 release or authorization to push new work.
 
-Local PRODUCT-10 source contracts after 3.4.1: opt-in stdio wire v2 encodes
+PRODUCT-10 source contracts in 3.7.0: opt-in stdio wire v2 encodes
 unsafe JSON integers losslessly as canonical decimal strings; `CopySelectionAction`
 owns emoji import plus clipboard outcomes; Desktop cursors bind browse context;
 managed preview uses the asset path; durable Desktop pin tables are in numbered
@@ -26,16 +25,16 @@ real trash measurements. A worker owner-job lease and ready-commit deferral are
 still needed. The separate Avilon child-process review must cover its
 spawn-to-assignment window. Targeted evidence and limitations are listed in
 `docs/releases/next.md` and the internal
-PRODUCT-10 status ledger. These contracts are local and unreleased. A7 applies
+PRODUCT-10 status ledger. A7 applies
 only to private E and must not add model,
 AI command, UI, or implementation to this public source tree. A9's private E
 runtime manifest contract has targeted synthetic evidence; the current source
-handoff check has no unresolved boundary findings. N1 Folder transfer remains partially open. No release or push
-is authorized by this work.
+handoff check has no unresolved boundary findings. N1 Folder transfer remains
+partially open. Publication of later changes requires a new owner instruction.
 Public and E share Pods/Desktop/settings storage. The local launcher selects E
 `4f53749f7293`; the shared profile reached schema v12 on 2026-11-15 with a
 pre-migration backup and passing integrity check. A compatible local public v12
-binary is staged separately. Published public 3.4.1 and prior E `c1555b47dc04`
+binary is staged separately. Public 3.4.1 and prior E `c1555b47dc04`
 cannot open the migrated profile without controlled rollback.
 For image background Actions, saved Images blobs have extensionless digest paths:
 `EventKind::ManagedImage` admits them at the metadata boundary, while external
@@ -45,14 +44,14 @@ The public category divider omits empty subgroup labels (scoped UI regression).
 Avilon Windows media stop closes the assigned decoder process tree; its current
 evidence is limited to the stop fixture, and does not close the spawn-to-assign
 window.
-Local unreleased work after 3.4.1 also adds reusable Avilon palette/navigation policy from Telegram Glass.
+Local 3.7 work also adds reusable Avilon palette/navigation policy from Telegram Glass.
 Pods has a read-only, fully-qualified Unicode 16 emoji catalogue grouped from the bundled official emoji-test file; virtual IDs must never enter destructive or metadata mutation paths. Inside Pods only, physical backslash toggles it and Ctrl+backslash selects one of the two current collections; other tabs retain independent uses of the physical key. The catalogue category picker uses Shift+physical backslash only in the full catalogue; its session-only group filter must remain scoped to search and pagination. See `docs/pods.md`.
 External-original moves from Downloads, Screenshots and explicitly permitted
 references use the verified, handle-bound recycle path. `finish_cut` reports a
 per-item recycle receipt and recovery location; it must not directly dispose
 of the locked original. The final recycle/cleanup stage remains Service-bound.
 Catalogue emoji use the ordinary revision-checked copy, previous-window paste and native drag paths. Ctrl+C additionally imports them into saved Pods; Enter uses the ordinary previous-window paste flow, and all-Pods native drag offers Unicode text alongside the existing `pods.txt` file. No AI search command, UI or model belongs in this public source tree; Katran E is a separate private distribution.
-Local unreleased work after 3.4.1 adds the Desktop background library; see
+The 3.7 source adds the Desktop background library; see
 `docs/releases/next.md` before changing background storage or tab routing.
 Its cards now use the standard shelf Event, selection, and Actions path via
 `src/desktop_projection.rs` and `src/desktop_selection.rs`; the separate
