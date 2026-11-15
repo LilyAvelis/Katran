@@ -2,9 +2,9 @@
 
 Owner decision 2026-11-15: use the public 3.7 source as the sole Katran host. The optional emoji AI mode now follows `SearchEmojiAi` through the standard dispatcher and job service, with `src/bin/emoji_ai_ui.rs` as its UI client. Its runtime lives under the active profile's `emoji-ai-runtime` directory, outside versioned executables; a missing model must not break ordinary Katran. The earlier separate E distribution plan is superseded for 3.7. See [the model setup](emoji-ai.md).
 
-In the 3.7.1 candidate, `Command::Actions` classifies the selected or cursor asset once for background action availability. `Command::SortActions` returns the same sorted command rows without resolving Desktop assets. `src/bin/palette.rs` uses the latter for Sorting. Keep catalogue construction metadata-only; actual wallpaper commands still validate revisions and bytes at the action boundary.
+In 3.7.1, `Command::Actions` classifies the selected or cursor asset once for background action availability. `Command::SortActions` returns the same sorted command rows without resolving Desktop assets. `src/bin/palette.rs` uses the latter for Sorting. Keep catalogue construction metadata-only; actual wallpaper commands still validate revisions and bytes at the action boundary.
 
-Public release baseline: **3.7.0** (2026-11-15). For each new release, update this
+Public release baseline: **3.7.1** (2026-11-16). For each new release, update this
 baseline and the current section of `AGENTS.md` together with the README and
 release note. Older numbered sections and reviews are dated evidence, not
 current product instructions. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
@@ -33,7 +33,7 @@ snapshots; historical reviews describe the snapshots they examined.
 
 The former public and private E builds shared the Pods/Desktop/settings database.
 The local launcher now selects unified 3.7.1 via `runtime/current-version.txt`
-(`be05300517b4` on 2026-11-16), and the shared profile reached schema v12 on
+(`d7eae2862b31` on 2026-11-16), and the shared profile reached schema v12 on
 2026-11-15 with a pre-migration SQLite backup and a passing integrity check.
 The local public v12 binary is staged at `runtime/versions/28c8fb0b5446`.
 Published public 3.4.1 and previous E `c1555b47dc04` remain incompatible with

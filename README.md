@@ -1,8 +1,9 @@
 # Katran
 
 **Katran 3.7** adds an emoji catalogue in Pods, a Desktop background library,
-stronger file operations, and a new application icon. See the
-[3.7.0 release notes](docs/releases/3.7.0.md).
+stronger file operations, and a new application icon. The latest patch unifies
+the application and improves Desktop menus. See the
+[3.7.1 release notes](docs/releases/3.7.1.md).
 
 Independent, local Windows-first object shelf in Rust. API First: UI, capture,
 CLI and integrations use one Rust command dispatcher. Clipboard events are the
@@ -15,10 +16,10 @@ Setup: installs without administrator rights and keeps data in
 `%LOCALAPPDATA%/Katran/data`. Settings → Updates checks manually and installs
 an available update for the next launch. [Distribution and update contract](docs/distribution.md).
 
-## Current release · 3.7.0
+## Current release · 3.7.1
 
 Close the previous window yourself once after this update, then use **Katran** in
-the Start Menu/Raycast or **Start Katran.cmd**. The title strip reports **3.7.0**
+the Start Menu/Raycast or **Start Katran.cmd**. The title strip reports **3.7.1**
 in Settings (compact themes hide the title strip). Existing data stays in its
 configured profile. A full setup or fresh portable extraction updates the
 launcher icon; the in-app updater changes the application executable only.
@@ -32,17 +33,17 @@ An additional action sends a copy with its audio track removed. Wallpaper Engine
 applies the video to its first monitor by default. Katran keeps a durable copy
 and lists successfully sent videos in Desktop; the source may later move or disappear.
 
-## Local 3.7.1 candidate · one Katran
+## One Katran · 3.7.1
 
-The next local patch is merging the former E emoji AI search into this public application. It uses the existing Pods catalogue and a separately installed local model; the installer will not contain model weights. Without the model, ordinary Katran and literal emoji search continue to work and AI search explains how to install it. See [optional emoji AI setup](docs/emoji-ai.md). No account or payment check is planned for this 3.7 patch; authorization is a separate 4.0 decision. The published 3.7.0 release does not yet contain this change.
+This patch merges the former E emoji AI search into the public application. It uses the existing Pods catalogue and a separately installed local model; the installer does not contain model weights. Without the model, ordinary Katran and literal emoji search continue to work and AI search explains how to install it. See [optional emoji AI setup](docs/emoji-ai.md). No account or payment check is included in this patch; authorization is a separate 4.0 decision.
 
-The candidate also reduces Desktop menu work: Actions resolves the current asset once, while Sorting requests only sorting commands. This avoids repeated scans of saved backgrounds while those menus are open.
+Desktop Actions resolves the current asset once, while Sorting requests only sorting commands. This avoids repeated scans of saved backgrounds while those menus are open.
 
 ## 3.7 implementation history
 
-The published 3.7.0 source includes the hardening recorded in the
+The 3.7.0 source includes the hardening recorded in the
 [development log](docs/releases/next.md). A separate local E build was used for
-the first emoji AI experiment; the 3.7.1 candidate merges that feature into this
+the first emoji AI experiment; 3.7.1 merges that feature into this
 source. That E build is historical migration input rather than the future app.
 
 Local contracts include the opt-in lossless JSON stdio protocol v2 for large
@@ -52,7 +53,7 @@ safer managed-media publication/action checks. See the
 [wire v2 contract](docs/wire-v2.md) for client requirements. A9 product
 handoff automation and N1 Folder transfer responsiveness remain open. The former
 public and E builds shared the Pods/Desktop/settings database. The local launcher
-now selects the unified 3.7.1 candidate (`be05300517b4` on 2026-11-16).
+now selects unified 3.7.1 (`d7eae2862b31` on 2026-11-16).
 The local shared profile reached schema v12 on 2026-11-15 after E installation;
 its integrity check passed and a pre-v12 backup was created. A compatible local
 public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.

@@ -1,15 +1,15 @@
 # Katran development rules
 
-## Public release baseline · 3.7.0 · 2026-11-15
+## Public release baseline · 3.7.1 · 2026-11-16
 
 ## Owner decision · unified Katran · 2026-11-15
 
-Lilia replaced the earlier two-application and A7 private-only decision for the 3.7 line. Continue from the public 3.7 source as one application; move emoji AI search into this codebase and keep the model/runtime as an optional, separately downloaded local component. If missing, show a useful error and installation instructions. No Notion authentication or paid gate in 3.7; revisit entitlement and private distribution in 4.0. Earlier statements below that forbid AI code in public or require a separate E app are historical and no longer govern this work. Published 3.7.0 assets remain immutable; a later merge needs a new patch version and verified artifact.
+Lilia replaced the earlier two-application and A7 private-only decision for the 3.7 line. Continue from the public 3.7 source as one application; emoji AI search is in this codebase and the model/runtime is an optional, separately downloaded local component. If missing, show a useful error and installation instructions. No Notion authentication or paid gate in 3.7; revisit entitlement and private distribution in 4.0. Earlier statements below that forbid AI code in public or require a separate E app are historical and no longer govern this work. Published 3.7.0 assets remain immutable.
 
-For Desktop menus in the local 3.7.1 candidate, `Actions` resolves the selected or cursor asset once to classify background action availability; `SortActions` supplies Sorting without scanning Desktop assets. Both are metadata queries. Real wallpaper actions must still validate revisions and bytes at their execution boundary. The owner reported lag in Desktop after changing backgrounds; synthetic API checks cover the optimization, while native responsiveness requires owner acceptance of the rebuilt candidate.
+For Desktop menus in 3.7.1, `Actions` resolves the selected or cursor asset once to classify background action availability; `SortActions` supplies Sorting without scanning Desktop assets. Both are metadata queries. Real wallpaper actions must still validate revisions and bytes at their execution boundary. Lilia confirmed native responsiveness after the change and comma toggling of Sorting in the installed build.
 
-The public 3.7.0 release source includes PRODUCT-10 hardening. Distinguish the
-public release from the locally installed private E build.
+The 3.7.0 release source introduced PRODUCT-10 hardening. The former private E
+build is historical migration input; current development uses one Katran host.
 Read `README.md`, `docs/development.md`, and `docs/releases/next.md` for its
 current implementation and evidence. Lilia's [author guide](https://app.notion.com/p/41649fda329680eeb371d42dbee517d8)
 is valuable product context; it currently labels itself 3.2.3, so reconcile
