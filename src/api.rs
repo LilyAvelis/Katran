@@ -481,6 +481,8 @@ pub enum Command {
     OpenCurrent,
     ClosePreview,
     Actions,
+    /// Palette rows for sorting only; does not resolve the current selection.
+    SortActions,
     RunAction {
         id: String,
     },

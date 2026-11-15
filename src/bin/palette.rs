@@ -183,7 +183,7 @@ impl Shelf {
         if !self.sorting_input.is_open() {
             return;
         }
-        let catalogue = self.call(Command::Actions);
+        let catalogue = self.call(Command::SortActions);
         let anchor = ctx
             .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("sorting-button-rect")))
             .map(|r| r.right_top() + egui::vec2(0.0, -6.0))

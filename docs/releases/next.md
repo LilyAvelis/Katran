@@ -4,6 +4,8 @@
 
 Lilia chose one Katran application after the separate local E build developed a native background regression while the compatible public build still played the same video. The 3.7.0 release is unchanged. The next patch carries emoji AI search into the public host as an optional local feature, with no authorization or payment gate yet. Model weights, Python environment and generated index are installed separately, never bundled with Katran. The `EmojiAiStatus` command and AI mode explain when the model is missing; ordinary Pods and wallpaper functionality remain independent. The active profile is the stable home for the runtime, so app updates do not have to copy it. See [model setup](../emoji-ai.md). This integration still needs complete validation and owner GUI acceptance before release.
 
+Desktop menu performance follow-up: the owner isolated lag to Desktop after changing a background; image and video backgrounds worked, while Actions and Sorting slowed and Tags did not. `Actions` had repeatedly resolved the current Desktop asset while constructing five background commands on each frame. It now classifies that asset once, and `SortActions` avoids asset resolution entirely. Synthetic API tests cover availability and action-boundary validation; actual GUI responsiveness still needs owner confirmation on the new build.
+
 This page preserves pre-release checkpoints and their then-current status.
 For the published 3.7.0 behavior, see [3.7.0 release notes](3.7.0.md).
 

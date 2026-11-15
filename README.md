@@ -36,6 +36,8 @@ and lists successfully sent videos in Desktop; the source may later move or disa
 
 The next local patch is merging the former E emoji AI search into this public application. It uses the existing Pods catalogue and a separately installed local model; the installer will not contain model weights. Without the model, ordinary Katran and literal emoji search continue to work and AI search explains how to install it. See [optional emoji AI setup](docs/emoji-ai.md). No account or payment check is planned for this 3.7 patch; authorization is a separate 4.0 decision. The published 3.7.0 release does not yet contain this change.
 
+The candidate also reduces Desktop menu work: Actions resolves the current asset once, while Sorting requests only sorting commands. This avoids repeated scans of saved backgrounds while those menus are open.
+
 ## 3.7 implementation history
 
 The published 3.7.0 source includes the hardening recorded in the

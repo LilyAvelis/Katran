@@ -1661,10 +1661,19 @@ impl Service {
                 self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::Actions => {
+            Command::Actions | Command::SortActions => {
+                let sort_only = matches!(command, Command::SortActions);
+                let background = (!sort_only).then(|| self.background_action_availability());
                 let mut definitions: Vec<_> = actions::DEFS
                     .iter()
-                    .filter(|d| d.in_palette && self.action_available(d.id))
+                    .filter(|d| {
+                        d.in_palette
+                            && if sort_only {
+                                d.id.starts_with("sort_")
+                            } else {
+                                self.action_available(d.id, background.expect("full palette"))
+                            }
+                    })
                     .collect();
                 definitions.sort_by_key(|d| actions::palette_order(d.id));
                 Ok(serde_json::Value::Array(definitions.into_iter().map(|d| {

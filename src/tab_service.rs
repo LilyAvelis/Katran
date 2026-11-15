@@ -17,6 +17,51 @@ pub fn label(tab: ShelfTab) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BackgroundActions {
+    image: bool,
+    video: bool,
+}
+
+// The Actions catalogue is presentation metadata. Resolve at most one event;
+// destructive or external effects still validate bytes at their action boundary.
+fn background_actions(
+    selected: &[i64],
+    cursor: Option<i64>,
+    resolve: impl FnOnce(i64) -> Result<crate::Event>,
+) -> BackgroundActions {
+    let id = match selected {
+        [] => cursor,
+        [id] => Some(*id),
+        _ => None,
+    };
+    let Some(event) = id.and_then(|id| resolve(id).ok()) else {
+        return BackgroundActions::default();
+    };
+    if matches!(
+        event.kind,
+        crate::EventKind::TextFragment
+            | crate::EventKind::LinkFragment
+            | crate::EventKind::TableFragment
+    ) {
+        return BackgroundActions::default();
+    }
+    let image = event.kind == crate::EventKind::ManagedImage
+        || crate::file_types::is_native_image(&event.path);
+    let extension = event
+        .path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let video = (event.revision.starts_with("ref:")
+        || event.revision.starts_with("blob:")
+        || (event.id < 0 && event.revision.starts_with("file:")))
+        && ["mp4", "m4v", "mov", "mkv", "webm"]
+            .iter()
+            .any(|candidate| extension.eq_ignore_ascii_case(candidate));
+    BackgroundActions { image, video }
+}
+
 impl Service {
     pub(crate) fn navigate_tab(&mut self, delta: i8) -> Result<Value> {
         if !matches!(delta, -1 | 1) {
@@ -37,13 +82,19 @@ impl Service {
         Ok(json!(self.interaction))
     }
 
-    pub(crate) fn action_available(&self, id: &str) -> bool {
+    pub(crate) fn background_action_availability(&self) -> BackgroundActions {
+        background_actions(&self.interaction.selected, self.interaction.cursor, |id| {
+            self.get(id)
+        })
+    }
+
+    pub(crate) fn action_available(&self, id: &str, background: BackgroundActions) -> bool {
         match id {
-            "use_as_background" => self.selected_background_image().is_ok(),
-            "use_as_desktop_wallpaper" => self.selected_background_image().is_ok(),
-            "use_as_video_background" => self.selected_background_video().is_ok(),
-            "use_as_video_desktop_wallpaper" => self.selected_background_video().is_ok(),
-            "use_as_video_desktop_wallpaper_silent" => self.selected_background_video().is_ok(),
+            "use_as_background" => background.image,
+            "use_as_desktop_wallpaper" => background.image,
+            "use_as_video_background" => background.video,
+            "use_as_video_desktop_wallpaper" => background.video,
+            "use_as_video_desktop_wallpaper_silent" => background.video,
             "add_to_katran" => self.interaction.tab == ShelfTab::All,
             "images" => self.settings.tab_enabled(ShelfTab::Images),
             "screenshots" => self.settings.tab_enabled(ShelfTab::Screenshots),
@@ -275,5 +326,30 @@ impl Service {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod background_action_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn catalogue_classification_resolves_only_one_selected_event() {
+        let calls = Cell::new(0);
+        let missing = |_: i64| {
+            calls.set(calls.get() + 1);
+            Err(ApiError::new("synthetic", "missing"))
+        };
+        let none = background_actions(&[], None, missing);
+        assert!(!none.image && !none.video);
+        assert_eq!(calls.get(), 0);
+        let multiple = background_actions(&[1, 2], Some(1), missing);
+        assert!(!multiple.image && !multiple.video);
+        assert_eq!(calls.get(), 0);
+        let _ = background_actions(&[1], Some(2), missing);
+        assert_eq!(calls.get(), 1);
+        let _ = background_actions(&[], Some(2), missing);
+        assert_eq!(calls.get(), 2);
     }
 }
