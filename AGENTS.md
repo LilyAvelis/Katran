@@ -35,8 +35,9 @@ AI command, UI, or implementation to this public source tree. A9's private E
 runtime manifest contract has targeted synthetic evidence; the current source
 handoff check has no unresolved boundary findings. N1 Folder transfer remains
 partially open. Publication of later changes requires a new owner instruction.
-Public and E share Pods/Desktop/settings storage. The local launcher selects E
-`4f53749f7293`; the shared profile reached schema v12 on 2026-11-15 with a
+The former public and E builds shared Pods/Desktop/settings storage. The local
+launcher now selects the unified 3.7.1 candidate via `runtime/current-version.txt`
+(`be05300517b4` on 2026-11-16); the shared profile reached schema v12 on 2026-11-15 with a
 pre-migration backup and passing integrity check. A compatible local public v12
 binary is staged separately. Public 3.4.1 and prior E `c1555b47dc04`
 cannot open the migrated profile without controlled rollback.

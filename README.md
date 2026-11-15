@@ -48,15 +48,16 @@ IDs, domain-owned Copy behavior, context-bound Desktop cursors, managed-path
 preview selection, schema v12 migrations, complete build provenance, and
 safer managed-media publication/action checks. See the
 [wire v2 contract](docs/wire-v2.md) for client requirements. A9 product
-handoff automation and N1 Folder transfer responsiveness remain open. Public
-and E share the Pods/Desktop/settings database.
+handoff automation and N1 Folder transfer responsiveness remain open. The former
+public and E builds shared the Pods/Desktop/settings database. The local launcher
+now selects the unified 3.7.1 candidate (`be05300517b4` on 2026-11-16).
 The local shared profile reached schema v12 on 2026-11-15 after E installation;
 its integrity check passed and a pre-v12 backup was created. A compatible local
 public v12 binary is staged at `runtime/versions/28c8fb0b5446/katran-ui.exe`.
 The published public 3.4.1 and old E runtime cannot open this v12 profile;
 neither is selected by the local launcher.
 
-Saved images in Images use extensionless internal blob paths. The local E now
+Saved images in Images use extensionless internal blob paths. The unified source
 offers both Katran background and Windows desktop wallpaper Actions for these
 images using their managed image type; the selected bytes are checked when the
 action runs. Files lists file pointers, so a saved image normally appears in

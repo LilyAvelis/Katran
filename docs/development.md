@@ -29,8 +29,9 @@ The public 3.7.0 source includes the hardening described below. See the
 limitations. The `1.5` labels and ownership section below are dated historical
 snapshots; historical reviews describe the snapshots they examined.
 
-Public and private E share the Pods/Desktop/settings database. The local launcher
-now selects E `4f53749f7293`, and the shared profile reached schema v12 on
+The former public and private E builds shared the Pods/Desktop/settings database.
+The local launcher now selects unified 3.7.1 via `runtime/current-version.txt`
+(`be05300517b4` on 2026-11-16), and the shared profile reached schema v12 on
 2026-11-15 with a pre-migration SQLite backup and a passing integrity check.
 The local public v12 binary is staged at `runtime/versions/28c8fb0b5446`.
 Published public 3.4.1 and previous E `c1555b47dc04` remain incompatible with
