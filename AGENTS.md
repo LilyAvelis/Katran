@@ -16,6 +16,14 @@ Native product acceptance still belongs to Lilia.
 
 ## Local 3.8 implementation · owner instruction 2026-11-17
 
+Latest owner instruction persists the bounded Folder neural index across restarts.
+Separate `folder-ai-index/{cpu,cuda}.sqlite3` files contain hashed descriptors and
+validated vectors, bound to actual model/tokenizer/preprocessing/runtime identity.
+Only missing/changed descriptors are embedded; absent entries are pruned. Cache
+failure is optional and must preserve RAM search. Query text/plain folder paths
+must not be stored by this cache, and tests must use a separate temporary cache
+directory even when reading the installed model/runtime. No catalogue schema bump.
+
 Latest owner UX instruction: Mini stream Text shows the first nonempty content
 line unless explicitly renamed; all pinned rows show standard pin dots. Text
 Ctrl+Left/Right switches Markdown/source while browsing the split pane. Neural

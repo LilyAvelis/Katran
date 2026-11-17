@@ -45,6 +45,10 @@ pub fn validate(query: &str, limit: u32) -> Result<()> {
 }
 
 pub trait Backend: Send {
+    /// Optional diagnostics contain counts/status only, never paths or queries.
+    fn cache_status(&self) -> Option<Value> {
+        None
+    }
     fn search(
         &mut self,
         query: &str,
@@ -56,6 +60,8 @@ pub trait Backend: Send {
 }
 pub struct Resident {
     root: PathBuf,
+    cache_directory: PathBuf,
+    cache_stats: Option<Value>,
     worker: Option<Worker>,
     next_id: u64,
     snapshot: Option<Vec<PathBuf>>,
@@ -63,8 +69,16 @@ pub struct Resident {
 }
 impl Resident {
     pub fn new(root: PathBuf) -> Self {
+        let cache_directory = root.join("folder-ai-index");
+        Self::with_cache_directory(root, cache_directory)
+    }
+    /// Keep model/runtime resolution separate from derived-cache storage.
+    /// Tests and integration clients may use an isolated cache directory.
+    pub fn with_cache_directory(root: PathBuf, cache_directory: PathBuf) -> Self {
         Self {
             root,
+            cache_directory,
+            cache_stats: None,
             worker: None,
             next_id: 0,
             snapshot: None,
@@ -104,7 +118,12 @@ fn wait<T>(receiver: &Receiver<T>, timeout: Duration, cancel: &Cancellation) -> 
     }
 }
 impl Worker {
-    fn start(root: &std::path::Path, gpu: bool, cancel: &Cancellation) -> Result<Self> {
+    fn start(
+        root: &std::path::Path,
+        cache_directory: &std::path::Path,
+        gpu: bool,
+        cancel: &Cancellation,
+    ) -> Result<Self> {
         let runtime = crate::emoji_ai::runtime::resolve(root, Some(cancel)).map_err(|error| {
             if error.code == "model_unavailable" { ApiError::new("model_unavailable", "Local AI model or runtime is not installed. Installation: https://github.com/LilyAvelis/Katran/blob/main/docs/emoji-ai.md") } else { error }
         })?;
@@ -124,6 +143,7 @@ impl Worker {
             .arg(base.join("model/onnx/model.onnx"))
             .arg(base.join("model/onnx/tokenizer.json"))
             .arg(if gpu { "gpu" } else { "cpu" })
+            .arg(cache_directory.join(if gpu { "cuda.sqlite3" } else { "cpu.sqlite3" }))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -212,6 +232,9 @@ impl Worker {
     }
 }
 impl Backend for Resident {
+    fn cache_status(&self) -> Option<Value> {
+        self.cache_stats.clone()
+    }
     fn search(
         &mut self,
         query: &str,
@@ -220,6 +243,7 @@ impl Backend for Resident {
         gpu: bool,
         cancel: &Cancellation,
     ) -> Result<Vec<usize>> {
+        self.cache_stats = None;
         if query.trim().is_empty()
             || query.chars().count() > 512
             || query.contains('\0')
@@ -241,22 +265,25 @@ impl Backend for Resident {
             self.snapshot = None;
         }
         if self.worker.is_none() {
-            self.worker = Some(Worker::start(&self.root, gpu, cancel).map_err(|error| {
-                if gpu && error.code == "folder_ai_unavailable" {
-                    ApiError::new(
-                        "folder_gpu_unavailable",
-                        "GPU folder search could not start; check the local GPU runtime",
-                    )
-                } else {
-                    error
-                }
-            })?);
+            self.worker = Some(
+                Worker::start(&self.root, &self.cache_directory, gpu, cancel).map_err(|error| {
+                    if gpu && error.code == "folder_ai_unavailable" {
+                        ApiError::new(
+                            "folder_gpu_unavailable",
+                            "GPU folder search could not start; check the local GPU runtime",
+                        )
+                    } else {
+                        error
+                    }
+                })?,
+            );
             self.snapshot = None;
             self.gpu = Some(gpu);
         }
         self.next_id = self.next_id.wrapping_add(1);
         let id = self.next_id;
         let warm = self.snapshot.as_deref() == Some(paths);
+        self.cache_stats = None;
         let request = json!({"id":id,"query":query,"paths":paths,"limit":limit});
         let result = self
             .worker
@@ -270,6 +297,27 @@ impl Backend for Resident {
             .and_then(|reply| {
                 if reply["id"].as_u64() != Some(id) {
                     return Err(unavailable("Invalid local folder AI response"));
+                }
+                if let Some(cache) = reply.get("cache").filter(|cache| cache.is_object()) {
+                    let mut stats = serde_json::Map::new();
+                    for name in ["loaded", "reused", "encoded"] {
+                        if let Some(count) = cache[name]
+                            .as_u64()
+                            .filter(|count| *count <= MAX_ITEMS as u64)
+                        {
+                            stats.insert(name.into(), json!(count));
+                        }
+                    }
+                    if let Some(persisted) = cache["persisted"].as_bool() {
+                        stats.insert("persisted".into(), json!(persisted));
+                    }
+                    if let Some(status) = cache["status"].as_str().filter(|text| {
+                        text.len() <= 64
+                            && text.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+                    }) {
+                        stats.insert("status".into(), json!(status));
+                    }
+                    self.cache_stats = Some(Value::Object(stats));
                 }
                 let values = reply["indices"]
                     .as_array()
@@ -298,6 +346,7 @@ impl Backend for Resident {
                 Ok(indices)
             }
             Err(error) => {
+                self.cache_stats = None;
                 self.worker = None;
                 self.snapshot = None;
                 self.gpu = None;
@@ -483,6 +532,6 @@ pub fn search(
         .collect();
     let next_offset = has_more.then_some(offset + items.len());
     Ok(
-        json!({"query":query,"offset":offset,"items":items,"next_offset":next_offset,"has_more":has_more,"snapshot":token,"incomplete":incomplete,"indexed_count":indexed_count,"scope":"bounded_everything_index_and_saved_folders"}),
+        json!({"query":query,"offset":offset,"items":items,"next_offset":next_offset,"has_more":has_more,"snapshot":token,"incomplete":incomplete,"indexed_count":indexed_count,"scope":"bounded_everything_index_and_saved_folders","cache":backend.cache_status()}),
     )
 }

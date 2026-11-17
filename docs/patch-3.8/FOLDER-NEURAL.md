@@ -38,7 +38,8 @@ This initial version embeds **names and paths only**, from a bounded Everything
 directory snapshot, ordinary-search candidates and saved favorites/history. It indexes at most **8192**
 unique paths with a frame-byte budget; reaching either bound is explicitly
 incomplete. It does not read document contents, traverse directories itself,
-guarantee full-disk semantic recall or persist a private-path vector index.
+guarantee full-disk semantic recall. A bounded derived vector cache is now
+persisted locally across launches; see below.
 Literal exact-name hits keep priority after successful model inference.
 
 The installed optional multilingual E5 runtime supplies Python, tokenizer and
@@ -50,6 +51,26 @@ ordinary lexical results as successful AI. Return to ordinary mode with `\`.
 See [local runtime installation](../emoji-ai.md).
 
 ## Responsiveness and limitations
+
+The index survives Katran/worker restarts in the active profile's
+`folder-ai-index/cpu.sqlite3` or `cuda.sqlite3`. Compatible vectors load from
+disk; only names/path descriptors missing from that cache are encoded. Renaming
+or moving a folder changes its descriptor; deleted or evicted entries are pruned
+when the next bounded discovery snapshot is saved. File contents and folder
+modification times are not embedding inputs, so changing files inside a folder
+does not require re-embedding its unchanged name/path.
+
+The cache stores hashed descriptors and normalized float32 vectors, never query
+history or plain folder paths. Writes are atomic SQLite transactions, bounded
+to 8192 vectors per device. Model/tokenizer/optional external tensor hashes,
+descriptor/pooling/prefix versions, token limit, dimensions, ORT and CPU/GPU mode
+bind compatibility; incompatible vectors are rebuilt rather than reused.
+Corrupt, locked or unwritable caches fall back to the working RAM index with
+an explicit diagnostic status. The main catalogue schema remains v13.
+
+This avoids full re-embedding after restart; the local model/runtime still has
+to load to encode the query. Entries outside the bounded retained snapshot can
+be encoded again if they return later. No file-content crawl is introduced.
 
 The first query loads the model and embeds the bounded snapshot. Later queries
 reuse the resident encoder and RAM vectors for unchanged paths. Reordering does

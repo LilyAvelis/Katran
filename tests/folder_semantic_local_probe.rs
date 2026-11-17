@@ -68,7 +68,13 @@ fn resident_model_and_dispatcher_cold_warm_probe() {
     } else {
         Box::new(SyntheticSource { count })
     };
-    api.set_folder_semantic_backend(Box::new(Resident::new(PathBuf::from(profile))), source);
+    api.set_folder_semantic_backend(
+        Box::new(Resident::with_cache_directory(
+            PathBuf::from(profile),
+            temp.path().join("derived-cache"),
+        )),
+        source,
+    );
     for (query, target) in if live {
         [
             ("Katran", "Katran"),
@@ -118,5 +124,81 @@ fn resident_model_and_dispatcher_cold_warm_probe() {
             assert!(start.elapsed() < Duration::from_secs(240));
             std::thread::sleep(Duration::from_millis(25));
         }
+    }
+}
+
+#[test]
+#[ignore = "Requires explicit runtime profile; verifies persistence with a real local model"]
+fn resident_cache_survives_worker_restart_and_encodes_only_changed_descriptor() {
+    let profile = PathBuf::from(
+        std::env::var_os("KATRAN_FOLDER_PROBE_PROFILE").expect("explicit runtime profile"),
+    );
+    let gpu = std::env::var_os("KATRAN_FOLDER_PROBE_GPU").is_some();
+    let count = std::env::var("KATRAN_FOLDER_PROBE_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(128)
+        .clamp(4, 8192);
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("derived-cache");
+    for (phase, query, expected_encoded) in [
+        (0, "счета и квитанции", count),
+        (1, "счета и квитанции", 0),
+        (2, "цветочная мастерская", 1),
+    ] {
+        let mut api =
+            Service::open(&temp.path().join(format!("service-{phase}")), 100_000).unwrap();
+        let mut settings: katran::settings::Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)).unwrap();
+        settings.folder_ai_gpu = gpu;
+        call(&mut api, Command::SetSettings { settings });
+        api.set_folder_semantic_backend(
+            Box::new(Resident::with_cache_directory(
+                profile.clone(),
+                cache_dir.clone(),
+            )),
+            Box::new(SyntheticSource { count }),
+        );
+        let started = Instant::now();
+        let begun = call(
+            &mut api,
+            Command::BeginJob {
+                command: Box::new(Command::SearchFoldersSemanticPage {
+                    query: query.into(),
+                    offset: 0,
+                    limit: 10,
+                    snapshot: None,
+                }),
+            },
+        );
+        let id = JobId(begun["job_id"].as_u64().unwrap());
+        loop {
+            let status = call(&mut api, Command::PollJob { job_id: id });
+            if status["state"] == "succeeded" {
+                let cache = &status["result"]["cache"];
+                assert_eq!(
+                    cache["encoded"].as_u64(),
+                    Some(expected_encoded as u64),
+                    "phase={phase},cache={cache}"
+                );
+                assert_eq!(cache["persisted"], true, "phase={phase},cache={cache}");
+                if phase > 0 {
+                    assert_eq!(
+                        cache["reused"].as_u64(),
+                        Some((count - expected_encoded) as u64)
+                    );
+                }
+                println!(
+                    "restart_phase={phase} gpu={gpu} elapsed_ms={} cache={cache}",
+                    started.elapsed().as_millis()
+                );
+                break;
+            }
+            assert_ne!(status["state"], "failed", "{}", status["error"]["code"]);
+            assert!(started.elapsed() < Duration::from_secs(240));
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        // Dropping Service kills its resident child, forcing disk reload next phase.
+        drop(api);
     }
 }

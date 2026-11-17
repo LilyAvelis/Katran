@@ -1,5 +1,33 @@
 # Katran 3.8 verification handoff
 
+## Persistent derived Folder index · 2026-11-17
+
+New worker SQLite persistence and Rust profile-cache wiring were verified with
+synthetic-only data, using an isolated temporary cache even when reading the
+installed real model/runtime. No personal index was filled with synthetic paths.
+
+- Python cache checks **5/5**: independent process restart with no encode, one
+  changed descriptor, deleted-entry pruning, identity/model/tokenizer/sidecar/
+  provider incompatibility, corrupt vector handling, lock/bad path/bounds and
+  rollback preserving the previous committed cache.
+- Existing semantic API **3/3** passed; all-targets Clippy `-D warnings` and
+  final formatting passed. One new probe fixture initially missed a borrowed
+  Path parameter; corrected before its model execution.
+- Actual CUDA API probe across three freshly opened Services/resident processes,
+  **8192 synthetic paths**: initial encoded=8192; after restart loaded/reused=8192,
+  encoded=0; after one changed path loaded/reused=8191, encoded=1. Every phase
+  persisted successfully. This confirms model/IPC/disk behavior, not merely a
+  simulated counter. The caches used hashed descriptors, not queries/plain paths.
+- Single debug-run end-to-end observations: 11835ms initial, 9883ms restart,
+  9830ms changed-path restart (`target/build/folder-persistent-restart-gpu.log`).
+  Model/runtime integrity checks and process/session startup remain in these
+  times; do not claim instant startup or a benchmarked general speed multiplier.
+
+Catalogue schema remains v13; no GUI/provider/search-mode change. Prior 245 UI
+checks, GPU/provider/quality evidence and unchanged runtime installation remain
+valid. The new compiled inputs invalidate the prior UI artifact for persistence;
+one affected optimized build is required, without repeating unrelated suites.
+
 ## Text snippets, Enter/top-10 and optional CUDA follow-up · 2026-11-17
 
 Latest native owner feedback accepts the functioning split view/neural mode and

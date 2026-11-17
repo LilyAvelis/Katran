@@ -6,6 +6,15 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Persistent-index follow-up: same Nemi session owns worker SQLite/fingerprint and
+Python cache tests; Polly owns profile cache path, bounded API cache diagnostics,
+isolated real-process restart probe, integration/docs/staging. No new agents.
+Synthetic cache 5/5 and existing semantic API 3/3 passed; real CUDA probe across
+three fresh Services/workers proved 8192 encoded initially, then 8192 reused/0
+encoded after restart, then 8191 reused/1 encoded after a changed descriptor.
+All-targets Clippy passed. GUI/schema/model/GPU environment are unchanged; reuse
+their evidence and rebuild only the affected UI artifact after source freeze.
+
 Final state: all follow-up implementation/setup work complete. Source `58c86ce`,
 primary runtime `a0f03404416d`, corrected embedded CUDA worker and profile-isolated
 GPU component verified through an 8192-path synthetic API probe. Same named

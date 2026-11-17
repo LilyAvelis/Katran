@@ -51,6 +51,14 @@ Mini stream Text uses a shared display-title helper (manual alias before first
 nonempty line) and standard pin dots. Ctrl+Left/Right activates text rendering
 controls for the Text cursor pane without altering full-screen preview state.
 
+Folder embeddings persist in a separate per-profile/per-device derived SQLite
+cache, owned by the embedded worker. `Resident` supplies its path and exposes
+bounded cache counts/status through the result; `with_cache_directory` supports
+isolated integration probes without writing synthetic entries into a real index.
+The worker validates model/preprocessing identity and vector integrity, saves the
+current bounded set transactionally, and tolerates optional-cache I/O failures.
+No catalogue migration or GUI action/storage path was added.
+
 Earlier research:
 [architecture](patch-3.8/DETAILS-VIEW-RESEARCH.md), [UX](patch-3.8/DETAILS-VIEW-UX.md)
 and [semantic research](patch-3.8/FOLDER-SEMANTIC-RESEARCH.md) for the earlier study.
