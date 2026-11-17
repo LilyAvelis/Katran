@@ -28,6 +28,18 @@ checks, GPU/provider/quality evidence and unchanged runtime installation remain
 valid. The new compiled inputs invalidate the prior UI artifact for persistence;
 one affected optimized build is required, without repeating unrelated suites.
 
+### Primary installation
+
+Source local main `4c882ff835d2dc6884fc77ffa68f72afc7c69856`; one optimized build
+**1m23s**, matched pre/post compiled inputs including the embedded cache worker.
+Primary runtime now selects **`17ab92129b84`**, SHA-256:
+`17ab92129b841f4774d608b7e1b463812e97a41ed8335db2ce0a72f6bcb43ecb`.
+Previous `a0f03404416d` retained, fresh consistent v13 backup verified; private
+receipt `runtime/rollback-persistent-index.json`. No model/package/schema/shortcut
+change, forced restart, GitHub push/tag/release. The first neural search after
+this update creates the new disk cache from the old RAM-only state; later worker
+restarts reuse it. The owner exits the old tray process and launches via Raycast.
+
 ## Text snippets, Enter/top-10 and optional CUDA follow-up · 2026-11-17
 
 Latest native owner feedback accepts the functioning split view/neural mode and

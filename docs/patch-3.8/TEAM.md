@@ -6,6 +6,13 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Persistent-index work complete: source `4c882ff`, primary runtime `17ab92129b84`,
+one 1m23s optimized build with verified compiled inputs and installed hash.
+Nemi's SQLite/cache test handoff and Polly's three-process CUDA proof are closed.
+New consistent v13 backup and prior runtime retained. Next: owner tray exit and
+Raycast relaunch; first new-version neural query creates the on-disk cache once.
+No UI/model/package changes and no GitHub publication.
+
 Persistent-index follow-up: same Nemi session owns worker SQLite/fingerprint and
 Python cache tests; Polly owns profile cache path, bounded API cache diagnostics,
 isolated real-process restart probe, integration/docs/staging. No new agents.
