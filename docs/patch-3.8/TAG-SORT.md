@@ -38,3 +38,11 @@ Schema stays v13. Older binaries do not know settings enum `sort.mode: tags`:
 before controlled rollback select an older supported sort with this build or
 restore compatible preferences/backup. Do not assume switching only the runtime
 pointer is sufficient. No public push/tag/release is authorized.
+
+## Installed artifact
+
+Source `5135443`, runtime `efc8c786e60f`, one 82.31s build. Targeted API regression
+20/20 passed. UI 265/266 plus isolated timing-fixture retry 1/1, all new sort/cache
+checks passed. All-targets Clippy and formatting passed. Native owner acceptance
+of ordering and visual cache behavior remains pending. See VERIFICATION.md for
+artifact identity and controlled rollback.

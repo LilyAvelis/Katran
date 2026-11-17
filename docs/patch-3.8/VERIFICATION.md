@@ -1,5 +1,20 @@
 # Katran 3.8 verification handoff
 
+## Installed combined follow-up · 2026-11-18
+
+Source `5135443`, one optimized UI build **82.31s**, Windows x64 / Rust 1.95.0 /
+locked offline / existing `target/build` / ui + clipboard-events. Compiled
+source/resource fingerprints matched before/after; copied UI/helpers verified.
+Primary runtime **`efc8c786e60f`**, SHA256
+`efc8c786e60fbba74a6590c409a49749bb5f31fddd75067c5ed702211d99dca0`.
+Atomic pointer replaced `cb740a2f72e7`; previous runtime and fresh consistent v13
+backup retained in private `runtime/rollback-tag-sort.json`. Schema unchanged,
+no AI/model/runtime setup changes, no GitHub push/tag/public release.
+Running app untouched. Owner asked to exit through tray, launch via Raycast,
+check rename/pin/tag images and comma→Slash tag groups. Native acceptance pending.
+For rollback after saving Tags mode, select a supported sort first or restore
+compatible preferences; the old runtime cannot parse the new settings enum.
+
 ## General image refresh and Tags sort · 2026-11-18
 
 New Tags API gate 4/4 passed. Combined targeted regression 20/20 passed:

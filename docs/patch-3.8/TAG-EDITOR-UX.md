@@ -98,3 +98,8 @@ retention, late old-job rejection, genuine revision reload, namespace isolation
 and exclusion of Shell icons/thumbnails. Metadata API-backed UI fixture covers
 alias/search membership, opener, tag assignment and unpin without replacing
 resident textures. No personal data or desktop automation is involved.
+
+Combined follow-up source `5135443` is installed as `efc8c786e60f` (82.31s build).
+UI 265/266 plus unrelated timing-fixture isolated retry 1/1; all new image/cache
+checks passed. The owner's first-artifact report is **not** counted as acceptance
+of the broader correction; manual retry is pending.
