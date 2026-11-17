@@ -30,6 +30,21 @@ The requested GPU component is installed separately from the emoji CPU runtime;
 provider/kernel and end-to-end GPU evidence is recorded below once confirmed.
 No native window was controlled and no personal tags/content were changed by tests.
 
+### Primary UX artifact while optional GPU setup completes
+
+Source local main `cd4d5bf23c93d604d96d731be69f130088c419e5`; one optimized UI
+build **1m24s**, matched pre/post compiled inputs. Primary runtime now selects
+**`c363daae5864`**, SHA-256:
+`c363daae58642a81352dba366261d026e09655005da5c397a9451720fb628ad1`.
+Previous `52d064dd97cb` retained; a fresh consistent v13 backup passed integrity
+check, private receipt `runtime/rollback-mini-text-pages.json`. No migration,
+shortcut replacement or forced restart. The owner exits the old tray process
+and relaunches through Raycast for these new UX changes. No GitHub publication.
+
+Optional CUDA wheels are a separate download/setup stage and do not justify
+recompiling this unchanged UI artifact when installation finishes. The GPU
+checkbox defaults off; CUDA availability is not inferred from this artifact.
+
 ## Mini stream and local Folder neural mode · later 2026-11-17 follow-up
 
 Tag dragging was confirmed working by Lilia. The earlier third-view/neural

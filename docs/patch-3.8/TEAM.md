@@ -6,6 +6,12 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current primary UX checkpoint: `cd4d5bf`, runtime `c363daae5864`, matched hashes,
+one optimized build 1m24s and verified profile backup. Text/pin/keyboard and
+Enter/top-10/page UX are staged for Lilia; same previous runtime retained.
+Mira's optional GPU download/setup remains active, with real CUDA/API proof
+pending. Polly will reuse this artifact for a runtime-only setup completion.
+
 Latest native-feedback follow-up: Lilia confirmed Mini stream and neural search
 work and requested Text titles/pin markers/Ctrl+arrow, Enter-only neural search,
 10-item pages and optional GPU. Fenna owns row presentation and Settings checkbox;
