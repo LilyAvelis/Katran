@@ -1,5 +1,12 @@
 # Developer and agent entry point
 
+Native video preview is API-first: `media_playback.rs` owns session/control/frame
+policy, `media_service.rs` binds source revisions and active preview context,
+and `media_playback_windows.rs` owns Media Foundation audio/frame lifecycle.
+`media_preview_ui.rs` consumes the dispatcher through an asynchronous open job
+and reuses one texture. See [contract and limits](video-preview.md), including
+the client-poll watchdog and system codec limitations. Video-only, no migration.
+
 Build/test outputs belong in `target/build`. Read the [storage budget](devops.md)
 before cleanup: `maintain-build-cache.ps1` plans by default, `-Apply` uses guarded
 native deletion; build-working invokes it after a successful install. Preserve

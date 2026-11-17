@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Local native video preview · 2026-11-18
+
+Post-v3.8.0 local follow-up: Space and Mini stream use one explicit video/audio
+session via `media_playback`, `media_service` and the Windows Media Foundation
+backend. GUI opens through `BeginJob(OpenMedia)`; source preparation and guarded
+commit belong to the dispatcher. Switching object/surface, closing, hiding or
+Settings closes playback; metadata-only tag/pin updates preserve it. No autoplay.
+Read [the contract](docs/video-preview.md) before changing playback or preview
+routing. No schema change or new GitHub publication is authorized for this work.
+
 ## Public 3.8 release authorization · 2026-11-18
 
 Lilia accepted the combined local UI follow-up and explicitly authorized pushing

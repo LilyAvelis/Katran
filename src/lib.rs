@@ -44,7 +44,11 @@ pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
 pub mod markdown;
+pub mod media_playback;
+#[cfg(windows)]
+pub mod media_playback_windows;
 pub mod media_runtime;
+mod media_service;
 pub mod open_file;
 pub mod origin;
 mod paste_service;
@@ -118,6 +122,7 @@ pub mod wallpaper_engine;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    media: media_service::MediaState,
     known_folder_provider: Box<dyn known_folders::Provider>,
     emoji_ai: std::sync::Arc<std::sync::Mutex<Box<dyn emoji_ai::Backend>>>,
     ai_components: ai_components::Manager,
@@ -301,6 +306,7 @@ impl Service {
                 folder_semantic::EverythingSource,
             ))),
             folder_semantic_session: folder_semantic::new_session(),
+            media: media_service::MediaState::new(false),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost::new()),
@@ -394,6 +400,7 @@ impl Service {
                 folder_semantic::EverythingSource,
             ))),
             folder_semantic_session: folder_semantic::new_session(),
+            media: media_service::MediaState::new(true),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost::new()),
@@ -458,6 +465,7 @@ impl Service {
         {
             log.record("command",serde_json::json!({"request_id":request.request_id,"command":diagnostics::summarize_command(&request.command),"cursor":self.interaction.cursor,"selected_count":self.interaction.selected.len(),"selected_sample":self.interaction.selected.iter().take(32).collect::<Vec<_>>()}));
         }
+        self.reconcile_media();
         let result = if request.api_version != API_VERSION {
             Err(ApiError::new(
                 "unsupported_version",
@@ -466,6 +474,7 @@ impl Service {
         } else {
             self.dispatch(request.command)
         };
+        self.reconcile_media();
         if (hot.is_none()
             || result.is_err()
             || started.elapsed() >= std::time::Duration::from_millis(10))
@@ -516,6 +525,13 @@ impl Service {
             ));
         }
         match command {
+            Command::OpenMedia { id, revision } => self.open_media(id, revision),
+            Command::ControlMedia { session, action } => self.control_media(session, action),
+            Command::MediaState => self.media_state(),
+            Command::MediaFrame {
+                session,
+                after_serial,
+            } => self.media_frame(session, after_serial),
             Command::AiComponentsStatus => self.ai_components.status(&self.root),
             Command::LaunchAiComponent { component, action } => {
                 self.ai_components.launch(&self.root, component, action)

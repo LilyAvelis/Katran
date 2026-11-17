@@ -54,6 +54,21 @@ fn command(value: &mut Value) -> Result<(), String> {
         .ok_or("Expected command type")?
         .to_owned();
     match kind.as_str() {
+        "control_media" | "media_frame" => {
+            if let Some(value) = object.get_mut("session") {
+                unsigned_id(value)?;
+            }
+            if let Some(value) = object.get_mut("after_serial") {
+                unsigned_id(value)?;
+            }
+            if let Some(value) = object
+                .get_mut("action")
+                .and_then(Value::as_object_mut)
+                .and_then(|action| action.get_mut("position_ms"))
+            {
+                unsigned_id(value)?;
+            }
+        }
         "poll_job" | "cancel_job" => {
             if let Some(value) = object.get_mut("job_id") {
                 unsigned_id(value)?;
@@ -83,6 +98,7 @@ fn command(value: &mut Value) -> Result<(), String> {
             }
         }
         "describe_pod"
+        | "open_media"
         | "get_pinned_properties"
         | "set_pinned_properties"
         | "set_pinned_tags"

@@ -268,6 +268,29 @@ impl Shelf {
                 ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
                 if event["available"] == false {
                     ui.weak(tr("Объект недоступен", "Item unavailable"));
+                } else if let Some(target) =
+                    super::media_preview_ui::target(event, &self.state, false)
+                {
+                    if let Some(api) = self.api.as_mut() {
+                        self.media_preview.show_with_poster(
+                            ui,
+                            &target,
+                            event,
+                            &mut self.images,
+                            &mut |command| {
+                                api.execute(Request {
+                                    api_version: 1,
+                                    request_id: "media-ui".into(),
+                                    command,
+                                })
+                            },
+                        );
+                    } else {
+                        ui.weak(tr(
+                            "Видео временно недоступно",
+                            "Video temporarily unavailable",
+                        ));
+                    }
                 } else if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
                     let (rect, _) = ui.allocate_exact_size(
                         Vec2::new(width, preview_height),

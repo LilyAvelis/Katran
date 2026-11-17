@@ -1,5 +1,10 @@
 # Katran
 
+Local follow-up: [video with sound](docs/video-preview.md) inside Space preview
+and Mini stream, with explicit Play/Pause, seeking and volume. Closing or changing
+the viewed object stops playback. Uses Windows Media Foundation; codec support
+depends on Windows. This local addition is separate from the v3.8.0 release tag.
+
 **Katran 3.8.0** adds: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings, drag reordering of complete tags
 and improved Folder navigation. The third [Mini stream view](docs/patch-3.8/DETAILS-VIEW.md)

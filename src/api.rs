@@ -337,6 +337,19 @@ pub enum Command {
         id: i64,
         operation: crate::open_file::Operation,
     },
+    OpenMedia {
+        id: i64,
+        revision: String,
+    },
+    ControlMedia {
+        session: u64,
+        action: crate::media_playback::Action,
+    },
+    MediaState,
+    MediaFrame {
+        session: u64,
+        after_serial: u64,
+    },
     BeginJob {
         command: Box<Command>,
     },

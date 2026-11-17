@@ -1,5 +1,14 @@
 # Development log through 3.7.1
 
+## Local follow-up after v3.8.0 · 2026-11-18
+
+[Native video with audio](../video-preview.md) adds explicit playback in Space
+and Mini stream, pause, seek and volume. One dispatcher-owned session stops on
+close, object/surface change or hiding; ordinary browsing does not autoplay.
+Windows Media Foundation supplies codecs/audio without a separate player install.
+This work has no schema migration and does not alter the immutable v3.8.0 tag.
+See the verification handoff for automated evidence and owner acceptance status.
+
 Local 2026-11-18 follow-up: [Tags sorting](../patch-3.8/TAG-SORT.md) is comma then
 Slash, current tag order with untagged last; custom pinned order remains separate.
 [Image refresh correction](../patch-3.8/TAG-EDITOR-UX.md) now also covers rename,

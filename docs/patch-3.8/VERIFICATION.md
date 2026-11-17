@@ -1,5 +1,30 @@
 # Katran 3.8 verification handoff
 
+## Native video/audio local follow-up · 2026-11-18
+
+Scope: [Space and Mini stream playback](../video-preview.md), after immutable
+v3.8.0 tag; local main/primary install only, no new push/tag/public release.
+
+Automated evidence:
+- Muted synthetic Windows Media Foundation probe: 1/1, H264/AAC MP4 and MKV,
+  real non-black decoded frames, audio-stream detection, pause/seek, handle
+  release and abandoned-client poll lease. Final run 2.86s; no personal media.
+- Domain policy 4/4, dispatcher 4/4 and wire-v2 6/6. Includes stale tokens,
+  async leave/return, source mutation, Settings/hide, Space/Details transitions
+  and preservation over pin/tag metadata updates.
+- UI 272/272, including 6 new synthetic player tests: explicit Play, late-job
+  cancellation, stopped-worker recovery, selected volume before Play, bounded
+  frame decoding, texture reuse and target routing.
+- Locked offline Clippy, all targets with UI, passed with warnings denied.
+  Environment reports incremental hard-link fallback; no code lint remains.
+- Final routing/async regression gate: 14/14 (8 job dispatcher, 4 media API,
+  2 preview navigation), after the equivalent Clippy condition cleanup.
+
+Logs are local ignored target/build/media-{native-probe,api-gate,ui-gate,clippy}.log.
+Native appearance/audible output and owner media codecs remain manual acceptance.
+The worker lease supplements Stop; it cannot interrupt a hung OS codec/COM call.
+Normal shutdown is tested, strict worst-case shutdown time is not established.
+
 ## Public 3.8 release authorization · 2026-11-18
 
 Lilia accepted the combined local UI follow-up and explicitly authorized pushing

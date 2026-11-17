@@ -1,5 +1,23 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Native video preview follow-up · 2026-11-18
+
+Owner authorized local native video+audio in Space and Mini stream, with explicit
+pause/seek/volume and stop on close/change. This is after v3.8.0 tag; no new push,
+tag or public release. Existing sessions reused, scopes acknowledged:
+
+| Session | Model/effort | Owned files and next step |
+| --- | --- | --- |
+| /root/mira | gpt-6.1-terra/high | media_playback_windows.rs; native backend/probe frozen for gate |
+| /root/nemi | gpt-6.1-terra/high | media_playback/service, api/lib/jobs/file_types, policy/API tests; frozen for gate |
+| /root/fenna | gpt-6.1-terra/high | media_preview_ui and rendering branches; frozen, 6 UI checks passed |
+| /root | current lead | Wirev2, GUI lifecycle/shared fields, integration gates/docs/build/primary install |
+
+Native MP4/MKV/lease probe passed 1/1; API/policy/wire passed 14/14 before GUI.
+UI passed 272/272 including six new player tests. Clippy all-targets passed.
+Lead is completing routing verification, local checkpoint/build and primary install.
+No desktop automation or model/real-media tests.
+
 ## Public 3.8 release authorization · 2026-11-18
 
 Lilia accepted the combined local UI follow-up and explicitly authorized pushing

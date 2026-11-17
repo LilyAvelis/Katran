@@ -6,7 +6,8 @@ pub fn has_internal_preview(event: &crate::Event) -> bool {
         crate::EventKind::TextFragment
             | crate::EventKind::LinkFragment
             | crate::EventKind::TableFragment
-    ) || is_markdown(Path::new(&event.name))
+    ) || is_native_video(&event.path) || is_native_video(Path::new(&event.name))
+        || is_markdown(Path::new(&event.name))
         || is_native_image(Path::new(&event.name))
         // Desktop labels preserve the original name, which may lack an extension.
         // Only the reserved managed-asset projection may use its path here.
@@ -37,4 +38,14 @@ pub(crate) fn sql_image_predicate() -> String {
             .collect::<Vec<_>>()
             .join(" OR ")
     )
+}
+
+pub fn is_native_video(path: &Path) -> bool {
+    path.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+        [
+            "mp4", "mkv", "webm", "mov", "m4v", "avi", "wmv", "mpeg", "mpg",
+        ]
+        .iter()
+        .any(|known| x.eq_ignore_ascii_case(known))
+    })
 }

@@ -20,6 +20,7 @@ mod input_log;
 mod launch_args;
 mod link_card_ui;
 mod markdown_ui;
+mod media_preview_ui;
 mod native_drag_ui;
 mod navigation_input;
 mod open_apps_ui;
@@ -286,6 +287,7 @@ struct Shelf {
     overlay_ui: overlay_ui::State,
     pods_ui: pods_ui::State,
     emoji_ai: emoji_ai_ui::State,
+    media_preview: media_preview_ui::State,
     video_background: video_background_ui::State,
     video_background_id: Option<String>,
     video_background_source: Option<video_background_ui::VideoSource>,
@@ -520,6 +522,43 @@ impl Shelf {
             } else {
                 format!("Видеофон: {error}")
             };
+        }
+    }
+    fn stop_media_preview(&mut self) {
+        if let Some(api) = self.api.as_mut() {
+            self.media_preview.stop(&mut |command| {
+                api.execute(Request {
+                    api_version: 1,
+                    request_id: "media-ui-stop".into(),
+                    command,
+                })
+            });
+        }
+    }
+    fn media_preview_lifecycle(&mut self, ctx: &egui::Context) {
+        let full = self.state["preview"].as_i64();
+        let id = full.or_else(|| {
+            (self.state["view"] == "details")
+                .then(|| self.state["cursor"].as_i64())
+                .flatten()
+        });
+        let target = if self.video_visible
+            && self.state["settings_open"] != true
+            && !ctx.input(|i| i.viewport().minimized.unwrap_or(false))
+        {
+            id.and_then(|id| self.events.iter().find(|e| e["id"] == id))
+                .and_then(|event| media_preview_ui::target(event, &self.state, full.is_some()))
+        } else {
+            None
+        };
+        if let Some(api) = self.api.as_mut() {
+            self.media_preview.sync(ctx, target, &mut |command| {
+                api.execute(Request {
+                    api_version: 1,
+                    request_id: "media-ui-sync".into(),
+                    command,
+                })
+            });
         }
     }
     fn transfer_input_reserved(&self) -> bool {
@@ -1555,6 +1594,7 @@ impl Shelf {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.refresh_tag_materials();
+        self.media_preview_lifecycle(&ctx);
         let visible = self.events.clone();
         self.state = self.call(Command::SetVisible {
             ids: visible.iter().filter_map(|e| e["id"].as_i64()).collect(),
@@ -1964,6 +2004,7 @@ impl eframe::App for Shelf {
         self.tray_tick(ctx);
         self.overlay_tick(ctx);
         self.video_background_tick(ctx);
+        self.media_preview_lifecycle(ctx);
         if self
             .overlay_ui
             .animation
@@ -2221,6 +2262,7 @@ fn main() -> eframe::Result {
         overlay_ui: overlay_ui::State::default(),
         pods_ui: pods_ui::State::default(),
         emoji_ai: emoji_ai_ui::State::default(),
+        media_preview: Default::default(),
         video_background: Default::default(),
         video_background_id: None,
         video_background_source: None,
@@ -2469,6 +2511,7 @@ mod tests {
             overlay_ui: overlay_ui::State::default(),
             pods_ui: pods_ui::State::default(),
             emoji_ai: emoji_ai_ui::State::default(),
+            media_preview: Default::default(),
             video_background: Default::default(),
             video_background_id: None,
             video_background_source: None,

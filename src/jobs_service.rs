@@ -81,6 +81,7 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    Media(crate::media_service::PreparedMedia),
     EmojiAi {
         value: Value,
         view_generation: u64,
@@ -626,6 +627,16 @@ impl Service {
             };
         }
         let id = match command {
+            Command::OpenMedia { id, revision } => {
+                let (event, identity, epoch, desktop_digest) =
+                    self.start_media_prepare(id, revision)?;
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    cancel.check()?;
+                    let prepared = media_service::prepare(event, identity, epoch, desktop_digest)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Media(prepared))
+                })?
+            }
             Command::SearchEmojiAi {
                 query,
                 offset,
@@ -1737,6 +1748,7 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::Media(prepared)=>{self.jobs.authorize_claimed_effect(ready)?;self.commit_media(prepared)},
                 PreparedWork::ExternalPasteReady{..} | PreparedWork::ExternalPasteFinished{..} => Err(ApiError::new("invalid_job_phase", "External paste requires continuation")),
                 PreparedWork::FolderExportReady(_) | PreparedWork::FolderExportCopied{..} => Err(ApiError::new("invalid_job_phase", "Folder export requires continuation")),
                 PreparedWork::FolderCopy{..}=>Err(ApiError::new("invalid_job_phase","Folder copy requires continuation")),

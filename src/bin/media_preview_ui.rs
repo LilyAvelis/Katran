@@ -1,0 +1,775 @@
+//! Explicit-play video preview, driven by dispatcher-owned sessions.
+use super::i18n::tr;
+use base64::Engine;
+use eframe::egui::{self, Color32};
+use katran::{Command, domain_jobs::JobId, media_playback::Action};
+use serde_json::Value;
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Target {
+    pub id: i64,
+    pub revision: String,
+    pub context: String,
+}
+
+/// Presentation routing only; the dispatcher revalidates the source and context.
+pub(super) fn target(event: &Value, state: &Value, full: bool) -> Option<Target> {
+    if !matches!(
+        event["kind"].as_str(),
+        Some("file_reference" | "managed_image")
+    ) {
+        return None;
+    }
+    let video = event["path"]
+        .as_str()
+        .is_some_and(|s| katran::file_types::is_native_video(Path::new(s)))
+        || event["name"]
+            .as_str()
+            .is_some_and(|s| katran::file_types::is_native_video(Path::new(s)));
+    if !video || event["available"] == false {
+        return None;
+    }
+    Some(Target {
+        id: event["id"].as_i64()?,
+        revision: event["revision"].as_str()?.to_owned(),
+        context: serde_json::json!([
+            state["tab"],
+            state["folder_path"],
+            if full { "preview" } else { "details" }
+        ])
+        .to_string(),
+    })
+}
+
+struct Pending {
+    id: JobId,
+    target: Target,
+    cancelled: bool,
+    cancel_sent: bool,
+}
+
+#[derive(Default)]
+pub(super) struct State {
+    target: Option<Target>,
+    pending: Option<Pending>,
+    session: Option<u64>,
+    stopping: bool,
+    snapshot: Value,
+    serial: u64,
+    texture: Option<egui::TextureHandle>,
+    next_poll: Option<Instant>,
+    error: Option<String>,
+    chosen_volume: Option<f64>,
+    seek_position: Option<u64>,
+}
+
+impl State {
+    fn message(reply: &Value) -> String {
+        let code = reply["error"]["code"].as_str().unwrap_or("media_error");
+        let message = reply["error"]["message"]
+            .as_str()
+            .unwrap_or(tr("Видео недоступно", "Video unavailable"));
+        format!("{message} ({code})")
+    }
+
+    /// Called every frame, including hide/close. Never starts playback itself.
+    pub(super) fn sync(
+        &mut self,
+        ctx: &egui::Context,
+        target: Option<Target>,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) {
+        if self.target != target {
+            self.error = None;
+            self.stop(call);
+            self.target = target;
+            self.texture = None;
+            self.serial = 0;
+            self.seek_position = None;
+        }
+        if self.stopping {
+            self.stop(call);
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.cancelled && !pending.cancel_sent)
+        {
+            self.stop(call);
+        }
+        if let Some(pending) = self.pending.as_ref() {
+            let id = pending.id;
+            let response = call(Command::PollJob { job_id: id });
+            if response["ok"] != true {
+                self.error = Some(Self::message(&response));
+                ctx.request_repaint_after(Duration::from_millis(200));
+                return;
+            }
+            match response["result"]["state"].as_str() {
+                Some("queued" | "running" | "ready") => {
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                    return;
+                }
+                Some("succeeded") => {
+                    let pending = self.pending.take().unwrap();
+                    let session = response["result"]["result"].clone();
+                    if pending.cancelled || self.target.as_ref() != Some(&pending.target) {
+                        if let Some(token) = session["token"].as_u64() {
+                            self.session = Some(token);
+                            self.stopping = true;
+                            self.stop(call);
+                        }
+                    } else if self.accept_session(&session, &pending.target) {
+                        self.play_opened(call);
+                    }
+                }
+                Some("failed" | "cancelled") => {
+                    let pending = self.pending.take().unwrap();
+                    if !pending.cancelled {
+                        self.error = Some(Self::message(&response["result"]));
+                    }
+                }
+                _ => {
+                    self.error = Some(
+                        tr(
+                            "Неизвестное состояние загрузки видео",
+                            "Unknown video loading state",
+                        )
+                        .into(),
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                    return;
+                }
+            }
+        }
+        if self.stopping {
+            ctx.request_repaint_after(Duration::from_millis(200));
+            return;
+        }
+        let Some(token) = self.session else {
+            return;
+        };
+        if self.next_poll.is_some_and(|when| Instant::now() < when) {
+            ctx.request_repaint_after(
+                self.next_poll
+                    .unwrap()
+                    .saturating_duration_since(Instant::now()),
+            );
+            return;
+        }
+        let state = call(Command::MediaState);
+        if state["ok"] != true {
+            self.error = Some(Self::message(&state));
+            self.stopping = true;
+            self.stop(call);
+            if self.stopping {
+                ctx.request_repaint_after(Duration::from_millis(200));
+            }
+            return;
+        }
+        if state["result"].is_null() {
+            self.session = None;
+            self.texture = None;
+            return;
+        }
+        if state["result"]["token"].as_u64() != Some(token) {
+            self.session = None;
+            self.texture = None;
+            self.error = Some(tr("Сессия видео изменилась", "Video session changed").into());
+            return;
+        }
+        self.snapshot = state["result"]["snapshot"].clone();
+        if let Some(error) = self.snapshot["error"].as_str() {
+            self.error = Some(error.to_owned());
+        }
+        if matches!(self.snapshot["state"].as_str(), Some("stopped" | "error")) {
+            if self.error.is_none() {
+                self.error = Some(tr("Воспроизведение остановлено", "Playback stopped").into());
+            }
+            self.stopping = true;
+            self.stop(call);
+            if self.stopping {
+                ctx.request_repaint_after(Duration::from_millis(200));
+            }
+            return;
+        }
+        let frame = call(Command::MediaFrame {
+            session: token,
+            after_serial: self.serial,
+        });
+        if frame["ok"] != true {
+            self.error = Some(Self::message(&frame));
+            self.stopping = true;
+            self.stop(call);
+            if self.stopping {
+                ctx.request_repaint_after(Duration::from_millis(200));
+            }
+            return;
+        }
+        if frame["result"]["session"].as_u64() == Some(token) && !frame["result"]["frame"].is_null()
+        {
+            if let Some((serial, image)) = decode_frame(&frame["result"]["frame"], self.serial) {
+                self.serial = serial;
+                if let Some(texture) = self.texture.as_mut() {
+                    texture.set(image, egui::TextureOptions::LINEAR);
+                } else {
+                    self.texture = Some(ctx.load_texture(
+                        "media-preview",
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+            } else {
+                self.error = Some(tr("Некорректный кадр видео", "Invalid video frame").into());
+                self.stopping = true;
+                self.stop(call);
+                if self.stopping {
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                }
+                return;
+            }
+        }
+        let delay = if self.snapshot["state"] == "playing" {
+            Duration::from_millis(33)
+        } else {
+            Duration::from_millis(150)
+        };
+        self.next_poll = Some(Instant::now() + delay);
+        ctx.request_repaint_after(delay);
+    }
+
+    /// Cancel unfinished preparation before polling it; retain unconfirmed stops.
+    pub(super) fn stop(&mut self, call: &mut dyn FnMut(Command) -> Value) {
+        if let Some(pending) = self.pending.as_mut() {
+            pending.cancelled = true;
+            if !pending.cancel_sent {
+                let response = call(Command::CancelJob { job_id: pending.id });
+                if response["ok"] == true || response["error"]["code"] == "job_not_cancellable" {
+                    pending.cancel_sent = true;
+                } else {
+                    self.error = Some(Self::message(&response));
+                }
+            }
+        }
+        if let Some(token) = self.session {
+            let response = call(Command::ControlMedia {
+                session: token,
+                action: Action::Stop,
+            });
+            if response["ok"] == true
+                || response["error"]["code"] == "stale_media_session"
+                || response["error"]["code"] == "media_context_closed"
+                || response["error"]["code"] == "source_changed"
+            {
+                self.session = None;
+                self.stopping = false;
+                self.snapshot = Value::Null;
+                self.texture = None;
+                self.serial = 0;
+            } else {
+                self.stopping = true;
+                self.error = Some(Self::message(&response));
+            }
+        }
+    }
+
+    fn accept_session(&mut self, value: &Value, target: &Target) -> bool {
+        let Some(token) = value["token"].as_u64() else {
+            self.error = Some(tr("Некорректная сессия видео", "Invalid video session").into());
+            return false;
+        };
+        if value["identity"]["id"].as_i64() != Some(target.id)
+            || value["identity"]["revision"].as_str() != Some(target.revision.as_str())
+        {
+            self.session = Some(token);
+            self.stopping = true;
+            self.error = Some(tr("Сессия видео устарела", "Video session is stale").into());
+            return false;
+        }
+        self.session = Some(token);
+        self.snapshot = value["snapshot"].clone();
+        self.next_poll = None;
+        true
+    }
+
+    fn play_opened(&mut self, call: &mut dyn FnMut(Command) -> Value) {
+        if let Some(volume) = self.chosen_volume
+            && !self.control(Action::SetVolume { volume }, call)
+        {
+            return;
+        }
+        self.control(Action::Play, call);
+    }
+
+    fn control(&mut self, action: Action, call: &mut dyn FnMut(Command) -> Value) -> bool {
+        let Some(token) = self.session else {
+            return false;
+        };
+        let requested_volume = match &action {
+            Action::SetVolume { volume } => Some(*volume),
+            _ => None,
+        };
+        let result = call(Command::ControlMedia {
+            session: token,
+            action,
+        });
+        if result["ok"] == true {
+            if result["result"].is_null() {
+                self.session = None;
+                self.texture = None;
+            } else if result["result"]["token"].as_u64() == Some(token) {
+                self.snapshot = result["result"]["snapshot"].clone();
+                self.error = None;
+                if let Some(volume) = requested_volume {
+                    self.chosen_volume = Some(volume);
+                }
+            } else {
+                self.error = Some(tr("Сессия видео изменилась", "Video session changed").into());
+                return false;
+            }
+        } else {
+            self.error = Some(Self::message(&result));
+            return false;
+        }
+        self.next_poll = None;
+        true
+    }
+
+    pub(super) fn show_with_poster(
+        &mut self,
+        ui: &mut egui::Ui,
+        target: &Target,
+        event: &Value,
+        images: &mut super::images::Images,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) {
+        self.sync(ui.ctx(), Some(target.clone()), call);
+        if self.texture.is_none() {
+            let size = egui::vec2(
+                ui.available_width().max(1.0),
+                (ui.available_height() - 90.0).max(48.0),
+            );
+            let canvas = egui::Rect::from_min_size(ui.next_widget_position(), size);
+            ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
+            images.paint_at(ui, event, canvas, 512);
+        }
+        self.show(ui, target, call);
+    }
+
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        target: &Target,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) {
+        self.sync(ui.ctx(), Some(target.clone()), call);
+        let width = ui.available_width().max(1.0);
+        let height = (ui.available_height() - 90.0).max(48.0);
+        let (canvas, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        if let Some(texture) = &self.texture {
+            ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
+            let rect = super::gallery_card::fit_rect(canvas, texture.size_vec2());
+            ui.painter().image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        let busy = self.pending.is_some() || self.stopping;
+        ui.horizontal(|ui| {
+            if self.session.is_none() {
+                let play = ui.add_enabled(!busy, egui::Button::new(tr("Воспроизвести", "Play")));
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(egui::Id::new("media-play"), play.rect));
+                if play.clicked() {
+                    self.target = Some(target.clone());
+                    self.error = None;
+                    let result = call(Command::BeginJob {
+                        command: Box::new(Command::OpenMedia {
+                            id: target.id,
+                            revision: target.revision.clone(),
+                        }),
+                    });
+                    if result["ok"] != true {
+                        self.error = Some(Self::message(&result));
+                    } else if result["result"]["state"] == "succeeded" {
+                        if self.accept_session(&result["result"]["result"], target) {
+                            self.play_opened(call);
+                        }
+                    } else if let Some(id) = result["result"]["job_id"].as_u64() {
+                        self.pending = Some(Pending {
+                            id: JobId(id),
+                            target: target.clone(),
+                            cancelled: false,
+                            cancel_sent: false,
+                        });
+                    } else {
+                        self.error =
+                            Some(tr("Не удалось запустить видео", "Could not start video").into());
+                    }
+                    ui.ctx().request_repaint_after(Duration::from_millis(100));
+                }
+            } else if !self.stopping {
+                let playing = self.snapshot["state"] == "playing";
+                if ui
+                    .button(if playing {
+                        tr("Пауза", "Pause")
+                    } else if self.snapshot["state"] == "ended" {
+                        tr("Сначала", "Replay")
+                    } else {
+                        tr("Воспроизвести", "Play")
+                    })
+                    .clicked()
+                {
+                    if self.snapshot["state"] == "ended"
+                        && !self.control(Action::Seek { position_ms: 0 }, call)
+                    {
+                        return;
+                    }
+                    self.control(if playing { Action::Pause } else { Action::Play }, call);
+                }
+            }
+            if busy {
+                ui.weak(tr("Загрузка…", "Loading…"));
+            }
+        });
+        if self.session.is_some() && !self.stopping {
+            if let Some(duration) = self.snapshot["duration_ms"]
+                .as_u64()
+                .filter(|value| *value > 0)
+            {
+                let mut position = self
+                    .seek_position
+                    .unwrap_or_else(|| self.snapshot["position_ms"].as_u64().unwrap_or(0))
+                    .min(duration);
+                let response =
+                    ui.add(egui::Slider::new(&mut position, 0..=duration).show_value(false));
+                if response.dragged() {
+                    self.seek_position = Some(position);
+                }
+                if response.drag_stopped() {
+                    let position = self.seek_position.take().unwrap_or(position);
+                    self.control(
+                        Action::Seek {
+                            position_ms: position,
+                        },
+                        call,
+                    );
+                } else if response.changed() && !response.dragged() {
+                    self.control(
+                        Action::Seek {
+                            position_ms: position,
+                        },
+                        call,
+                    );
+                }
+                ui.label(format!("{} / {}", timestamp(position), timestamp(duration)));
+            } else {
+                ui.weak(tr("Длительность загружается…", "Loading duration…"));
+            }
+            let mut volume = self.snapshot["volume"]
+                .as_f64()
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+            if ui
+                .add(egui::Slider::new(&mut volume, 0.0..=1.0).text(tr("Громкость", "Volume")))
+                .changed()
+            {
+                self.control(Action::SetVolume { volume }, call);
+            }
+        }
+        if let Some(error) = &self.error {
+            ui.colored_label(Color32::LIGHT_RED, error);
+        }
+    }
+}
+
+fn timestamp(ms: u64) -> String {
+    let seconds = ms / 1000;
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn decode_frame(value: &Value, previous: u64) -> Option<(u64, egui::ColorImage)> {
+    let serial = value["serial"].as_u64()?;
+    let width = usize::try_from(value["width"].as_u64()?).ok()?;
+    let height = usize::try_from(value["height"].as_u64()?).ok()?;
+    if serial <= previous || width == 0 || height == 0 || width > 1280 || height > 720 {
+        return None;
+    }
+    let bytes = width.checked_mul(height)?.checked_mul(4)?;
+    let encoded = value["rgba_base64"].as_str()?;
+    if encoded.len() != bytes.checked_add(2)?.checked_div(3)?.checked_mul(4)? {
+        return None;
+    }
+    let rgba = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    if rgba.len() != bytes {
+        return None;
+    }
+    Some((
+        serial,
+        egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn t(context: &str) -> Target {
+        Target {
+            id: 5,
+            revision: "r1".into(),
+            context: context.into(),
+        }
+    }
+    fn session(token: u64, state: &str) -> Value {
+        json!({"token":token,"identity":{"id":5,"revision":"r1","context":"domain"},"snapshot":{"state":state,"duration_ms":5000,"position_ms":0,"volume":1.0,"has_audio":true,"width":1,"height":1,"error":null}})
+    }
+    fn ok(value: Value) -> Value {
+        json!({"ok":true,"result":value})
+    }
+
+    #[test]
+    fn mini_and_full_views_do_not_open_until_explicit_play() {
+        for context in ["details", "preview"] {
+            let ctx = egui::Context::default();
+            let mut state = State::default();
+            let target = t(context);
+            let calls = std::cell::RefCell::new(Vec::new());
+            let mut call = |command: Command| {
+                match command {
+                    Command::BeginJob { .. } => calls.borrow_mut().push("open"),
+                    _ => calls.borrow_mut().push("other"),
+                }
+                ok(json!({"state":"queued","job_id":7}))
+            };
+            for _ in 0..2 {
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 500.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| state.show(ui, &target, &mut call),
+                );
+                out.textures_delta.clear();
+            }
+            assert!(calls.borrow().is_empty());
+            let rect: egui::Rect = ctx.data(|d| d.get_temp(egui::Id::new("media-play")).unwrap());
+            for pressed in [true, false] {
+                let pos = rect.center();
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 500.0),
+                        )),
+                        events: vec![
+                            egui::Event::PointerMoved(pos),
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                    |ui| state.show(ui, &target, &mut call),
+                );
+                out.textures_delta.clear();
+            }
+            assert!(state.pending.is_some());
+            assert_eq!(*calls.borrow(), ["open"]);
+        }
+    }
+
+    #[test]
+    fn changed_context_cancels_before_poll_and_stops_late_session() {
+        let ctx = egui::Context::default();
+        let mut state = State {
+            target: Some(t("preview")),
+            pending: Some(Pending {
+                id: JobId(1),
+                target: t("preview"),
+                cancelled: false,
+                cancel_sent: false,
+            }),
+            ..Default::default()
+        };
+        let mut calls = Vec::new();
+        let mut call = |command: Command| match command {
+            Command::CancelJob { .. } => {
+                calls.push("cancel");
+                json!({"ok":false,"error":{"code":"job_not_cancellable"}})
+            }
+            Command::PollJob { .. } => {
+                calls.push("poll");
+                ok(json!({"state":"succeeded","result":session(9,"paused")}))
+            }
+            Command::ControlMedia {
+                action: Action::Stop,
+                ..
+            } => {
+                calls.push("stop");
+                ok(Value::Null)
+            }
+            _ => panic!("unexpected media command"),
+        };
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            state.sync(&ctx, Some(t("details")), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(calls, ["cancel", "poll", "stop"]);
+        assert!(state.pending.is_none() && state.session.is_none());
+    }
+
+    #[test]
+    fn watchdog_stop_is_recoverable_and_selected_volume_precedes_play() {
+        let ctx = egui::Context::default();
+        let mut state = State {
+            target: Some(t("details")),
+            session: Some(4),
+            ..Default::default()
+        };
+        let mut calls = Vec::new();
+        let mut call = |command: Command| match command {
+            Command::MediaState => {
+                calls.push("state");
+                ok(session(4, "stopped"))
+            }
+            Command::ControlMedia {
+                action: Action::Stop,
+                ..
+            } => {
+                calls.push("stop");
+                ok(Value::Null)
+            }
+            _ => panic!("unexpected command"),
+        };
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            state.sync(&ctx, Some(t("details")), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(calls, ["state", "stop"]);
+        assert!(state.session.is_none() && state.error.is_some());
+        state.chosen_volume = Some(0.25);
+        assert!(state.accept_session(&session(8, "paused"), &t("details")));
+        let mut calls = Vec::new();
+        let mut call = |command: Command| match command {
+            Command::ControlMedia {
+                session: 8,
+                action: Action::SetVolume { volume },
+            } => {
+                assert_eq!(volume, 0.25);
+                calls.push("volume");
+                ok(session(8, "paused"))
+            }
+            Command::ControlMedia {
+                session: 8,
+                action: Action::Play,
+            } => {
+                calls.push("play");
+                ok(session(8, "playing"))
+            }
+            _ => panic!("unexpected command"),
+        };
+        state.play_opened(&mut call);
+        assert_eq!(calls, ["volume", "play"]);
+    }
+
+    #[test]
+    fn frame_decoder_rejects_stale_large_and_invalid_frames() {
+        let frame = json!({"serial":2,"width":1,"height":1,"rgba_base64":"AQIDBA=="});
+        assert!(decode_frame(&frame, 1).is_some());
+        assert!(decode_frame(&frame, 2).is_none());
+        assert!(
+            decode_frame(
+                &json!({"serial":3,"width":1281,"height":1,"rgba_base64":""}),
+                1
+            )
+            .is_none()
+        );
+        assert!(
+            decode_frame(
+                &json!({"serial":3,"width":1,"height":1,"rgba_base64":"????????"}),
+                1
+            )
+            .is_none()
+        );
+        assert!(
+            decode_frame(
+                &json!({"serial":3,"width":1,"height":1,"rgba_base64":"AQID"}),
+                1
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn polling_reuses_texture_and_rejects_foreign_session_frame() {
+        let ctx = egui::Context::default();
+        let mut state = State {
+            target: Some(t("preview")),
+            session: Some(8),
+            ..Default::default()
+        };
+        let frame_no = std::cell::Cell::new(0u64);
+        let mut call = |command: Command| match command {
+            Command::MediaState => ok(session(8, "paused")),
+            Command::MediaFrame { session: 8, .. } => {
+                let next = frame_no.get() + 1;
+                frame_no.set(next);
+                ok(
+                    json!({"session": if next == 3 { 99 } else { 8 }, "frame":{"serial":next,"width":1,"height":1,"rgba_base64":"AQIDBA=="}}),
+                )
+            }
+            _ => panic!("unexpected command"),
+        };
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            state.sync(&ctx, Some(t("preview")), &mut call)
+        });
+        out.textures_delta.clear();
+        let id = state.texture.as_ref().unwrap().id();
+        state.next_poll = None;
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            state.sync(&ctx, Some(t("preview")), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(state.texture.as_ref().unwrap().id(), id);
+        assert_eq!(state.serial, 2);
+        state.next_poll = None;
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            state.sync(&ctx, Some(t("preview")), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(state.serial, 2);
+        assert_eq!(state.texture.as_ref().unwrap().id(), id);
+    }
+
+    #[test]
+    fn target_routing_uses_video_path_but_excludes_nonvideo_and_missing() {
+        let state = json!({"tab":"desktop","folder_path":null});
+        let event = json!({"id":-42,"revision":"r1","kind":"file_reference","name":"wallpaper","path":"C:/media/video.mp4","available":true});
+        let full = target(&event, &state, true).unwrap();
+        let details = target(&event, &state, false).unwrap();
+        assert_ne!(full.context, details.context);
+        let mut missing = event.clone();
+        missing["available"] = false.into();
+        assert!(target(&missing, &state, true).is_none());
+        let mut text = event;
+        text["kind"] = "text_fragment".into();
+        assert!(target(&text, &state, true).is_none());
+    }
+}

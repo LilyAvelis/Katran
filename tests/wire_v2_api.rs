@@ -6,6 +6,23 @@ use std::{
 };
 
 #[test]
+fn v2_media_sessions_and_nested_open_keep_lossless_identities() {
+    for command in [
+        json!({"type":"begin_job","command":{"type":"open_media","id":"-4611686018427387905","revision":"r"}}),
+        json!({"type":"media_frame","session":"18446744073709551615","after_serial":"9007199254740992"}),
+        json!({"type":"control_media","session":"18446744073709551615","action":{"type":"seek","position_ms":"9007199254740992"}}),
+    ] {
+        assert!(
+            wire_v2::decode(json!({"api_version":2,"request_id":"media","command":command}))
+                .is_ok()
+        );
+    }
+    for token in [json!(9007199254740992_u64), json!("01"), json!("-1")] {
+        assert!(wire_v2::decode(json!({"api_version":2,"request_id":"media","command":{"type":"control_media","session":token,"action":{"type":"pause"}}})).is_err());
+    }
+}
+
+#[test]
 fn v2_rejects_unsafe_or_malformed_id_inputs_and_handles_nested_ids() {
     for value in [
         json!(9007199254740992_i64),

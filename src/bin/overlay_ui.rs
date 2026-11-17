@@ -20,6 +20,7 @@ pub(super) struct State {
 }
 impl Shelf {
     pub(super) fn quit_application(&mut self, ctx: &egui::Context) {
+        self.stop_media_preview();
         self.overlay_ui.quitting = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
@@ -36,7 +37,9 @@ impl Shelf {
         }
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        self.video_visible = visible;
         if !visible {
+            self.stop_media_preview();
             self.tag_menu.close(ctx);
         }
         self.call(Command::SetWindowVisibility { visible });

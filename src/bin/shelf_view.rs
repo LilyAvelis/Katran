@@ -144,7 +144,11 @@ impl Shelf {
                 }
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
-                        if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
+                        if let Some(target) = super::media_preview_ui::target(event, &self.state, true) {
+                            if let Some(api) = self.api.as_mut() {
+                                self.media_preview.show_with_poster(ui, &target, event, &mut self.images, &mut |command| api.execute(Request { api_version: 1, request_id: "media-ui".into(), command }));
+                            } else { ui.weak(tr("Видео временно недоступно", "Video temporarily unavailable")); }
+                        } else if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
                             let revision = event["revision"].as_str().unwrap_or("");
                             if self.api.is_some() && self.pods_ui.description_needed(id, revision) {
                                 let description = self.call(Command::DescribePod { id });
