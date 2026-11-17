@@ -13,4 +13,11 @@ try {
         $registration = Start-Process -FilePath $launcher -ArgumentList '--register' -Wait -PassThru -WindowStyle Hidden
         if ($registration.ExitCode -ne 0) { throw "Katran Start Menu registration failed (exit $($registration.ExitCode))" }
     }
+    # Installation is already complete: maintenance must never turn a successful
+    # artifact into a failed build or require recompilation.
+    try {
+        & (Join-Path $PSScriptRoot 'maintain-build-cache.ps1') -Apply
+    } catch {
+        Write-Warning "Build-cache maintenance deferred: $($_.Exception.Message)"
+    }
 } finally { Pop-Location }

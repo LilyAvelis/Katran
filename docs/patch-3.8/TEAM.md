@@ -1,5 +1,13 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Native acceptance · 2026-11-18
+
+Owner restarted and answered **«Всё работает»** for the combined rename/pin/tag
+image-retention and comma→Slash Tags sorting check. Installed runtime remains
+`efc8c786e60f`, source `5135443`. The follow-up native check is accepted within
+those reported scenarios. No product rebuild is required for the subsequent
+build-storage cleanup/tooling policy.
+
 ## Installed combined follow-up · 2026-11-18
 
 Source `5135443`, one optimized UI build **82.31s**, Windows x64 / Rust 1.95.0 /
@@ -362,3 +370,10 @@ with existing data. This supersedes the initial no-install restriction.
 - The old running process was not closed or manipulated. The owner should fully
   exit it once through the tray, then use normal Raycast launch. Native visual
   acceptance of this follow-up is still pending; nothing was pushed.
+
+Build-storage incident closed locally: target **387.59 → 31.89 GiB**, removed
+355.70 GiB, zero failed entries; active/prior runtime and database backup verified
+unchanged. Polly completed guarded maintenance/tooling directly, without team
+expansion. Automatic post-install budget hook and manual batch instructions are
+in docs/devops.md. No Rust rebuild/push/tag/release. Native Tags/cache acceptance
+was supplied by Lilia («Всё работает»).

@@ -52,3 +52,62 @@ Use job/step elapsed times for setup/download, compilation, tests, packaging and
 Prefer hosted-runner caches and artifact reuse first. Installing a self-hosted runner/service on the owner's machine is a separate explicitly approved decision, not an automatic release optimization.
 
 Sources: [Codex global instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [GitHub caches versus artifacts](https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching), [rerunning failed jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+
+## Local build storage budget · owner incident 2026-11-18
+
+The owner found roughly 400 GiB in the checkout. Inventory measured **387.59 GiB
+in target**, including 248.58 GiB in target/build and a duplicate 132.73 GiB
+in target/debug. The canonical debug directory held 132.03 GiB of PDB symbols,
+26.51 GiB of executable outputs and 73.23 GiB of incremental state. These are
+development outputs, not dependencies needed by the installed application.
+
+Canonical Cargo directory is **target/build** for both tests and builds. Do not
+create another root target/debug or change profiles/features/target-dir casually.
+Keep dependency caches, but enforce retention rather than accumulating unlimited
+linked test executables, symbols and incremental sessions.
+
+`scripts/maintain-build-cache.ps1` defaults to a read-only plan. `-Apply` prunes
+oldest eligible outputs to a **32 GiB target budget** and an **8 GiB incremental
+budget**. It removes the duplicate default debug tree under pressure, old
+incremental directories and oldest paired hashed debug test EXE/PDB outputs.
+Dependency rlib/rmeta/proc-macro files, canonical release outputs and evidence
+logs are retained. It never deletes runtime, local-experiments or katran-data.
+If protected outputs alone exceed the budget, it reports this rather than
+silently widening deletion. The budget is therefore a guarded pruning target,
+not an unconditional disk quota.
+
+The normal `scripts/build-working.ps1` runs maintenance after successful install.
+For manual Cargo/test/staging workflows, run the read-only plan after a work batch
+and apply when needed; do not run cargo clean after every command. A maintenance
+failure warns without invalidating the installed artifact or rebuilding it.
+
+Before mutation, the script verifies the installed runtime hash, obtains a real
+Windows process snapshot, refuses active Cargo/compiler/linker work or running
+candidate executables, and validates every deletion stays in approved target
+categories with no reparse points. Failure to enumerate processes defers cleanup.
+One receipt is written to ignored target/build-cache-last.json. No background
+service, scheduled task or public release is involved. Use native PowerShell
+Remove-Item -LiteralPath; do not build shell deletion strings.
+
+Verification: synthetic planner checks cover budget/age/pairing, read-only plans,
+dependency/release preservation and explicit over-budget reporting; PowerShell
+syntax is checked without a product rebuild. The current binary and its prior
+runtime/backup are independent and verified before the initial cleanup. Reusing
+cached Rust libraries does not require retaining every historical test EXE/PDB.
+
+### Initial cleanup result · 2026-11-18
+
+Verified current runtime efc8c786e60f and prior cb740a2f72e7 against their
+manifests, plus the independent schema-v13 backup hash. Real process snapshot
+showed Katran running from runtime/versions/efc8c786e60f, no Cargo/compiler work.
+Cleanup removed **381,930,576,630 bytes (355.70 GiB)** of eligible build outputs,
+with **zero failed entries**. target decreased from **387.59 to 31.89 GiB**.
+A fresh read-only inventory then proposed **zero additional removals**.
+Installed executable and previous runtime/backup hashes remained unchanged;
+no process was stopped, no personal data/model directories were touched.
+
+Planner synthetic suite 2/2 and PowerShell syntax checks passed. Python 3.10
+compatibility was corrected during the read-only preflight (reparse attributes
+instead of newer is_junction methods), before any deletion. No Rust compilation
+or release publication was performed for maintenance. Existing UI acceptance
+remains the owner's «Всё работает» for Tags sorting and image retention.

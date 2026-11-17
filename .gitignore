@@ -6,5 +6,6 @@
 .env.*
 /logs/
 /local-experiments/
+__pycache__/
 
 /assets/emoji-bundle/

@@ -1,5 +1,13 @@
 # Katran 3.8 verification handoff
 
+## Native acceptance · 2026-11-18
+
+Owner restarted and answered **«Всё работает»** for the combined rename/pin/tag
+image-retention and comma→Slash Tags sorting check. Installed runtime remains
+`efc8c786e60f`, source `5135443`. The follow-up native check is accepted within
+those reported scenarios. No product rebuild is required for the subsequent
+build-storage cleanup/tooling policy.
+
 ## Installed combined follow-up · 2026-11-18
 
 Source `5135443`, one optimized UI build **82.31s**, Windows x64 / Rust 1.95.0 /
@@ -496,3 +504,20 @@ as runtime `55356f72deb8`; SHA-256
 The existing profile remains in place, schema v13 unchanged, with a fresh
 consistent backup and the preceding runtime retained. No GUI was launched by
 the agents and no remote publication occurred.
+
+### Initial cleanup result · 2026-11-18
+
+Verified current runtime efc8c786e60f and prior cb740a2f72e7 against their
+manifests, plus the independent schema-v13 backup hash. Real process snapshot
+showed Katran running from runtime/versions/efc8c786e60f, no Cargo/compiler work.
+Cleanup removed **381,930,576,630 bytes (355.70 GiB)** of eligible build outputs,
+with **zero failed entries**. target decreased from **387.59 to 31.89 GiB**.
+A fresh read-only inventory then proposed **zero additional removals**.
+Installed executable and previous runtime/backup hashes remained unchanged;
+no process was stopped, no personal data/model directories were touched.
+
+Planner synthetic suite 2/2 and PowerShell syntax checks passed. Python 3.10
+compatibility was corrected during the read-only preflight (reparse attributes
+instead of newer is_junction methods), before any deletion. No Rust compilation
+or release publication was performed for maintenance. Existing UI acceptance
+remains the owner's «Всё работает» for Tags sorting and image retention.

@@ -332,3 +332,8 @@ Desktop shelf browsing reads managed-file metadata; background Actions validate 
 Desktop supports the same selection, pins, tag slots, copy, drag-out and Folder transfer commands as other file tabs. Applying a background accepts one selected asset; moving to Folder retains a pinned or active background in Desktop.
 
 The optional Desktop tab shows Katran-managed still backgrounds and video backgrounds, including images sent to Windows. Hiding this tab does not stop new backgrounds from being saved. You can reuse a saved image for Katran or Windows, reuse a video for Katran, and delete inactive managed copies to reclaim space. The currently selected Katran background and the last wallpaper set by Katran remain protected from deletion; Windows does not expose a reliable inventory of all virtual desktops' wallpaper references through the documented API.
+
+Local development storage uses one Cargo directory, `target/build`, with guarded
+[build-cache retention](docs/devops.md#local-build-storage-budget--owner-incident-2026-11-18).
+Default budgets are 32 GiB for target and 8 GiB for incremental state; installed
+runtime, optional models, user data and backups are separate.

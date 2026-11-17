@@ -1,5 +1,16 @@
 # Katran development rules
 
+## Local build storage budget · 2026-11-18
+
+Use only `target/build` for Cargo tests/builds. Working dependency caches are
+retained, but storage is bounded: target budget 32 GiB, incremental budget 8 GiB.
+After manual build/test batches run `scripts/maintain-build-cache.ps1` for a plan
+and `-Apply` when needed; standard build-working already runs guarded maintenance
+after installation. No unconditional cargo clean. Never prune runtime, models,
+profile data or backups as build waste. Refuse active builds/running candidates,
+linked paths and unverified installed artifacts. See `docs/devops.md` for policy
+and initial storage incident; cleanup does not justify a product rebuild.
+
 ## Tag sort and resident images · 2026-11-18
 
 Tags sorting is a domain `SortMode::Tags`, ordered by current scoped slot number,

@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Build/test outputs belong in `target/build`. Read the [storage budget](devops.md)
+before cleanup: `maintain-build-cache.ps1` plans by default, `-Apply` uses guarded
+native deletion; build-working invokes it after a successful install. Preserve
+release artifacts/dependencies and all runtime/model/profile data. This tooling
+change requires no Rust rebuild.
+
 Tag-order sorting uses `sorting.rs`, `catalogue_query.rs` (SQL keyset buckets),
 `desktop_projection.rs` (metadata snapshot), and the existing sort action/input
 clients. [Contract](patch-3.8/TAG-SORT.md) covers Folder/cursor/rollback exceptions.
