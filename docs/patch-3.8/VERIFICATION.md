@@ -2,6 +2,12 @@
 
 ## Optional AI setup · 2026-11-17
 
+Installed source `caa99c6`, one 1m20s optimized build, matched compiled-input
+fingerprints. Primary `4a4340fd4d26`, SHA256
+`4a4340fd4d267dc9887739a737740f20bcb78f52e21bf5fa9222a772a2bb2026`;
+copied files verified. Backup integrity/schema-v13 passed before atomic pointer
+activation. Previous `8c447197c96e` retained; owner process not closed.
+
 New domain API 1/1, helper-bundle/argument tests 2/2, CPU resolver 2/2 and semantic
 API 3/3 passed. Python offline checks 3/3 and terminal/package synthetic contracts
 passed. UI aggregate passed 250/251; unchanged native file-move fixture failed on

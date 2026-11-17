@@ -6,6 +6,17 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current installed source `caa99c6` adds the AI settings/visible installers. One
+optimized UI build completed in 1m20s with identical pre/post compiled-resource
+hashes. Primary runtime is `4a4340fd4d26`, executable SHA256
+`4a4340fd4d267dc9887739a737740f20bcb78f52e21bf5fa9222a772a2bb2026`.
+Copied helpers/notices and installed UI hashes matched; pointer changed atomically.
+Prior hotkey runtime `8c447197c96e` and a new consistent schema-v13 backup remain
+available through private `runtime/rollback-ai-components.json`. Running Katran
+was left alone. Next owner action: tray exit, normal Raycast launch, Settings →
+AI and tab-hotkey native checks. Fresh-machine bootstrap remains untested;
+Enter audit is complete but its fixes remain separate. No GitHub push/release.
+
 AI-component follow-up: same Mira `/root/mira` (Terra/high) owns setup/verify
 scripts and package whitelist, Nemi `/root/nemi` (Terra/high) owns independent
 CPU resolver/Folder adapter, Fenna `/root/fenna` (Terra/high) owns Settings AI.
