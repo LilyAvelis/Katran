@@ -196,7 +196,9 @@ impl State {
         all.retain(|event| event.name.to_lowercase().contains(&needle));
         all.sort_by(|a, b| {
             let order = match sort.mode {
-                SortMode::Arrival | SortMode::Pinned | SortMode::Modified => {
+                // Tags are rejected at SetSort for Folder; this stable arrival
+                // fallback also keeps an old persisted value harmless.
+                SortMode::Arrival | SortMode::Pinned | SortMode::Modified | SortMode::Tags => {
                     a.modified_at_ms.cmp(&b.modified_at_ms)
                 }
                 SortMode::Extension => {

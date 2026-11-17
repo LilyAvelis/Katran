@@ -7,6 +7,7 @@ pub fn sequence_hint(id: &str) -> Option<&'static str> {
         "sort_arrival" => ", t",
         "sort_arrival_reverse" => ", Shift+T",
         "sort_pinned" => ", y",
+        "sort_tags" => ", /",
         "sort_extension" => ", e",
         "sort_extension_reverse" => ", Shift+E",
         "sort_modified" => ", m",
@@ -54,6 +55,13 @@ pub fn confirmation(sort: &Value) -> String {
             return tr(
                 "Сортировка: закреплённые в своём порядке, затем по поступлению",
                 "Sort: pinned in their own order, then by arrival",
+            )
+            .into();
+        }
+        "tags" => {
+            return tr(
+                "Сортировка: по порядку тегов, без тега — в конце",
+                "Sort: by tag order, untagged last",
             )
             .into();
         }

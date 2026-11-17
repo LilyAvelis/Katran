@@ -1,10 +1,19 @@
 # Developer and agent entry point
 
+Tag-order sorting uses `sorting.rs`, `catalogue_query.rs` (SQL keyset buckets),
+`desktop_projection.rs` (metadata snapshot), and the existing sort action/input
+clients. [Contract](patch-3.8/TAG-SORT.md) covers Folder/cursor/rollback exceptions.
+The general image context transition now carries resident decoded image textures
+within the same namespace while retaining revision keys and stale-job rejection.
+
 Inline tag modal lifecycle belongs to `tag_menu_ui::State::close(ctx)` with
 main-frame/visibility integration. `Images::accept_metadata_generation` and
 `Shelf::accept_tag_style_update` bridge only proven checked style updates, keeping
 preview resources while invalidating stale browse cursors. Pinned properties use
 one domain save path for mouse/Ctrl+Enter. See [the UI contract](patch-3.8/TAG-EDITOR-UX.md).
+Pin/tag/alias/opener ACKs use `accept_item_metadata_update` to retain image
+resources over a proven generation transition while still requerying shelf
+metadata, search membership, sorting and cursors. Content revisions remain keys.
 
 File Clipboard receipts are settled after their native owner/open guard are
 released. `copy_out` verifies the exact fresh payload under a bounded read lock;

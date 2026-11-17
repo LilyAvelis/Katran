@@ -49,6 +49,53 @@ pub(crate) fn query_sorted_slice(
     view_generation: u64,
     features: (bool, bool, bool, bool),
 ) -> Result<(Vec<Event>, Option<String>)> {
+    if db.is_autocommit() {
+        let transaction = db.unchecked_transaction()?;
+        let result = query_sorted_slice_inner(
+            &transaction,
+            tab,
+            needle,
+            limit,
+            cursor,
+            sort,
+            pinned,
+            tag,
+            tag_slot,
+            view_generation,
+            features,
+        );
+        transaction.commit()?;
+        return result;
+    }
+    query_sorted_slice_inner(
+        db,
+        tab,
+        needle,
+        limit,
+        cursor,
+        sort,
+        pinned,
+        tag,
+        tag_slot,
+        view_generation,
+        features,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn query_sorted_slice_inner(
+    db: &Connection,
+    tab: ShelfTab,
+    needle: &str,
+    limit: u32,
+    cursor: Option<&str>,
+    sort: crate::sorting::SortSpec,
+    pinned: bool,
+    tag: Option<&str>,
+    tag_slot: Option<u8>,
+    view_generation: u64,
+    features: (bool, bool, bool, bool),
+) -> Result<(Vec<Event>, Option<String>)> {
     let (images_enabled, text_enabled, links_enabled, tables_enabled) = features;
     use crate::sorting::SortMode;
     if !(1..=1000).contains(&limit) {
@@ -61,8 +108,13 @@ pub(crate) fn query_sorted_slice(
     } else {
         0
     };
+    let tag_generation = if sort.mode == SortMode::Tags {
+        tag_sort_generation(db, tab)?
+    } else {
+        String::new()
+    };
     let generation = format!(
-        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{tag_slot:?}:{view_generation}:{pinned_generation}"
+        "{sources}:{images_enabled}:{text_enabled}:{links_enabled}:{tables_enabled}:{pinned}:{tag:?}:{tag_slot:?}:{view_generation}:{pinned_generation}:{tag_generation}"
     );
     let after = cursor
         .map(|value| {
@@ -190,6 +242,7 @@ pub(crate) fn query_sorted_slice(
         .expect("known projection tail");
     let key = match sort.mode {
         SortMode::Arrival => "p.id",
+        SortMode::Tags => "COALESCE(a.slot_number,10)",
         SortMode::Pinned => "CASE WHEN po.event_id IS NOT NULL THEN po.position ELSE -p.id END",
         SortMode::Name => "katran_name_key(p.name)",
         SortMode::Extension => "katran_extension_key(p.name)",
@@ -202,7 +255,6 @@ pub(crate) fn query_sorted_slice(
         }
     };
     let descending = (sort.mode == SortMode::Arrival) != sort.reverse;
-    let direction = if descending { "DESC" } else { "ASC" };
     let relation = if descending { "<" } else { ">" };
     // Missing primary values always last; COALESCE supplies only a cursor value,
     // never a fabricated modification date/provenance.
@@ -211,11 +263,66 @@ pub(crate) fn query_sorted_slice(
             "LEFT JOIN katran_pinned_order po ON po.event_id=p.id",
             "po.event_id IS NULL".to_owned(),
         )
+    } else if sort.mode == SortMode::Tags {
+        let scope = crate::tag_service::scope(tab)?;
+        (
+            match scope {
+                "images" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='images' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "screenshots" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='screenshots' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "downloads" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='downloads' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "text" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='text' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "links" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='links' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "tables" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='tables' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "pods" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='pods' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                "files" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='files' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
+                _ => {
+                    return Err(ApiError::new(
+                        "folder_has_no_tags",
+                        "Folder has no tag slots",
+                    ));
+                }
+            },
+            "0".to_owned(),
+        )
     } else {
         ("", format!("{key} IS NULL"))
     };
+    let tag_sort = sort.mode == SortMode::Tags;
+    let (cursor_order, order_by) = if tag_sort {
+        (
+            "sort_key>?10 OR (sort_key=?10 AND id<?12)".to_owned(),
+            "missing ASC,sort_key ASC,id DESC".to_owned(),
+        )
+    } else {
+        (
+            format!(
+                "sort_key {relation} ?10 OR (sort_key=?10 AND (name_key {relation} ?11 OR (name_key=?11 AND id {relation} ?12)))"
+            ),
+            if descending {
+                "missing ASC,sort_key DESC,name_key DESC,id DESC".to_owned()
+            } else {
+                "missing ASC,sort_key ASC,name_key ASC,id ASC".to_owned()
+            },
+        )
+    };
     let sql = format!(
-        "WITH projection AS ({projection}), keyed AS (SELECT p.*,({missing}) AS missing,COALESCE({key},0) AS sort_key,katran_name_key(p.name) AS name_key FROM projection p JOIN events m ON m.id=p.id {rank_join}) SELECT * FROM keyed WHERE ?8=0 OR missing>?9 OR (missing=?9 AND (sort_key {relation} ?10 OR (sort_key=?10 AND (name_key {relation} ?11 OR (name_key=?11 AND id {relation} ?12))))) ORDER BY missing ASC,sort_key {direction},name_key {direction},id {direction} LIMIT ?6"
+        "WITH projection AS ({projection}), keyed AS (SELECT p.*,({missing}) AS missing,COALESCE({key},0) AS sort_key,katran_name_key(p.name) AS name_key FROM projection p JOIN events m ON m.id=p.id {rank_join}) SELECT * FROM keyed WHERE ?8=0 OR missing>?9 OR (missing=?9 AND ({cursor_order})) ORDER BY {order_by} LIMIT ?6"
     );
     let mut statement = db.prepare_cached(&sql)?;
     let mut rows = statement.query(params![
@@ -275,6 +382,32 @@ pub(crate) fn query_sorted_slice(
         None
     };
     Ok((events, next))
+}
+
+/// Bind a Tags cursor to both the active definitions/reorder revision and the
+/// complete assignment map. This detects updates made by another Service
+/// sharing the profile database, even when this Service's view generation is
+/// unchanged.
+fn tag_sort_generation(db: &Connection, tab: ShelfTab) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let scope = crate::tag_service::scope(tab)?;
+    let slots = crate::tag_slots::list_slots(db, scope)
+        .map_err(|error| ApiError::new("storage_error", error))?;
+    let revision = crate::tag_slots::revision(db, scope, &slots)
+        .map_err(|error| ApiError::new("storage_error", error))?;
+    let mut digest = Sha256::new();
+    digest.update(revision.as_bytes());
+    let mut statement = db.prepare(
+        "SELECT event_id,slot_number FROM tag_scoped_assignments WHERE scope=?1 ORDER BY event_id",
+    )?;
+    let mut rows = statement.query([scope])?;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let slot: u8 = row.get(1)?;
+        digest.update(id.to_be_bytes());
+        digest.update([slot]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 #[cfg(test)]

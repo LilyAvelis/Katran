@@ -13,16 +13,28 @@ pub(crate) fn is_desktop_id(id: i64) -> bool {
     id <= DESKTOP_ID_MAX
 }
 
+pub(crate) struct SortMetadata<'a> {
+    pub pinned_ranks: &'a std::collections::HashMap<i64, i64>,
+    pub tag_slots: &'a std::collections::HashMap<i64, Option<u8>>,
+    pub tag_generation: &'a str,
+}
+
 pub(crate) fn browse(
     mut events: Vec<Event>,
     query: &str,
     limit: u32,
     cursor: Option<&str>,
     sort: crate::sorting::SortSpec,
-    pinned_ranks: &std::collections::HashMap<i64, i64>,
+    metadata: SortMetadata<'_>,
     context: (u64, bool, Option<&str>, Option<u8>),
 ) -> Result<(Vec<Event>, Option<String>)> {
     use crate::sorting::{self, SortMode};
+    let SortMetadata {
+        pinned_ranks,
+        tag_slots,
+        tag_generation,
+    } = metadata;
+    let sort = sort.normalized();
     if !(1..=1000).contains(&limit) {
         return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
     }
@@ -31,6 +43,14 @@ pub(crate) fn browse(
     events.sort_by(|a, b| {
         let order = match sort.mode {
             SortMode::Arrival | SortMode::Modified => a.modified_at_ms.cmp(&b.modified_at_ms),
+            SortMode::Tags => tag_slots
+                .get(&a.id)
+                .copied()
+                .flatten()
+                .unwrap_or(10)
+                .cmp(&tag_slots.get(&b.id).copied().flatten().unwrap_or(10))
+                .then_with(|| b.detected_at_ms.cmp(&a.detected_at_ms))
+                .then_with(|| a.id.cmp(&b.id)),
             SortMode::Pinned => match (pinned_ranks.get(&a.id), pinned_ranks.get(&b.id)) {
                 (Some(left), Some(right)) => left.cmp(right),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -49,7 +69,7 @@ pub(crate) fn browse(
             SortMode::Origin => a.source.cmp(&b.source),
         };
         let order = order.then_with(|| a.id.cmp(&b.id));
-        if sort.reverse && sort.mode != SortMode::Pinned {
+        if sort.reverse && !matches!(sort.mode, SortMode::Pinned | SortMode::Tags) {
             order.reverse()
         } else {
             order
@@ -61,8 +81,19 @@ pub(crate) fn browse(
         .iter()
         .map(|event| pinned_ranks.get(&event.id))
         .collect();
-    let snapshot = serde_json::to_vec(&(&needle, sort, context, &events, ranks))
-        .map_err(|_| ApiError::new("invalid_cursor", "Cannot encode Desktop cursor"))?;
+    let mut tag_assignment_snapshot: Vec<_> =
+        tag_slots.iter().map(|(&id, &slot)| (id, slot)).collect();
+    tag_assignment_snapshot.sort_unstable_by_key(|(id, _)| *id);
+    let snapshot = serde_json::to_vec(&(
+        &needle,
+        sort,
+        context,
+        tag_generation,
+        tag_assignment_snapshot,
+        &events,
+        ranks,
+    ))
+    .map_err(|_| ApiError::new("invalid_cursor", "Cannot encode Desktop cursor"))?;
     let fingerprint = format!("{:x}", Sha256::digest(snapshot));
     let start = match cursor {
         None => 0,
@@ -87,6 +118,43 @@ pub(crate) fn browse(
     let end = start.saturating_add(limit as usize).min(events.len());
     let next = (end < events.len()).then(|| format!("d1:{end}:{fingerprint}"));
     Ok((events.drain(start..end).collect(), next))
+}
+
+/// Current Desktop tag slots and their cross-Service cursor fingerprint.
+pub(crate) fn tag_sort_state(
+    db: &rusqlite::Connection,
+    events: &[Event],
+) -> Result<(std::collections::HashMap<i64, Option<u8>>, String)> {
+    if db.is_autocommit() {
+        let transaction = db.unchecked_transaction()?;
+        let result = tag_sort_state(&transaction, events);
+        transaction.commit()?;
+        return result;
+    }
+    use sha2::{Digest, Sha256};
+    let slots = crate::tag_slots::list_slots(db, "desktop")
+        .map_err(|error| ApiError::new("storage_error", error))?;
+    let revision = crate::tag_slots::revision(db, "desktop", &slots)
+        .map_err(|error| ApiError::new("storage_error", error))?;
+    let mut digest = Sha256::new();
+    digest.update(revision.as_bytes());
+    let mut statement = db
+        .prepare("SELECT asset_id,slot_number FROM desktop_scoped_assignments ORDER BY asset_id")?;
+    let mut rows = statement.query([])?;
+    let mut scoped_assignments = std::collections::HashMap::new();
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let slot: u8 = row.get(1)?;
+        digest.update(id.to_be_bytes());
+        digest.update([slot]);
+        scoped_assignments.insert(id, slot);
+    }
+    let mut assignments = std::collections::HashMap::with_capacity(events.len());
+    for event in events {
+        let slot = scoped_assignments.get(&event.id).copied();
+        assignments.insert(event.id, slot);
+    }
+    Ok((assignments, format!("{:x}", digest.finalize())))
 }
 
 fn stable_id(typed_id: &str) -> i64 {

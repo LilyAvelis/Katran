@@ -283,6 +283,13 @@ impl Settings {
         }
         crate::tab_layout::validate_order(&self.tab_order)?;
         crate::tab_layout::validate_visible(&self.hidden_tabs)?;
+        if self
+            .tab_preferences
+            .get(&ShelfTab::All)
+            .is_some_and(|prefs| prefs.sort.mode == crate::sorting::SortMode::Tags)
+        {
+            return Err("Folder does not support tag sorting".into());
+        }
         if self.tab_preferences.values().any(|prefs| {
             !(1..=12).contains(&prefs.gallery_columns)
                 || !(1..=12).contains(&prefs.stream_rows)

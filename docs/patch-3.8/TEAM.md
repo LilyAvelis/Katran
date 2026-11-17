@@ -1,5 +1,18 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Active follow-up · 2026-11-18
+
+Owner found remaining image flashes on rename, pinning and tag assignment, and
+requested parallel tag-order sorting. Existing Nemi `/root/nemi`
+(gpt-6.1-terra/high) delivered the general cache/metadata bridge; files frozen.
+Existing Kiki `/root/kiki` (Junior/Luna high, reused session, no replacement)
+acknowledged and delivered domain Tags sorting/tests; files frozen. Polly owns
+shared API/settings/actions integration, keyboard presentation, validation,
+docs and primary staging. No team expansion. First domain Tags gate 4/4 passed.
+Combined API regression 20/20 passed; UI 265/266 plus the unrelated timing
+fixture isolated retry 1/1; all-targets Clippy/format/diff checks passed.
+Next: one primary artifact and owner visual checks.
+
 Initial owner instruction: 2026-11-17, preparation and implementation without publication. The later workflow correction authorizes local main integration and primary installation with existing data; see the activation record below. No public release or push. Product contract: [PRODUCT.md](PRODUCT.md).
 
 Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current session; no separate Lead spawned). Baseline `c7c0b8e`, Katran 3.7.1, schema v12. Existing untracked user files are outside this change.

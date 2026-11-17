@@ -1,5 +1,18 @@
 # Katran 3.8 verification handoff
 
+## General image refresh and Tags sort · 2026-11-18
+
+New Tags API gate 4/4 passed. Combined targeted regression 20/20 passed:
+Tags ordinary 3, Desktop 1, existing sort API 9, pinned sort 2, catalogue snapshot
+4 and Desktop cursor 1. UI run passed 265/266, including all new metadata/cache
+and comma→Slash checks; the unrelated 200ms busy-overlay dwell fixture exceeded
+its real-time window under concurrent load, and its isolated retry passed 1/1.
+All-targets Clippy passed after grouping Desktop sort metadata arguments;
+formatting and diff checks passed. No production timing or transfer logic changed.
+New tests preserve TextureIds and reject late/revised/other-context previews;
+they are synthetic evidence, not a claim of native visual acceptance.
+Next: one optimized primary UI artifact, preserving cb740a2f72e7 and v13 backup.
+
 ## Inline editor follow-up · 2026-11-18
 
 Installed source `0c507dc`, one optimized UI build 22.74s; compiled inputs and

@@ -131,6 +131,12 @@ impl Service {
         }
         if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
             let mut events = crate::desktop_projection::list(&self.root)?;
+            let (tag_slots, tag_generation) =
+                if self.interaction.sort.mode == crate::sorting::SortMode::Tags {
+                    crate::desktop_projection::tag_sort_state(&self.db, &events)?
+                } else {
+                    (std::collections::HashMap::new(), String::new())
+                };
             let mut ranks = std::collections::HashMap::new();
             for event in &events {
                 if let Some(rank) = crate::desktop_pins::rank(&self.db, event.id)? {
@@ -158,7 +164,11 @@ impl Service {
                 limit,
                 cursor,
                 self.interaction.sort,
-                &ranks,
+                crate::desktop_projection::SortMetadata {
+                    pinned_ranks: &ranks,
+                    tag_slots: &tag_slots,
+                    tag_generation: &tag_generation,
+                },
                 (
                     self.interaction.view_generation,
                     self.interaction.pinned_only,

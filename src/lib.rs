@@ -1260,6 +1260,14 @@ impl Service {
                 reverse,
                 seed,
             } => {
+                if mode == sorting::SortMode::Tags
+                    && self.interaction.tab == interaction::ShelfTab::All
+                {
+                    return Err(ApiError::new(
+                        "folder_has_no_tags",
+                        "Folder does not support tag sorting",
+                    ));
+                }
                 let mut settings = self.settings.clone();
                 settings.sort = sorting::SortSpec {
                     mode,
@@ -1804,6 +1812,8 @@ impl Service {
                     .iter()
                     .filter(|d| {
                         d.in_palette
+                            && !(d.id == "sort_tags"
+                                && self.interaction.tab == interaction::ShelfTab::All)
                             && if sort_only {
                                 d.id.starts_with("sort_")
                             } else {

@@ -788,6 +788,8 @@ impl Shelf {
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")))
             && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
             && !(self.api.is_none() && self.busy_text_editing);
+        self.sorting_input
+            .set_tags_allowed(self.state["tab"] != "folder");
         if let Some(action) = self.sorting_input.take(&ctx, sort_allowed) {
             self.pending_sort = Some(action);
         }

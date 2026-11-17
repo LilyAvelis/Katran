@@ -123,6 +123,7 @@ pub fn palette_terms(id: &str) -> &'static str {
         "restart" => "перезапуск перезагрузить",
         "quicklook" | "preview" => "просмотр превью preview",
         "toggle_pinned_view" | "pinned_move_up" | "pinned_move_down" => "pin pinned закрепить",
+        "sort_tags" => "теги метки tags tag order порядок",
         _ => "",
     }
 }
@@ -173,6 +174,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "sort_arrival" => "Sort by arrival",
         "sort_arrival_reverse" => "Sort by arrival · reverse",
         "sort_pinned" => "Pinned in custom order, then by arrival",
+        "sort_tags" => "Sort by tag order, untagged last",
         "sort_extension" => "Sort by extension",
         "sort_extension_reverse" => "Sort by extension · reverse",
         "sort_modified" => "Sort by modified date",
@@ -399,6 +401,14 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "sort_pinned",
         label: "Закреплённые по своему порядку, затем по поступлению",
+        default_binding: "",
+        rebindable: true,
+        group: "Сортировка",
+        in_palette: true,
+    },
+    Definition {
+        id: "sort_tags",
+        label: "Сортировать по порядку тегов",
         default_binding: "",
         rebindable: true,
         group: "Сортировка",

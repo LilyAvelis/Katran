@@ -1,5 +1,11 @@
 # Development log through 3.7.1
 
+Local 2026-11-18 follow-up: [Tags sorting](../patch-3.8/TAG-SORT.md) is comma then
+Slash, current tag order with untagged last; custom pinned order remains separate.
+[Image refresh correction](../patch-3.8/TAG-EDITOR-UX.md) now also covers rename,
+pinning, assignment and ordinary same-namespace generation changes. Native owner
+acceptance of this follow-up remains separate from synthetic evidence.
+
 ## Local 3.8 work · 2026-11-17
 
 The 2026-11-18 [inline editor follow-up](../patch-3.8/TAG-EDITOR-UX.md) fixes tag

@@ -468,6 +468,7 @@ impl Shelf {
                 } else {
                     ids
                 };
+                let before = self.call(Command::Interaction);
                 let result = self.call(Command::TogglePins { ids });
                 if result.is_null() {
                     return;
@@ -486,7 +487,8 @@ impl Shelf {
                 } else {
                     tr("Закрепление обновлено", "Pins updated").into()
                 };
-                self.refresh();
+                let after = self.call(Command::Interaction);
+                self.accept_item_metadata_update(&before, after);
             }
         }
     }

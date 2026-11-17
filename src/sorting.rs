@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum SortMode {
     #[default]
     Arrival,
+    /// Tag-slot buckets in the current per-tab order, then untagged objects.
+    Tags,
     /// Pinned objects in the user's order, then unpinned by arrival.
     Pinned,
     Extension,
@@ -28,7 +30,10 @@ pub struct SortSpec {
 
 impl SortSpec {
     pub fn normalized(mut self) -> Self {
-        if matches!(self.mode, SortMode::Shuffle | SortMode::Pinned) {
+        if matches!(
+            self.mode,
+            SortMode::Shuffle | SortMode::Pinned | SortMode::Tags
+        ) {
             self.reverse = false;
         }
         self
@@ -124,6 +129,7 @@ pub fn action_sort(id: &str) -> Option<(SortMode, bool)> {
     let key = id.strip_suffix("_reverse").unwrap_or(id);
     let mode = match key {
         "arrival" => SortMode::Arrival,
+        "tags" if !reverse => SortMode::Tags,
         "pinned" if !reverse => SortMode::Pinned,
         "extension" => SortMode::Extension,
         "modified" => SortMode::Modified,

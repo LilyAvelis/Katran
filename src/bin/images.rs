@@ -18,6 +18,12 @@ pub(super) fn preview_context(state: &Value) -> String {
     ])
     .to_string()
 }
+/// Namespace excludes generation but still separates tabs, folders and catalogue.
+fn context_namespace(context: &str) -> Option<String> {
+    let parsed: Value = serde_json::from_str(context).ok()?;
+    let parts = parsed.as_array()?;
+    (parts.len() == 4).then(|| serde_json::json!([parts[0], parts[1], parts[2]]).to_string())
+}
 type Work = (ImageKey, Option<PathBuf>, egui::Context);
 struct Queue {
     pending: VecDeque<Work>,
@@ -206,14 +212,85 @@ impl Images {
         self.context = preview_context(after);
         true
     }
+    #[cfg(test)]
+    pub(super) fn test_seed_texture(
+        &mut self,
+        ctx: &egui::Context,
+        event: &Value,
+        edge: u32,
+    ) -> egui::TextureId {
+        let key = (
+            event["id"].as_i64().unwrap(),
+            edge,
+            event["revision"].as_str().unwrap().to_owned(),
+            self.context_epoch,
+        );
+        let texture = ctx.load_texture(
+            format!("fixture-{key:?}"),
+            egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        let id = texture.id();
+        self.textures.insert(
+            key,
+            Entry {
+                texture: Some(texture),
+                icon: false,
+                visual_status: "image",
+                touched: 0,
+                retry_after: Instant::now(),
+            },
+        );
+        id
+    }
+    #[cfg(test)]
+    pub(super) fn test_texture_id(&self, event: &Value, edge: u32) -> Option<egui::TextureId> {
+        let key = (
+            event["id"].as_i64()?,
+            edge,
+            event["revision"].as_str()?.to_owned(),
+            self.context_epoch,
+        );
+        self.textures
+            .get(&key)?
+            .texture
+            .as_ref()
+            .map(|texture| texture.id())
+    }
+    #[cfg(test)]
+    pub(super) fn test_is_requested(&self, event: &Value, edge: u32) -> bool {
+        let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
+            return false;
+        };
+        self.requested
+            .contains(&(id, edge, revision.to_owned(), self.context_epoch))
+    }
     pub(super) fn set_context(&mut self, state: &Value) {
         let context = preview_context(state);
         if self.context != context {
+            let same_namespace = context_namespace(&self.context).is_some()
+                && context_namespace(&self.context) == context_namespace(&context);
+            let old_epoch = self.context_epoch;
             self.context = context;
             self.context_epoch = self.context_epoch.wrapping_add(1);
             self.active.clear();
             self.requested.clear();
-            self.textures.clear();
+            // A generation change invalidates all pending work, but decoded
+            // image pixels remain valid for the same id, revision and edge.
+            // Shell-derived visuals also depend on path/name and system state,
+            // which are not captured by ImageKey, so they are never carried.
+            let old = std::mem::take(&mut self.textures);
+            if same_namespace {
+                self.textures = old
+                    .into_iter()
+                    .filter_map(|((id, edge, revision, epoch), entry)| {
+                        (epoch == old_epoch
+                            && entry.visual_status == "image"
+                            && entry.texture.is_some())
+                        .then_some(((id, edge, revision, self.context_epoch), entry))
+                    })
+                    .collect();
+            }
             self.preview_geometry = PreviewGeometryCache::default();
             if let Ok(mut queue) = self.queue.0.lock() {
                 queue.pending.clear();
@@ -449,6 +526,142 @@ impl Drop for Images {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tag_filter_generation_retains_decoded_texture() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10_000).unwrap();
+        let mut call = |command| {
+            let reply = api.execute(Request {
+                api_version: 1,
+                request_id: "resident-filter".into(),
+                command,
+            });
+            assert_eq!(reply["ok"], true, "{reply}");
+            reply["result"].clone()
+        };
+        let mut images = Images::new(root.path().into());
+        let before = call(Command::Interaction);
+        images.set_context(&before);
+        let ctx = egui::Context::default();
+        let event = serde_json::json!({"id":1,"revision":"blob:synthetic","kind":"managed_image"});
+        let id = images.test_seed_texture(&ctx, &event, 320);
+        let filtered = call(Command::FilterTagSlot { slot: Some(1) });
+        assert_ne!(filtered["view_generation"], before["view_generation"]);
+        images.set_context(&filtered);
+        assert_eq!(images.test_texture_id(&event, 320), Some(id));
+        let cleared = call(Command::FilterTagSlot { slot: Some(1) });
+        images.set_context(&cleared);
+        assert_eq!(images.test_texture_id(&event, 320), Some(id));
+    }
+
+    #[test]
+    fn resident_decoded_images_survive_generation_but_not_namespace_or_revision() {
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                pending: VecDeque::new(),
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        let mut images = Images {
+            queue,
+            rx,
+            active: HashSet::new(),
+            requested: HashSet::new(),
+            textures: HashMap::new(),
+            clock: 0,
+            preview_geometry: PreviewGeometryCache::default(),
+            context: String::new(),
+            context_epoch: 0,
+        };
+        let ctx = egui::Context::default();
+        let a = serde_json::json!({"tab":"images","folder_path":null,"emoji_catalogue":false,"view_generation":1});
+        let b = serde_json::json!({"tab":"images","folder_path":null,"emoji_catalogue":false,"view_generation":2});
+        images.set_context(&a);
+        let old_epoch = images.context_epoch;
+        let old = (1, 320, "blob:old".to_owned(), old_epoch);
+        let pending = (2, 320, "blob:pending".to_owned(), old_epoch);
+        let make_texture = |name| {
+            ctx.load_texture(
+                name,
+                egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            )
+        };
+        let texture = make_texture("resident-image");
+        let texture_id = texture.id();
+        images.textures.insert(
+            old.clone(),
+            Entry {
+                texture: Some(texture),
+                icon: false,
+                visual_status: "image",
+                touched: 1,
+                retry_after: Instant::now(),
+            },
+        );
+        images.textures.insert(
+            (3, 320, "file:shell".to_owned(), old_epoch),
+            Entry {
+                texture: Some(make_texture("resident-shell")),
+                icon: true,
+                visual_status: "shell_icon",
+                touched: 1,
+                retry_after: Instant::now(),
+            },
+        );
+        images.textures.insert(
+            (4, 320, "file:thumbnail".to_owned(), old_epoch),
+            Entry {
+                texture: Some(make_texture("resident-thumb")),
+                icon: false,
+                visual_status: "shell_thumbnail",
+                touched: 1,
+                retry_after: Instant::now(),
+            },
+        );
+        images.requested.insert(pending.clone());
+        images
+            .queue
+            .0
+            .lock()
+            .unwrap()
+            .pending
+            .push_back((pending.clone(), None, ctx.clone()));
+        images.set_context(&b);
+        let new_epoch = images.context_epoch;
+        assert_ne!(old_epoch, new_epoch);
+        let current = (1, 320, "blob:old".to_owned(), new_epoch);
+        assert_eq!(images.textures.len(), 1);
+        assert_eq!(
+            images.textures[&current].texture.as_ref().unwrap().id(),
+            texture_id
+        );
+        assert!(images.queue.0.lock().unwrap().pending.is_empty());
+        assert!(images.requested.is_empty());
+        images.active.insert(current.clone());
+        tx.send((pending, serde_json::json!({"ok":false}))).unwrap();
+        images.end_frame(&ctx);
+        assert_eq!(
+            images.textures.len(),
+            1,
+            "late old-generation work must be ignored"
+        );
+        let changed = serde_json::json!({"id":1,"revision":"blob:new","kind":"managed_image"});
+        images.prefetch(&ctx, &changed, 320);
+        assert!(
+            images
+                .requested
+                .contains(&(1, 320, "blob:new".to_owned(), new_epoch))
+        );
+        let different = serde_json::json!({"tab":"images","folder_path":"other","emoji_catalogue":false,"view_generation":3});
+        images.set_context(&different);
+        assert!(images.textures.is_empty());
+        assert!(images.requested.is_empty());
+        assert!(images.queue.0.lock().unwrap().pending.is_empty());
+    }
 
     #[test]
     fn checked_style_generation_keeps_images_and_work_but_revision_and_context_still_invalidate() {

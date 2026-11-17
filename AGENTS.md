@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Tag sort and resident images · 2026-11-18
+
+Tags sorting is a domain `SortMode::Tags`, ordered by current scoped slot number,
+untagged last. SQL grouping precedes LIMIT; cross-Service tag changes invalidate
+cursors. Folder rejects it, virtual emoji catalogue keeps fixed order.
+See `docs/patch-3.8/TAG-SORT.md`, including settings-aware rollback.
+Same-namespace generation changes may carry only resident decoded image textures
+by id/edge/content revision; still advance epoch and cancel stale queued work.
+Do not carry arbitrary Shell visuals or relax late-reply checks.
+
 ## Inline tag modal/cache contract · 2026-11-18
 
 Tag editor dismissal uses State::close(ctx), including focus-loss/hide and tab
@@ -10,6 +20,10 @@ and browse-context invalidation. Never remove generation from image identity
 unconditionally or retain an old pagination cursor. Ctrl+Enter in pinned
 properties uses the ordinary SetPinnedProperties path. See
 `docs/patch-3.8/TAG-EDITOR-UX.md` for evidence and owner acceptance limits.
+Explicit successful pin/tag/pinned-property updates use
+`accept_item_metadata_update` with the same proven image-generation bridge but
+always requery shelf metadata for changed search/order/filter membership. Never
+replace that requery with only patching a row label or dropping invalidation.
 
 ## File Clipboard receipt settlement · 2026-11-17
 

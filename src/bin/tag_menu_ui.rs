@@ -711,6 +711,7 @@ impl super::Shelf {
         false
     }
     fn assign_tag_menu(&mut self, ids: Vec<i64>, slot: Option<u8>) {
+        let before = self.call(katran::Command::Interaction);
         let result = self.call(katran::Command::AssignTagSlot {
             ids: ids.clone(),
             slot,
@@ -746,8 +747,8 @@ impl super::Shelf {
             self.tag_menu.retry = None;
             self.tag_menu.error.clear();
         }
-        self.state = self.call(katran::Command::Interaction);
-        self.refresh();
+        let after = self.call(katran::Command::Interaction);
+        self.accept_item_metadata_update(&before, after);
     }
 }
 

@@ -6,6 +6,15 @@ continuously reloaded/flickered image thumbnails. The pinned properties form als
 needed a clearer layout and keyboard confirmation. Local main/primary install;
 no release or GitHub publication.
 
+Owner follow-up on the first artifact found the same short flash after rename,
+pinning and tag assignment. Those operations still used a full generation change.
+`accept_item_metadata_update(before,after)` now bridges proven metadata generations
+for those explicit ACK paths, then **always** requeries the shelf. Name/search
+membership, pin ordering, tag filters and pagination therefore update normally;
+unchanged image textures/work remain resident. Alias/opener/pin/tag values are
+not part of the file content revision. Actual content revision or context changes
+retain normal invalidation. The existing inline style-only fast path is separate.
+
 ## Tag lifecycle
 
 `tag_menu_ui::State::close(ctx)` closes the active menu/editor, nested popups and
@@ -38,10 +47,17 @@ generation is exactly the next one, and every other Interaction field is equal.
 old generation-bound pagination cursor. Load-more follows the existing recovery
 path to obtain a fresh cursor. Tag materials reload independently.
 
-Other changes use normal refresh/invalidation. Changed file revisions still
-request new previews; different tabs/folders/catalogues retain their context
-isolation. The optimization is scoped to successful inline tag style saves,
-not an unconditional removal of generation from cache identity.
+The subsequent owner report extended this to rename, pin and tag assignment.
+Their successful explicit ACK paths now use `accept_item_metadata_update` and
+always requery shelf metadata, preserving correct membership/order/cursors.
+
+For other same-tab/folder/catalogue generation changes, `set_context` retains
+only resident successfully decoded image TextureHandles, still keyed by event,
+edge and content revision. It advances the epoch and clears pending/requested
+work, so late old-generation results remain rejected. Shell icons/thumbnails
+are not carried by this general path because path/name/Windows association can
+change independently of image content. Different namespaces clear all entries;
+new content revisions request new pixels. Cache bounds remain unchanged.
 
 ## Pinned properties
 
@@ -59,7 +75,10 @@ path. Escape/backdrop retain the standard nested-popup behavior.
 
 ## Evidence and remaining acceptance
 
-Headless UI suite **262/262** passed. New tests cover focus-loss/hide input
+Initial headless UI suite **262/262** passed; the broader metadata follow-up
+passed **263/263**. Its new test preserves two resident texture IDs across tag,
+opener, rename/query-membership and unpin changes, then requests a new content
+revision. New tests cover focus-loss/hide input
 release, Slash/Backslash/Escape and pasted text, dirty/conflicted drafts,
 successive style updates retaining texture IDs and request queues, valid old
 in-flight results, real revision/context invalidation, metadata cursor recovery,
@@ -71,3 +90,11 @@ change or repeated broad test was needed for that fixture.
 No desktop automation or personal data was used. Native slider smoothness,
 blur/reopen behavior and the form's final visual acceptance remain owner checks
 in the primary installation.
+
+## General refresh follow-up verification
+
+Resident-image tests cover a real FilterTagSlot generation change, texture ID
+retention, late old-job rejection, genuine revision reload, namespace isolation
+and exclusion of Shell icons/thumbnails. Metadata API-backed UI fixture covers
+alias/search membership, opener, tag assignment and unpin without replacing
+resident textures. No personal data or desktop automation is involved.

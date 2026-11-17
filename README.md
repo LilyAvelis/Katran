@@ -21,6 +21,10 @@ the clipboard sequence after publication teardown before authorizing Enter.
 The [inline editor follow-up](docs/patch-3.8/TAG-EDITOR-UX.md) releases tag modals
 on exit, retains image thumbnails during style edits and adds Ctrl+Enter to the
 refined pinned-properties form.
+The same preview retention covers pinning, assigning tags and renaming items,
+while the shelf still recomputes search/filter/order metadata.
+Comma then Slash selects [tag-order sorting](docs/patch-3.8/TAG-SORT.md): current
+tag positions first, untagged last; custom pinned order remains separate.
 The owner now uses local `main` and the primary Raycast launch with the existing
 profile for manual acceptance; retain the previous runtime and database backup
 for rollback. This work is not a public release. See the

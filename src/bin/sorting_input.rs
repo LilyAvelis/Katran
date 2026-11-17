@@ -6,6 +6,7 @@ pub struct State {
     open: bool,
     selected: usize,
     scroll: bool,
+    unsupported_tags: bool,
 }
 impl State {
     pub fn is_open(&self) -> bool {
@@ -25,6 +26,9 @@ impl State {
     pub fn close(&mut self) {
         self.open = false;
     }
+    pub fn set_tags_allowed(&mut self, allowed: bool) {
+        self.unsupported_tags = !allowed;
+    }
     pub fn take(&mut self, ctx: &egui::Context, allowed: bool) -> Option<String> {
         if !allowed {
             self.close();
@@ -32,9 +36,12 @@ impl State {
         }
         let choices: Vec<_> = katran::actions::DEFS
             .iter()
-            .filter(|a| a.id.starts_with("sort_"))
+            .filter(|a| {
+                a.id.starts_with("sort_") && !(self.unsupported_tags && a.id == "sort_tags")
+            })
             .map(|a| a.id)
             .collect();
+        self.selected = self.selected.min(choices.len() - 1);
         ctx.input_mut(|input| {
             let mut action = None;
             let mut consume_text = false;
@@ -87,7 +94,10 @@ impl State {
                         self.close();
                         return false;
                     }
-                    if plain && let Some(mode) = key_mode(physical) {
+                    if plain
+                        && let Some(mode) = key_mode(physical)
+                        && !(mode == "tags" && self.unsupported_tags)
+                    {
                         action = Some(action_id(mode, modifiers.shift || raw_shift));
                         self.close();
                     }
@@ -109,7 +119,9 @@ impl State {
                         self.close();
                         return false;
                     }
-                    if let Some(mode) = text_mode(text) {
+                    if let Some(mode) = text_mode(text)
+                        && !(mode == "tags" && self.unsupported_tags)
+                    {
                         action = Some(action_id(
                             mode,
                             raw_shift || text.chars().any(char::is_uppercase),
@@ -133,6 +145,7 @@ fn key_mode(key: Key) -> Option<&'static str> {
     Some(match key {
         Key::T => "arrival",
         Key::Y => "pinned",
+        Key::Slash => "tags",
         Key::E => "extension",
         Key::M => "modified",
         Key::R => "shuffle",
@@ -147,6 +160,7 @@ fn text_mode(text: &str) -> Option<&'static str> {
     Some(match text.to_lowercase().as_str() {
         "t" | "е" => "arrival",
         "y" | "н" => "pinned",
+        "/" => "tags",
         "e" | "у" => "extension",
         "m" | "ь" => "modified",
         "r" | "к" => "shuffle",
@@ -160,7 +174,7 @@ fn text_mode(text: &str) -> Option<&'static str> {
 fn action_id(mode: &str, reverse: bool) -> String {
     format!(
         "sort_{mode}{}",
-        if reverse && mode != "shuffle" && mode != "pinned" {
+        if reverse && !matches!(mode, "shuffle" | "pinned" | "tags") {
             "_reverse"
         } else {
             ""
@@ -409,6 +423,57 @@ mod tests {
                 true
             ),
             (None, 1)
+        );
+    }
+    #[test]
+    fn slash_selects_tags_only_inside_sort_menu_and_supported_tabs() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let slash = || {
+            vec![
+                key(Key::Slash, egui::Modifiers::NONE),
+                egui::Event::Text("/".into()),
+            ]
+        };
+        assert_eq!(frame(&ctx, &mut state, slash(), true), (None, 2));
+        frame(
+            &ctx,
+            &mut state,
+            vec![key(Key::Comma, egui::Modifiers::NONE)],
+            true,
+        );
+        assert_eq!(
+            frame(&ctx, &mut state, slash(), true),
+            (Some("sort_tags".into()), 0)
+        );
+        assert!(!state.is_open());
+        state.set_tags_allowed(false);
+        state.open();
+        assert_eq!(frame(&ctx, &mut state, slash(), true), (None, 0));
+        assert!(state.is_open());
+        let choices: Vec<_> = katran::actions::DEFS
+            .iter()
+            .filter(|a| a.id.starts_with("sort_") && a.id != "sort_tags")
+            .collect();
+        for choice in choices.iter().skip(1) {
+            frame(
+                &ctx,
+                &mut state,
+                vec![key(Key::ArrowDown, egui::Modifiers::NONE)],
+                true,
+            );
+            assert_eq!(choices[state.selected()].id, choice.id);
+        }
+        assert_eq!(
+            frame(
+                &ctx,
+                &mut state,
+                vec![key(Key::Enter, egui::Modifiers::NONE)],
+                true
+            )
+            .0
+            .as_deref(),
+            Some(choices.last().unwrap().id)
         );
     }
     #[test]

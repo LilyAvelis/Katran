@@ -214,18 +214,20 @@ impl Shelf {
             };
             let name = self.pinned_ui.name.trim().to_owned();
             let opener = self.pinned_ui.opener.as_ref().map(PathBuf::from);
+            let before = self.call(Command::Interaction);
             let a = self.call(Command::SetPinnedProperties {
                 id,
                 display_name: (!name.is_empty()).then_some(name),
                 opener,
             });
             if !a.is_null() {
+                let after = self.call(Command::Interaction);
                 self.pinned_close();
                 egui::Popup::close_all(ctx);
                 if let Some(id) = ctx.memory(|m| m.focused()) {
                     ctx.memory_mut(|m| m.surrender_focus(id));
                 }
-                self.refresh();
+                self.accept_item_metadata_update(&before, after);
             } else {
                 self.pinned_ui.error = self.message.clone();
             }

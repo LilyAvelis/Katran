@@ -55,6 +55,158 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn item_metadata_refresh_keeps_images_and_requeries_filtered_membership() {
+        struct FixtureApps;
+        impl katran::app_handlers::Provider for FixtureApps {
+            fn discover(&self, _: &str) -> katran::Result<Vec<katran::app_handlers::AppHandler>> {
+                Ok(vec![katran::app_handlers::AppHandler {
+                    id: "fixture-handler".into(),
+                    name: "Fixture".into(),
+                    recommended: true,
+                    icon: None,
+                }])
+            }
+            fn invoke(&self, _: &str, _: &str, _: &std::path::Path) -> katran::Result<()> {
+                panic!("never launch a real app")
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_app_provider(Box::new(FixtureApps));
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let first = app.call(Command::IngestBytes {
+            name: "first.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        let second = app.call(Command::IngestBytes {
+            name: "second.png".into(),
+            bytes: vec![4, 5, 6],
+            source: "synthetic".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::TogglePins {
+            ids: vec![first, second],
+        });
+        for (id, name) in [(first, "shared first"), (second, "shared second")] {
+            assert!(
+                !app.call(Command::SetPinnedProperties {
+                    id,
+                    display_name: Some(name.into()),
+                    opener: None
+                })
+                .is_null()
+            );
+        }
+        app.state = app.call(Command::TogglePinnedView);
+        app.query = "shared".into();
+        app.refresh();
+        assert_eq!(app.events.len(), 2);
+        let first_event = app
+            .events
+            .iter()
+            .find(|e| e["id"] == first)
+            .unwrap()
+            .clone();
+        let neighbor = app
+            .events
+            .iter()
+            .find(|e| e["id"] == second)
+            .unwrap()
+            .clone();
+        app.images.set_context(&app.state);
+        let ctx = egui::Context::default();
+        let first_texture = app.images.test_seed_texture(&ctx, &first_event, 320);
+        let neighbor_texture = app.images.test_seed_texture(&ctx, &neighbor, 320);
+        let before = app.call(Command::Interaction);
+        assert!(
+            !app.call(Command::AssignTagSlot {
+                ids: vec![first],
+                slot: Some(1)
+            })
+            .is_null()
+        );
+        let after = app.call(Command::Interaction);
+        app.accept_item_metadata_update(&before, after);
+        app.images.set_context(&app.state);
+        assert_eq!(
+            app.images.test_texture_id(&first_event, 320),
+            Some(first_texture)
+        );
+        assert_eq!(
+            app.images.test_texture_id(&neighbor, 320),
+            Some(neighbor_texture)
+        );
+        for opener in [Some(PathBuf::from("fixture-handler")), None] {
+            let before = app.call(Command::Interaction);
+            let saved = app.call(Command::SetPinnedProperties {
+                id: first,
+                display_name: Some("shared first".into()),
+                opener,
+            });
+            assert!(!saved.is_null(), "{}", app.message);
+            let after = app.call(Command::Interaction);
+            app.accept_item_metadata_update(&before, after);
+            app.images.set_context(&app.state);
+            assert_eq!(
+                app.images.test_texture_id(&first_event, 320),
+                Some(first_texture)
+            );
+            assert_eq!(
+                app.images.test_texture_id(&neighbor, 320),
+                Some(neighbor_texture)
+            );
+            app.images.prefetch(&ctx, &neighbor, 320);
+            assert!(!app.images.test_is_requested(&neighbor, 320));
+            let current = app.events.iter().find(|e| e["id"] == first).unwrap();
+            assert_eq!(current["revision"], first_event["revision"]);
+        }
+        let before = app.call(Command::Interaction);
+        assert!(
+            !app.call(Command::SetPinnedProperties {
+                id: first,
+                display_name: Some("different".into()),
+                opener: None
+            })
+            .is_null()
+        );
+        let after = app.call(Command::Interaction);
+        app.accept_item_metadata_update(&before, after);
+        app.images.set_context(&app.state);
+        assert_eq!(app.events.len(), 1);
+        assert_eq!(app.events[0]["id"], second);
+        assert_eq!(
+            app.images.test_texture_id(&neighbor, 320),
+            Some(neighbor_texture)
+        );
+        let before = app.call(Command::Interaction);
+        assert!(
+            !app.call(Command::TogglePins { ids: vec![second] })
+                .is_null()
+        );
+        let after = app.call(Command::Interaction);
+        app.accept_item_metadata_update(&before, after);
+        app.images.set_context(&app.state);
+        assert!(app.events.is_empty());
+        assert_eq!(
+            app.images.test_texture_id(&neighbor, 320),
+            Some(neighbor_texture)
+        );
+        let mut changed = neighbor.clone();
+        changed["revision"] = serde_json::json!("blob:synthetic-new-revision");
+        app.images.prefetch(&ctx, &changed, 320);
+        assert!(app.images.test_is_requested(&changed, 320));
+    }
+
+    #[test]
     fn transfer_result_exposes_recovery_path() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
@@ -1582,6 +1734,17 @@ impl Shelf {
             };
             self.refresh();
         }
+    }
+    /// Pin, tag and pinned-property edits can change membership/order. Requery
+    /// metadata while carrying image work only over a proven generation change.
+    pub(super) fn accept_item_metadata_update(&mut self, before: &Value, after: Value) {
+        self.images.accept_metadata_generation(before, &after);
+        self.state = if after.is_null() {
+            self.call(Command::Interaction)
+        } else {
+            after
+        };
+        self.refresh();
     }
     pub(super) fn refresh(&mut self) {
         self.pending_folder_select_all = false;
