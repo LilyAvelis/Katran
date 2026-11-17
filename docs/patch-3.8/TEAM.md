@@ -6,6 +6,15 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Inline-editor follow-up (2026-11-18): same Fenna `/root/fenna`
+(gpt-6.1-terra/high) owns tag_menu_ui lifecycle/checked-save wiring; same Nemi
+`/root/nemi` (gpt-6.1-terra/high) owns images/api_client metadata cache bridge;
+same Iris `/root/iris` (gpt-6.1-sol/low) delivered readonly pinned-form UX contract.
+Polly `/root` owns pinned_ui, shared lifecycle/hide/tab integration, tests/docs
+and primary staging. All scopes acknowledged; files are frozen. UI 262/262 and
+Clippy passed. No roster expansion, native automation or parallel redesign.
+Next: one verified UI build, primary installation and owner checks.
+
 Current primary source `82619cb`, runtime `981c10a95b8a`; one optimized UI build
 1m26s with matched source/resource and copied-file hashes. Previous
 `fb5e69b83a48` plus consistent v13 backup retained in private

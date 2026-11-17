@@ -27,6 +27,42 @@ mod optical_gpu;
 mod overlay_ui;
 mod palette;
 mod pinned_ui;
+
+#[cfg(test)]
+mod tag_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn losing_focus_or_hiding_releases_tag_modal_input() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.tag_menu.open = true;
+        assert!(app.modal_owns_input());
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                events: vec![egui::Event::WindowFocused(false)],
+                ..Default::default()
+            },
+            |ui| app.tag_menu_lifecycle(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert!(!app.tag_menu.open && !app.modal_owns_input());
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::WindowFocused(true)],
+                ..Default::default()
+            },
+            |ui| {
+                app.tag_menu.open = true;
+                app.apply_window_visibility(ui.ctx(), false);
+                assert!(!app.tag_menu.open && !app.modal_owns_input());
+            },
+        );
+        output.textures_delta.clear();
+    }
+}
 mod pods_ui;
 mod preview_hints;
 mod restart_ui;
@@ -491,6 +527,18 @@ impl Shelf {
             || !self.pending_transfer_copies.is_empty()
     }
     /// Shared input ownership includes overlays before any early command handler.
+    fn tag_menu_lifecycle(&mut self, ctx: &egui::Context) {
+        if self.tag_menu.open
+            && ctx.input(|i| {
+                !i.focused
+                    || i.events
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::WindowFocused(false)))
+            })
+        {
+            self.tag_menu.close(ctx);
+        }
+    }
     fn modal_owns_input(&self) -> bool {
         self.transfer_input_reserved()
             || self.sorting_input.is_open()
@@ -1910,6 +1958,7 @@ impl eframe::App for Shelf {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.tag_menu_lifecycle(ctx);
         self.tray_tick(ctx);
         self.overlay_tick(ctx);
         self.video_background_tick(ctx);

@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Inline tag modal lifecycle belongs to `tag_menu_ui::State::close(ctx)` with
+main-frame/visibility integration. `Images::accept_metadata_generation` and
+`Shelf::accept_tag_style_update` bridge only proven checked style updates, keeping
+preview resources while invalidating stale browse cursors. Pinned properties use
+one domain save path for mouse/Ctrl+Enter. See [the UI contract](patch-3.8/TAG-EDITOR-UX.md).
+
 File Clipboard receipts are settled after their native owner/open guard are
 released. `copy_out` verifies the exact fresh payload under a bounded read lock;
 sequence=0 preserves copy/export results while withholding automatic paste.

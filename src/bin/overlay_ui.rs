@@ -36,6 +36,9 @@ impl Shelf {
         }
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        if !visible {
+            self.tag_menu.close(ctx);
+        }
         self.call(Command::SetWindowVisibility { visible });
         let theme = serde_json::from_value::<katran::theme::ThemePreferences>(
             self.call(Command::GetSettings)["theme"].clone(),

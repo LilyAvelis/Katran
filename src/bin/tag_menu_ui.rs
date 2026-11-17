@@ -4,6 +4,39 @@ use eframe::egui::{self, Color32, RichText};
 use katran::interaction::ShelfTab;
 use katran::tag_slots::Slot;
 
+/// Reserved modal close keys: consume their paired typed character, not Paste.
+fn take_tag_close(input: &mut egui::InputState, editing: bool) -> bool {
+    let mut close = false;
+    let mut paired_text = false;
+    input.events.retain(|event| match event {
+        egui::Event::Key {
+            key,
+            physical_key,
+            pressed,
+            repeat,
+            modifiers,
+            ..
+        } if (physical_key.unwrap_or(*key) == egui::Key::Backslash
+            || editing && physical_key.unwrap_or(*key) == egui::Key::Slash)
+            && modifiers.is_none() =>
+        {
+            paired_text = *pressed;
+            close |= *pressed && !*repeat;
+            false
+        }
+        egui::Event::Key { .. } => {
+            paired_text = false;
+            true
+        }
+        egui::Event::Text(text) if paired_text && text.chars().count() == 1 => {
+            paired_text = false;
+            false
+        }
+        _ => true,
+    });
+    close
+}
+
 struct Editor {
     tab: ShelfTab,
     slot: Slot,
@@ -37,8 +70,36 @@ pub enum Intent {
     Retry,
 }
 impl State {
+    fn clear_popup_focus(ctx: &egui::Context) {
+        egui::Popup::close_all(ctx);
+        if let Some(id) = ctx.memory(|memory| memory.focused()) {
+            ctx.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    }
+
+    /// Dismiss only an active tag modal. Keep failed/unsaved draft and its revision.
+    pub(super) fn close(&mut self, ctx: &egui::Context) {
+        if !self.open {
+            return;
+        }
+        Self::clear_popup_focus(ctx);
+        self.open = false;
+        self.editing = false;
+        self.save_requested = false;
+        self.reload_requested = false;
+        if self.editor.as_ref().is_some_and(|editor| !editor.dirty) {
+            self.editor = None;
+        }
+        ctx.request_repaint();
+    }
+
     pub fn start(&mut self, slots: Vec<Slot>) {
         let editor = self.editor.take().filter(|editor| editor.dirty);
+        let error = if editor.is_some() {
+            std::mem::take(&mut self.error)
+        } else {
+            String::new()
+        };
         *self = Self {
             open: true,
             slots,
@@ -46,6 +107,7 @@ impl State {
             fresh: true,
             scroll: true,
             editor,
+            error,
             ..Default::default()
         };
     }
@@ -61,10 +123,17 @@ impl State {
         if !self.open {
             return None;
         }
+        if ctx.input_mut(|input| take_tag_close(input, self.editing)) {
+            self.close(ctx);
+            return None;
+        }
         if self.editing {
             let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             if escape {
+                Self::clear_popup_focus(ctx);
                 self.editing = false;
+                self.save_requested = false;
+                self.reload_requested = false;
                 if self.editor.as_ref().is_some_and(|editor| !editor.dirty) {
                     self.editor = None;
                 }
@@ -136,6 +205,9 @@ impl State {
                 && let Some(shape) = super::theme_ui::optical_shape(ctx, result.response.rect, 12.0)
             {
                 painter.set(index, shape);
+            }
+            if result.should_close() {
+                self.close(ctx);
             }
             return None;
         }
@@ -269,7 +341,9 @@ impl State {
                     }
                     _ => None,
                 });
-                if shortcut.is_some() {
+                if shortcut == Some((0, false)) {
+                    take_tag_close(input, true);
+                } else if shortcut.is_some() {
                     super::shortcuts_ui::discard(input);
                 }
                 shortcut
@@ -284,11 +358,11 @@ impl State {
                     )
                     .into();
                 } else {
-                    self.open = false;
+                    self.close(ctx);
                     return Some(Intent::Assign(None));
                 }
             } else if number == 0 {
-                self.open = false;
+                self.close(ctx);
                 return Some(Intent::Filter(None));
             }
             if self.slots.iter().any(|slot| slot.number == number) {
@@ -299,7 +373,7 @@ impl State {
                     )
                     .into();
                 } else {
-                    self.open = false;
+                    self.close(ctx);
                     return Some(if assign {
                         Intent::Assign(Some(number))
                     } else {
@@ -419,7 +493,7 @@ impl State {
                 .and_then(|(_, intent, enabled)| enabled.then_some(*intent));
         }
         if picked.is_some() || result.should_close() {
-            self.open = false;
+            self.close(ctx);
         }
         picked
     }
@@ -544,6 +618,7 @@ impl super::Shelf {
                 if editor.conflicted {
                     return;
                 }
+                let before = self.call(katran::Command::Interaction);
                 let result = self
                     .api
                     .as_mut()
@@ -595,8 +670,8 @@ impl super::Shelf {
                         *old = slot;
                     }
                     self.tag_menu.error.clear();
-                    self.state = self.call(katran::Command::Interaction);
-                    self.refresh();
+                    let after = self.call(katran::Command::Interaction);
+                    self.accept_tag_style_update(&before, after);
                     ctx.request_repaint();
                 }
             }
@@ -678,6 +753,170 @@ impl super::Shelf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn closing_active_tag_modal_clears_popup_focus_but_keeps_dirty_draft() {
+        use eframe::egui;
+        use katran::interaction::ShelfTab;
+        let ctx = egui::Context::default();
+        let popup = egui::Id::new("test-tag-color-popup");
+        let field = egui::Id::new("test-tag-name");
+        let mut state = super::State::default();
+        state.start(vec![slot(1)]);
+        state.tab = ShelfTab::Text;
+        state.editor = Some(super::Editor {
+            tab: ShelfTab::Text,
+            slot: slot(1),
+            dirty: true,
+            revision: "original-revision".into(),
+            conflicted: true,
+        });
+        state.editing = true;
+        state.error = "Synthetic conflict".into();
+        state.save_requested = true;
+        state.reload_requested = true;
+        egui::Popup::open_id(&ctx, popup);
+        ctx.memory_mut(|m| m.request_focus(field));
+        state.close(&ctx);
+        assert!(!state.open && !state.editing && !state.save_requested && !state.reload_requested);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(!ctx.memory(|m| m.has_focus(field)));
+        let editor = state.editor.as_ref().unwrap();
+        assert!(editor.dirty && editor.conflicted);
+        assert_eq!(editor.revision, "original-revision");
+        state.start(vec![slot(1)]);
+        assert!(state.open && !state.editing);
+        assert_eq!(state.error, "Synthetic conflict");
+        assert_eq!(state.editor.as_ref().unwrap().revision, "original-revision");
+        state.open = false;
+        egui::Popup::open_id(&ctx, popup);
+        ctx.memory_mut(|m| m.request_focus(field));
+        state.close(&ctx);
+        assert!(egui::Popup::is_id_open(&ctx, popup));
+        assert!(ctx.memory(|m| m.has_focus(field)));
+    }
+
+    #[test]
+    fn slash_or_backslash_close_editor_and_palette_preserving_paste_and_draft() {
+        use eframe::egui::{self, Key, Modifiers};
+        use katran::interaction::ShelfTab;
+        for editing in [false, true] {
+            for key in [Key::Slash, Key::Backslash] {
+                if !editing && key == Key::Slash {
+                    continue;
+                }
+                let ctx = egui::Context::default();
+                let mut state = super::State::default();
+                state.start(vec![slot(1)]);
+                state.editor = Some(super::Editor {
+                    tab: ShelfTab::Images,
+                    slot: slot(1),
+                    dirty: true,
+                    revision: "r1".into(),
+                    conflicted: false,
+                });
+                state.error = "Save failed".into();
+                state.editing = editing;
+                let field = egui::Id::new("tag-editor-field");
+                ctx.memory_mut(|m| m.request_focus(field));
+                egui::Popup::open_id(&ctx, egui::Id::new("tag-popup"));
+                let mut remaining = Vec::new();
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![
+                            egui::Event::Key {
+                                key,
+                                physical_key: Some(key),
+                                pressed: true,
+                                repeat: false,
+                                modifiers: Modifiers::NONE,
+                            },
+                            egui::Event::Text("/".into()),
+                            egui::Event::Paste("/kept".into()),
+                        ],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        assert!(state.show(ui.ctx(), false, 0, false, "", None).is_none());
+                        remaining = ui.ctx().input(|i| i.events.clone());
+                    },
+                );
+                output.textures_delta.clear();
+                assert!(!state.open && !state.editing && !state.save_requested);
+                assert!(state.editor.as_ref().unwrap().dirty);
+                assert_eq!(state.error, "Save failed");
+                assert!(!egui::Popup::is_any_open(&ctx));
+                assert!(!ctx.memory(|m| m.has_focus(field)));
+                assert!(
+                    remaining
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::Paste(text) if text == "/kept"))
+                );
+                assert!(
+                    !remaining
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::Text(_)))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn escape_leaves_editor_for_palette_and_closes_nested_popup() {
+        use eframe::egui::{self, Key, Modifiers};
+        let ctx = egui::Context::default();
+        let mut state = super::State::default();
+        state.start(vec![slot(1)]);
+        state.editor = Some(super::Editor {
+            tab: katran::interaction::ShelfTab::Images,
+            slot: slot(1),
+            dirty: true,
+            revision: "r1".into(),
+            conflicted: false,
+        });
+        state.editing = true;
+        egui::Popup::open_id(&ctx, egui::Id::new("material-combo"));
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Escape,
+                    physical_key: Some(Key::Escape),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                state.show(ui.ctx(), false, 0, false, "", None);
+            },
+        );
+        out.textures_delta.clear();
+        assert!(state.open && !state.editing && state.editor.as_ref().unwrap().dirty);
+        assert!(!egui::Popup::is_any_open(&ctx));
+    }
+
+    #[test]
+    fn ctrl_shift_slash_is_not_consumed_as_modal_close() {
+        use eframe::egui::{self, Key, Modifiers};
+        let ctx = egui::Context::default();
+        let mut state = super::State::default();
+        state.start(vec![slot(1)]);
+        state.editor = Some(super::Editor {
+            tab: katran::interaction::ShelfTab::Images,
+            slot: slot(1),
+            dirty: false,
+            revision: "r1".into(),
+            conflicted: false,
+        });
+        state.editing = true;
+        let mut retained = false;
+        let mut out = ctx.run_ui(egui::RawInput { events: vec![egui::Event::Key { key: Key::Slash, physical_key: Some(Key::Slash), pressed: true, repeat: false, modifiers: Modifiers::CTRL | Modifiers::SHIFT }], ..Default::default() }, |ui| {
+            state.show(ui.ctx(), false, 0, false, "", None);
+            retained = ui.ctx().input(|i| i.events.iter().any(|event| matches!(event, egui::Event::Key { key: Key::Slash, pressed: true, modifiers, .. } if *modifiers == (Modifiers::CTRL | Modifiers::SHIFT))));
+        });
+        out.textures_delta.clear();
+        assert!(state.open && state.editing && retained);
+    }
     #[test]
     fn palette_reloads_and_rejects_numeric_action_after_reorder() {
         use katran::{Command, interaction::ShelfTab};

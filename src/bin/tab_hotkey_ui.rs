@@ -193,7 +193,7 @@ impl Shelf {
         self.close_open_apps();
         self.actions = false;
         self.sorting_input.close();
-        self.tag_menu.open = false;
+        self.tag_menu.close(ctx);
         self.info = Default::default();
         self.pods_ui.selector_open = false;
         self.pods_ui.category_open = false;

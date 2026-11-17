@@ -1,5 +1,15 @@
 # Katran 3.8 verification handoff
 
+## Inline editor follow-up · 2026-11-18
+
+Headless UI 262/262 passed, including new tag lifecycle/dirty-draft/popups,
+generation cache bridge/resource retention/revision invalidation/cursor recovery
+and pinned Ctrl+Enter/form/error cases. Existing pinned-properties API 3/3 passed.
+All-targets Clippy passed; formatter and
+diff checks passed. Unchanged Enter/AI/native-publication evidence is retained,
+not rerun. Native app/desktop was not manipulated. See
+[contract and remaining manual checks](TAG-EDITOR-UX.md).
+
 ## File receipt settlement · 2026-11-17
 
 Installed source `82619cb`, one 1m26s optimized build, primary `981c10a95b8a`.

@@ -1,5 +1,16 @@
 # Katran development rules
 
+## Inline tag modal/cache contract · 2026-11-18
+
+Tag editor dismissal uses State::close(ctx), including focus-loss/hide and tab
+summon, to release nested popup/input ownership while preserving failed drafts.
+Only a successful checked inline style save can use accept_tag_style_update;
+the exact Interaction generation/context bridge must preserve content-revision
+and browse-context invalidation. Never remove generation from image identity
+unconditionally or retain an old pagination cursor. Ctrl+Enter in pinned
+properties uses the ordinary SetPinnedProperties path. See
+`docs/patch-3.8/TAG-EDITOR-UX.md` for evidence and owner acceptance limits.
+
 ## File Clipboard receipt settlement · 2026-11-17
 
 Do not authorize Enter from a sequence captured before file Clipboard teardown.

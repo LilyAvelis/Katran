@@ -182,6 +182,30 @@ impl Images {
             context_epoch: 0,
         }
     }
+    /// A checked tag-style save changes only the view generation. Retain image
+    /// work only when both interaction snapshots and our current context prove it.
+    pub(super) fn accept_metadata_generation(&mut self, before: &Value, after: &Value) -> bool {
+        let (Some(old), Some(new)) = (
+            before["view_generation"].as_u64(),
+            after["view_generation"].as_u64(),
+        ) else {
+            return false;
+        };
+        if old.wrapping_add(1) != new || self.context != preview_context(before) {
+            return false;
+        }
+        let (Some(mut a), Some(mut b)) = (before.as_object().cloned(), after.as_object().cloned())
+        else {
+            return false;
+        };
+        a.remove("view_generation");
+        b.remove("view_generation");
+        if a != b {
+            return false;
+        }
+        self.context = preview_context(after);
+        true
+    }
     pub(super) fn set_context(&mut self, state: &Value) {
         let context = preview_context(state);
         if self.context != context {
@@ -425,6 +449,99 @@ impl Drop for Images {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_style_generation_keeps_images_and_work_but_revision_and_context_still_invalidate() {
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                pending: VecDeque::new(),
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        let mut images = Images {
+            queue,
+            rx,
+            active: HashSet::new(),
+            requested: HashSet::new(),
+            textures: HashMap::new(),
+            clock: 0,
+            preview_geometry: PreviewGeometryCache::default(),
+            context: String::new(),
+            context_epoch: 0,
+        };
+        let ctx = egui::Context::default();
+        let mut before = serde_json::json!({"tab":"images","folder_path":null,"emoji_catalogue":false,"view_generation":10,"cursor":1});
+        images.set_context(&before);
+        let epoch = images.context_epoch;
+        let original = (1, 320, "blob:old".to_owned(), epoch);
+        let texture = ctx.load_texture(
+            "synthetic-cache",
+            egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        images.textures.insert(
+            original.clone(),
+            Entry {
+                texture: Some(texture),
+                icon: false,
+                visual_status: "image",
+                touched: 0,
+                retry_after: Instant::now(),
+            },
+        );
+        let pending = (2, 320, "blob:pending".to_owned(), epoch);
+        images.requested.insert(pending.clone());
+        images
+            .queue
+            .0
+            .lock()
+            .unwrap()
+            .pending
+            .push_back((pending.clone(), None, ctx.clone()));
+        let event = serde_json::json!({"id":1,"revision":"blob:old","kind":"managed_image"});
+        for _ in 0..4 {
+            let mut after = before.clone();
+            after["view_generation"] =
+                serde_json::json!(before["view_generation"].as_u64().unwrap() + 1);
+            assert!(images.accept_metadata_generation(&before, &after));
+            images.set_context(&after);
+            images.prefetch(&ctx, &event, 320);
+            assert_eq!(images.context_epoch, epoch);
+            assert_eq!(
+                images.textures[&original].texture.as_ref().unwrap().id(),
+                texture_id
+            );
+            assert_eq!(images.queue.0.lock().unwrap().pending.len(), 1);
+            assert!(images.requested.contains(&pending));
+            before = after;
+        }
+        // Work queued before metadata-only changes is still valid in this context.
+        images.active.insert(pending.clone());
+        tx.send((pending.clone(), serde_json::json!({"ok":false})))
+            .unwrap();
+        images.end_frame(&ctx);
+        assert!(images.textures.contains_key(&pending));
+        let changed = serde_json::json!({"id":1,"revision":"blob:new","kind":"managed_image"});
+        images.prefetch(&ctx, &changed, 320);
+        assert!(
+            images
+                .requested
+                .contains(&(1, 320, "blob:new".to_owned(), epoch))
+        );
+        assert_eq!(images.queue.0.lock().unwrap().pending.len(), 2);
+        let mut other = before.clone();
+        other["view_generation"] = serde_json::json!(15);
+        other["tab"] = serde_json::json!("desktop");
+        assert!(!images.accept_metadata_generation(&before, &other));
+        images.set_context(&other);
+        assert_ne!(images.context_epoch, epoch);
+        assert!(images.textures.is_empty());
+        assert!(images.queue.0.lock().unwrap().pending.is_empty());
+        assert!(images.requested.is_empty());
+    }
 
     #[test]
     fn text_never_enqueues_shell_or_image_preview() {

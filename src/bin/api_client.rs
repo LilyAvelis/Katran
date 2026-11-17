@@ -18,6 +18,43 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn checked_style_update_retains_loaded_page_and_rebuilds_cursor_on_demand() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.call(Command::IngestBytes {
+            name: "synthetic.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "synthetic".into(),
+        });
+        app.state = app.call(Command::Interaction);
+        app.refresh();
+        app.images.set_context(&app.state);
+        let old_events = app.events.clone();
+        app.next_cursor = Some("synthetic-old-cursor".into());
+        let slots = app.call(Command::ListTagSlots);
+        let mut slot: katran::tag_slots::Slot =
+            serde_json::from_value(slots["slots"][0].clone()).unwrap();
+        let before = app.call(Command::Interaction);
+        slot.color = "#123456".into();
+        let saved = app.call(Command::SaveTagSlotChecked {
+            tab: katran::interaction::ShelfTab::Images,
+            slot,
+            expected_revision: slots["revision"].as_str().unwrap().into(),
+        });
+        assert!(!saved.is_null());
+        let after = app.call(Command::Interaction);
+        app.accept_tag_style_update(&before, after);
+        assert_eq!(app.events, old_events);
+        assert!(app.next_cursor.is_none());
+        assert!(app.preloaded_has_more);
+        app.refresh_tag_materials();
+        assert_eq!(app.tag_material_cache.slots[0].color, "#123456");
+    }
+
+    #[test]
     fn transfer_result_exposes_recovery_path() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
@@ -1527,6 +1564,23 @@ impl Shelf {
                 }
             }
             _ => self.pending_folder_select_all = false,
+        }
+    }
+    /// Applies a single successfully checked style save without re-browsing the
+    /// shelf. Any unproven transition follows the ordinary invalidation path.
+    pub(super) fn accept_tag_style_update(&mut self, before: &Value, after: Value) {
+        if self.images.accept_metadata_generation(before, &after) {
+            self.state = after;
+            // Browse cursors bind view_generation and must not be reused. On the
+            // next Load more, refresh reconstructs a current cursor first.
+            self.preloaded_has_more |= self.next_cursor.take().is_some();
+        } else {
+            self.state = if after.is_null() {
+                self.call(Command::Interaction)
+            } else {
+                after
+            };
+            self.refresh();
         }
     }
     pub(super) fn refresh(&mut self) {

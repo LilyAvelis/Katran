@@ -2,6 +2,10 @@
 
 ## Local 3.8 work · 2026-11-17
 
+The 2026-11-18 [inline editor follow-up](../patch-3.8/TAG-EDITOR-UX.md) fixes tag
+modal dismissal and image-cache churn during live styling, and refines pinned
+properties with Ctrl+Enter. Native owner acceptance remains separate.
+
 The Notion-browser follow-up found `clipboard_changed` before SendInput despite
 successful manual paste. File receipts now settle after owner teardown with exact
 payload proof, retaining strict delivery checks. See [evidence](../patch-3.8/PASTE-SEQUENCE.md).
