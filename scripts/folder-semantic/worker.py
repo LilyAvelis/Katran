@@ -55,7 +55,8 @@ def run():
             ort.preload_dlls(directory="")
         if "CUDAExecutionProvider" not in ort.get_available_providers():
             raise ValueError("CUDA unavailable")
-        opts.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+        # E5 keeps Gather/Unsqueeze shape work on CPU; neural kernels use CUDA.
+        # Reject a whole-session CPU fallback, not legitimate shape nodes.
         session = ort.InferenceSession(model, sess_options=opts, providers=["CUDAExecutionProvider"])
         session.disable_fallback()
         if "CUDAExecutionProvider" not in session.get_providers():

@@ -30,6 +30,34 @@ The requested GPU component is installed separately from the emoji CPU runtime;
 provider/kernel and end-to-end GPU evidence is recorded below once confirmed.
 No native window was controlled and no personal tags/content were changed by tests.
 
+### Confirmed CUDA component and API
+
+Mira installed the isolated GPU component once; dependency validation passed.
+RTX 5090/driver 616.86 was observed locally. The first real GPU startup exposed
+a concrete worker defect: blanket `session.disable_cpu_ep_fallback=1` rejects
+the model's legitimate shape nodes. Removed only that setting; CUDA selection,
+provider verification and disabled whole-session fallback remain. Profiling
+confirmed **349 CUDA nodes** (MatMul 84, FusedMatMul 12), and **2 CPU** shape nodes
+(Gather/Unsqueeze). No CPU/emoji environment or model manifest was modified.
+
+The corrected worker passed AST/cache checks and real CPU/GPU 64-name smoke.
+CPU startup/first/cached: 981/104/3ms; GPU: 1264/184/3ms. Single observations;
+this small workload did not show an acceleration.
+
+Final **real CUDA API probe passed** through Settings(true) → BeginJob → resolver
+→ resident worker: **8192 synthetic paths**, cold **8544ms**, warm **51ms**,
+one-path-change **51ms**, intended targets rank 1 for three manual queries.
+Evidence `target/build/folder-gpu-api-final.log`; no private paths printed.
+The earlier CPU 8192 probe was 30925ms cold; these were not controlled paired
+benchmarks and no general multiplier is claimed. No broad live-index recall
+claim follows from the synthetic model/IPC check.
+
+The embedded worker changed, invalidating its GPU startup evidence and prior UI
+artifact for GPU use. Repeat only the affected model/worker checks and optimized
+UI build; reuse 245 UI checks, domain Page/settings evidence, unchanged Clippy,
+installed CUDA component and cached toolchain. No clean/full test loop or repeat
+of the 1.8GB setup is required.
+
 ### Primary UX artifact while optional GPU setup completes
 
 Source local main `cd4d5bf23c93d604d96d731be69f130088c419e5`; one optimized UI
