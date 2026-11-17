@@ -50,6 +50,7 @@ pub fn icon(id: &str) -> Lucide {
         "save" => Lucide::Save,
         "gallery" => Lucide::Images,
         "list" => Lucide::List,
+        "details" => Lucide::PanelsTopLeft,
         "capture" => Lucide::ClipboardPaste,
         "refresh" => Lucide::RefreshCw,
         "settings" => Lucide::Settings,

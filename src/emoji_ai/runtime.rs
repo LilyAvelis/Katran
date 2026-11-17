@@ -44,7 +44,7 @@ fn missing_model() -> ApiError {
     )
 }
 
-pub(super) struct Runtime {
+pub(crate) struct Runtime {
     pub python: PathBuf,
     pub worker: PathBuf,
 }
@@ -92,7 +92,7 @@ fn check_present(root: &Path) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn resolve(profile_root: &Path, cancel: Option<&Cancellation>) -> Result<Runtime> {
+pub(crate) fn resolve(profile_root: &Path, cancel: Option<&Cancellation>) -> Result<Runtime> {
     let root = selected_root(profile_root)?;
     check_present(&root)?;
     validate(&root, cancel)

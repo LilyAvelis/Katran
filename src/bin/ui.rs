@@ -6,6 +6,8 @@ mod app_identity;
 mod category_divider;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
+mod details_metadata_ui;
+mod details_view_ui;
 mod emoji_ai_ui;
 mod emoji_categories_ui;
 mod files_file_picker;
@@ -299,6 +301,7 @@ struct Shelf {
     link_cards: link_card_ui::State,
     link_refresh_last: Option<(usize, usize, usize)>,
     table_preview: table_preview_ui::TablePreview,
+    details_metadata: details_metadata_ui::DetailsMetadata,
     events: Vec<Value>,
     next_cursor: Option<String>,
     preloaded_has_more: bool,
@@ -1203,14 +1206,21 @@ impl Shelf {
                         tabs.iter()
                             .any(|tab| tab["tab"] == "links" && tab["enabled"] == true)
                     });
-                    let markdown_preview = self.state["preview"].as_i64().is_some_and(|id| {
-                        self.events.iter().any(|event| {
-                            event["id"] == id
-                                && event["name"].as_str().is_some_and(|name| {
-                                    katran::file_types::is_markdown(std::path::Path::new(name))
-                                })
+                    let markdown_preview = self.state["preview"]
+                        .as_i64()
+                        .or_else(|| {
+                            (self.state["view"] == "details")
+                                .then(|| self.state["cursor"].as_i64())
+                                .flatten()
                         })
-                    });
+                        .is_some_and(|id| {
+                            self.events.iter().any(|event| {
+                                event["id"] == id
+                                    && event["name"].as_str().is_some_and(|name| {
+                                        katran::file_types::is_markdown(std::path::Path::new(name))
+                                    })
+                            })
+                        });
                     self.text_preview.set_enabled(
                         text_enabled
                             || link_enabled
@@ -1224,7 +1234,8 @@ impl Shelf {
                         tabs.iter()
                             .any(|tab| tab["tab"] == "tables" && tab["enabled"] == true)
                     });
-                    self.table_preview.set_enabled(tables_enabled);
+                    self.table_preview
+                        .set_enabled(tables_enabled || self.state["view"] == "details");
                     if let Ok(order) = serde_json::from_value(tabs["visible_tabs"].clone()) {
                         self.tab_order = order;
                     }
@@ -1602,6 +1613,9 @@ impl Shelf {
                 if modifiers.ctrl && modifiers.alt {
                     continue;
                 }
+                if self.state["view"] == "details" && ctx.egui_wants_keyboard_input() {
+                    continue;
+                }
                 if ctx.egui_wants_keyboard_input()
                     && matches!(key, egui::Key::ArrowLeft | egui::Key::ArrowRight)
                 {
@@ -1651,6 +1665,9 @@ impl Shelf {
                 }
             }
         }
+        self.images.set_context(&self.state);
+        self.text_preview.set_context(&self.state);
+        self.table_preview.set_context(&self.state);
         self.shelf_view(root, &ctx, &visible, gallery, columns);
         self.emoji_categories_panel(&ctx);
         if self.pods_ui.selector_open {
@@ -2189,6 +2206,7 @@ fn main() -> eframe::Result {
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
         text_preview: text_preview_ui::TextPreview::new(root.clone()),
+        details_metadata: details_metadata_ui::DetailsMetadata::new(root.clone()),
         link_cards: link_card_ui::State::new(root.clone()),
         link_refresh_last: None,
         table_preview: table_preview_ui::TablePreview::new(root),
@@ -2436,6 +2454,7 @@ mod tests {
             pending_density: Vec::new(),
             images: Images::new(root.into()),
             text_preview: text_preview_ui::TextPreview::new(root.into()),
+            details_metadata: details_metadata_ui::DetailsMetadata::new(root.into()),
             link_cards: link_card_ui::State::new(root.into()),
             link_refresh_last: None,
             table_preview: table_preview_ui::TablePreview::new(root.into()),

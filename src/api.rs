@@ -133,6 +133,10 @@ pub enum Command {
         query: String,
         limit: u32,
     },
+    SearchFoldersSemantic {
+        query: String,
+        limit: u32,
+    },
     FolderHistory {
         query: String,
     },

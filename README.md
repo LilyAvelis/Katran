@@ -2,9 +2,10 @@
 
 Local development is preparing **3.8.0**: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings, drag reordering of complete tags
-and improved Folder navigation. The third dense list/detail view and optional
-semantic Folder search are [separate research](docs/patch-3.8/DETAILS-VIEW-RESEARCH.md),
-not implemented features of this checkpoint.
+and improved Folder navigation. The third [Mini stream view](docs/patch-3.8/DETAILS-VIEW.md)
+is available through Actions → Display and Settings → Appearance → Tab view.
+Optional [local neural Folder search](docs/patch-3.8/FOLDER-NEURAL.md) toggles with
+physical backslash in the folder picker; ordinary search remains available.
 The owner now uses local `main` and the primary Raycast launch with the existing
 profile for manual acceptance; retain the previous runtime and database backup
 for rollback. This work is not a public release. See the

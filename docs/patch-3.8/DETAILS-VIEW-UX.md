@@ -1,5 +1,8 @@
 # Details View · UX proposal · 2026-11-17
 
+Implementation follow-up: [Mini stream](DETAILS-VIEW.md). The proposal/status
+below preserves the earlier research checkpoint.
+
 Status: research and design contract, not an implemented or accepted feature. The reference is the owner's Raycast screenshot: a dense list at left, a large content area at right, and an information section below it. Katran retains its own visual language and existing actions.
 
 ## Geometry and behavior

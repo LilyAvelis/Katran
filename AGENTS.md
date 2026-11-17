@@ -16,6 +16,17 @@ Native product acceptance still belongs to Lilia.
 
 ## Local 3.8 implementation · owner instruction 2026-11-17
 
+Later owner instruction implements the previously researched Mini stream and local
+Folder neural mode. `View::Details` must be discoverable through Display and Tab
+view settings; a cursor-driven pane must not set full-screen preview or selection.
+Folder picker physical backslash toggles neural mode, suppresses paired typing,
+and shows gold styling; Ctrl+Y/configured Standard shortcut works inside the open
+picker. Neural search reads bounded names/paths only, uses the installed optional
+runtime, and exposes incomplete coverage. See `docs/patch-3.8/DETAILS-VIEW.md` and
+`FOLDER-NEURAL.md`. Prior research-only statements below describe earlier scope.
+Rollback must account for old binaries rejecting persisted `view: details` even
+though schema remains v13. Back up settings/profile before primary staging.
+
 Owner extension: drag-reorder complete tag definitions and assignments in Settings,
 with revision-checked saves in both editors. No schema bump. Lilia confirmed the
 base tags/search experience useful; the new third dense list/detail view and

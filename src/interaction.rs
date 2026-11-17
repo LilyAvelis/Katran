@@ -23,6 +23,7 @@ pub enum View {
     #[default]
     Gallery,
     List,
+    Details,
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

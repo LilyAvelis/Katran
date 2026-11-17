@@ -1,5 +1,9 @@
 # Optional semantic Folder search · 2026-11-17
 
+Later owner instruction implements a bounded optional mode; see
+[Folder neural mode](FOLDER-NEURAL.md). This report preserves the prior research
+and its smaller feasibility probe; those numbers are not production latency.
+
 Research only. The accepted 3.8 ordinary Everything search remains the default.
 No Folder AI command, model download, personal-folder index or cloud service was
 added. Existing optional emoji AI is unchanged.

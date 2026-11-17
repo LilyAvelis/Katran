@@ -123,7 +123,7 @@ pub fn criterion(event: &Value, sort: &Value) -> Option<String> {
         _ => return None,
     })
 }
-fn size(bytes: u64) -> String {
+pub(super) fn size(bytes: u64) -> String {
     let units = if super::i18n::is_english() {
         ["B", "KiB", "MiB", "GiB", "TiB"]
     } else {
@@ -143,7 +143,7 @@ fn size(bytes: u64) -> String {
 }
 // Gregorian civil date from epoch days. UTC is explicit; no filesystem/local
 // timezone query is performed while painting a card.
-fn date(ms: i64) -> String {
+pub(super) fn date(ms: i64) -> String {
     let seconds = ms.div_euclid(1000);
     let z = seconds.div_euclid(86400) + 719468;
     let era = z.div_euclid(146097);

@@ -6,8 +6,10 @@ The owner confirmed the local base tag/search experience and requested complete
 tag reordering in Settings; see [the team and contract](../patch-3.8/TEAM.md) and
 [local candidate notes](3.8.0.md). Local main and the primary Raycast installation
 with the existing profile are explicitly authorized; GitHub publication is not.
-The third dense list/detail mode and neural Folder search remain separate
-research. Ordinary search stays available without a model.
+The later owner instruction implements the third Mini stream in Display/settings
+and optional local neural Folder search with a physical backslash switch.
+Ordinary search stays available without a model. Older checkpoint paragraphs
+remain dated evidence of the earlier research-only scope.
 
 ## 3.7.1 unified application
 

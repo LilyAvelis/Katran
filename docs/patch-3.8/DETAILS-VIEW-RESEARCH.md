@@ -1,5 +1,8 @@
 # Details View / mini-stream: architecture research
 
+Later implementation: [Mini stream](DETAILS-VIEW.md). The research-only status
+below records the earlier checkpoint before the owner's implementation request.
+
 Status: research only, 2026-11-17. No product implementation, build or native UI acceptance is claimed. The desired third view is a dense list on the left with a preview and available metadata for the cursor item on the right. It should work across the existing shelf providers and preserve their existing commands and protections.
 
 ## Current architecture

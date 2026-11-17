@@ -3,6 +3,38 @@ use super::i18n::tr;
 use super::*;
 use katran::domain_jobs::JobId;
 
+/// Consume the physical switch and only its paired text event. Paste stays intact.
+fn take_neural_toggle(input: &mut egui::InputState) -> bool {
+    let mut toggles = 0;
+    let mut paired_text = false;
+    input.events.retain(|event| match event {
+        egui::Event::Key {
+            key,
+            physical_key,
+            pressed,
+            repeat,
+            modifiers,
+            ..
+        } if physical_key.unwrap_or(*key) == egui::Key::Backslash && modifiers.is_none() => {
+            paired_text = *pressed;
+            if *pressed && !repeat {
+                toggles += 1;
+            }
+            false
+        }
+        egui::Event::Key { .. } => {
+            paired_text = false;
+            true
+        }
+        egui::Event::Text(text) if paired_text && text.chars().count() == 1 => {
+            paired_text = false;
+            false
+        }
+        _ => true,
+    });
+    toggles % 2 == 1
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Mode {
     #[default]
@@ -19,6 +51,8 @@ pub(super) struct State {
     items: Vec<PathBuf>,
     standard_details: Vec<(String, Option<String>)>,
     incomplete: bool,
+    neural: bool,
+    indexed_count: Option<u64>,
     selected: usize,
     focus: bool,
     scroll: bool,
@@ -46,13 +80,15 @@ impl Shelf {
         self.workspace.items.clear();
         self.workspace.standard_details.clear();
         self.workspace.incomplete = false;
+        self.workspace.indexed_count = None;
         self.workspace.selected = 0;
         self.workspace.error = None;
         if self.workspace.mode == Mode::Search {
             if !self.workspace.query.trim().is_empty() {
                 self.workspace.loading = true;
-                self.workspace.due = Some(Instant::now() + Duration::from_millis(120));
-                ctx.request_repaint_after(Duration::from_millis(120));
+                let debounce = Duration::from_millis(if self.workspace.neural { 350 } else { 120 });
+                self.workspace.due = Some(Instant::now() + debounce);
+                ctx.request_repaint_after(debounce);
             }
         } else if self.workspace.mode == Mode::Standard {
             let result = self.call(Command::ListKnownFolders);
@@ -86,6 +122,7 @@ impl Shelf {
     }
     fn workspace_set_items(&mut self, result: &Value) {
         self.workspace.incomplete = result["incomplete"] == true;
+        self.workspace.indexed_count = result["indexed_count"].as_u64();
         self.workspace.items = result["items"]
             .as_array()
             .into_iter()
@@ -302,8 +339,6 @@ impl Shelf {
                 && !self.pinned_ui.open
                 && !self.tag_menu.open
                 && self.state["settings_open"] != true
-                && !ctx.egui_wants_keyboard_input()
-                && !super::search_or_text_edit_focused(ctx)
             {
                 let shortcuts: Vec<katran::shortcuts::ShortcutInfo> =
                     serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
@@ -341,6 +376,11 @@ impl Shelf {
             }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
                 self.workspace_mode(Mode::Favorites, ctx);
+            }
+            if self.workspace.mode == Mode::Search && ctx.input_mut(take_neural_toggle) {
+                self.workspace.neural = !self.workspace.neural;
+                self.workspace.focus = true;
+                self.workspace_reload(ctx);
             }
         } else if !self.actions
             && !self.open_apps.open
@@ -433,8 +473,13 @@ impl Shelf {
         {
             self.workspace.due = None;
             let query = self.workspace.query.clone();
+            let command = if self.workspace.neural {
+                Command::SearchFoldersSemantic { query, limit: 100 }
+            } else {
+                Command::SearchFolders { query, limit: 100 }
+            };
             let result = self.call(Command::BeginJob {
-                command: Box::new(Command::SearchFolders { query, limit: 100 }),
+                command: Box::new(command),
             });
             if result["state"] == "succeeded" {
                 self.workspace.loading = false;
@@ -481,7 +526,8 @@ impl Shelf {
             .area(egui::Modal::default_area(egui::Id::new("workspace-picker")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx, |ui| {
                 ui.set_width(width);
-                ui.label(RichText::new(match state.mode { Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
+                let neural = state.mode == Mode::Search && state.neural;
+                ui.label(RichText::new(match state.mode { Mode::Search if neural => tr("Нейропоиск папок · локально", "Neural folder search · local"), Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
                 ui.add_space(6.0);
                 let mut mode_change = None;
                 ui.horizontal_wrapped(|ui| {
@@ -491,7 +537,13 @@ impl Shelf {
                 });
                 if let Some(mode) = mode_change { ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode)); }
                 if state.incomplete { ui.weak(tr("Показаны частичные результаты", "Partial results shown")); }
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 220.0).clamp(80.0, 360.0)).show(ui, |ui| {
+                if neural {
+                    ui.weak(tr("По смыслу имён и путей · без чтения содержимого файлов", "Meaning of names and paths · file contents are not read"));
+                    if let Some(count) = state.indexed_count {
+                        ui.weak(format!("{}: {count}", tr("Папок в ограниченном индексе", "Folders in bounded index")));
+                    }
+                }
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - if neural { 300.0 } else { 240.0 }).clamp(40.0, 360.0)).show(ui, |ui| {
                     for (index, path) in state.items.iter().enumerate() {
                         let text = path.to_string_lossy();
                         let detail = state.standard_details.get(index);
@@ -511,13 +563,16 @@ impl Shelf {
                         if response.clicked() && !state.loading && !path.as_os_str().is_empty() { chosen = Some(path.clone()); }
                         response.on_hover_text(detail_text);
                     }
-                    if state.loading { ui.weak(tr("Поиск папок…", "Searching folders…")); }
+                    if state.loading { ui.weak(if neural { tr("Подготовка локального индекса и поиск…", "Preparing local index and searching…") } else { tr("Поиск папок…", "Searching folders…") }); }
                     else if let Some(error) = &state.error { ui.colored_label(Color32::LIGHT_RED, error); }
                     else if state.items.is_empty() { ui.weak(if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
                 });
                 ui.separator();
-                let field = ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(tr("Имя или полный путь папки…", "Folder name or full path…")).desired_width(f32::INFINITY));
+                let field = egui::Frame::new().inner_margin(4).stroke(egui::Stroke::new(if neural { 1.5 } else { 0.0 }, Color32::from_rgb(221, 178, 75))).show(ui, |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY))
+                }).inner;
                 if state.focus { field.request_focus(); state.focus = false; }
+                if state.mode == Mode::Search { ui.weak(if neural { tr("\\ · обычный поиск", "\\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }
                 ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
             });
         if let Some(mode) =
@@ -621,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_folder_shortcut_uses_custom_binding_and_yields_to_text_editing() {
+    fn standard_folder_shortcut_uses_custom_binding_inside_focused_picker() {
         struct FakeKnownFolders;
         impl katran::known_folders::Provider for FakeKnownFolders {
             fn resolve(
@@ -736,11 +791,72 @@ mod tests {
         );
         output.textures_delta.clear();
         assert!(app.workspace.open);
-        assert!(app.workspace.mode == Mode::Search);
+        assert!(app.workspace.mode == Mode::Standard);
         assert!(
-            retained,
-            "Ctrl+Y redo input must be left to the text editor"
+            !retained,
+            "the configured picker shortcut works while its search is focused"
         );
+    }
+
+    #[test]
+    fn physical_backslash_switches_folder_search_and_consumes_only_its_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(dir.path());
+        app.workspace.open = true;
+        app.workspace.mode = Mode::Search;
+        app.workspace.query = "travel".into();
+        let ctx = egui::Context::default();
+        let mut remaining = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::Slash,
+                        physical_key: Some(egui::Key::Backslash),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text("/".into()),
+                    egui::Event::Paste("C:\\Synthetic\\Travel".into()),
+                    egui::Event::Text("unrelated".into()),
+                ],
+                ..Default::default()
+            },
+            |_| {
+                app.workspace_input(&ctx);
+                remaining = ctx.input(|input| input.events.clone());
+            },
+        );
+        output.textures_delta.clear();
+        assert!(app.workspace.neural);
+        assert_eq!(app.workspace.query, "travel");
+        assert!(
+            !remaining
+                .iter()
+                .any(|event| matches!(event, egui::Event::Text(text) if text == "/"))
+        );
+        assert!(remaining.iter().any(
+            |event| matches!(event, egui::Event::Paste(text) if text == "C:\\Synthetic\\Travel")
+        ));
+        assert!(
+            remaining
+                .iter()
+                .any(|event| matches!(event, egui::Event::Text(text) if text == "unrelated"))
+        );
+        app.workspace.mode = Mode::History;
+        send_workspace_key(
+            &mut app,
+            &egui::Context::default(),
+            egui::Event::Key {
+                key: egui::Key::Backslash,
+                physical_key: Some(egui::Key::Backslash),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        );
+        assert!(app.workspace.neural, "history has no search-mode toggle");
     }
 
     fn send_workspace_key(app: &mut Shelf, ctx: &egui::Context, event: egui::Event) {

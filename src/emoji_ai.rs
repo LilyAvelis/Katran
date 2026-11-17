@@ -1,5 +1,5 @@
 //! Local emoji search worker adapter. Never logs query text.
-mod runtime;
+pub(crate) mod runtime;
 use crate::{ApiError, Result};
 use serde_json::{Value, json};
 use std::{

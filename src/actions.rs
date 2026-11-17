@@ -38,6 +38,7 @@ pub fn palette_order(id: &str) -> usize {
         "refresh",
         "gallery",
         "list",
+        "details",
         "density_less",
         "density_more",
         "pinned_move_up",
@@ -67,7 +68,7 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
         "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view"
         | "refresh" => "Навигация и выделение",
-        "gallery" | "list" | "density_less" | "density_more" => "Отображение",
+        "gallery" | "list" | "details" | "density_less" | "density_more" => "Отображение",
         "pinned_move_up" | "pinned_move_down" => "Закреплённые",
         "use_as_background"
         | "use_as_desktop_wallpaper"
@@ -92,6 +93,7 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
         "folder_standard" => "Открыть стандартные папки",
         "gallery" => "Галерея",
         "list" => "Поток",
+        "details" => "Мини-поток",
         "density_less" => "Увеличить карточки",
         "density_more" => "Уменьшить карточки",
         "pinned_move_up" => "Поднять в порядке закреплённых",
@@ -204,6 +206,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "preview" => "Open preview / return to shelf",
         "gallery" => "Gallery",
         "list" => "Stream",
+        "details" => "Mini stream",
         "settings" => "Settings",
         "toggle_images" => "Enable / disable Images",
         "toggle_screenshots" => "Enable / disable Screenshots",
@@ -874,6 +877,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "details",
+        label: "Вид: мини-поток",
+        default_binding: "",
+        rebindable: true,
+        group: "Вид",
+        in_palette: true,
+    },
+    Definition {
         id: "settings",
         label: "Настройки",
         default_binding: "Ctrl Comma",
@@ -1047,6 +1058,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
             view: View::Gallery,
         }),
         "list" => command(Command::SetView { view: View::List }),
+        "details" => command(Command::SetView {
+            view: View::Details,
+        }),
         "capture" => command(Command::SetCaptureEnabled { enabled: !capture }),
         "refresh" => command(Command::List { limit: 1000 }),
         "transfer_copy" => command(Command::CopySelection),

@@ -121,6 +121,9 @@ impl Shelf {
         columns: usize,
     ) {
         self.images.begin_frame();
+        if self.state["view"] != "details" || !self.state["preview"].is_null() {
+            self.details_metadata.reset();
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -363,6 +366,8 @@ impl Shelf {
                             }
                         }
                     }
+                } else if self.state["view"] == "details" {
+                    self.details_view(ui, ctx, visible);
                 } else {
                     self.images.clear_preview_geometry();
                     if visible.is_empty() {

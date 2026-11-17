@@ -1,4 +1,6 @@
 function Get-KatranSources([string]$Root) {
+    # This Python worker is embedded in the Rust binary with include_str!.
+    $folderSemanticWorker = Join-Path $Root 'scripts/folder-semantic/worker.py'
     $files = @((Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File).FullName) + @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/branding') -Recurse -File).FullName) + @('Cargo.toml','Cargo.lock','build.rs','scripts/build-working.ps1','scripts/install-build.ps1' | ForEach-Object { Join-Path $Root $_ })
     if (Test-Path -LiteralPath (Join-Path $Root 'assets/emoji-flags')) { $files += @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/emoji-flags') -Recurse -File).FullName) }
     foreach ($assetDir in @('assets/themes/lilies','assets/everything')) {
@@ -11,6 +13,7 @@ function Get-KatranSources([string]$Root) {
         $files += @((Get-Item -LiteralPath (Join-Path $crateRoot 'Cargo.toml'),(Join-Path $crateRoot 'LICENSE')).FullName)
         $files += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object FullName)
     }
+    if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
     return @($files | Sort-Object | ForEach-Object { [ordered]@{ path = $_.Substring($Root.Length + 1); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
 }
 function Invoke-KatranInstall {

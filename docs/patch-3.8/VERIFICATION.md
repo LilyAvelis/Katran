@@ -1,5 +1,68 @@
 # Katran 3.8 verification handoff
 
+## Mini stream and local Folder neural mode · later 2026-11-17 follow-up
+
+Tag dragging was confirmed working by Lilia. The earlier third-view/neural
+research checkpoint was followed by her instruction to implement both.
+
+- API-first View gate: 6 checks passed across details, per-tab preferences,
+  action presentation and density. All 10 tabs, restart, selection/cursor and
+  old Gallery/Stream settings are covered. No schema change.
+- Integrated UI/API gate: **239/239 UI**, **1/1** read-only Desktop/Folder
+  provider check, **2/2** Details API and **2/2** initial semantic API passed
+  (`target/build/details-semantic-integrated.log`). The optional real-model
+  probe was intentionally ignored in that ordinary run.
+- Initial compile errors were confined to the new test moving a field out of a
+  Drop type. Initial UI failures were a missing new-action icon and unapplied
+  egui texture deltas in two new fixtures; all were corrected. The provider
+  fixture's initial assumption about upscaling a 2px image was corrected.
+- Final all-targets Clippy `-D warnings` passed after collapsing two nested
+  context-reset checks; formatting passed. No production warning suppressions.
+- Synthetic semantic API checks explicitly cover missing/failed model, invalid
+  replies, cancellation, exact priority, incomplete coverage and injecting an
+  ordinary nonliteral candidate outside the broad index. The last candidate-pool
+  change passed its targeted **2/2** API gate. Everything snapshot **7/7**;
+  late image/text/table context checks **4/4**; Python incremental cache **2/2**.
+
+### Real optional runtime evidence
+
+The actual resident Python/ONNX worker was exercised through BeginJob/PollJob,
+using the already installed verified runtime. All output omitted private paths.
+No content was read, no model downloaded, no persistent private vector index
+created. These are single-run wall-clock observations on this machine, not
+controlled benchmarks, p95 or native visual acceptance.
+
+Final synthetic source: 8192 fake paths; Russian travel, invoice and florist
+queries. Cold end-to-end **30,925ms**, warm **50ms**, one-path-change **51ms**;
+intended targets ranked first. Cache synthetic tests separately prove no encode
+on reorder, one new encode on replacement and eviction of removed paths.
+
+Final live Everything source: 8192 bounded paths, explicitly incomplete.
+Observed end-to-end times **69,403ms** cold, **1,090ms** and **1,014ms** for
+subsequent queries. `Katran` ranked first; `cat run` did **not** return the target
+in this probe's top 20, despite improved candidate acquisition. This is a known
+quality limitation, not a passed typo-recall test. The ordinary search's earlier
+`cat run` success remains independent. Do not market the new mode as uniformly
+better or full-disk semantic recall. Evidence: `folder-semantic-local-final.log`
+and `folder-semantic-live-final.log` in ignored `target/build`.
+
+The first real probe exposed expensive full re-embedding when the candidate
+snapshot changed (61.765s and 44.292s, before the cache fix). The source changed
+to incremental per-path caching, then only the affected model/IPC probes and
+API/cache checks were rerun; the successful UI suite was not blindly repeated.
+
+Installed ONNX Runtime **1.23.2** exposes CPU/Azure providers; the Folder worker
+explicitly selects **CPUExecutionProvider**, four threads. No CUDA provider is
+installed or selected. GPU acceleration was discussed, not implemented or timed.
+Native acceptance of split layout and gold-field behavior belongs to Lilia.
+
+The last picker-only layout adjustment passed its **5/5** focused UI checks and
+UI-binary Clippy, reusing the unaffected integrated evidence. These include
+configured Ctrl+Y inside the focused picker and physical backslash text/paste
+handling. Public source includes the embedded Python worker in the build-input
+fingerprint. No successful optimized compilation has yet been repeated for this
+source; the final staging receipt is recorded below when available.
+
 ## Complete tag reorder follow-up · 2026-11-17
 
 The owner's latest feedback accepts the base tag/search usability, before the

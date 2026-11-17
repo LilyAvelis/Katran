@@ -6,6 +6,18 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Latest owner follow-up: tag dragging is now confirmed working natively by Lilia.
+She requested actual implementation of the researched third view, plus Ctrl+Y
+inside the open Folder picker and physical-backslash neural search with a gold
+field. Same sessions reused: Nemi owns View/Actions/persistence and semantic
+command/jobs/resident runtime; Mira owns provider-aware preview workers and
+Everything snapshot; Fenna owns Mini stream UI/settings/action icon; Polly owns
+asynchronous details metadata, Folder picker UX, source fingerprint coverage,
+integration/checks/docs/staging. No new agents or model substitutions.
+Domain View gate passed before UI, and neural API gate before actual-model probe.
+Details UI is integrated; current validation/staging evidence follows in
+`VERIFICATION.md`. Historical completion records below describe earlier stages.
+
 Reorder source frozen at local main `1a3fc6f`. Nemi's domain and Fenna's UI
 are complete; Kiki's bounded independent review is closed. Final integrated
 checks: UI 228/228, reorder API 2/2, scoped migration 2/2, existing tag API 7/7;

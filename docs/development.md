@@ -8,7 +8,8 @@ Fenna with Iris's UX contract; independent acceptance to Kiki. Polly integrates
 the public command enum and dispatcher. The owner's later 2026-11-17 correction
 authorizes local main integration and primary Raycast installation using the
 existing profile, with rollback backups. No public release or GitHub push is
-authorized. Folder AI is deferred; ordinary ranking is first.
+authorized. The later owner instruction adds an optional local neural Folder mode
+after ordinary ranking; ordinary search remains independent of its runtime.
 Schema v13 copies legacy tag definitions/materials and assignments into
 independent tab scopes, preserving the initial appearance. `tag_slots.rs`,
 `tag_service.rs`, `catalogue_schema.rs`, `catalogue_query.rs`,
@@ -27,12 +28,21 @@ reorder. Legacy numeric save commands remain compatible. Ctrl+Shift+Comma edits
 the highlighted palette tag without opening Settings. Folder Standard folders
 uses the contextual, rebindable `folder_standard` action (default Ctrl+Y).
 
-The requested third dense list/detail mode is research only; see the
-[architecture and provider matrix](patch-3.8/DETAILS-VIEW-RESEARCH.md) and
-[UX contract](patch-3.8/DETAILS-VIEW-UX.md). It should follow the cursor without
-entering full-screen preview or changing selection. Optional Folder embeddings
-are separately evaluated in [semantic research](patch-3.8/FOLDER-SEMANTIC-RESEARCH.md);
-no neural Folder search is wired into the product.
+`View::Details` is the third [Mini stream](patch-3.8/DETAILS-VIEW.md), exposed in
+Actions Display and per-tab Appearance settings. `details_view_ui.rs` renders
+the cursor-driven split list/detail layout without setting full-screen preview
+or modifying selection. Existing read-only workers use browse-context epochs;
+`details_metadata_ui.rs` adds bounded latest-only Unicode metadata. Desktop
+negative IDs use managed-ID preview commands; Folder snapshots use path/revision.
+
+`BeginJob(SearchFoldersSemantic)` uses the bounded Discovery lane and the
+installed integrity-checked E5 runtime with a separate embedded worker. The
+[Folder neural contract](patch-3.8/FOLDER-NEURAL.md) records input limits,
+incompleteness, errors, cache, cancellation and physical backslash UI. Its worker
+source is a compiled input included by `Get-KatranSources`. Runtime absence never
+turns a lexical-only reply into neural success. See the historical
+[architecture](patch-3.8/DETAILS-VIEW-RESEARCH.md), [UX](patch-3.8/DETAILS-VIEW-UX.md)
+and [semantic research](patch-3.8/FOLDER-SEMANTIC-RESEARCH.md) for the earlier study.
 
 Owner decision 2026-11-15: use the public 3.7 source as the sole Katran host. The optional emoji AI mode now follows `SearchEmojiAi` through the standard dispatcher and job service, with `src/bin/emoji_ai_ui.rs` as its UI client. Its runtime lives under the active profile's `emoji-ai-runtime` directory, outside versioned executables; a missing model must not break ordinary Katran. The earlier separate E distribution plan is superseded for 3.7. See [the model setup](emoji-ai.md).
 

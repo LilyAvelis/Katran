@@ -1,0 +1,386 @@
+//! Local semantic folder-name search. No path or query is logged or sent over a network.
+use crate::{ApiError, Result, domain_jobs::Cancellation};
+use serde_json::{Value, json};
+use std::{
+    collections::HashSet,
+    io::{BufRead, BufReader, Read, Write},
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver, SyncSender},
+    time::{Duration, Instant},
+};
+
+const MAX_FRAME: usize = 4 * 1024 * 1024;
+const MAX_ITEMS: usize = 8192;
+const START_TIMEOUT: Duration = Duration::from_secs(45);
+const COLD_TIMEOUT: Duration = Duration::from_secs(180);
+const WARM_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub fn validate(query: &str, limit: u32) -> Result<()> {
+    if query.trim().is_empty()
+        || query.chars().count() > 512
+        || query.contains('\0')
+        || !(1..=100).contains(&limit)
+    {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Expected a nonempty query of at most 512 characters and limit 1–100",
+        ));
+    }
+    Ok(())
+}
+
+pub trait Backend: Send {
+    fn search(
+        &mut self,
+        query: &str,
+        paths: &[PathBuf],
+        limit: u32,
+        cancel: &Cancellation,
+    ) -> Result<Vec<usize>>;
+}
+pub struct Resident {
+    root: PathBuf,
+    worker: Option<Worker>,
+    next_id: u64,
+    snapshot: Option<Vec<PathBuf>>,
+}
+impl Resident {
+    pub fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            worker: None,
+            next_id: 0,
+            snapshot: None,
+        }
+    }
+}
+struct Worker {
+    child: Child,
+    writer: SyncSender<(Vec<u8>, SyncSender<bool>)>,
+    reader: Receiver<Option<Value>>,
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+fn unavailable(message: &'static str) -> ApiError {
+    ApiError::new("folder_ai_unavailable", message)
+}
+fn wait<T>(receiver: &Receiver<T>, timeout: Duration, cancel: &Cancellation) -> Result<T> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        cancel.check()?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(unavailable("Local folder AI timed out"));
+        }
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(25))) {
+            Ok(v) => return Ok(v),
+            Err(mpsc::RecvTimeoutError::Timeout) => (),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(unavailable("Local folder AI worker stopped"));
+            }
+        }
+    }
+}
+impl Worker {
+    fn start(root: &std::path::Path, cancel: &Cancellation) -> Result<Self> {
+        let runtime = crate::emoji_ai::runtime::resolve(root, Some(cancel)).map_err(|error| {
+            if error.code == "model_unavailable" { ApiError::new("model_unavailable", "Local AI model or runtime is not installed. Installation: https://github.com/LilyAvelis/Katran/blob/main/docs/emoji-ai.md") } else { error }
+        })?;
+        let base = runtime
+            .worker
+            .parent()
+            .ok_or_else(|| unavailable("Invalid local AI runtime"))?;
+        let mut command = Command::new(runtime.python);
+        command
+            .arg("-c")
+            .arg(include_str!("../scripts/folder-semantic/worker.py"))
+            .arg(base.join("model/onnx/model.onnx"))
+            .arg(base.join("model/onnx/tokenizer.json"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|_| unavailable("Local folder AI worker could not start"))?;
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let (writer, writes) = mpsc::sync_channel::<(Vec<u8>, SyncSender<bool>)>(1);
+        std::thread::spawn(move || {
+            for (data, ack) in writes {
+                let ok = stdin.write_all(&data).and_then(|_| stdin.flush()).is_ok();
+                let _ = ack.send(ok);
+                if !ok {
+                    break;
+                }
+            }
+        });
+        let (frames, reader) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut stdout = BufReader::new(stdout);
+            loop {
+                let mut data = Vec::new();
+                let result = (&mut stdout)
+                    .take(MAX_FRAME as u64 + 1)
+                    .read_until(b'\n', &mut data);
+                if result.is_err()
+                    || data.is_empty()
+                    || data.len() > MAX_FRAME
+                    || data.last() != Some(&b'\n')
+                {
+                    let _ = frames.send(None);
+                    break;
+                }
+                if frames
+                    .send(serde_json::from_slice::<Value>(&data).ok())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let worker = Self {
+            child,
+            writer,
+            reader,
+        };
+        let ready = wait(&worker.reader, START_TIMEOUT, cancel)?
+            .ok_or_else(|| unavailable("Local folder AI startup failed"))?;
+        if ready["type"] != "ready" || ready["protocol"] != 1 {
+            return Err(unavailable("Local folder AI startup failed"));
+        }
+        Ok(worker)
+    }
+    fn request(&self, value: &Value, timeout: Duration, cancel: &Cancellation) -> Result<Value> {
+        let mut bytes =
+            serde_json::to_vec(value).map_err(|_| unavailable("Invalid folder search request"))?;
+        bytes.push(b'\n');
+        if bytes.len() > MAX_FRAME {
+            return Err(ApiError::new(
+                "folder_ai_input_limit",
+                "Folder search snapshot is too large",
+            ));
+        }
+        let (ack, rx) = mpsc::sync_channel(1);
+        self.writer
+            .try_send((bytes, ack))
+            .map_err(|_| unavailable("Local folder AI worker is busy"))?;
+        if !wait(&rx, timeout, cancel)? {
+            return Err(unavailable("Local folder AI input failed"));
+        }
+        wait(&self.reader, timeout, cancel)?
+            .ok_or_else(|| unavailable("Invalid local folder AI response"))
+    }
+}
+impl Backend for Resident {
+    fn search(
+        &mut self,
+        query: &str,
+        paths: &[PathBuf],
+        limit: u32,
+        cancel: &Cancellation,
+    ) -> Result<Vec<usize>> {
+        validate(query, limit)?;
+        if paths.len() > MAX_ITEMS || paths.iter().any(|p| p.to_str().is_none()) {
+            return Err(ApiError::new(
+                "folder_ai_input_limit",
+                "Folder snapshot is invalid or too large",
+            ));
+        }
+        if self.worker.is_none() {
+            self.worker = Some(Worker::start(&self.root, cancel)?);
+            self.snapshot = None;
+        }
+        self.next_id = self.next_id.wrapping_add(1);
+        let id = self.next_id;
+        let warm = self.snapshot.as_deref() == Some(paths);
+        let request = json!({"id":id,"query":query,"paths":paths,"limit":limit});
+        let result = self
+            .worker
+            .as_ref()
+            .expect("started")
+            .request(
+                &request,
+                if warm { WARM_TIMEOUT } else { COLD_TIMEOUT },
+                cancel,
+            )
+            .and_then(|reply| {
+                if reply["id"].as_u64() != Some(id) {
+                    return Err(unavailable("Invalid local folder AI response"));
+                }
+                let values = reply["indices"]
+                    .as_array()
+                    .ok_or_else(|| unavailable("Invalid local folder AI response"))?;
+                if values.len() > limit as usize {
+                    return Err(unavailable("Invalid local folder AI response"));
+                }
+                let mut seen = HashSet::new();
+                let mut indices = Vec::new();
+                for v in values {
+                    let i = v
+                        .as_u64()
+                        .and_then(|x| usize::try_from(x).ok())
+                        .filter(|i| *i < paths.len())
+                        .ok_or_else(|| unavailable("Invalid local folder AI response"))?;
+                    if !seen.insert(i) {
+                        return Err(unavailable("Invalid local folder AI response"));
+                    }
+                    indices.push(i);
+                }
+                Ok(indices)
+            });
+        match result {
+            Ok(indices) => {
+                self.snapshot = Some(paths.to_vec());
+                Ok(indices)
+            }
+            Err(error) => {
+                self.worker = None;
+                self.snapshot = None;
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Injectable discovery keeps synthetic API checks independent of a real Everything index.
+pub trait Source: Send {
+    fn snapshot(&mut self, query: &str, cancel: &Cancellation) -> Result<Snapshot>;
+}
+pub struct Snapshot {
+    pub indexed: Vec<PathBuf>,
+    pub exact_candidates: Vec<PathBuf>,
+    pub incomplete: bool,
+}
+pub struct EverythingSource;
+impl Source for EverythingSource {
+    fn snapshot(&mut self, query: &str, cancel: &Cancellation) -> Result<Snapshot> {
+        cancel.check()?;
+        let indexed = crate::everything::list_indexed_folders(MAX_ITEMS)
+            .map_err(|e| ApiError::new(&e.code, e.message))?;
+        cancel.check()?;
+        let exact = crate::everything::search_folders(query, 100)
+            .map_err(|e| ApiError::new(&e.code, e.message))?;
+        cancel.check()?;
+        Ok(Snapshot {
+            indexed: indexed.items.into_iter().map(|item| item.path).collect(),
+            exact_candidates: exact.items.into_iter().map(|item| item.path).collect(),
+            incomplete: indexed.incomplete || exact.incomplete,
+        })
+    }
+}
+pub fn search(
+    backend: &mut dyn Backend,
+    source: &mut dyn Source,
+    query: &str,
+    limit: u32,
+    saved: &[PathBuf],
+    cancel: &Cancellation,
+) -> Result<Value> {
+    validate(query, limit)?;
+    let snapshot = source.snapshot(query, cancel)?;
+
+    let mut incomplete = snapshot.incomplete;
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    // Reserve space for query, JSON fields and framing; oversized snapshots are partial.
+    let mut frame_bytes = 4096usize;
+    // Saved and lexical candidates precede the bounded index so relevant folders
+    // outside the broad sample can still be ranked by the model. The worker
+    // reuses cached embeddings for unchanged paths across queries.
+    for path in saved
+        .iter()
+        .chain(&snapshot.exact_candidates)
+        .chain(&snapshot.indexed)
+    {
+        let text = path.to_str().ok_or_else(|| {
+            ApiError::new(
+                "folder_ai_input_limit",
+                "Folder snapshot contains an invalid path",
+            )
+        })?;
+        let key = if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text.to_owned()
+        };
+        if seen.insert(key) {
+            let encoded = serde_json::to_vec(path).map_err(|_| {
+                ApiError::new(
+                    "folder_ai_input_limit",
+                    "Folder snapshot contains an invalid path",
+                )
+            })?;
+            if paths.len() == MAX_ITEMS || frame_bytes.saturating_add(encoded.len() + 1) > MAX_FRAME
+            {
+                incomplete = true;
+                break;
+            }
+            frame_bytes += encoded.len() + 1;
+            paths.push(path.clone());
+        }
+    }
+    cancel.check()?;
+    // This call must succeed even when there are exact matches: no lexical-only success.
+    let indices = backend.search(query, &paths, limit, cancel)?;
+    cancel.check()?;
+    if indices.len() > limit as usize
+        || indices.iter().copied().collect::<HashSet<_>>().len() != indices.len()
+    {
+        return Err(unavailable("Invalid local folder AI response"));
+    }
+    let indexed_count = paths.len();
+    let mut result = Vec::new();
+    let mut used = HashSet::new();
+    let needle = query.trim().to_lowercase();
+    for path in snapshot.exact_candidates.iter().chain(paths.iter()) {
+        let Some(text) = path.to_str() else {
+            return Err(ApiError::new(
+                "folder_ai_input_limit",
+                "Folder snapshot contains an invalid path",
+            ));
+        };
+        let key = if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text.to_owned()
+        };
+        if path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|name| name.to_lowercase() == needle)
+            && used.insert(key)
+        {
+            result.push(json!({"path":path}));
+            if result.len() == limit as usize {
+                break;
+            }
+        }
+    }
+    for i in indices {
+        if i >= paths.len() {
+            return Err(unavailable("Invalid local folder AI response"));
+        }
+        let text = paths[i].to_string_lossy();
+        let key = if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text.into_owned()
+        };
+        if used.insert(key) && result.len() < limit as usize {
+            result.push(json!({"path":paths[i]}));
+        }
+    }
+    Ok(
+        json!({"items":result,"incomplete":incomplete,"indexed_count":indexed_count,"scope":"bounded_everything_index_and_saved_folders"}),
+    )
+}

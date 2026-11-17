@@ -4,7 +4,7 @@ use super::*;
 use crate::theme_ui::{Role, color as theme_color};
 use std::sync::{Arc, Condvar, Mutex};
 
-type Key = (i64, String);
+type Key = (i64, String, u64);
 struct Queue {
     next: Option<(Key, Option<PathBuf>, egui::Context)>,
     closed: bool,
@@ -18,6 +18,8 @@ pub(super) struct TextPreview {
     enabled: bool,
     worker: Option<Worker>,
     wanted: Option<Key>,
+    context: String,
+    context_epoch: u64,
     content: Option<Result<String, String>>,
     document: Option<katran::markdown::Document>,
     rendered: bool,
@@ -29,6 +31,8 @@ impl TextPreview {
             enabled: false,
             worker: None,
             wanted: None,
+            context: String::new(),
+            context_epoch: 0,
             content: None,
             document: None,
             rendered: true,
@@ -97,6 +101,21 @@ impl TextPreview {
         self.content = None;
         self.document = None;
     }
+    pub fn set_context(&mut self, state: &Value) {
+        let context = super::images::preview_context(state);
+        if self.context != context {
+            self.context = context;
+            self.context_epoch = self.context_epoch.wrapping_add(1);
+            self.wanted = None;
+            self.content = None;
+            self.document = None;
+            if let Some(worker) = &self.worker
+                && let Ok(mut queue) = worker.queue.0.lock()
+            {
+                queue.next = None;
+            }
+        }
+    }
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
         if !enabled {
@@ -159,8 +178,8 @@ impl TextPreview {
         let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
             return;
         };
-        let key = (id, revision.to_owned());
-        let path = if id < 0 {
+        let key = (id, revision.to_owned(), self.context_epoch);
+        let path = if event["source"] == "work_folder" {
             let Some(path) = event["path"].as_str() else {
                 return;
             };
@@ -367,6 +386,65 @@ pub(super) fn card_title(event: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn late_response_from_other_context_is_not_rendered() {
+        let root = tempfile::tempdir().unwrap();
+        let mut preview = TextPreview::new(root.path().into());
+        preview.enabled = true;
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                next: None,
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        preview.worker = Some(Worker { queue, rx });
+        let a = serde_json::json!({"tab":"folder", "folder_path":"a", "view_generation":1});
+        let b = serde_json::json!({"tab":"folder", "folder_path":"b", "view_generation":2});
+        preview.set_context(&a);
+        let old = (1, "revision".to_owned(), preview.context_epoch);
+        preview.set_context(&b);
+        preview.set_context(&a);
+        let current = (1, "revision".to_owned(), preview.context_epoch);
+        preview.wanted = Some(current.clone());
+        tx.send((
+            old,
+            serde_json::json!({"ok":true,"result":{"revision":"revision","text":"old"}}),
+        ))
+        .unwrap();
+        let ctx = egui::Context::default();
+        let event = serde_json::json!({"id":1,"kind":"text_fragment","revision":"revision"});
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| preview.show(ui, &event));
+        output.textures_delta.clear();
+        assert!(preview.content.is_none());
+        tx.send((
+            current,
+            serde_json::json!({"ok":true,"result":{"revision":"revision","text":"new"}}),
+        ))
+        .unwrap();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| preview.show(ui, &event));
+        output.textures_delta.clear();
+        assert_eq!(preview.content.as_ref().unwrap().as_ref().unwrap(), "new");
+    }
+    #[test]
+    fn browse_context_invalidates_prior_item_even_if_returning_to_same_context() {
+        let root = tempfile::tempdir().unwrap();
+        let mut preview = TextPreview::new(root.path().into());
+        let a = serde_json::json!({"tab":"folder", "folder_path":"a", "view_generation":1});
+        let b = serde_json::json!({"tab":"folder", "folder_path":"b", "view_generation":2});
+        preview.set_context(&a);
+        let old = (1, "same-revision".to_owned(), preview.context_epoch);
+        preview.wanted = Some(old.clone());
+        preview.content = Some(Err("old content".into()));
+        preview.set_context(&b);
+        assert!(preview.wanted.is_none() && preview.content.is_none());
+        preview.set_context(&a);
+        assert_ne!(old, (1, "same-revision".to_owned(), preview.context_epoch));
+        let epoch = preview.context_epoch;
+        preview.set_context(&a);
+        assert_eq!(epoch, preview.context_epoch);
+    }
     use super::*;
     #[test]
     fn named_link_uses_custom_space_heading() {

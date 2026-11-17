@@ -30,6 +30,7 @@ mod folder_delete;
 mod folder_import;
 pub mod folder_launch;
 pub mod folder_search_rank;
+pub mod folder_semantic;
 pub mod folder_transfer;
 pub mod folder_watch;
 pub mod interaction;
@@ -115,6 +116,8 @@ pub struct Service {
     known_folder_provider: Box<dyn known_folders::Provider>,
     emoji_ai: std::sync::Arc<std::sync::Mutex<Box<dyn emoji_ai::Backend>>>,
     emoji_ai_backend_injected: bool,
+    folder_semantic: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Backend>>>,
+    folder_semantic_source: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Source>>>,
     window_visible: bool,
     overlay_session: overlay::Session,
     overlay_host: Box<dyn overlay::Host + Send>,
@@ -172,6 +175,14 @@ impl Service {
     pub fn set_emoji_ai_backend(&mut self, backend: Box<dyn emoji_ai::Backend>) {
         self.emoji_ai = std::sync::Arc::new(std::sync::Mutex::new(backend));
         self.emoji_ai_backend_injected = true;
+    }
+    pub fn set_folder_semantic_backend(
+        &mut self,
+        backend: Box<dyn folder_semantic::Backend>,
+        source: Box<dyn folder_semantic::Source>,
+    ) {
+        self.folder_semantic = std::sync::Arc::new(std::sync::Mutex::new(backend));
+        self.folder_semantic_source = std::sync::Arc::new(std::sync::Mutex::new(source));
     }
     fn accept_update_check(&mut self, status: updater::UpdateStatus) -> Result<serde_json::Value> {
         self.checked_update = status.release.clone();
@@ -275,6 +286,12 @@ impl Service {
                 emoji_ai::Resident::new(root.clone()),
             ))),
             emoji_ai_backend_injected: false,
+            folder_semantic: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                folder_semantic::Resident::new(root.clone()),
+            ))),
+            folder_semantic_source: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                folder_semantic::EverythingSource,
+            ))),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -360,6 +377,12 @@ impl Service {
                 emoji_ai::Resident::new(root.clone()),
             ))),
             emoji_ai_backend_injected: false,
+            folder_semantic: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                folder_semantic::Resident::new(root.clone()),
+            ))),
+            folder_semantic_source: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
+                folder_semantic::EverythingSource,
+            ))),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -756,6 +779,10 @@ impl Service {
                     .map(|v| serde_json::json!(v))
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
+            Command::SearchFoldersSemantic { .. } => Err(ApiError::new(
+                "background_required",
+                "Folder AI search must run as a background job",
+            )),
             Command::FolderHistory { query } => self.folder_entries(false, &query),
             Command::FolderRecovery => {
                 let path = self
@@ -901,6 +928,10 @@ impl Service {
                 Ok(serde_json::json!({"scheduled":true,"sources":self.source_runtime.statuses()}))
             }
             Command::AdjustDensity { delta } => {
+                // Mini stream has a fixed compact row height; preserve both other densities.
+                if self.interaction.view == interaction::View::Details {
+                    return Ok(serde_json::json!(&self.settings));
+                }
                 let mut settings = self.settings.clone();
                 let tab = self.interaction.tab;
                 let prefs = settings
@@ -927,6 +958,7 @@ impl Service {
                             prefs.stream_rows = density::adjust_density(prefs.stream_rows, delta);
                             settings.stream_rows = prefs.stream_rows;
                         }
+                        interaction::View::Details => unreachable!("handled above"),
                     }
                 }
                 self.dispatch(Command::SetSettings { settings })

@@ -787,6 +787,41 @@ impl Service {
                     })
                 })?
             }
+            Command::SearchFoldersSemantic { query, limit } => {
+                crate::folder_semantic::validate(&query, limit)?;
+                let saved: Vec<_> = crate::pinned::folder_favorites(&self.db)?
+                    .into_iter()
+                    .chain(crate::pinned::folder_history(&self.db)?)
+                    .map(|entry| entry.path)
+                    .collect();
+                let backend = std::sync::Arc::clone(&self.folder_semantic);
+                let source = std::sync::Arc::clone(&self.folder_semantic_source);
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    cancel.check()?;
+                    let mut backend = backend.lock().map_err(|_| {
+                        ApiError::new(
+                            "folder_ai_unavailable",
+                            "Local folder AI backend is unavailable",
+                        )
+                    })?;
+                    let mut source = source.lock().map_err(|_| {
+                        ApiError::new(
+                            "folder_ai_unavailable",
+                            "Folder search index is unavailable",
+                        )
+                    })?;
+                    let result = crate::folder_semantic::search(
+                        &mut **backend,
+                        &mut **source,
+                        &query,
+                        limit,
+                        &saved,
+                        &cancel,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Value(result))
+                })?
+            }
             Command::SearchFolders { query, limit } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     cancel.check()?;

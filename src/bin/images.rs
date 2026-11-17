@@ -6,7 +6,18 @@ use std::{
 };
 
 // A key describes the event contents, not merely its potentially reusable row ID.
-type ImageKey = (i64, u32, String);
+type ImageKey = (i64, u32, String, u64);
+
+/// Identity of the browse context, independent of cursor movement.
+pub(super) fn preview_context(state: &Value) -> String {
+    serde_json::json!([
+        state["tab"],
+        state["folder_path"],
+        state["emoji_catalogue"],
+        state["view_generation"]
+    ])
+    .to_string()
+}
 type Work = (ImageKey, Option<PathBuf>, egui::Context);
 struct Queue {
     pending: VecDeque<Work>,
@@ -15,6 +26,7 @@ struct Queue {
 struct Entry {
     texture: Option<egui::TextureHandle>,
     icon: bool,
+    visual_status: &'static str,
     touched: u64,
     retry_after: Instant,
 }
@@ -26,10 +38,12 @@ fn preview_command(id: i64, edge: u32) -> Command {
     }
 }
 fn work_path(event: &Value, id: i64) -> Option<Option<PathBuf>> {
-    if id < 0 {
+    if id >= 0 || event["source"] == "desktop" {
+        Some(None)
+    } else if event["source"] == "work_folder" {
         Some(Some(PathBuf::from(event["path"].as_str()?)))
     } else {
-        Some(None)
+        None
     }
 }
 fn work_command(key: &ImageKey, path: Option<PathBuf>) -> Command {
@@ -75,6 +89,8 @@ pub(super) struct Images {
     textures: HashMap<ImageKey, Entry>,
     clock: u64,
     preview_geometry: PreviewGeometryCache,
+    context: String,
+    context_epoch: u64,
 }
 impl Images {
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
@@ -89,7 +105,7 @@ impl Images {
         let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
             return;
         };
-        let key = (id, edge, revision.to_owned());
+        let key = (id, edge, revision.to_owned(), self.context_epoch);
         let Some(path) = work_path(event, id) else {
             return;
         };
@@ -162,6 +178,22 @@ impl Images {
             textures: HashMap::new(),
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
+            context: String::new(),
+            context_epoch: 0,
+        }
+    }
+    pub(super) fn set_context(&mut self, state: &Value) {
+        let context = preview_context(state);
+        if self.context != context {
+            self.context = context;
+            self.context_epoch = self.context_epoch.wrapping_add(1);
+            self.active.clear();
+            self.requested.clear();
+            self.textures.clear();
+            self.preview_geometry = PreviewGeometryCache::default();
+            if let Ok(mut queue) = self.queue.0.lock() {
+                queue.pending.clear();
+            }
         }
     }
     pub(super) fn begin_frame(&mut self) {
@@ -193,6 +225,16 @@ impl Images {
                     egui::TextureOptions::LINEAR,
                 ))
             })();
+            let visual_status = if texture.is_none() {
+                "unavailable"
+            } else {
+                match reply["result"]["visual_kind"].as_str() {
+                    Some("shell_thumbnail") => "shell_thumbnail",
+                    Some("shell_icon") => "shell_icon",
+                    Some("generic_icon") => "generic_icon",
+                    _ => "image",
+                }
+            };
             ctx.request_repaint();
             self.textures.insert(
                 result_key,
@@ -202,6 +244,7 @@ impl Images {
                         reply["result"]["visual_kind"].as_str(),
                         Some("shell_icon" | "generic_icon")
                     ),
+                    visual_status,
                     touched: self.clock,
                     retry_after: Instant::now() + Duration::from_secs(3),
                 },
@@ -228,6 +271,7 @@ impl Images {
             event["id"].as_i64()?,
             1400,
             event["revision"].as_str()?.to_owned(),
+            self.context_epoch,
         );
         let texture = self.textures.get(&key)?.texture.as_ref()?;
         Some(super::gallery_card::fit_rect(canvas, texture.size_vec2()).size())
@@ -243,10 +287,25 @@ impl Images {
             .as_i64()
             .zip(event["revision"].as_str())
             .and_then(|(id, revision)| {
-                self.preview_geometry
-                    .resolve((id, 1400, revision.to_owned()), canvas, image)
+                self.preview_geometry.resolve(
+                    (id, 1400, revision.to_owned(), self.context_epoch),
+                    canvas,
+                    image,
+                )
             });
         self.paint_image(ui, event, canvas, 1400, image);
+    }
+    pub(super) fn visual_status(&self, event: &Value, edge: u32) -> &'static str {
+        let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
+            return "unavailable";
+        };
+        if work_path(event, id).is_none() {
+            return "unavailable";
+        }
+        let key = (id, edge, revision.to_owned(), self.context_epoch);
+        self.textures
+            .get(&key)
+            .map_or("loading", |entry| entry.visual_status)
     }
     pub(super) fn paint_at(
         &mut self,
@@ -271,7 +330,7 @@ impl Images {
         let Some(revision) = event["revision"].as_str() else {
             return;
         };
-        let key = (id, edge, revision.to_owned());
+        let key = (id, edge, revision.to_owned(), self.context_epoch);
         let Some(path) = work_path(event, id) else {
             return;
         };
@@ -407,16 +466,80 @@ mod tests {
 
     #[test]
     fn folder_preview_carries_path_revision_and_size() {
-        let event =
-            serde_json::json!({"id": -1, "path": "folder/image.png", "revision": "file:abc"});
+        let event = serde_json::json!({"id": -1, "source": "work_folder", "path": "folder/image.png", "revision": "file:abc"});
         let path = work_path(&event, -1).unwrap();
-        let key = (-1, 320, "file:abc".to_owned());
+        let key = (-1, 320, "file:abc".to_owned(), 0);
         assert!(
             matches!(work_command(&key, path), Command::PreviewPath { path, revision, max_edge: 320, image_only: false } if path == std::path::Path::new("folder/image.png") && revision == "file:abc")
         );
         assert!(work_path(&serde_json::json!({}), -1).is_none());
     }
 
+    #[test]
+    fn late_image_reply_from_old_context_is_discarded() {
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                pending: VecDeque::new(),
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        let mut images = Images {
+            queue,
+            rx,
+            active: HashSet::new(),
+            requested: HashSet::new(),
+            textures: HashMap::new(),
+            clock: 0,
+            preview_geometry: PreviewGeometryCache::default(),
+            context: String::new(),
+            context_epoch: 0,
+        };
+        let a = serde_json::json!({"tab":"folder", "folder_path":"a", "view_generation":1});
+        let b = serde_json::json!({"tab":"folder", "folder_path":"b", "view_generation":2});
+        images.set_context(&a);
+        let old = (-1, 320, "revision".to_owned(), images.context_epoch);
+        images.set_context(&b);
+        images.set_context(&a);
+        let current = (-1, 320, "revision".to_owned(), images.context_epoch);
+        images.active.insert(current.clone());
+        tx.send((old, serde_json::json!({"ok":false}))).unwrap();
+        images.end_frame(&egui::Context::default());
+        assert!(!images.textures.contains_key(&current));
+        tx.send((current.clone(), serde_json::json!({"ok":false})))
+            .unwrap();
+        images.end_frame(&egui::Context::default());
+        assert_eq!(images.textures[&current].visual_status, "unavailable");
+    }
+    #[test]
+    fn desktop_uses_id_route_folder_uses_snapshot_and_context_rejects_late_reply() {
+        let desktop = serde_json::json!({"id": -(1_i64 << 62) - 1, "source":"desktop", "path":"managed/extensionless", "revision":"file:r"});
+        let id = desktop["id"].as_i64().unwrap();
+        assert!(
+            matches!(work_command(&(id, 320, "file:r".into(), 0), work_path(&desktop, id).unwrap()), Command::PreviewFile { id: actual, .. } if actual == id)
+        );
+        assert!(
+            work_path(
+                &serde_json::json!({"id": -1, "source":"emoji_catalogue", "path":""}),
+                -1
+            )
+            .is_none()
+        );
+        let root = tempfile::tempdir().unwrap();
+        let mut images = Images::new(root.path().into());
+        let a = serde_json::json!({"tab":"folder", "folder_path":"A", "view_generation":1});
+        let b = serde_json::json!({"tab":"folder", "folder_path":"B", "view_generation":2});
+        images.set_context(&a);
+        let epoch_a = images.context_epoch;
+        images.set_context(&b);
+        images.set_context(&a);
+        assert_ne!(images.context_epoch, epoch_a);
+        let old = (-1, 320, "r".to_owned(), epoch_a);
+        let now = (-1, 320, "r".to_owned(), images.context_epoch);
+        assert_ne!(old, now);
+        assert_eq!(images.visual_status(&desktop, 320), "loading");
+    }
     #[test]
     fn busy_preview_reuses_last_domain_geometry_without_resetting_zoom() {
         let root = tempfile::tempdir().unwrap();
@@ -463,7 +586,7 @@ mod tests {
                 g["height"].as_f64().unwrap() as f32,
             ),
         );
-        let key = (1, 1400, "synthetic".to_owned());
+        let key = (1, 1400, "synthetic".to_owned(), 0);
         let mut cache = PreviewGeometryCache::default();
         assert_eq!(cache.resolve(key.clone(), canvas, Some(image)), Some(image));
         // A background job temporarily owns the dispatcher: no new rectangle.
@@ -471,7 +594,10 @@ mod tests {
             assert_eq!(cache.resolve(key.clone(), canvas, None), Some(image));
         }
         assert_ne!(image, canvas);
-        assert_eq!(cache.resolve((2, 1400, "other".into()), canvas, None), None);
+        assert_eq!(
+            cache.resolve((2, 1400, "other".into(), 0), canvas, None),
+            None
+        );
         assert_eq!(cache.resolve(key.clone(), canvas, None), None);
         cache.resolve(key.clone(), canvas, Some(image));
         assert_eq!(
@@ -498,6 +624,8 @@ mod tests {
             textures: HashMap::new(),
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
+            context: String::new(),
+            context_epoch: 0,
         };
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

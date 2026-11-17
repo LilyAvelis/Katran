@@ -120,6 +120,63 @@ pub fn search_folders(query: &str, limit: usize) -> Result<EverythingFolders, Ev
     search_with_runner(query, limit, &helper, run)
 }
 
+/// Maximum number of index entries exposed to a bounded semantic snapshot.
+pub const MAX_INDEXED_FOLDERS: usize = 8192;
+
+/// Read a bounded snapshot of the Everything folder index, without traversing
+/// directories or reading their contents. This is not an exhaustive index.
+/// Run off the UI thread; every returned path must be revalidated when used.
+pub fn list_indexed_folders(limit: usize) -> Result<EverythingFolders, EverythingError> {
+    validate_snapshot_limit(limit)?;
+    let executable =
+        std::env::current_exe().map_err(|e| error("helper_unavailable", e.to_string()))?;
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or_else(|| error("helper_unavailable", "LOCALAPPDATA unavailable"))?;
+    let helper = resolve_helper(&executable, &PathBuf::from(local))?;
+    indexed_folders_with_runner(limit, &helper, run)
+}
+
+fn validate_snapshot_limit(limit: usize) -> Result<(), EverythingError> {
+    if !(1..=MAX_INDEXED_FOLDERS).contains(&limit) {
+        return Err(error(
+            "invalid_argument",
+            "Indexed folder limit must be 1–8192",
+        ));
+    }
+    Ok(())
+}
+
+fn indexed_folders_with_runner<F>(
+    limit: usize,
+    helper: &Path,
+    runner: F,
+) -> Result<EverythingFolders, EverythingError>
+where
+    F: FnOnce(&Path, &str, usize) -> Result<Vec<u8>, EverythingError>,
+{
+    validate_snapshot_limit(limit)?;
+    let result = parse_results(&runner(helper, "folder:", limit + 1)?, limit + 1)?;
+    // Conservative when the boundary was reached, even if duplicates reduce
+    // the returned set: more indexed entries may exist beyond the query cap.
+    let incomplete = result.items.len() >= limit;
+    let mut seen = std::collections::HashSet::new();
+    let mut items = Vec::new();
+    for item in result.items {
+        let key = item
+            .path
+            .to_string_lossy()
+            .replace('/', "\\")
+            .to_lowercase();
+        if seen.insert(key) {
+            items.push(item);
+            if items.len() == limit {
+                break;
+            }
+        }
+    }
+    Ok(EverythingFolders { items, incomplete })
+}
+
 /// Resolve an installed helper or materialize the verified embedded fallback.
 /// The explicit cache root also supports isolated updater validation.
 pub fn resolve_helper(executable: &Path, cache_root: &Path) -> Result<PathBuf, EverythingError> {
@@ -475,6 +532,34 @@ fn run(helper: &Path, query: &str, limit: usize) -> Result<Vec<u8>, EverythingEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn indexed_snapshot_is_bounded_deduplicated_and_reports_coverage() {
+        let helper = Path::new("unused");
+        for limit in [0, MAX_INDEXED_FOLDERS + 1] {
+            let result = indexed_folders_with_runner(limit, helper, |_, _, _| {
+                panic!("invalid limit cannot call helper")
+            });
+            assert_eq!(result.unwrap_err().code, "invalid_argument");
+        }
+        let result = indexed_folders_with_runner(2, helper, |_, query, limit| {
+            assert_eq!(query, "folder:");
+            assert_eq!(limit, 3);
+            Ok(br#"[{"filename":"C:/one","attributes":16},{"filename":"c:/ONE","attributes":16},{"filename":"C:/two","attributes":16}]"#.to_vec())
+        }).unwrap();
+        assert_eq!(result.items.len(), 2);
+        assert!(result.incomplete);
+        let small = indexed_folders_with_runner(3, helper, |_, _, _| {
+            Ok(br#"[{"filename":"C:/one","attributes":16}]"#.to_vec())
+        })
+        .unwrap();
+        assert_eq!(small.items.len(), 1);
+        assert!(!small.incomplete);
+        let error = indexed_folders_with_runner(2, helper, |_, _, _| {
+            Err(super::error("everything_unavailable", "offline"))
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "everything_unavailable");
+    }
     #[test]
     fn independent_exact_name_survives_truncated_broad_streams() {
         use std::cell::Cell;
