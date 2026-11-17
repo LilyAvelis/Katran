@@ -2,6 +2,21 @@
 
 ## Replacement: libmpv and overlay UI · 2026-11-18
 
+Installed from source `7c708a3`, one optimized UI build **91.88s**, Windows x64 /
+Rust 1.95.0 / locked offline / ui + clipboard-events. Before/after compiled input
+fingerprints matched. Primary runtime **`3322b2bcfddb`**, SHA256
+`3322b2bcfddb9ade994afbddc760b822e43dc2a55adf3f9cb59e6144c2b77058`.
+Pinned libmpv DLL, component receipt and notice installed alongside the UI;
+all copied helper hashes verified. Previous runtime `e910e1fc8c1d` and fresh
+consistent integrity-checked v13 backup retained in runtime/rollback-mpv-player.json.
+Running app untouched; owner asked to tray-exit/relaunch from Raycast and test
+the failing Folder clip, autoplay/audio, overlay/controls and stop on close/change.
+Manual acceptance remains pending; no push/tag/public release.
+
+Post-batch cache pruning removed **4.52 GiB**, zero failed entries; 37.60 ->
+33.08 GiB. Protected dependencies/release outputs prevent reaching the32GiB
+target; installed UI and all helpers were reverified. No unconditional clean.
+
 Owner refined scope after seeing Desktop playback: controls must overlay the
 full canvas and hide during idle playback; Space autoplays, Mini waits for Play.
 Default backend is now libmpv through Rust C ABI, using a pinned separate DLL
@@ -15,6 +30,9 @@ Automated evidence for this replacement:
   Initial startup failure was traced to a lease starting before DLL loading/
   initialization; the lease now begins after initialization, with cancel checked
   before loading playback. No test certifies audible sound or GPU performance.
+  Final evidence is the explicitly labeled agent report
+  target/build/media-mpv-native-final.txt; the earlier raw native-gate log retains
+  the failed first attempt and must not be confused with the corrected run.
 - UI integrated run passed 273/274 including all 8 player checks; the unrelated
   synthetic recycle test got OSError5 in the restricted temporary directory.
   Its exact isolated retry with native filesystem access passed 1/1, no source

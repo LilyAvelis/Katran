@@ -11,7 +11,7 @@ The first candidate is not accepted. Reused sessions, same models/efforts:
 | /root/mira · Terra/high | media_playback_mpv.rs | Frozen; muted Unicode MP4/MKV probe passed, 1/1 |
 | /root/fenna · Terra/high | media_preview_ui.rs | Frozen; 8 player UI tests passed, including measured centering/width |
 | /root/nemi · Terra/high | tests/media_playback_api.rs | Frozen; Folder Unicode source/context regression passed |
-| /root · lead | lib/service/Cargo switch, setup, docs, integration/install | API 15/15, UI 273 + isolated native-transfer retry 1/1; final lint/build/install |
+| /root · lead | lib/service/Cargo switch, setup, docs, integration/install | Lint/gates passed; runtime3322b2bcfddb installed; owner check pending |
 
 libmpv is pinned to Afio's existing runtime. Current bridge renders CPU RGBA,
 not Afio's OpenGL path; no performance/GPU claims. Setup reuses the verified
