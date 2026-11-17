@@ -2,6 +2,19 @@
 
 ## Native video/audio local follow-up · 2026-11-18
 
+Installed locally from source `5fe5238`: single optimized UI build 106.71s,
+Windows x64 / Rust 1.95.0 / locked offline / ui + clipboard-events. Input
+fingerprints matched before and after build. Primary runtime `e910e1fc8c1d`,
+SHA256 `e910e1fc8c1d97ca04038b64ab865d2a5c438711e8cc456d8d1bb7c4c0175c44`.
+Previous runtime `efc8c786e60f` and consistent integrity-checked v13 backup retained
+in ignored runtime/rollback-native-player.json. Atomic pointer switched; running
+app untouched. Owner asked to tray-exit/Raycast-relaunch and check both surfaces,
+sound/controls and stop on close/change; manual acceptance pending.
+
+Post-batch guarded cache maintenance removed 4.56 GiB, zero failed entries;
+36.87 -> 32.31 GiB. Protected dependencies/release outputs prevent reaching the
+32 GiB pruning target; installed runtime reverified unchanged. No broad clean.
+
 Scope: [Space and Mini stream playback](../video-preview.md), after immutable
 v3.8.0 tag; local main/primary install only, no new push/tag/public release.
 
