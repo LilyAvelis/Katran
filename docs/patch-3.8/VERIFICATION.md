@@ -116,3 +116,12 @@ The primary local-main installation uses one newly built UI executable after
 these checks. Its exact source checkpoint, hash and previous runtime are recorded
 in the follow-up activation record in `TEAM.md` and the ignored runtime receipt.
 Native owner acceptance of the new palette and physical keys remains pending.
+
+The follow-up executable was built once from local-main source checkpoint
+`ee164a3754d06c20d3a1104ddc664be1ce2e2649`, with pre/post build inputs matched.
+It was hash-verified after copying and selected for the primary Raycast launch
+as runtime `55356f72deb8`; SHA-256
+`55356f72deb8c19ba4fc09d4760cdd5439da2b939eb4656786bd391ed389b89f`.
+The existing profile remains in place, schema v13 unchanged, with a fresh
+consistent backup and the preceding runtime retained. No GUI was launched by
+the agents and no remote publication occurred.

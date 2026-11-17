@@ -117,3 +117,15 @@ with existing data. This supersedes the initial no-install restriction.
   shortcut cases passed; final Clippy all-targets and formatting passed. See
   `VERIFICATION.md` for the split aggregate/targeted results and one unrelated
   Windows fixture's parallel access-denied observation.
+- Follow-up source checkpoint on local main:
+  `ee164a3754d06c20d3a1104ddc664be1ce2e2649`. One optimized UI build completed
+  in 1m19s with matched pre/post compiled-input hashes; no second compilation.
+- Primary Raycast launch now selects `55356f72deb8`; UI SHA-256
+  `55356f72deb8c19ba4fc09d4760cdd5439da2b939eb4656786bd391ed389b89f`.
+  The stable launcher/profile path is unchanged. Runtime `9266bfb24bfd` remains
+  available for rollback. A fresh consistent schema-v13 database backup passed
+  integrity check; the private receipt is
+  `runtime/rollback-local-tag-editor.json`. No migration was required.
+- The old running process was not closed or manipulated. The owner should fully
+  exit it once through the tray, then use normal Raycast launch. Native visual
+  acceptance of this follow-up is still pending; nothing was pushed.
