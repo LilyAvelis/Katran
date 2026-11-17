@@ -58,6 +58,21 @@ UI build; reuse 245 UI checks, domain Page/settings evidence, unchanged Clippy,
 installed CUDA component and cached toolchain. No clean/full test loop or repeat
 of the 1.8GB setup is required.
 
+### Final CUDA primary artifact
+
+Source local main `58c86ce7354487308a9f7af7f34c1e9a62ea49bb`. The minimal
+worker-input rebuild completed in **1m23s**; pre/post compiled inputs matched.
+Primary runtime now selects **`a0f03404416d`**, UI SHA-256:
+`a0f03404416d5d8b20bfcaeeabe537bcc3c280391e4056a0c7fb85ff1800d3ff`.
+The copied executable and helpers were hash-verified. Previous `c363daae5864`
+remains immutable; fresh consistent v13 backup passed integrity check, private
+receipt `runtime/rollback-cuda-final.json`. Optional CUDA runtime is installed
+and verified independently in the existing profile. The checkbox remains opt-in;
+tests enabled it only in synthetic Services, never by rewriting Lilia's setting.
+No schema migration, forced process termination, GitHub push/tag/release.
+Exit the old tray process and relaunch through Raycast before trying the GPU
+checkbox. All requested Text/pin/keyboard and Enter/top-10/page UX is included.
+
 ### Primary UX artifact while optional GPU setup completes
 
 Source local main `cd4d5bf23c93d604d96d731be69f130088c419e5`; one optimized UI

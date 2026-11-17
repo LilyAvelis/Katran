@@ -6,6 +6,14 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Final state: all follow-up implementation/setup work complete. Source `58c86ce`,
+primary runtime `a0f03404416d`, corrected embedded CUDA worker and profile-isolated
+GPU component verified through an 8192-path synthetic API probe. Same named
+sessions are complete and reusable; no new workers. Prior UI/API/Clippy evidence
+retained for unchanged inputs, minimal worker rebuild 1m23s. Lilia's next step:
+tray exit/Raycast relaunch, manual Text/pin/page feedback and optional GPU checkbox
+in General → Folders and storage. Backups and old runtimes retained; no GitHub push.
+
 Current primary UX checkpoint: `cd4d5bf`, runtime `c363daae5864`, matched hashes,
 one optimized build 1m24s and verified profile backup. Text/pin/keyboard and
 Enter/top-10/page UX are staged for Lilia; same previous runtime retained.
