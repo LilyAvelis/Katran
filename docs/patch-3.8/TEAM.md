@@ -6,6 +6,17 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current inline-editor source `0c507dc`, one optimized UI build **22.74s** in the
+existing cache, matched compiled-source/resource hashes. Primary runtime
+`cb740a2f72e7`, SHA256
+`cb740a2f72e7bf7f95ed26283c35f0f84fcc5075c33b26ecd02e3358b42c117c`.
+Copied UI/helpers verified; pointer changed atomically from `981c10a95b8a`.
+Previous runtime and consistent schema-v13 backup retained in private
+`runtime/rollback-tag-modal.json`. Running app untouched; owner asked to exit
+through tray/Raycast relaunch and check sliders, dismissal and pinned Ctrl+Enter.
+UI 262/262, existing pinned API 3/3, Clippy/format passed. Native acceptance is
+pending; no GitHub push/tag/public release.
+
 Inline-editor follow-up (2026-11-18): same Fenna `/root/fenna`
 (gpt-6.1-terra/high) owns tag_menu_ui lifecycle/checked-save wiring; same Nemi
 `/root/nemi` (gpt-6.1-terra/high) owns images/api_client metadata cache bridge;

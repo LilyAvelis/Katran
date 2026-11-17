@@ -2,6 +2,12 @@
 
 ## Inline editor follow-up · 2026-11-18
 
+Installed source `0c507dc`, one optimized UI build 22.74s; compiled inputs and
+installed/copy hashes matched. Primary `cb740a2f72e7`, SHA256
+`cb740a2f72e7bf7f95ed26283c35f0f84fcc5075c33b26ecd02e3358b42c117c`.
+Previous `981c10a95b8a` and new consistent schema-v13 backup kept; owner process
+left running. No migration, model/runtime reinstall or public publication.
+
 Headless UI 262/262 passed, including new tag lifecycle/dirty-draft/popups,
 generation cache bridge/resource retention/revision invalidation/cursor recovery
 and pinned Ctrl+Enter/form/error cases. Existing pinned-properties API 3/3 passed.
