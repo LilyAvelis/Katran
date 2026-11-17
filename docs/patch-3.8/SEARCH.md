@@ -23,7 +23,7 @@ The helper was run read-only against the local index after the execution environ
 | New exact basename, `Katran` | Two candidates; the repository was second. |
 | New anchored two-substitution basename, `cat run` | Two candidates; the repository was second. |
 
-## Ranked API snapshot, 2026-11-17
+## Intermediate ranked API snapshot, before the word-boundary refinement
 
 The debug CLI (`ui` feature, debug profile) was exercised through `serve-stdio` with a new isolated temporary profile under `target`; no source workers, capture or UI were started. CLI SHA-256: `3485e78e36df1864ad9b0a64c64eaf133e189a1fe9e68339412a14e3bbed7352`. Timing is one local observation, measured from request write to response read; it is not a benchmark. The old helper comparison used a limit of 100 and measured process invocation through response.
 
@@ -35,3 +35,23 @@ The debug CLI (`ui` feature, debug profile) was exercised through `serve-stdio` 
 For `Katran`, the old top three were recycle/recovery folders; the ranked API top three were the target repository, another folder named Katran, then a recycle/recovery folder. For `cat run`, the old top three comprised a technical folder and two other folders; the ranked API top three were other folders. Thus `cat run` now finds the repository in this snapshot, but its rank of 12 leaves a visible ranking limitation. No real path names or identifiers are recorded here.
 
 Candidate acquisition may be truncated, and these examples do not establish complete recall for arbitrary queries or indices.
+
+## Final release-artifact API snapshot · 2026-11-17
+
+Kiki independently exercised the optimized CLI built from source commit
+`12360d1ab4e4e9394b09d821e8f4935dcb1f6260`, after the word-boundary ranking
+refinement. CLI SHA-256:
+`45c9d3cb934154d4acbcee3a039124dc94ceef30625c49cd11c60b4d257b2f4d`.
+The refinement matches query words to beginnings of distinct name tokens;
+arbitrary fragments inside unrelated words no longer receive that bonus.
+
+| Query | Original helper | Final ranked API | Observed API time | Incomplete |
+| --- | --- | --- | --- | --- |
+| `Katran` | Repository absent from first 100 | Repository **1st** of 100 | 534.9 ms | yes |
+| `cat run` | Repository absent from 11 | Repository **1st** of 13 | 476.2 ms | no |
+
+The first two final candidates were folders named Katran. Later results still
+included recovery or runtime folders: technical directories remain discoverable.
+These are single observations on the local index, not a benchmark, a completeness
+guarantee or native UI acceptance. No AI was used. See
+[independent artifact smoke](VERIFICATION.md).
