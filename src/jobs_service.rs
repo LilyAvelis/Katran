@@ -1798,7 +1798,7 @@ impl Service {
                 PreparedWork::Copy{events,plan,mut sink}=> {
                     self.validate_job_events(&events)?;
                     let receipt=copy_out::commit(&plan,&mut sink).map_err(|e|ApiError::new("clipboard_error",e))?;if receipt.failures.is_empty() {self.record_selection_publication(receipt.sequence,&events.iter().map(|event|event.id).collect::<Vec<_>>());}else{self.record_clipboard_publication(receipt.sequence);}
-                    Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings}))
+                    Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings,"publication":receipt.publication}))
                 }
                 PreparedWork::Drag{events,prepared}=> {self.validate_job_events(&events)?;self.commit_drag_preparation(prepared)}
             });

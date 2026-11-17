@@ -46,9 +46,8 @@ pub struct Editor {
     error: Option<String>,
     replaceable: bool,
     selected: Option<usize>,
-    release: bool,
     physical_keys: bool,
-    super_held: bool,
+    held_modifiers: [bool; 8],
     alt_armed: bool,
 }
 impl Editor {
@@ -65,7 +64,6 @@ impl Editor {
             id: id.into(),
             label: label.into(),
             current_binding: current_binding.into(),
-            release: true,
             ..Self::default()
         }
     }
@@ -74,7 +72,6 @@ impl Editor {
         self.error = Some(message);
         self.replaceable = replaceable;
         self.selected = replaceable.then_some(0);
-        self.release = true;
     }
     fn choices(&self) -> Vec<(&'static str, usize)> {
         let mut c = vec![];
@@ -107,7 +104,6 @@ impl Editor {
                 self.error = None;
                 self.replaceable = false;
                 self.selected = None;
-                self.release = true;
                 None
             }
             2 => Some(Intent::Set {
@@ -119,88 +115,60 @@ impl Editor {
     }
     pub fn input(&mut self, ctx: &egui::Context) -> Option<Intent> {
         ctx.input_mut(|input| {
-            self.alt_armed |= input.events.iter().any(|event| {
-                matches!(
-                    event,
-                    egui::Event::Key {
-                        key: Key::AltLeft | Key::AltRight,
-                        pressed: true,
-                        repeat: false,
-                        ..
-                    }
-                )
-            });
-            let candidate = |event: &egui::Event| match event {
-                egui::Event::Key {
+            if !input.focused {
+                self.held_modifiers = [false; 8];
+                self.alt_armed = false;
+                discard(input);
+                return None;
+            }
+            let mut captured = None;
+            for event in &input.events {
+                let egui::Event::Key {
                     key,
+                    physical_key,
                     pressed,
                     repeat,
                     modifiers,
-                    ..
-                } => {
-                    !modifier_key(*key)
-                        && !repeat
-                        && (*pressed || (self.alt_armed && modifiers.alt && input.focused))
-                }
-                _ => false,
-            };
-            if self.release {
-                let released = input.keys_down.is_empty() && input.modifiers.is_none();
-                let fresh = input.events.iter().any(candidate);
-                self.release = !released && !fresh;
-                if !fresh {
-                    self.super_held &= input.focused;
-                    for event in &input.events {
-                        if let egui::Event::Key {
-                            key: Key::SuperLeft | Key::SuperRight,
-                            pressed,
-                            ..
-                        } = event
-                        {
-                            self.super_held = *pressed && input.focused;
-                        }
-                    }
-                    discard(input);
-                    return None;
-                }
-            }
-            let mut super_held = self.super_held && input.focused;
-            let mut captured = None;
-            for event in &input.events {
-                if let egui::Event::Key {
-                    key: Key::SuperLeft | Key::SuperRight,
-                    pressed,
-                    ..
                 } = event
-                {
-                    super_held = *pressed;
-                }
-                if captured.is_some() || !candidate(event) {
+                else {
+                    continue;
+                };
+                let physical = physical_key.unwrap_or(*key);
+                if let Some(index) = modifier_index(physical).or_else(|| modifier_index(*key)) {
+                    if self.physical_keys {
+                        self.held_modifiers[index] = *pressed;
+                    }
+                    if matches!(physical, Key::AltLeft | Key::AltRight)
+                        || matches!(key, Key::AltLeft | Key::AltRight)
+                    {
+                        self.alt_armed = if *pressed {
+                            true
+                        } else if self.physical_keys {
+                            self.held_modifiers[2] || self.held_modifiers[3]
+                        } else {
+                            false
+                        };
+                    }
                     continue;
                 }
-                captured = match event {
-                    egui::Event::Key {
-                        key,
-                        pressed: _,
-                        repeat: _,
-                        modifiers,
-                        physical_key,
-                    } if !modifier_key(*key) => Some((
-                        if self.physical_keys {
-                            physical_key.unwrap_or(*key)
-                        } else {
-                            *key
-                        },
-                        egui::Modifiers {
-                            mac_cmd: modifiers.mac_cmd || (self.physical_keys && super_held),
-                            ..*modifiers
-                        },
-                    )),
-                    _ => None,
-                };
+                if captured.is_some() || *repeat {
+                    continue;
+                }
+                let held_alt =
+                    self.physical_keys && (self.held_modifiers[2] || self.held_modifiers[3]);
+                if !*pressed && !(self.alt_armed && (modifiers.alt || held_alt)) {
+                    continue;
+                }
+                let mut active = *modifiers;
+                if self.physical_keys {
+                    active.ctrl |= self.held_modifiers[0] || self.held_modifiers[1];
+                    active.alt |= held_alt;
+                    active.shift |= self.held_modifiers[4] || self.held_modifiers[5];
+                    active.mac_cmd |= self.held_modifiers[6] || self.held_modifiers[7];
+                }
+                captured = Some((if self.physical_keys { physical } else { *key }, active));
             }
-            self.super_held = super_held && input.focused;
-            if !input.modifiers.alt {
+            if !input.modifiers.alt && !self.held_modifiers[2] && !self.held_modifiers[3] {
                 self.alt_armed = false;
             }
             discard(input);
@@ -285,18 +253,18 @@ impl Editor {
         choice.and_then(|c| self.choice(c))
     }
 }
-fn modifier_key(key: Key) -> bool {
-    matches!(
-        key,
-        Key::ControlLeft
-            | Key::ControlRight
-            | Key::AltLeft
-            | Key::AltRight
-            | Key::ShiftLeft
-            | Key::ShiftRight
-            | Key::SuperLeft
-            | Key::SuperRight
-    )
+fn modifier_index(key: Key) -> Option<usize> {
+    match key {
+        Key::ControlLeft => Some(0),
+        Key::ControlRight => Some(1),
+        Key::AltLeft => Some(2),
+        Key::AltRight => Some(3),
+        Key::ShiftLeft => Some(4),
+        Key::ShiftRight => Some(5),
+        Key::SuperLeft => Some(6),
+        Key::SuperRight => Some(7),
+        _ => None,
+    }
 }
 pub fn discard(input: &mut egui::InputState) {
     input.events.retain(|e| {
@@ -403,6 +371,131 @@ pub fn take_action_with_editing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn key_event(key: Key, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers,
+        }
+    }
+    fn recorder_frame(
+        ctx: &egui::Context,
+        editor: &mut Editor,
+        events: Vec<egui::Event>,
+    ) -> Option<Intent> {
+        let mut result = None;
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| result = editor.input(ui.ctx()),
+        );
+        out.textures_delta.clear();
+        result
+    }
+    #[test]
+    fn physical_recording_recovers_shift_and_other_held_modifiers() {
+        for (held, target, expected) in [
+            (
+                vec![Key::ControlLeft, Key::ShiftLeft],
+                Key::Slash,
+                "Ctrl Shift Slash",
+            ),
+            (
+                vec![Key::ControlRight, Key::ShiftRight],
+                Key::Comma,
+                "Ctrl Shift Comma",
+            ),
+            (vec![Key::AltLeft, Key::ShiftRight], Key::R, "Alt Shift R"),
+            (
+                vec![Key::ControlLeft, Key::AltRight, Key::ShiftLeft],
+                Key::R,
+                "Ctrl Alt Shift R",
+            ),
+        ] {
+            let ctx = egui::Context::default();
+            let mut editor = Editor::new("tab", "Tab", "").with_physical_keys();
+            for modifier in held {
+                assert!(
+                    recorder_frame(
+                        &ctx,
+                        &mut editor,
+                        vec![key_event(modifier, true, egui::Modifiers::NONE)]
+                    )
+                    .is_none()
+                );
+            }
+            let result = recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![key_event(target, true, egui::Modifiers::NONE)],
+            );
+            assert!(
+                matches!(result, Some(Intent::Set { binding, .. }) if binding == expected),
+                "expected {expected}"
+            );
+        }
+    }
+    #[test]
+    fn physical_modifiers_release_independently_and_clear_on_focus_loss() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new("tab", "Tab", "").with_physical_keys();
+        for (key, pressed) in [
+            (Key::ShiftLeft, true),
+            (Key::ShiftRight, true),
+            (Key::ShiftLeft, false),
+        ] {
+            assert!(
+                recorder_frame(
+                    &ctx,
+                    &mut editor,
+                    vec![key_event(key, pressed, egui::Modifiers::NONE)]
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            matches!(recorder_frame(&ctx, &mut editor, vec![key_event(Key::R, true, egui::Modifiers::NONE)]), Some(Intent::Set { binding, .. }) if binding == "Shift R")
+        );
+        assert!(
+            recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![
+                    key_event(Key::R, false, egui::Modifiers::NONE),
+                    key_event(Key::ShiftRight, false, egui::Modifiers::NONE)
+                ]
+            )
+            .is_none()
+        );
+        assert!(
+            matches!(recorder_frame(&ctx, &mut editor, vec![key_event(Key::Q, true, egui::Modifiers::CTRL)]), Some(Intent::Set { binding, .. }) if binding == "Ctrl Q")
+        );
+        assert!(
+            recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![key_event(Key::ShiftLeft, true, egui::Modifiers::NONE)]
+            )
+            .is_none()
+        );
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                ..Default::default()
+            },
+            |ui| {
+                assert!(editor.input(ui.ctx()).is_none());
+            },
+        );
+        out.textures_delta.clear();
+        assert!(
+            matches!(recorder_frame(&ctx, &mut editor, vec![key_event(Key::K, true, egui::Modifiers::CTRL)]), Some(Intent::Set { binding, .. }) if binding == "Ctrl K")
+        );
+    }
     #[test]
     fn physical_windows_modifier_is_released_without_sticking() {
         let ctx = egui::Context::default();

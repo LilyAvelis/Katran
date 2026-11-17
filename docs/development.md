@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Enter policy uses `overlay::PasteLease` and `overlay_service::PendingPaste`;
+production UI initializes `WindowsHost::with_observer()` before creating its
+window. `foreground_windows.rs` owns native event/visit policy; test Services
+never install hooks. File publication owns an HWND and returns bounded format
+facts through both copy API paths. See [the implementation evidence](patch-3.8/PASTE-IMPLEMENTATION.md).
+
 Optional component setup is API-first through `AiComponentsStatus` and
 `LaunchAiComponent`. `ai_components.rs` owns visible launch/receipt state,
 `ai_component_bundle.rs` embeds version-matched helpers, and

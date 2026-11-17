@@ -1,5 +1,19 @@
 # Katran 3.8 verification handoff
 
+## Enter + Ctrl/Shift punctuation follow-up · 2026-11-17
+
+Dispatcher overlay 5/5, copy-before-paste 2/2, new intent API 6/6, observer policy
+4/4 and file publication 11/11 passed with synthetic inputs. Emoji catalogue API
+7/7, smart copy 2/2 and tab summon API 3/3 passed. Keyboard parser/persistence 2/2
+and physical recorder 7/7 passed, including Ctrl+Shift+Slash and Comma.
+UI aggregate 252/253 passed; its one failure was an obsolete fake foreground
+assumption. After correcting the fake's activation transition, that isolated UI
+test passed (no broader rerun needed). All-targets Clippy with denied warnings,
+format and diff checks passed. Windows native source compiled; hooks, clipboard,
+Notion, chats and visible UI were not exercised by automation. Azuros reviewed
+the concrete patch and the requested repeat-summon API case passed. See
+[implementation and manual checks](PASTE-IMPLEMENTATION.md).
+
 ## Optional AI setup · 2026-11-17
 
 Installed source `caa99c6`, one 1m20s optimized build, matched compiled-input

@@ -241,6 +241,21 @@ pub struct CopyReceipt {
     pub failures: Vec<ItemFailure>,
     pub warnings: Vec<String>,
     pub sequence: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<PublicationFacts>,
+}
+/// Facts about accepted clipboard formats, never file names or content.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct PublicationFacts {
+    pub formats: Vec<&'static str>,
+    pub item_count: usize,
+    pub optional_pixel_warning: bool,
+    pub sequence: u32,
+}
+pub struct ClipboardWrite {
+    pub sequence: u32,
+    pub warnings: Vec<String>,
+    pub publication: Option<PublicationFacts>,
 }
 /// Separate owned-export budget, including the still-pasteable prior batch.
 pub const DEFAULT_EXPORT_QUOTA: u64 = 2 * 1024 * 1024 * 1024;
@@ -535,6 +550,14 @@ fn bounded_content_digest(path: &Path, limit: u64) -> Result<String, String> {
 /// A sink must return success only after the primary file payload is accepted.
 pub trait ClipboardSink {
     fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String>;
+    fn write_with_facts(&mut self, paths: &[PathBuf]) -> Result<ClipboardWrite, String> {
+        let (sequence, warnings) = self.write(paths)?;
+        Ok(ClipboardWrite {
+            sequence,
+            warnings,
+            publication: None,
+        })
+    }
 }
 pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt, String> {
     if plan.attempted.replace(true) {
@@ -547,7 +570,11 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
             plan.failures.len()
         ));
     }
-    let (sequence, mut warnings) = match sink.write(&plan.paths) {
+    let ClipboardWrite {
+        sequence,
+        mut warnings,
+        publication,
+    } = match sink.write_with_facts(&plan.paths) {
         Ok(result) => result,
         Err(error) => {
             return match std::fs::remove_dir_all(&plan.directory) {
@@ -576,6 +603,7 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
         failures: plan.failures.clone(),
         warnings,
         sequence,
+        publication,
     })
 }
 /// Image decoding and HDROP encoding are preparation work, not publication work.
@@ -603,6 +631,62 @@ fn remember_file_token(tokens: &mut std::collections::VecDeque<String>, token: S
     }
 }
 
+#[cfg(any(windows, test))]
+trait FilePublication {
+    fn owner_valid(&self) -> bool;
+    fn primary(&mut self) -> Result<(), String>;
+    fn pixels(&mut self) -> Result<(), String>;
+    fn effect(&mut self) -> Result<bool, String>;
+    fn marker(&mut self) -> Result<bool, String>;
+    fn sequence(&self) -> u32;
+}
+
+#[cfg(any(windows, test))]
+fn publish_file_formats<B: FilePublication>(
+    mut backend: B,
+    item_count: usize,
+    has_pixels: bool,
+    mut warnings: Vec<String>,
+) -> Result<ClipboardWrite, String> {
+    if !backend.owner_valid() {
+        return Err("Clipboard owner window unavailable".into());
+    }
+    backend.primary()?;
+    let mut formats = vec!["CF_HDROP"];
+    let mut optional_pixel_warning = !warnings.is_empty();
+    if has_pixels {
+        match backend.pixels() {
+            Ok(()) => formats.push("CF_DIBV5"),
+            Err(error) => {
+                optional_pixel_warning = true;
+                warnings.push(format!("Files copied; image clipboard failed: {error}"));
+            }
+        }
+    }
+    match backend.effect() {
+        Ok(true) => formats.push("Preferred DropEffect"),
+        Ok(false) => {}
+        Err(error) => warnings.push(format!("Copy effect unavailable: {error}")),
+    }
+    match backend.marker() {
+        Ok(true) => formats.push("Katran owner marker"),
+        Ok(false) => {}
+        Err(error) => warnings.push(format!("Clipboard ownership marker failed: {error}")),
+    }
+    let sequence = backend.sequence();
+    drop(backend); // Close clipboard before destroying the owner window.
+    Ok(ClipboardWrite {
+        sequence,
+        warnings,
+        publication: Some(PublicationFacts {
+            formats,
+            item_count,
+            optional_pixel_warning,
+            sequence,
+        }),
+    })
+}
+
 #[cfg(test)]
 #[test]
 fn file_owner_tokens_are_bounded() {
@@ -621,6 +705,162 @@ pub(crate) struct PreparedNativeClipboard {
     files: Vec<u8>,
     pixels: Option<Vec<u8>>,
     warnings: Vec<String>,
+}
+
+#[cfg(windows)]
+mod native_publication {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use windows::{
+        Win32::{
+            Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+            System::LibraryLoader::GetModuleHandleW,
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, DefWindowProcW, DestroyWindow, HWND_MESSAGE, RegisterClassW,
+                UnregisterClassW, WNDCLASSW,
+            },
+        },
+        core::{PCWSTR, w},
+    };
+
+    unsafe extern "system" fn window_proc(
+        hwnd: HWND,
+        message: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, message, wp, lp) }
+    }
+    struct Window {
+        hwnd: HWND,
+        class: Vec<u16>,
+        module: HINSTANCE,
+    }
+    impl Window {
+        fn new() -> Result<Self, String> {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let class: Vec<u16> = format!(
+                "Katran.FileClipboard.{}.{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            )
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+            let module = HINSTANCE(
+                unsafe { GetModuleHandleW(None) }
+                    .map_err(|e| e.to_string())?
+                    .0,
+            );
+            let definition = WNDCLASSW {
+                lpfnWndProc: Some(window_proc),
+                hInstance: module,
+                lpszClassName: PCWSTR(class.as_ptr()),
+                ..Default::default()
+            };
+            if unsafe { RegisterClassW(&definition) } == 0 {
+                return Err(windows::core::Error::from_thread().to_string());
+            }
+            let hwnd = match unsafe {
+                CreateWindowExW(
+                    Default::default(),
+                    PCWSTR(class.as_ptr()),
+                    w!(""),
+                    Default::default(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(HWND_MESSAGE),
+                    None,
+                    Some(module),
+                    None,
+                )
+            } {
+                Ok(hwnd) => hwnd,
+                Err(error) => {
+                    unsafe {
+                        let _ = UnregisterClassW(PCWSTR(class.as_ptr()), Some(module));
+                    }
+                    return Err(error.to_string());
+                }
+            };
+            Ok(Self {
+                hwnd,
+                class,
+                module,
+            })
+        }
+    }
+    impl Drop for Window {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyWindow(self.hwnd);
+                let _ = UnregisterClassW(PCWSTR(self.class.as_ptr()), Some(self.module));
+            }
+        }
+    }
+    pub(super) struct Backend<'a> {
+        // Fields drop in declaration order: CloseClipboard before DestroyWindow.
+        _clipboard: clipboard_win::Clipboard,
+        window: Window,
+        files: &'a [u8],
+        pixels: Option<&'a [u8]>,
+    }
+    impl<'a> Backend<'a> {
+        pub(super) fn open(files: &'a [u8], pixels: Option<&'a [u8]>) -> Result<Self, String> {
+            let window = Window::new()?;
+            if window.hwnd.0.is_null() {
+                return Err("Clipboard owner window unavailable".into());
+            }
+            let clipboard = clipboard_win::Clipboard::new_attempts_for(window.hwnd.0, 20)
+                .map_err(|e| e.to_string())?;
+            Ok(Self {
+                _clipboard: clipboard,
+                window,
+                files,
+                pixels,
+            })
+        }
+    }
+    impl FilePublication for Backend<'_> {
+        fn owner_valid(&self) -> bool {
+            !self.window.hwnd.0.is_null()
+        }
+        fn primary(&mut self) -> Result<(), String> {
+            clipboard_win::raw::set(15, self.files).map_err(|e| e.to_string())
+        }
+        fn pixels(&mut self) -> Result<(), String> {
+            clipboard_win::raw::set_without_clear(17, self.pixels.ok_or("Pixels unavailable")?)
+                .map_err(|e| e.to_string())
+        }
+        fn effect(&mut self) -> Result<bool, String> {
+            let Some(format) = clipboard_win::raw::register_format("Preferred DropEffect") else {
+                return Ok(false);
+            };
+            clipboard_win::raw::set_without_clear(format.get(), &1u32.to_le_bytes())
+                .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        fn marker(&mut self) -> Result<bool, String> {
+            let mut tokens = FILE_OWNER_TOKENS
+                .lock()
+                .map_err(|_| "Clipboard ownership registry unavailable".to_owned())?;
+            let token = unsafe { windows::Win32::System::Com::CoCreateGuid() }
+                .map(|guid| format!("{:032x}", guid.to_u128()))
+                .map_err(|e| e.to_string())?;
+            let format = clipboard_win::raw::register_format(crate::table_clipboard::OWNER_FORMAT)
+                .ok_or("Cannot register ownership marker")?;
+            let bytes = [token.as_bytes(), &[0]].concat();
+            clipboard_win::raw::set_without_clear(format.get(), &bytes)
+                .map_err(|e| e.to_string())?;
+            remember_file_token(&mut tokens, token);
+            Ok(true)
+        }
+        fn sequence(&self) -> u32 {
+            unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+        }
+    }
 }
 impl PreparedNativeClipboard {
     pub(crate) fn prepare(paths: &[PathBuf]) -> Self {
@@ -647,54 +887,22 @@ impl PreparedNativeClipboard {
 }
 impl ClipboardSink for PreparedNativeClipboard {
     fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+        let result = self.write_with_facts(paths)?;
+        Ok((result.sequence, result.warnings))
+    }
+    fn write_with_facts(&mut self, paths: &[PathBuf]) -> Result<ClipboardWrite, String> {
         if paths != self.paths {
             return Err("Prepared clipboard payload does not match export plan".into());
         }
         #[cfg(windows)]
         {
-            let mut warnings = std::mem::take(&mut self.warnings);
-            let _clipboard =
-                clipboard_win::Clipboard::new_attempts(20).map_err(|error| error.to_string())?;
-            clipboard_win::raw::set(15, &self.files).map_err(|error| error.to_string())?;
-            if let Some(pixels) = &self.pixels
-                && let Err(error) = clipboard_win::raw::set_without_clear(17, pixels)
-            {
-                warnings.push(format!("Files copied; image clipboard failed: {error}"));
-            }
-            if let Some(format) = clipboard_win::raw::register_format("Preferred DropEffect")
-                && let Err(error) =
-                    clipboard_win::raw::set_without_clear(format.get(), &1u32.to_le_bytes())
-            {
-                warnings.push(format!("Copy effect unavailable: {error}"));
-            }
-            // Keep the registry locked until publication completes, so capture
-            // cannot observe a marker before its token is remembered.
-            match FILE_OWNER_TOKENS.lock() {
-                Ok(mut tokens) => {
-                    let marker = unsafe { windows::Win32::System::Com::CoCreateGuid() }
-                        .map(|guid| format!("{:032x}", guid.to_u128()))
-                        .map_err(|e| e.to_string());
-                    let result = marker.and_then(|token| {
-                        let format = clipboard_win::raw::register_format(
-                            crate::table_clipboard::OWNER_FORMAT,
-                        )
-                        .ok_or_else(|| "Cannot register ownership marker".to_string())?;
-                        let bytes = [token.as_bytes(), &[0]].concat();
-                        clipboard_win::raw::set_without_clear(format.get(), &bytes)
-                            .map_err(|e| e.to_string())?;
-                        remember_file_token(&mut tokens, token);
-                        Ok(())
-                    });
-                    if let Err(error) = result {
-                        warnings.push(format!("Clipboard ownership marker failed: {error}"));
-                    }
-                }
-                Err(_) => warnings.push("Clipboard ownership registry unavailable".into()),
-            }
-            Ok((
-                unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() },
-                warnings,
-            ))
+            let backend = native_publication::Backend::open(&self.files, self.pixels.as_deref())?;
+            publish_file_formats(
+                backend,
+                paths.len(),
+                self.pixels.is_some(),
+                std::mem::take(&mut self.warnings),
+            )
         }
         #[cfg(not(windows))]
         {
@@ -708,10 +916,182 @@ impl ClipboardSink for NativeClipboard {
     fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
         PreparedNativeClipboard::prepare(paths).write(paths)
     }
+    fn write_with_facts(&mut self, paths: &[PathBuf]) -> Result<ClipboardWrite, String> {
+        PreparedNativeClipboard::prepare(paths).write_with_facts(paths)
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct FakePublication {
+        events: Arc<Mutex<Vec<&'static str>>>,
+        valid_owner: bool,
+        fail_primary: bool,
+        fail_pixels: bool,
+    }
+    impl Drop for FakePublication {
+        fn drop(&mut self) {
+            let mut events = self.events.lock().unwrap();
+            events.push("close_clipboard");
+            events.push("destroy_owner");
+        }
+    }
+    impl FilePublication for FakePublication {
+        fn owner_valid(&self) -> bool {
+            self.events.lock().unwrap().push("check_owner");
+            self.valid_owner
+        }
+        fn primary(&mut self) -> Result<(), String> {
+            self.events.lock().unwrap().push("hdrop");
+            if self.fail_primary {
+                Err("primary failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn pixels(&mut self) -> Result<(), String> {
+            self.events.lock().unwrap().push("dibv5");
+            if self.fail_pixels {
+                Err("pixel failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn effect(&mut self) -> Result<bool, String> {
+            self.events.lock().unwrap().push("effect");
+            Ok(true)
+        }
+        fn marker(&mut self) -> Result<bool, String> {
+            self.events.lock().unwrap().push("marker");
+            Ok(true)
+        }
+        fn sequence(&self) -> u32 {
+            self.events.lock().unwrap().push("sequence");
+            42
+        }
+    }
+    fn fake_publication(
+        valid_owner: bool,
+        fail_primary: bool,
+        fail_pixels: bool,
+    ) -> (FakePublication, Arc<Mutex<Vec<&'static str>>>) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        (
+            FakePublication {
+                events: events.clone(),
+                valid_owner,
+                fail_primary,
+                fail_pixels,
+            },
+            events,
+        )
+    }
+    #[test]
+    fn file_publication_requires_owner_and_closes_before_destroying_it() {
+        let (backend, events) = fake_publication(true, false, false);
+        let result = publish_file_formats(backend, 2, true, vec![]).unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "check_owner",
+                "hdrop",
+                "dibv5",
+                "effect",
+                "marker",
+                "sequence",
+                "close_clipboard",
+                "destroy_owner"
+            ]
+        );
+        let facts = result.publication.unwrap();
+        assert_eq!(
+            facts.formats,
+            [
+                "CF_HDROP",
+                "CF_DIBV5",
+                "Preferred DropEffect",
+                "Katran owner marker"
+            ]
+        );
+        assert_eq!(facts.item_count, 2);
+        assert_eq!(facts.sequence, 42);
+        assert!(!facts.optional_pixel_warning);
+        let encoded = serde_json::to_string(&facts).unwrap();
+        assert!(!encoded.contains("path") && !encoded.contains("content"));
+        let (backend, events) = fake_publication(false, false, false);
+        assert!(publish_file_formats(backend, 1, false, vec![]).is_err());
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["check_owner", "close_clipboard", "destroy_owner"]
+        );
+    }
+    #[test]
+    fn hdrop_failure_is_fatal_but_optional_pixels_are_reported() {
+        let (backend, events) = fake_publication(true, true, false);
+        assert!(publish_file_formats(backend, 1, true, vec![]).is_err());
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["check_owner", "hdrop", "close_clipboard", "destroy_owner"]
+        );
+        let (backend, events) = fake_publication(true, false, true);
+        let result = publish_file_formats(backend, 1, true, vec![]).unwrap();
+        let facts = result.publication.unwrap();
+        assert_eq!(facts.sequence, 42);
+        assert!(facts.optional_pixel_warning);
+        assert!(!facts.formats.contains(&"CF_DIBV5"));
+        assert!(facts.formats.contains(&"CF_HDROP"));
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(events.lock().unwrap().last(), Some(&"destroy_owner"));
+    }
+    #[test]
+    fn commit_exposes_publication_facts_without_changing_legacy_receipt() {
+        struct FactSink;
+        impl ClipboardSink for FactSink {
+            fn write(&mut self, _: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+                unreachable!("commit must use extended sink boundary")
+            }
+            fn write_with_facts(&mut self, paths: &[PathBuf]) -> Result<ClipboardWrite, String> {
+                let (backend, _) = fake_publication(true, false, true);
+                publish_file_formats(backend, paths.len(), true, vec![])
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("synthetic.bin");
+        std::fs::write(&source, b"fixture").unwrap();
+        let plan = prepare(root.path(), &[cached_event(source)]).unwrap();
+        let receipt = commit(&plan, &mut FactSink).unwrap();
+        assert_eq!(receipt.count, 1);
+        assert_eq!(receipt.sequence, 42);
+        assert!(receipt.failures.is_empty());
+        assert_eq!(receipt.warnings.len(), 1);
+        let facts = receipt.publication.unwrap();
+        assert_eq!(facts.item_count, 1);
+        assert_eq!(facts.sequence, receipt.sequence);
+        assert!(facts.optional_pixel_warning);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn unicode_group_hdrop_encodes_all_names_and_double_terminator() {
+        use std::os::windows::ffi::OsStrExt;
+        let paths = [
+            PathBuf::from(r"C:\test\папка\猫.txt"),
+            PathBuf::from(r"C:\test\🐄.png"),
+        ];
+        let bytes = file_drop(&paths);
+        let units: Vec<u16> = bytes[20..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let expected: Vec<u16> = paths
+            .iter()
+            .flat_map(|path| path.as_os_str().encode_wide().chain(Some(0)))
+            .chain(Some(0))
+            .collect();
+        assert_eq!(units, expected);
+        assert_eq!(&units[units.len() - 2..], &[0, 0]);
+    }
     struct Fake(bool);
     impl ClipboardSink for Fake {
         fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {

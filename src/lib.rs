@@ -37,6 +37,7 @@ pub mod folder_search_rank;
 pub mod folder_semantic;
 pub mod folder_transfer;
 pub mod folder_watch;
+mod foreground_windows;
 pub mod interaction;
 mod jobs_service;
 pub mod known_folders;
@@ -127,7 +128,7 @@ pub struct Service {
     window_visible: bool,
     overlay_session: overlay::Session,
     overlay_host: Box<dyn overlay::Host + Send>,
-    overlay_copy: Option<(domain_jobs::JobId, u64)>,
+    overlay_copy: Option<crate::overlay_service::PendingPaste>,
     clipboard_files: Box<dyn clipboard_files::Source>,
     transfer_sequence: Option<u32>,
     transfer_intent: Option<(Vec<SelectionRef>, bool)>,
@@ -302,7 +303,7 @@ impl Service {
             folder_semantic_session: folder_semantic::new_session(),
             window_visible: true,
             overlay_session: Default::default(),
-            overlay_host: Box::new(overlay_windows::WindowsHost),
+            overlay_host: Box::new(overlay_windows::WindowsHost::new()),
             overlay_copy: None,
             clipboard_files: Box::new(clipboard_files::Native),
             transfer_sequence: None,
@@ -395,7 +396,7 @@ impl Service {
             folder_semantic_session: folder_semantic::new_session(),
             window_visible: true,
             overlay_session: Default::default(),
-            overlay_host: Box::new(overlay_windows::WindowsHost),
+            overlay_host: Box::new(overlay_windows::WindowsHost::new()),
             overlay_copy: None,
             clipboard_files: Box::new(clipboard_files::Native),
             transfer_sequence: None,
@@ -1485,7 +1486,7 @@ impl Service {
                     self.record_clipboard_publication(receipt.sequence);
                 }
                 Ok(
-                    serde_json::json!({"copied":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings}),
+                    serde_json::json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings,"publication":receipt.publication}),
                 )
             }
             Command::IngestWithOrigin { origin, command } => {

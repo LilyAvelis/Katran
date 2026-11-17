@@ -52,7 +52,8 @@ impl Host for Fake {
     fn wait_modifiers_released(&mut self) -> katran::overlay::Result<()> {
         Ok(())
     }
-    fn activate(&mut self, _: u64) -> katran::overlay::Result<()> {
+    fn activate(&mut self, hwnd: u64) -> katran::overlay::Result<()> {
+        self.0.lock().unwrap().foreground = hwnd;
         Ok(())
     }
     fn send_paste(&mut self, _: Target, sequence: u32) -> katran::overlay::Result<()> {
@@ -157,6 +158,7 @@ fn copy_must_succeed_before_paste_and_session_is_single_use() {
             false,
             "self summon must not replace the previous external target"
         );
+        state.lock().unwrap().foreground = 8;
         call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {

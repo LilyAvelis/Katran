@@ -298,6 +298,7 @@ mod tests {
 
     #[derive(Default)]
     struct PasteState {
+        foreground: Option<u64>,
         text: String,
         sent: usize,
     }
@@ -311,7 +312,7 @@ mod tests {
     struct Previous(Arc<Mutex<PasteState>>);
     impl katran::overlay::Host for Previous {
         fn foreground(&mut self) -> katran::overlay::Result<u64> {
-            Ok(7)
+            Ok(self.0.lock().unwrap().foreground.unwrap_or(7))
         }
         fn identity(&mut self, hwnd: u64) -> katran::overlay::Result<katran::overlay::Target> {
             Ok(katran::overlay::Target {
@@ -331,7 +332,8 @@ mod tests {
         fn wait_modifiers_released(&mut self) -> katran::overlay::Result<()> {
             Ok(())
         }
-        fn activate(&mut self, _: u64) -> katran::overlay::Result<()> {
+        fn activate(&mut self, hwnd: u64) -> katran::overlay::Result<()> {
+            self.0.lock().unwrap().foreground = Some(hwnd);
             Ok(())
         }
         fn send_paste(
@@ -533,6 +535,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        pasted.lock().unwrap().foreground = Some(77);
         key(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert!(app.overlay_ui.pending, "{}", app.message);
         while app.overlay_ui.pending {

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Katran — проверка вставки</title>
+<style>
+body{font:17px system-ui;background:#171926;color:#eee;max-width:850px;margin:45px auto;padding:20px}
+h1{font-size:26px}button{font:inherit;padding:10px;border-radius:8px;cursor:pointer}
+#receiver{margin:22px 0;padding:35px;border:2px solid #a5a2ec;border-radius:12px;outline:none}
+#receiver:focus{border-color:#e9b75b;background:#222537}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#222537;padding:20px;border-radius:12px}
+.muted{color:#b2b4c7}li{margin:10px 0}
+</style>
+<h1>Проверка вставки Katran</h1>
+<p>Эта локальная страница показывает, дошла ли команда вставки и какие типы данных получил браузер.
+Она не читает содержимое файлов, имена, текст или ссылки и ничего не отправляет в сеть.</p>
+<ol><li>Нажми на область ниже, затем вернись в уже открытый Katran и вставь один тестовый файл через Enter.</li>
+<li>Для сравнения скопируй тот же объект в Katran через Ctrl+C и здесь нажми Ctrl+V.</li></ol>
+<div id="receiver" contenteditable="true" role="textbox" aria-label="Область проверки вставки" spellcheck="false">Нажми сюда перед проверкой</div>
+<button id="reset">Очистить результаты</button>
+<pre id="output" aria-live="polite">Ожидание вставки…</pre>
+<p class="muted">Если здесь есть файл, а в Notion его нет, проверяется обработчик конкретного редактора.
+Результат этой страницы не подтверждает, что Notion прикрепил файл.</p>
+<script>
+const receiver=document.getElementById('receiver'),output=document.getElementById('output');
+let rows=[],keys=0,pastes=0;
+function show(){output.textContent=JSON.stringify({команды_Ctrl_V:keys,события_вставки:pastes,проверки:rows},null,2)}
+receiver.addEventListener('keydown',event=>{
+ if((event.ctrlKey||event.metaKey)&&event.code==='KeyV'){keys++;show()}
+});
+receiver.addEventListener('paste',event=>{
+ event.preventDefault();pastes++;
+ const data=event.clipboardData;
+ rows.push({номер:pastes,типы:data?Array.from(data.types):[],
+   файлы:data?Array.from(data.files,file=>({тип:file.type||'не указан',байты:file.size})):[],
+   элементы:data?Array.from(data.items,item=>({вид:item.kind,тип:item.type})):[]});
+ rows=rows.slice(-10);show();
+});
+receiver.addEventListener('beforeinput',event=>event.preventDefault());
+document.getElementById('reset').addEventListener('click',()=>{rows=[];keys=0;pastes=0;show();receiver.focus()});
+</script></html>

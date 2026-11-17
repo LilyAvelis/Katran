@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Enter follow-up · local 3.8 · 2026-11-17
+
+Begin/Complete paste use immutable owner/target/visit leases. Native foreground
+observation starts only in production UI before window creation, not ordinary
+Service/test constructors. Never fallback to a stale summon on tracking failure,
+retarget pending input, force foreign child focus or retry partial SendInput.
+File publication owns a real HWND through CloseClipboard; publication facts are
+bounded formats/counts only. `sent` means input submission, not recipient
+attachment. See `docs/patch-3.8/PASTE-IMPLEMENTATION.md` for evidence/limitations.
+
 ## Local optional AI setup · 2026-11-17
 
 Settings → AI uses `AiComponentsStatus` / `LaunchAiComponent`. Installation and

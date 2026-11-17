@@ -6,6 +6,26 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Enter implementation handoff: Mira native observer/activation, Nemi lease API
+and Fenna file publication are frozen; first API gates passed. Owner then reported
+Ctrl+Shift+Slash/Shift recording: Polly owns parser/VK aliases and persistence
+tests, Fenna owns the existing physical recorder (7/7 tests). Azuros reused the
+same `/root/azuros` gpt-6.1-sol/xhigh for bounded read-only review and found no
+remaining blocking code issue after fresh-summon consume correction. His exact
+combined API regression passed. No roster expansion or native UI/Clipboard test.
+Polly integrates diagnostics, remaining gates, docs and one primary UI build.
+
+Enter implementation is now explicitly authorized by Lilia (2026-11-17).
+Same existing sessions: Nemi `/root/nemi` (gpt-6.1-terra/high) owns overlay domain,
+immutable paste lease and synthetic API tests; Mira `/root/mira` (same model/effort)
+owns native foreground observer and activation/input guards; Fenna `/root/fenna`
+(same model/effort) owns file Clipboard HWND lifetime and publication facts.
+All three acknowledged scope/result and agreed native/domain interfaces before
+parallel edits. Polly owns shared Service/feature/UI integration, docs and build.
+No roster expansion, desktop automation or real personal Clipboard testing.
+Native receipt interoperability remains a measured/manual boundary, not inferred
+from SendInput. Garden refresh failed; cached profiles were used as reported.
+
 Current installed source `caa99c6` adds the AI settings/visible installers. One
 optimized UI build completed in 1m20s with identical pre/post compiled-resource
 hashes. Primary runtime is `4a4340fd4d26`, executable SHA256

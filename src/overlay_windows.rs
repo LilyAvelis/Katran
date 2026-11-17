@@ -1,7 +1,10 @@
 //! Native Windows host and thread-owned global hotkey. No Clipboard handling.
 #[cfg(windows)]
 mod native {
-    use crate::overlay::{Host, Hotkey, OverlayError, Result, SummonReceipt, Target, WorkArea};
+    use crate::overlay::{
+        ForegroundVisit, Host, Hotkey, LeasePhase, OverlayError, Result, SummonReceipt, Target,
+        WorkArea,
+    };
     use std::{
         sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
         thread::{self, JoinHandle},
@@ -28,8 +31,83 @@ mod native {
     fn fail(code: &str, error: impl ToString) -> OverlayError {
         OverlayError::new(code, error)
     }
-    pub struct WindowsHost;
+    pub struct WindowsHost {
+        observer: Option<crate::foreground_windows::Observer>,
+    }
+    impl Default for WindowsHost {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+    impl WindowsHost {
+        pub fn new() -> Self {
+            Self { observer: None }
+        }
+        pub fn with_observer() -> Result<Self> {
+            Ok(Self {
+                observer: Some(crate::foreground_windows::Observer::start()?),
+            })
+        }
+        fn observer(&self) -> Result<&crate::foreground_windows::Observer> {
+            self.observer
+                .as_ref()
+                .ok_or_else(|| fail("tracking_unavailable", "Foreground tracking is unavailable"))
+        }
+    }
     impl Host for WindowsHost {
+        fn foreground_visit(&mut self, owner: u64) -> Result<Option<ForegroundVisit>> {
+            self.observer()?.visit(owner).map(Some)
+        }
+        fn lease_check(
+            &mut self,
+            owner: u64,
+            epoch: u64,
+            expected: Target,
+            phase: LeasePhase,
+        ) -> Result<()> {
+            if self.identity(expected.hwnd)? != expected {
+                return Err(fail("target_changed", "Previous window or process changed"));
+            }
+            self.observer()?.check(owner, epoch, expected, phase)
+        }
+        fn activate_with_lease(&mut self, owner: u64, epoch: u64, expected: Target) -> Result<()> {
+            self.observer()?.arm(owner, epoch, expected)?;
+            self.activate(expected.hwnd)?;
+            let mut outcome = 0usize;
+            let ok = unsafe {
+                SendMessageTimeoutW(
+                    hwnd(expected.hwnd),
+                    WM_NULL,
+                    WPARAM(0),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                    500,
+                    Some(&mut outcome),
+                )
+            };
+            if ok.0 == 0 {
+                return Err(fail(
+                    "activation_timeout",
+                    "Previous application did not become ready in time",
+                ));
+            }
+            self.lease_check(owner, epoch, expected, LeasePhase::ActivatingTarget)
+        }
+        fn send_paste_leased(
+            &mut self,
+            owner: u64,
+            epoch: u64,
+            expected: Target,
+            sequence: u32,
+        ) -> Result<()> {
+            self.wait_modifiers_released()?;
+            self.lease_check(owner, epoch, expected, LeasePhase::ActivatingTarget)?;
+            self.send_paste(expected, sequence)
+        }
+        fn consume_visit(&mut self, owner: u64, epoch: u64) -> Result<()> {
+            self.observer()?.consume(owner, epoch)
+        }
+
         fn foreground(&mut self) -> Result<u64> {
             let h = unsafe { GetForegroundWindow() };
             if h.0.is_null() {
@@ -160,6 +238,15 @@ mod native {
                     "Clipboard changed before pasting",
                 ));
             }
+            if [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN]
+                .iter()
+                .any(|key| (unsafe { GetAsyncKeyState(i32::from(key.0)) } as u16 & 0x8000) != 0)
+            {
+                return Err(fail(
+                    "modifiers_held",
+                    "Release modifier keys before pasting",
+                ));
+            }
             let make = |key, flags| INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: INPUT_0 {
@@ -189,7 +276,11 @@ mod native {
                     }
                 }
                 return Err(fail(
-                    "input_blocked",
+                    if sent == 0 {
+                        "input_blocked"
+                    } else {
+                        "input_partial"
+                    },
                     format!(
                         "Windows accepted {sent}/4 input events; target integrity/UIPI may block input"
                     ),
@@ -203,7 +294,7 @@ mod native {
     /// the target monitor and request foreground. Unsupported/denied desktop
     /// transitions are returned explicitly; this does not switch desktops.
     pub fn summon_window(own_window: u64, previous: Target, area: WorkArea) -> Result<()> {
-        let mut host = WindowsHost;
+        let mut host = WindowsHost::new();
         let own = host.identity(own_window)?;
         if own.pid != std::process::id()
             || previous.pid == own.pid
@@ -394,7 +485,7 @@ mod native {
             }
             if message.message == WM_HOTKEY && message.wParam.0 == 1 {
                 let capture = (|| {
-                    let mut host = WindowsHost;
+                    let mut host = WindowsHost::new();
                     let window = host.foreground()?;
                     let previous = host.identity(window)?;
                     if previous.pid == std::process::id() {
@@ -437,6 +528,24 @@ pub use native::{HotkeyListener, WindowsHost, summon_window};
 
 #[cfg(not(windows))]
 pub struct WindowsHost;
+#[cfg(not(windows))]
+impl WindowsHost {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn with_observer() -> crate::overlay::Result<Self> {
+        Err(crate::overlay::OverlayError::new(
+            "unsupported_platform",
+            "Overlay requires Windows",
+        ))
+    }
+}
+#[cfg(not(windows))]
+impl Default for WindowsHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 #[cfg(not(windows))]
 impl crate::overlay::Host for WindowsHost {
     fn foreground(&mut self) -> crate::overlay::Result<u64> {

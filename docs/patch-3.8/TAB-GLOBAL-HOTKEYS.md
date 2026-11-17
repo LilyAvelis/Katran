@@ -1,5 +1,12 @@
 # Global tab shortcuts · local 3.8 · 2026-11-17
 
+Later keyboard correction: physical modifier press/release tracking now preserves
+Ctrl+Shift/Alt+Shift combinations when event snapshots omit Shift. Parser accepts
+standard punctuation/navigation keys including Slash and Comma. Ctrl+Shift+Slash
+persists as a physical Win32 OEM chord; parser API 2/2 and recorder 7/7 passed.
+See [the combined follow-up](PASTE-IMPLEMENTATION.md). Modifier-only bindings
+remain invalid and Windows-reserved combinations can still fail registration.
+
 Settings → Tabs places a recorder and clear control to the right of each eye.
 There are no default bindings. `Settings.tab_hotkeys` maps stable `ShelfTab`
 values to canonical physical Win32 chords. Win/Ctrl/Alt/Shift plus a letter,

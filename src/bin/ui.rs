@@ -2085,6 +2085,13 @@ fn main() -> eframe::Result {
         eprintln!("{}", e.message);
         std::process::exit(1)
     });
+    // Observe the external application before eframe creates/activates Katran.
+    // Synthetic API/headless tests never install native foreground hooks.
+    #[cfg(all(windows, not(test)))]
+    match katran::overlay_windows::WindowsHost::with_observer() {
+        Ok(host) => api.set_overlay_host(Box::new(host)),
+        Err(error) => eprintln!("Foreground tracking: {}", error.code),
+    }
     let initial_settings = api.execute(Request {
         api_version: 1,
         request_id: "startup-language".into(),

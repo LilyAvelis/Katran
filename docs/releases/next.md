@@ -2,6 +2,11 @@
 
 ## Local 3.8 work · 2026-11-17
 
+The subsequently authorized [Enter follow-up](../patch-3.8/PASTE-IMPLEMENTATION.md)
+implements observed destination/immutable paste leases and owned file Clipboard
+publication. Global binding recording/parser now supports Ctrl+Shift+Slash.
+Native Notion/chat delivery remains owner acceptance, not inferred from `sent`.
+
 Settings → AI now owns explicit visible-terminal component installation and
 functional verification, independent Folder CPU setup and optional CUDA. See
 [the setup contract](../patch-3.8/AI-COMPONENTS.md) for evidence and remaining

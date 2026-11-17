@@ -426,6 +426,7 @@ fn category_filter_is_validated_and_pagination_is_scoped() {
 
 #[derive(Default)]
 struct OutputState {
+    foreground: Option<u64>,
     text: String,
     sequence: u32,
     sent: usize,
@@ -451,7 +452,7 @@ impl katran::text_fragments::ClipboardSink for Clipboard {
 struct Overlay(std::sync::Arc<std::sync::Mutex<OutputState>>);
 impl katran::overlay::Host for Overlay {
     fn foreground(&mut self) -> katran::overlay::Result<u64> {
-        Ok(7)
+        Ok(self.0.lock().unwrap().foreground.unwrap_or(7))
     }
     fn identity(&mut self, hwnd: u64) -> katran::overlay::Result<katran::overlay::Target> {
         Ok(katran::overlay::Target {
@@ -471,7 +472,8 @@ impl katran::overlay::Host for Overlay {
     fn wait_modifiers_released(&mut self) -> katran::overlay::Result<()> {
         Ok(())
     }
-    fn activate(&mut self, _: u64) -> katran::overlay::Result<()> {
+    fn activate(&mut self, hwnd: u64) -> katran::overlay::Result<()> {
+        self.0.lock().unwrap().foreground = Some(hwnd);
         Ok(())
     }
     fn send_paste(
@@ -779,6 +781,7 @@ fn catalogue_copy_paste_and_drag_share_exact_unicode_selection() {
             },
         },
     );
+    state.lock().unwrap().foreground = Some(8);
     call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -830,6 +833,7 @@ fn catalogue_copy_paste_and_drag_share_exact_unicode_selection() {
             },
         },
     );
+    state.lock().unwrap().foreground = Some(8);
     call(&mut api, Command::BeginPastePrevious { owner_window: 8 });
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
