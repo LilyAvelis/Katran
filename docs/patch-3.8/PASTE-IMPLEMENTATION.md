@@ -1,5 +1,10 @@
 # Enter follow-up · 2026-11-17
 
+Subsequent browser-Notion failure was isolated and corrected at the file receipt
+sequence boundary; the owner confirmed the same file now inserts. See
+[incident and native confirmation](PASTE-SEQUENCE.md). Earlier pending acceptance
+statements below describe the first Enter artifact, not that later confirmation.
+
 Owner scope: use the last external window visited before returning to an already
 open Katran; investigate Notion/chat file delivery. Lilia clarified that retaining
 the receiver's focused text control generally already works. This patch does not

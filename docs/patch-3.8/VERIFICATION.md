@@ -2,6 +2,14 @@
 
 ## File receipt settlement · 2026-11-17
 
+Installed source `82619cb`, one 1m26s optimized build, primary `981c10a95b8a`.
+SHA256 `981c10a95b8a9d74f4dcda749dd50a4ddac0506d185d0f0b4580f4c36f5e246d`;
+input fingerprints/copies matched, backup integrity v13 passed, old runtime kept.
+Dispatcher API 2/2 passed with expanded zero-sequence vector. Owner then confirmed
+Notion browser Enter now inserts the same file; logs show verified 687→687 and
+successful input. A four-file batch also shows verified 691→691/input success.
+No desktop/Clipboard automation, model changes or public publication.
+
 Owner accepted Ctrl+Shift+Slash and reported Notion browser manual paste works,
 while Enter fails. Existing stage logs prove five image-file attempts failed
 `clipboard_changed` before input after successful publication. New synthetic file

@@ -57,3 +57,25 @@ zero input sends. All-targets Clippy passed. Azuros's one bounded review found n
 blocking proof/resource/retention issue. No native Clipboard test was run against
 the owner's personal data; the exact producer of +2 and Notion acceptance still
 require the next owner attempt.
+
+## Installed artifact and owner confirmation
+
+Source `82619cb`, one optimized UI build 1m26s, matched compiled-resource hashes.
+Primary runtime `981c10a95b8a`, SHA256
+`981c10a95b8a9d74f4dcda749dd50a4ddac0506d185d0f0b4580f4c36f5e246d`.
+Previous `fb5e69b83a48` and an integrity-checked schema-v13 backup are retained
+through private `runtime/rollback-paste-sequence.json`. No model/settings migration,
+process closure or GitHub publication. The owner restarted the app herself.
+
+The owner subsequently confirmed: the same file now inserts through Enter in
+the same Notion browser editor. New-session stage logs show a single image with
+`sequence_verification=verified`, publication/delivery 687→687 and successful
+input without a tracking warning. Another four-file batch recorded verified
+691→691 and successful input; that log alone is not a separate recipient ack.
+The bounded stage-only confirmation is in ignored
+`target/build/notion-paste-confirmation.json`.
+
+This closes the reported same-file browser-Notion failure. It confirms the stale
+receipt/automatic-delivery boundary and the working correction, without claiming
+which Windows internal operation produced each old +2 increment or universal
+support for all file types/editors.

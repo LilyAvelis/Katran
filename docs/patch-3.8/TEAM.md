@@ -6,6 +6,16 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current primary source `82619cb`, runtime `981c10a95b8a`; one optimized UI build
+1m26s with matched source/resource and copied-file hashes. Previous
+`fb5e69b83a48` plus consistent v13 backup retained in private
+`runtime/rollback-paste-sequence.json`. Owner restarted herself and confirmed the
+same file now inserts in Notion browser through Enter. New-session logs confirm
+verified publication/delivery 687→687 and successful input; a four-file batch
+also shows verified 691→691/input success. The reported failure is closed;
+native acceptance is scoped to the owner's tested editor/file. Documentation and
+Notion updated, no new build for these evidence-only notes and no GitHub push.
+
 Settlement implementation frozen: same Mira `/root/mira` gpt-6.1-terra/high
 delivered post-teardown proof and 13/13 synthetic tests. Same Azuros `/root/azuros`
 gpt-6.1-sol/xhigh reviewed once without blocking findings. Polly's dispatcher
