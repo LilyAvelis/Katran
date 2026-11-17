@@ -2,6 +2,19 @@
 
 ## Native video/audio local follow-up · 2026-11-18
 
+**Owner check failed:** Folder playback shows Media Engine code 4 /
+HRESULT 0x80070003. Subsequent muted synthetic reproduction with a Cyrillic
+filename also fails (0x80070002); earlier native gates used ASCII basenames and
+did not cover this case. Both ordinary Cyrillic and Cyrillic/special-character
+fixtures fail. The previously installed player is not owner-accepted. Cause of
+the particular owner file has not yet been proven; path handling is reproducibly
+broken. Logs: media-unicode-probe.log and media-cyrillic-probe.log.
+
+Afio's existing libmpv adapter was located in Afiocira/crates/photo-gui/src/video.rs
+and media_view.rs; it uses egui/glow with native libmpv audio and rendering.
+Owner was asked whether to migrate to it or fix current path handling first.
+No replacement or new rebuild was performed while that preference is pending.
+
 Installed locally from source `5fe5238`: single optimized UI build 106.71s,
 Windows x64 / Rust 1.95.0 / locked offline / ui + clipboard-events. Input
 fingerprints matched before and after build. Primary runtime `e910e1fc8c1d`,
