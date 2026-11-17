@@ -90,6 +90,7 @@ impl Service {
 
     pub(crate) fn action_available(&self, id: &str, background: BackgroundActions) -> bool {
         match id {
+            "folder_favorites" | "folder_history" => self.interaction.tab == ShelfTab::All,
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,

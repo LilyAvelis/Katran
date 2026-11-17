@@ -20,6 +20,7 @@ pub enum Intent {
     Filter(Option<u8>),
     Assign(Option<u8>),
     Retry,
+    Settings,
 }
 impl State {
     pub fn start(&mut self, slots: Vec<Slot>) {
@@ -43,6 +44,10 @@ impl State {
     ) -> Option<Intent> {
         if !self.open {
             return None;
+        }
+        if super::shortcuts_ui::take_assignment_key(ctx) {
+            self.open = false;
+            return Some(Intent::Settings);
         }
         if self.fresh {
             ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("tag-menu-search")));
@@ -255,6 +260,15 @@ impl State {
                         }
                     });
                 ui.separator();
+                if ui
+                    .button(tr(
+                        "Настройки тегов · Ctrl Shift ,",
+                        "Tag settings · Ctrl Shift ,",
+                    ))
+                    .clicked()
+                {
+                    picked = Some(Intent::Settings);
+                }
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
@@ -376,6 +390,10 @@ impl super::Shelf {
                         self.assign_tag_menu(ids, slot);
                     }
                 }
+                Intent::Settings => {
+                    self.state = self.call(katran::Command::ShowTagSettings);
+                    ctx.request_repaint();
+                }
             }
         }
     }
@@ -422,6 +440,30 @@ impl super::Shelf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tag_settings_shortcut_is_contextual() {
+        use eframe::egui::{self, Key, Modifiers};
+        let ctx = egui::Context::default();
+        let mut state = super::State::default();
+        state.start(vec![slot(1)]);
+        let mut intent = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Comma,
+                    physical_key: Some(Key::Comma),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+                }],
+                ..Default::default()
+            },
+            |ui| intent = state.show(ui.ctx(), true, 1, false, "", None),
+        );
+        output.textures_delta.clear();
+        assert!(matches!(intent, Some(super::Intent::Settings)));
+        assert!(!state.open);
+    }
     fn slot(number: u8) -> katran::tag_slots::Slot {
         katran::tag_slots::Slot {
             number,
@@ -547,6 +589,9 @@ mod tests {
     fn partial_assignment_retries_only_failed_items() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(katran::Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
         let make = |app: &mut super::super::Shelf, name: &str| {
             app.call(katran::Command::IngestBytes {
                 name: name.into(),

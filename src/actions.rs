@@ -784,6 +784,22 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "folder_favorites",
+        label: "Избранные папки",
+        default_binding: "Ctrl F",
+        rebindable: true,
+        group: "Folder",
+        in_palette: false,
+    },
+    Definition {
+        id: "folder_history",
+        label: "История папок",
+        default_binding: "Ctrl H",
+        rebindable: true,
+        group: "Folder",
+        in_palette: false,
+    },
+    Definition {
         id: "shelf_search",
         label: "Поиск на полке",
         default_binding: "Ctrl T",
@@ -910,6 +926,12 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }),
         "toggle_pinned_view" => command(Command::TogglePinnedView),
         "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
+        "folder_favorites" if state.tab == crate::interaction::ShelfTab::All => {
+            Dispatch::Intent(serde_json::json!({"intent":"folder_favorites"}))
+        }
+        "folder_history" if state.tab == crate::interaction::ShelfTab::All => {
+            Dispatch::Intent(serde_json::json!({"intent":"folder_history"}))
+        }
         "search_with_ai" => Dispatch::Intent(serde_json::json!({"intent":"search_with_ai"})),
         "files" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Files,

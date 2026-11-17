@@ -379,8 +379,9 @@ fn slice_projection(
             )
         })
         .unwrap_or_default();
+    let scope = crate::tag_service::scope(tab).unwrap_or("");
     let slot_filter = tag_slot
-        .map(|number| format!("AND EXISTS(SELECT 1 FROM tag_slot_assignments a WHERE a.event_id=e.id AND a.slot_number={number})"))
+        .map(|number| format!("AND EXISTS(SELECT 1 FROM tag_scoped_assignments a WHERE a.event_id=e.id AND a.scope='{scope}' AND a.slot_number={number})"))
         .unwrap_or_default();
     format!("SELECT e.id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,e.origin_json,e.reference_hash,e.delete_policy_json,
       CASE WHEN json_extract(e.delete_policy_json,'$.kind')='live_original' THEN EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=e.id AND p.available=1) ELSE NULL END AS projected_available,

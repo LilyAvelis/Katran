@@ -128,6 +128,18 @@ impl Shortcuts {
         {
             value.overrides.insert("select_all".into(), None);
         }
+        for (id, chord) in [("folder_favorites", "Ctrl F"), ("folder_history", "Ctrl H")] {
+            if !value.overrides.contains_key(id)
+                && value.overrides.iter().any(|(other, binding)| {
+                    other != id
+                        && binding
+                            .as_deref()
+                            .is_some_and(|s| s.split(" / ").any(|part| part == chord))
+                })
+            {
+                value.overrides.insert(id.into(), None);
+            }
+        }
         Ok(value)
     }
     fn migrate_enter_bindings(&mut self) {
@@ -223,6 +235,25 @@ impl std::error::Error for ShortcutError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_folder_defaults_preserve_existing_user_bindings() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("shortcuts.json"),
+            r#"{"version":1,"overrides":{"save":"Ctrl F","gallery":"Ctrl H"}}"#,
+        )
+        .unwrap();
+        let shortcuts = Shortcuts::load(root.path()).unwrap();
+        assert_eq!(shortcuts.binding("save"), "Ctrl F");
+        assert_eq!(shortcuts.binding("gallery"), "Ctrl H");
+        assert_eq!(shortcuts.binding("folder_favorites"), "");
+        assert_eq!(shortcuts.binding("folder_history"), "");
+        assert!(
+            Shortcuts::default()
+                .set(root.path(), "save", Some("Ctrl F".into()), false, false)
+                .is_err()
+        );
+    }
     #[test]
     fn conflicts_replace_persist_and_clear() {
         let root = tempfile::tempdir().unwrap();

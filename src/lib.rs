@@ -29,10 +29,12 @@ mod folder_commit;
 mod folder_delete;
 mod folder_import;
 pub mod folder_launch;
+pub mod folder_search_rank;
 pub mod folder_transfer;
 pub mod folder_watch;
 pub mod interaction;
 mod jobs_service;
+pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
 pub mod markdown;
@@ -110,6 +112,7 @@ pub mod wallpaper_engine;
 
 /// The only action dispatcher. Transports and future UI call this contract.
 pub struct Service {
+    known_folder_provider: Box<dyn known_folders::Provider>,
     emoji_ai: std::sync::Arc<std::sync::Mutex<Box<dyn emoji_ai::Backend>>>,
     emoji_ai_backend_injected: bool,
     window_visible: bool,
@@ -156,6 +159,9 @@ pub struct Service {
     read_only: bool,
 }
 impl Service {
+    pub fn set_known_folder_provider(&mut self, provider: Box<dyn known_folders::Provider>) {
+        self.known_folder_provider = provider;
+    }
     pub fn set_updater(&mut self, updater: updater::Updater) {
         self.updater = updater;
         self.checked_update = None;
@@ -264,6 +270,7 @@ impl Service {
         let shortcuts =
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
+            known_folder_provider: Box::new(known_folders::NativeProvider),
             emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 emoji_ai::Resident::new(root.clone()),
             ))),
@@ -348,6 +355,7 @@ impl Service {
             .validate(0)
             .map_err(|error| ApiError::new("settings_error", error))?;
         Ok(Self {
+            known_folder_provider: Box::new(known_folders::NativeProvider),
             emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 emoji_ai::Resident::new(root.clone()),
             ))),
@@ -740,6 +748,9 @@ impl Service {
             Command::AddFiles { paths } => self.add_files(paths),
             Command::ChooseFolder { path } => self.choose_folder(path),
             Command::CurrentFolder => Ok(serde_json::json!({"path":self.work_folder.current()})),
+            Command::ListKnownFolders => Ok(serde_json::json!({
+                "items": known_folders::list(self.known_folder_provider.as_ref())
+            })),
             Command::SearchFolders { query, limit } => {
                 everything::search_folders(&query, limit as usize)
                     .map(|v| serde_json::json!(v))
@@ -833,6 +844,8 @@ impl Service {
                 Ok(serde_json::json!(self.interaction))
             }
             Command::ListTagSlots => self.list_tag_slots(),
+            Command::ListTagSlotsForTab { tab } => self.list_tag_slots_for_tab(tab),
+            Command::SaveTagSlotForTab { tab, slot } => self.save_tag_slot_for_tab(tab, slot),
             Command::SaveTagSlot { slot } => self.save_tag_slot(slot),
             Command::AssignTagSlot { ids, slot } => {
                 if ids.iter().any(|id| pods::is_emoji_id(*id)) {
@@ -1036,6 +1049,11 @@ impl Service {
             }
             Command::ShowTabSettings => {
                 self.interaction.settings_section = 2;
+                self.interaction.settings_open = true;
+                Ok(serde_json::json!(self.interaction))
+            }
+            Command::ShowTagSettings => {
+                self.interaction.settings_section = 5;
                 self.interaction.settings_open = true;
                 Ok(serde_json::json!(self.interaction))
             }

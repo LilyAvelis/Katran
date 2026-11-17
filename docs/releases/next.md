@@ -1,5 +1,12 @@
 # Development log through 3.7.1
 
+## Local 3.8 work · 2026-11-17
+
+Owner-authorized implementation of per-tab tags and Folder navigation is in
+progress; see [the team and contract](../patch-3.8/TEAM.md) and
+[local candidate notes](3.8.0.md). No public release, push or replacement of
+the installed working application is authorized. AI folder search is deferred.
+
 ## 3.7.1 unified application
 
 Lilia chose one Katran application after the separate local E build developed a native background regression while the compatible public build still played the same video. The 3.7.0 release files are unchanged. Version 3.7.1 carries emoji AI search into the public host as an optional local feature, with no authorization or payment gate yet. Model weights, Python environment and generated index are installed separately, never bundled with Katran. The `EmojiAiStatus` command and AI mode explain when the model is missing; ordinary Pods and wallpaper functionality remain independent. The active profile is the stable home for the runtime, so app updates do not have to copy it. See [model setup](../emoji-ai.md). Lilia confirmed the unified local AI search, backgrounds and Desktop responsiveness before release.

@@ -137,6 +137,8 @@ fn localized_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
         let direct = match id {
             "pods" => "Tab: Pods",
             "search_with_ai" => "Search with AI",
+            "folder_favorites" => "Favorite folders",
+            "folder_history" => "Folder history",
             "files" => "Tab: Files",
             "tables" => "Tab: Tables",
             "text" => "Tab: Text",
@@ -177,7 +179,7 @@ fn localized_tab_label(label: &str) -> &str {
     }
 }
 
-fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'static str {
+pub(super) fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'static str {
     use katran::interaction::ShelfTab;
     match tab {
         ShelfTab::All => super::i18n::tr("Folder", "Folder"),
@@ -782,6 +784,9 @@ impl State {
         let interaction = call(api, Command::Interaction);
         let open = interaction["result"]["settings_open"] == true;
         if !open {
+            if !self.tags.flush(api) {
+                return false;
+            }
             if self.editor.is_some() {
                 ctx.request_repaint();
             }
@@ -1262,6 +1267,9 @@ impl State {
             }
         } else if let Some(deadline) = self.pending_save.filter(|_| !path_editing) {
             ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+        }
+        if close && !self.tags.flush(api) {
+            close = false;
         }
         if close {
             call(api, Command::CloseSettings);

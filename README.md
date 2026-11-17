@@ -1,5 +1,11 @@
 # Katran
 
+Local development is preparing **3.8.0**: per-tab tag sets with preservation of
+legacy assignments, inline live tag settings and improved Folder navigation.
+This work is not a public release or an installed-app update. See the
+[3.8 contract and team](docs/patch-3.8/TEAM.md); the released baseline below
+remains 3.7.1.
+
 **Katran 3.7** adds an emoji catalogue in Pods, a Desktop background library,
 stronger file operations, and a new application icon. The latest patch unifies
 the application and improves Desktop menus. See the

@@ -20,6 +20,9 @@ pub struct EverythingFolder {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EverythingFolders {
     pub items: Vec<EverythingFolder>,
+    /// At least one candidate stream reached its safety bound.
+    #[serde(default)]
+    pub incomplete: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,6 +90,7 @@ fn direct_result(path: &Path) -> Result<EverythingFolders, EverythingError> {
     }
     Ok(EverythingFolders {
         items: vec![EverythingFolder { path }],
+        incomplete: false,
     })
 }
 
@@ -103,7 +107,10 @@ pub fn search_folders(query: &str, limit: usize) -> Result<EverythingFolders, Ev
         return direct_result(&path);
     }
     if query.trim().is_empty() {
-        return Ok(EverythingFolders { items: Vec::new() });
+        return Ok(EverythingFolders {
+            items: Vec::new(),
+            incomplete: false,
+        });
     }
     let executable =
         std::env::current_exe().map_err(|e| error("helper_unavailable", e.to_string()))?;
@@ -216,7 +223,7 @@ fn search_with_runner<F>(
     runner: F,
 ) -> Result<EverythingFolders, EverythingError>
 where
-    F: FnOnce(&Path, &str, usize) -> Result<Vec<u8>, EverythingError>,
+    F: Fn(&Path, &str, usize) -> Result<Vec<u8>, EverythingError>,
 {
     if query.contains('\0')
         || query.encode_utf16().count() > 16_000
@@ -231,12 +238,104 @@ where
         return direct_result(&path);
     }
     if query.trim().is_empty() {
-        return Ok(EverythingFolders { items: Vec::new() });
+        return Ok(EverythingFolders {
+            items: Vec::new(),
+            incomplete: false,
+        });
     }
-    // Group the user's native expression and request folders from the index.
-    // The parser independently rejects files even if the expression changes the filter.
-    let expression = format!("folder: <{}>", query);
-    parse_results(&runner(helper, &expression, limit)?, limit)
+    // Independent streams protect exact name matches from noisy path results.
+    // Each asks for one extra row so a safety-bound result is explicit.
+    const CANDIDATE_LIMIT: usize = 512;
+    let mut expressions = Vec::new();
+    if let Some(expression) = exact_name_expression(query) {
+        expressions.push(expression);
+    }
+    expressions.push(format!("folder: nopath: <{}>", query));
+    expressions.push(format!("folder: path: <{}>", query));
+    if let Some(expression) = approximate_expression(query) {
+        expressions.push(expression);
+    }
+    let mut items = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut incomplete = false;
+    for expression in expressions {
+        let mut result = parse_results(
+            &runner(helper, &expression, CANDIDATE_LIMIT + 1)?,
+            CANDIDATE_LIMIT + 1,
+        )?;
+        incomplete |= result.items.len() > CANDIDATE_LIMIT;
+        result.items.truncate(CANDIDATE_LIMIT);
+        for item in result.items {
+            let key = item
+                .path
+                .to_string_lossy()
+                .replace('/', "\\")
+                .to_lowercase();
+            if seen.insert(key) {
+                items.push(item);
+            }
+        }
+    }
+    crate::folder_search_rank::rank_folders(query, &mut items);
+    items.truncate(limit);
+    Ok(EverythingFolders { items, incomplete })
+}
+
+// Exact basename stream is independent of the broad name and path streams.
+// Everything's quoted regex cannot safely represent a literal quote here;
+// preserve the native expression in the other streams in that case.
+fn exact_name_expression(query: &str) -> Option<String> {
+    let query = query.trim();
+    if query.is_empty() || query.contains('"') || query.chars().any(char::is_control) {
+        return None;
+    }
+    let mut pattern = String::new();
+    let mut in_space = false;
+    for c in query.chars() {
+        if c.is_whitespace() {
+            if !in_space {
+                pattern.push_str(r"[\s._-]*");
+            }
+            in_space = true;
+        } else {
+            in_space = false;
+            if r"\.^$|?*+()[]{}".contains(c) {
+                pattern.push('\\');
+            }
+            pattern.push(c);
+        }
+    }
+    Some(format!(r#"folder: nopath:regex:"^{}$""#, pattern))
+}
+
+// General bounded two-substitution retrieval for short ASCII human queries.
+// The ranker scores actual distance; this broad expression only finds candidates.
+fn approximate_expression(query: &str) -> Option<String> {
+    if query.chars().any(|c| c.is_alphabetic() && !c.is_ascii()) {
+        return None;
+    }
+    let chars: Vec<char> = query
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    if !(4..=12).contains(&chars.len()) {
+        return None;
+    }
+    let mut alternatives = Vec::new();
+    for i in 0..chars.len() {
+        for j in i + 1..chars.len() {
+            let pattern: String = chars
+                .iter()
+                .enumerate()
+                .map(|(k, c)| if k == i || k == j { '.' } else { *c })
+                .collect();
+            alternatives.push(pattern);
+        }
+    }
+    Some(format!(
+        r#"folder: nopath:regex:"^({})$""#,
+        alternatives.join("|")
+    ))
 }
 
 fn parse_results(output: &[u8], limit: usize) -> Result<EverythingFolders, EverythingError> {
@@ -280,7 +379,10 @@ fn parse_results(output: &[u8], limit: usize) -> Result<EverythingFolders, Every
             });
         }
     }
-    Ok(EverythingFolders { items })
+    Ok(EverythingFolders {
+        items,
+        incomplete: false,
+    })
 }
 
 fn run(helper: &Path, query: &str, limit: usize) -> Result<Vec<u8>, EverythingError> {
@@ -374,6 +476,41 @@ fn run(helper: &Path, query: &str, limit: usize) -> Result<Vec<u8>, EverythingEr
 mod tests {
     use super::*;
     #[test]
+    fn independent_exact_name_survives_truncated_broad_streams() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let result = search_with_runner("Katran", 3, Path::new("unused"), |_, expression, count| {
+            assert_eq!(count, 513);
+            let n = calls.get();
+            calls.set(n + 1);
+            let rows: Vec<serde_json::Value> = match n {
+                0 => {
+                    assert!(expression.contains("^Katran$"));
+                    vec![serde_json::json!({"filename":"C:/synthetic/Katran", "attributes":16})]
+                },
+                1 | 2 => (0..513).map(|i| serde_json::json!({"filename":format!("C:/synthetic/Katran-noise-{i}"),"attributes":16})).collect(),
+                _ => vec![serde_json::json!({"filename":"C:/synthetic/Katran", "attributes":16})],
+            };
+            Ok(serde_json::to_vec(&rows).unwrap())
+        }).unwrap();
+        assert_eq!(calls.get(), 4);
+        assert!(result.incomplete);
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.items[0].path, PathBuf::from("C:/synthetic/Katran"));
+    }
+    #[test]
+    fn expressions_escape_literals_and_handle_general_substitutions() {
+        assert!(
+            exact_name_expression("a.b [v2]")
+                .unwrap()
+                .contains(r"^a\.b[\s._-]*\[v2\]$")
+        );
+        let expression = approximate_expression("cat run").unwrap();
+        assert!(expression.contains(".atr.n"));
+        assert!(approximate_expression("x").is_none());
+        assert!(approximate_expression("cat папка run").is_none());
+    }
+    #[test]
     fn literal_directory_never_invokes_the_helper_runner() {
         let folder = tempfile::tempdir().unwrap();
         let query = format!("\"{}\"", folder.path().display());
@@ -417,8 +554,8 @@ mod tests {
         assert!(parse_results(br#"[{"filename":"x"}]"#, 1).is_err());
         assert!(parse_results(br#"[{},{}]"#, 1).is_err());
         let e = search_with_runner("test", 4, Path::new("unused"), |_, expression, limit| {
-            assert_eq!(expression, "folder: <test>");
-            assert_eq!(limit, 4);
+            assert_eq!(expression, r#"folder: nopath:regex:"^test$""#);
+            assert_eq!(limit, 513);
             Err(error("everything_unavailable", "offline"))
         })
         .unwrap_err();

@@ -9,6 +9,7 @@ enum Mode {
     Search,
     History,
     Favorites,
+    Standard,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -16,6 +17,8 @@ pub(super) struct State {
     mode: Mode,
     query: String,
     items: Vec<PathBuf>,
+    standard_details: Vec<(String, Option<String>)>,
+    incomplete: bool,
     selected: usize,
     focus: bool,
     scroll: bool,
@@ -41,6 +44,8 @@ impl Shelf {
     fn workspace_reload(&mut self, ctx: &egui::Context) {
         self.workspace_cancel();
         self.workspace.items.clear();
+        self.workspace.standard_details.clear();
+        self.workspace.incomplete = false;
         self.workspace.selected = 0;
         self.workspace.error = None;
         if self.workspace.mode == Mode::Search {
@@ -48,6 +53,21 @@ impl Shelf {
                 self.workspace.loading = true;
                 self.workspace.due = Some(Instant::now() + Duration::from_millis(120));
                 ctx.request_repaint_after(Duration::from_millis(120));
+            }
+        } else if self.workspace.mode == Mode::Standard {
+            let result = self.call(Command::ListKnownFolders);
+            if result.is_null() {
+                self.workspace.error = Some(self.message.clone());
+            } else if let Some(items) = result["items"].as_array() {
+                for item in items {
+                    self.workspace
+                        .items
+                        .push(item["path"].as_str().map(PathBuf::from).unwrap_or_default());
+                    self.workspace.standard_details.push((
+                        item["folder"].as_str().unwrap_or("").to_owned(),
+                        item["error"].as_str().map(str::to_owned),
+                    ));
+                }
             }
         } else {
             let query = self.workspace.query.clone();
@@ -65,6 +85,7 @@ impl Shelf {
         }
     }
     fn workspace_set_items(&mut self, result: &Value) {
+        self.workspace.incomplete = result["incomplete"] == true;
         self.workspace.items = result["items"]
             .as_array()
             .into_iter()
@@ -234,9 +255,38 @@ impl Shelf {
             self.workspace.opened_frame = ctx.cumulative_frame_nr();
             self.workspace_mode(Mode::Search, ctx);
         }
+        if !self.workspace.open
+            && self.state["tab"] == "folder"
+            && !self.modal_owns_input()
+            && self.state["settings_open"] != true
+            && !ctx.egui_wants_keyboard_input()
+            && !super::search_or_text_edit_focused(ctx)
+        {
+            let shortcuts: Vec<katran::shortcuts::ShortcutInfo> =
+                serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
+            let folder_shortcuts: Vec<_> = shortcuts
+                .into_iter()
+                .filter(|s| matches!(s.id.as_str(), "folder_favorites" | "folder_history"))
+                .collect();
+            if let Some(id) = shortcuts_ui::take_action_with_editing(ctx, &folder_shortcuts, false)
+            {
+                let result = self.call(Command::RunAction { id });
+                let mode = match result["intent"].as_str() {
+                    Some("folder_favorites") => Some(Mode::Favorites),
+                    Some("folder_history") => Some(Mode::History),
+                    _ => None,
+                };
+                if let Some(mode) = mode {
+                    self.workspace.open = true;
+                    self.workspace.opened_frame = ctx.cumulative_frame_nr();
+                    self.workspace_mode(mode, ctx);
+                }
+            }
+        }
         if self.workspace.open {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Period))
                 && let Some(path) = self.workspace.items.get(self.workspace.selected).cloned()
+                && !path.as_os_str().is_empty()
             {
                 let result = self.call(Command::ToggleFavoriteFolderPath { path });
                 if let Some(favorite) = result["favorite"].as_bool() {
@@ -384,7 +434,11 @@ impl Shelf {
         });
         state.scroll |= previous != state.selected;
         let mut chosen = if enter && !state.loading {
-            state.items.get(state.selected).cloned()
+            state
+                .items
+                .get(state.selected)
+                .filter(|path| !path.as_os_str().is_empty())
+                .cloned()
         } else {
             None
         };
@@ -394,21 +448,35 @@ impl Shelf {
             .area(egui::Modal::default_area(egui::Id::new("workspace-picker")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx, |ui| {
                 ui.set_width(width);
-                ui.label(RichText::new(match state.mode { Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders") }).strong().size(15.0));
+                ui.label(RichText::new(match state.mode { Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
                 ui.add_space(6.0);
+                let mut mode_change = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (mode, label) in [(Mode::Search, tr("Поиск", "Search")), (Mode::Favorites, tr("Избранное", "Favorites")), (Mode::History, tr("История", "History")), (Mode::Standard, tr("Стандартные папки", "Standard folders"))] {
+                        if ui.selectable_label(state.mode == mode, label).clicked() { mode_change = Some(mode); }
+                    }
+                });
+                if let Some(mode) = mode_change { ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode)); }
+                if state.incomplete { ui.weak(tr("Показаны частичные результаты", "Partial results shown")); }
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 220.0).clamp(80.0, 360.0)).show(ui, |ui| {
                     for (index, path) in state.items.iter().enumerate() {
                         let text = path.to_string_lossy();
-                        let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+                        let detail = state.standard_details.get(index);
+                        let name = detail.map(|(name, _)| match name.as_str() {
+                            "desktop" => tr("Рабочий стол", "Desktop"), "downloads" => tr("Загрузки", "Downloads"),
+                            "documents" => tr("Документы", "Documents"), "pictures" => tr("Изображения", "Pictures"),
+                            "videos" => tr("Видео", "Videos"), "music" => tr("Музыка", "Music"), _ => name.as_str(),
+                        }.to_owned()).unwrap_or_else(|| path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned());
+                        let detail_text = detail.and_then(|(_, error)| error.as_deref()).unwrap_or(text.as_ref());
                         let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
                         if index == state.selected || response.hovered() { ui.painter().rect_filled(rect, 7.0, if index == state.selected { Color32::from_rgb(91,91,99) } else { Color32::from_rgb(77,77,83) }); }
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 5.0))).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                             ui.add(egui_lucide::Lucide::Folder.size(21.0).image().tint(Color32::from_rgb(224,188,127)));
-                            ui.vertical(|ui| { ui.add(egui::Label::new(RichText::new(name).size(14.0)).truncate()); ui.add(egui::Label::new(RichText::new(text.as_ref()).size(11.0).color(Color32::from_gray(183))).truncate()); });
+                            ui.vertical(|ui| { ui.add(egui::Label::new(RichText::new(name).size(14.0)).truncate()); ui.add(egui::Label::new(RichText::new(detail_text).size(11.0).color(Color32::from_gray(183))).truncate()); });
                         });
                         if index == state.selected && state.scroll { response.scroll_to_me(None); state.scroll = false; }
-                        if response.clicked() && !state.loading { chosen = Some(path.clone()); }
-                        response.on_hover_text(text);
+                        if response.clicked() && !state.loading && !path.as_os_str().is_empty() { chosen = Some(path.clone()); }
+                        response.on_hover_text(detail_text);
                     }
                     if state.loading { ui.weak(tr("Поиск папок…", "Searching folders…")); }
                     else if let Some(error) = &state.error { ui.colored_label(Color32::LIGHT_RED, error); }
@@ -419,6 +487,12 @@ impl Shelf {
                 if state.focus { field.request_focus(); state.focus = false; }
                 ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
             });
+        if let Some(mode) =
+            ctx.data_mut(|d| d.remove_temp::<Mode>(egui::Id::new("workspace-mode-change")))
+        {
+            self.workspace_mode(mode, ctx);
+            return;
+        }
         let mut direct = false;
         let mut direct_error = None;
         if enter && state.mode == Mode::Search {
@@ -463,6 +537,55 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_shortcuts_open_existing_modes_and_respect_text_focus() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::All,
+        });
+        let ctx = egui::Context::default();
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        };
+        for (key, expected) in [
+            (egui::Key::F, Mode::Favorites),
+            (egui::Key::H, Mode::History),
+        ] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![press(key)],
+                    ..Default::default()
+                },
+                |_| app.workspace_input(&ctx),
+            );
+            output.textures_delta.clear();
+            assert!(app.workspace.open);
+            assert!(app.workspace.mode == expected);
+            app.workspace_close();
+        }
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![press(egui::Key::F)],
+                ..Default::default()
+            },
+            |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut String::new())
+                        .id(egui::Id::new("folder-test-input")),
+                );
+                response.request_focus();
+                app.workspace_input(&ctx);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(!app.workspace.open);
+    }
 
     fn frame(app: &mut Shelf, ctx: &egui::Context, event: Option<egui::Event>) {
         let mut output = ctx.run_ui(

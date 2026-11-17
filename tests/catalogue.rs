@@ -5,7 +5,16 @@ fn catalogue_has_unique_routable_ids_and_matching_shortcuts() {
     let keys = Shortcuts::default().catalogue();
     for def in actions::DEFS {
         assert!(ids.insert(def.id));
-        assert!(actions::resolve(def.id, &Interaction::default(), false).is_some());
+        let mut context = Interaction::default();
+        if matches!(def.id, "folder_favorites" | "folder_history") {
+            assert!(actions::resolve(def.id, &context, false).is_none());
+            context.tab = katran::interaction::ShelfTab::All;
+        }
+        assert!(
+            actions::resolve(def.id, &context, false).is_some(),
+            "{}",
+            def.id
+        );
         let key = keys.iter().find(|k| k.id == def.id).unwrap();
         assert_eq!(key.binding.as_deref().unwrap_or(""), def.default_binding);
         assert_eq!(key.rebindable, def.rebindable);

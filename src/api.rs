@@ -128,6 +128,7 @@ pub enum Command {
         path: PathBuf,
     },
     CurrentFolder,
+    ListKnownFolders,
     SearchFolders {
         query: String,
         limit: u32,
@@ -167,6 +168,13 @@ pub enum Command {
         tag: Option<String>,
     },
     ListTagSlots,
+    ListTagSlotsForTab {
+        tab: crate::interaction::ShelfTab,
+    },
+    SaveTagSlotForTab {
+        tab: crate::interaction::ShelfTab,
+        slot: crate::tag_slots::Slot,
+    },
     SaveTagSlot {
         slot: crate::tag_slots::Slot,
     },
@@ -290,6 +298,7 @@ pub enum Command {
         tab: crate::interaction::ShelfTab,
     },
     ShowTabSettings,
+    ShowTagSettings,
     OpenFile {
         id: i64,
         operation: crate::open_file::Operation,

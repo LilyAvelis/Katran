@@ -367,7 +367,7 @@ mod tests {
             INSERT INTO events VALUES(1),(2);
             CREATE TABLE katran_properties(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE, pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN(0,1)), display_name TEXT, opener_path TEXT);
             CREATE TABLE katran_tags(event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, tag_key TEXT NOT NULL, tag_display TEXT NOT NULL, PRIMARY KEY(event_id,tag_key));
-            CREATE TABLE tag_slot_assignments(event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL);
+            CREATE TABLE tag_scoped_assignments(scope TEXT NOT NULL, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL, PRIMARY KEY(scope,event_id));
             CREATE INDEX katran_tags_lookup ON katran_tags(tag_key,event_id);
             CREATE INDEX katran_properties_pinned ON katran_properties(pinned,event_id);
             CREATE TABLE folder_history(path_key TEXT PRIMARY KEY, path TEXT NOT NULL, opened_at_ms INTEGER NOT NULL);

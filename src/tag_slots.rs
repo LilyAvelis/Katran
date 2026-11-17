@@ -107,16 +107,16 @@ fn validate(slot: &Slot) -> Result<()> {
 }
 
 /// Changes settings only; existing object assignments are unaffected.
-pub(crate) fn save_slot(db: &Connection, slot: &Slot) -> Result<()> {
+pub(crate) fn save_slot(db: &Connection, scope: &str, slot: &Slot) -> Result<()> {
     validate(slot)?;
-    db.execute("INSERT INTO tag_slots(number,name,color,material,scale,intensity,angle,seed,opacity) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(number) DO UPDATE SET name=excluded.name,color=excluded.color,material=excluded.material,scale=excluded.scale,intensity=excluded.intensity,angle=excluded.angle,seed=excluded.seed,opacity=excluded.opacity", params![slot.number,slot.name,slot.color,slot.material.as_str(),slot.scale,slot.intensity,slot.angle,slot.seed,slot.opacity])?;
+    db.execute("INSERT INTO tag_scoped_slots(scope,number,name,color,material,scale,intensity,angle,seed,opacity) VALUES(?10,?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(scope,number) DO UPDATE SET name=excluded.name,color=excluded.color,material=excluded.material,scale=excluded.scale,intensity=excluded.intensity,angle=excluded.angle,seed=excluded.seed,opacity=excluded.opacity", params![slot.number,slot.name,slot.color,slot.material.as_str(),slot.scale,slot.intensity,slot.angle,slot.seed,slot.opacity,scope])?;
     Ok(())
 }
 
-pub(crate) fn list_slots(db: &Connection) -> Result<Vec<Slot>> {
-    let mut statement = db.prepare("SELECT number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_slots ORDER BY number")?;
+pub(crate) fn list_slots(db: &Connection, scope: &str) -> Result<Vec<Slot>> {
+    let mut statement = db.prepare("SELECT number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_scoped_slots WHERE scope=?1 ORDER BY number")?;
     let slots = statement
-        .query_map([], |r| {
+        .query_map([scope], |r| {
             let material: String = r.get(3)?;
             Ok(Slot {
                 number: r.get(0)?,
@@ -156,6 +156,7 @@ pub(crate) struct ItemOutcome {
 /// Changes commit together; database failure rolls the entire batch back.
 pub(crate) fn assign(
     db: &mut Connection,
+    scope: &str,
     ids: &[i64],
     slot: Option<u8>,
 ) -> Result<Vec<ItemOutcome>> {
@@ -168,8 +169,8 @@ pub(crate) fn assign(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(number) = slot {
         let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tag_slots WHERE number=?1)",
-            [number],
+            "SELECT EXISTS(SELECT 1 FROM tag_scoped_slots WHERE number=?1 AND scope=?2)",
+            params![number, scope],
             |r| r.get(0),
         )?;
         if !exists {
@@ -190,18 +191,24 @@ pub(crate) fn assign(
                     if let Some(number) = slot {
                         let current: Option<u8> = tx
                             .query_row(
-                                "SELECT slot_number FROM tag_slot_assignments WHERE event_id=?1",
-                                [id],
+                                "SELECT slot_number FROM tag_scoped_assignments WHERE event_id=?1 AND scope=?2",
+                                params![id,scope],
                                 |r| r.get(0),
                             )
                             .optional()?;
                         if current == Some(number) {
-                            tx.execute("DELETE FROM tag_slot_assignments WHERE event_id=?1", [id])?;
+                            tx.execute(
+                                "DELETE FROM tag_scoped_assignments WHERE event_id=?1 AND scope=?2",
+                                params![id, scope],
+                            )?;
                         } else {
-                            tx.execute("INSERT INTO tag_slot_assignments(event_id,slot_number) VALUES(?1,?2) ON CONFLICT(event_id) DO UPDATE SET slot_number=excluded.slot_number", params![id,number])?;
+                            tx.execute("INSERT INTO tag_scoped_assignments(event_id,slot_number,scope) VALUES(?1,?2,?3) ON CONFLICT(scope,event_id) DO UPDATE SET slot_number=excluded.slot_number", params![id,number,scope])?;
                         }
                     } else {
-                        tx.execute("DELETE FROM tag_slot_assignments WHERE event_id=?1", [id])?;
+                        tx.execute(
+                            "DELETE FROM tag_scoped_assignments WHERE event_id=?1 AND scope=?2",
+                            params![id, scope],
+                        )?;
                     }
                     Outcome::Applied
                 }
@@ -218,7 +225,7 @@ pub(crate) fn assign(
 /// The caller must propagate errors and roll back the encompassing transaction.
 pub(crate) fn clear_after_unpin(db: &Connection, ids: &[i64]) -> rusqlite::Result<usize> {
     let mut deleted = 0;
-    let mut statement = db.prepare("DELETE FROM tag_slot_assignments WHERE event_id=?1 AND NOT EXISTS (SELECT 1 FROM katran_properties p WHERE p.event_id=?1 AND p.pinned=1)")?;
+    let mut statement = db.prepare("DELETE FROM tag_scoped_assignments WHERE event_id=?1 AND NOT EXISTS (SELECT 1 FROM katran_properties p WHERE p.event_id=?1 AND p.pinned=1)")?;
     for id in ids {
         deleted += statement.execute([id])?;
     }
@@ -226,20 +233,20 @@ pub(crate) fn clear_after_unpin(db: &Connection, ids: &[i64]) -> rusqlite::Resul
 }
 
 /// Defense in depth for incomplete/legacy state: unpinned objects expose no tag.
-pub(crate) fn visible_slot(db: &Connection, id: i64) -> Result<Option<u8>> {
-    Ok(db.query_row("SELECT a.slot_number FROM tag_slot_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.event_id=?1", [id], |r| r.get(0)).optional()?)
+pub(crate) fn visible_slot(db: &Connection, scope: &str, id: i64) -> Result<Option<u8>> {
+    Ok(db.query_row("SELECT a.slot_number FROM tag_scoped_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.event_id=?1 AND a.scope=?2", params![id,scope], |r| r.get(0)).optional()?)
 }
 
 /// Domain filter data; the caller intersects these IDs with its category/query.
 #[cfg(test)]
 #[allow(dead_code)]
-pub(crate) fn visible_ids(db: &Connection, slot: u8) -> Result<Vec<i64>> {
+pub(crate) fn visible_ids(db: &Connection, scope: &str, slot: u8) -> Result<Vec<i64>> {
     if !valid_slot_number(slot) {
         return Err(StoreError::Invalid("slot must be 1..9"));
     }
-    let mut stmt = db.prepare("SELECT a.event_id FROM tag_slot_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.slot_number=?1 ORDER BY a.event_id DESC")?;
+    let mut stmt = db.prepare("SELECT a.event_id FROM tag_scoped_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.slot_number=?1 AND a.scope=?2 ORDER BY a.event_id DESC")?;
     let ids = stmt
-        .query_map([slot], |r| r.get(0))?
+        .query_map(params![slot, scope], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(ids)
 }

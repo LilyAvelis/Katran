@@ -1,5 +1,22 @@
 # Developer and agent entry point
 
+Local 3.8 work (2026-11-17) is tracked in [FEATURE-5](patch-3.8/TEAM.md).
+The team reuses five existing named runtime sessions, with single ownership of
+shared files. Per-tab tag persistence/migration belongs to Nemi; Everything
+candidate acquisition and OS Known Folders to Mira; ranking to Nemi; UI to
+Fenna with Iris's UX contract; independent acceptance to Kiki. Polly integrates
+the public command enum and dispatcher. No public release or installed-app
+replacement is authorized. Folder AI is deferred; ordinary ranking is first.
+Schema v13 copies legacy tag definitions/materials and assignments into
+independent tab scopes, preserving the initial appearance. `tag_slots.rs`,
+`tag_service.rs`, `catalogue_schema.rs`, `catalogue_query.rs`,
+`catalogue_snapshot.rs` and `desktop_pins.rs` own this contract. Explicit
+`ListTagSlotsForTab`/`SaveTagSlotForTab` edit a chosen scope; legacy tag commands
+use the active tab. Folder rejects tags. See [migration](patch-3.8/TAGS.md).
+`folder_search_rank.rs` ranks candidates from `everything.rs` before the final
+limit. `ListKnownFolders` uses an injectable `known_folders::Provider`; opening
+still revalidates through `ChooseFolder`. See [search evidence](patch-3.8/SEARCH.md).
+
 Owner decision 2026-11-15: use the public 3.7 source as the sole Katran host. The optional emoji AI mode now follows `SearchEmojiAi` through the standard dispatcher and job service, with `src/bin/emoji_ai_ui.rs` as its UI client. Its runtime lives under the active profile's `emoji-ai-runtime` directory, outside versioned executables; a missing model must not break ordinary Katran. The earlier separate E distribution plan is superseded for 3.7. See [the model setup](emoji-ai.md).
 
 In 3.7.1, `Command::Actions` classifies the selected or cursor asset once for background action availability. `Command::SortActions` returns the same sorted command rows without resolving Desktop assets. `src/bin/palette.rs` uses the latter for Sorting. Keep catalogue construction metadata-only; actual wallpaper commands still validate revisions and bytes at the action boundary.

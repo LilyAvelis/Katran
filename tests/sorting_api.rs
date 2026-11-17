@@ -246,7 +246,7 @@ fn migration_preserves_v3_events_unknown_metadata_and_old_settings() {
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
     db.execute("INSERT INTO events(detected_at_ms,source,name,path,size,origin_json) VALUES(42,'manual','legacy-external.txt','absent-synthetic',1,'{}')", []).unwrap();
-    db.execute_batch("DROP INDEX events_sort_modified;ALTER TABLE events DROP COLUMN modified_at_ms;PRAGMA user_version=3;").unwrap();
+    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; DROP INDEX events_sort_modified;ALTER TABLE events DROP COLUMN modified_at_ms;PRAGMA user_version=3;").unwrap();
     drop(db);
     let mut api = Service::open(root.path(), DEFAULT_QUOTA).unwrap();
     call(
@@ -260,7 +260,7 @@ fn migration_preserves_v3_events_unknown_metadata_and_old_settings() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        12
+        13
     );
     assert_eq!(
         db.query_row(

@@ -67,9 +67,12 @@ pub fn paint(ui: &egui::Ui, rect: Rect, slot: &Slot) {
 
 #[derive(Default)]
 pub struct Cache {
-    key: Option<(Vec<i64>, u64)>,
+    key: Option<(Vec<i64>, u64, String)>,
     pub slots: Vec<Slot>,
     pub assignments: std::collections::HashMap<i64, u8>,
+}
+fn taggable_event_id(id: i64, tab: &str) -> bool {
+    if tab == "desktop" { id < 0 } else { id > 0 }
 }
 impl super::Shelf {
     pub(super) fn seed_preloaded_tags(&mut self, page: &serde_json::Value) {
@@ -77,10 +80,14 @@ impl super::Shelf {
             .events
             .iter()
             .filter_map(|e| e["id"].as_i64())
-            .filter(|id| *id > 0)
+            .filter(|id| taggable_event_id(*id, self.state["tab"].as_str().unwrap_or("")))
             .collect();
         let generation = self.state["view_generation"].as_u64().unwrap_or(0);
-        self.tag_material_cache.key = Some((ids, generation));
+        self.tag_material_cache.key = Some((
+            ids,
+            generation,
+            self.state["tab"].as_str().unwrap_or("").to_owned(),
+        ));
         self.tag_material_cache.slots =
             serde_json::from_value(page["slots"].clone()).unwrap_or_default();
         self.tag_material_cache.assignments = page["assignments"]
@@ -104,10 +111,14 @@ impl super::Shelf {
             .events
             .iter()
             .filter_map(|e| e["id"].as_i64())
-            .filter(|id| *id > 0)
+            .filter(|id| taggable_event_id(*id, self.state["tab"].as_str().unwrap_or("")))
             .collect();
         let generation = self.state["view_generation"].as_u64().unwrap_or(0);
-        let key = (ids.clone(), generation);
+        let key = (
+            ids.clone(),
+            generation,
+            self.state["tab"].as_str().unwrap_or("").to_owned(),
+        );
         if self.tag_material_cache.key.as_ref() == Some(&key) {
             return;
         }
@@ -137,6 +148,46 @@ impl super::Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desktop_ids_reach_tag_cache_without_including_virtual_emoji() {
+        let desktop_id = -(1_i64 << 62) - 1;
+        assert!(taggable_event_id(desktop_id, "desktop"));
+        assert!(!taggable_event_id(desktop_id, "pods"));
+        assert!(!taggable_event_id(-1, "pods"));
+        assert!(taggable_event_id(1, "pods"));
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.state["tab"] = serde_json::json!("desktop");
+        app.events = vec![serde_json::json!({"id":desktop_id})];
+        app.seed_preloaded_tags(
+            &serde_json::json!({"slots":[], "assignments":[{"id":desktop_id,"slot":2}]}),
+        );
+        assert_eq!(
+            app.tag_material_cache.key.as_ref().unwrap().0,
+            vec![desktop_id]
+        );
+        assert_eq!(
+            app.tag_material_cache.assignments.get(&desktop_id),
+            Some(&2)
+        );
+    }
+    #[test]
+    fn acknowledged_slot_save_refreshes_shelf_material() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.state = app.call(katran::Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.refresh_tag_materials();
+        let mut slot = app.tag_material_cache.slots[0].clone();
+        slot.color = "#123456".into();
+        let tab = serde_json::from_value(app.state["tab"].clone()).unwrap();
+        let result = app.call(katran::Command::SaveTagSlotForTab { tab, slot });
+        assert_eq!(result["slot"]["color"], "#123456");
+        app.state = app.call(katran::Command::Interaction);
+        app.refresh_tag_materials();
+        assert_eq!(app.tag_material_cache.slots[0].color, "#123456");
+    }
     #[test]
     fn color_conversion_and_dots_are_bounded_for_valid_slots() {
         let slot = Slot {

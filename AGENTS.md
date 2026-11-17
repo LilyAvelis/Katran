@@ -1,5 +1,20 @@
 # Katran development rules
 
+## Local 3.8 implementation · owner instruction 2026-11-17
+
+FEATURE-5 / Мастерская + Iris is implementing per-tab tag definitions and
+assignments, an inline live tag editor, algorithmic Everything folder ranking,
+direct Folder favorites/history and Windows Known Folders navigation.
+See `docs/patch-3.8/TEAM.md` for the existing runtime roster and file ownership,
+and `docs/patch-3.8/PRODUCT.md` for the complete contract. Reuse these sessions.
+The scope does not authorize a public release, push, or replacing the installed
+working build. Folder AI search is deferred until ordinary search is assessed.
+Ctrl+Shift+Comma remains contextual; Ctrl+Y is still only a proposal.
+The public baseline below remains 3.7.1 until a separately authorized release.
+The local candidate uses schema v13: scoped tag definitions and assignments,
+with transactional v12 migration after the standard consistent backup. See
+`docs/patch-3.8/TAGS.md`; old binaries require the pre-v13 backup for rollback.
+
 ## Public release baseline · 3.7.1 · 2026-11-16
 
 ## Owner decision · unified Katran · 2026-11-15

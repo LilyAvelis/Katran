@@ -129,7 +129,7 @@ fn existing_tag_slots_gain_opacity_without_losing_materials() {
     drop(api);
 
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("ALTER TABLE tag_slots DROP COLUMN opacity; PRAGMA user_version=10;")
+    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; UPDATE tag_slots SET material='dots',intensity=90 WHERE number=1; ALTER TABLE tag_slots DROP COLUMN opacity; PRAGMA user_version=10;")
         .unwrap();
     drop(db);
 
@@ -207,6 +207,7 @@ fn tagged_search_still_finds_text_link_and_table_contents() {
         ),
     ];
     for (tab, command) in cases {
+        call(&mut api, Command::SetTab { tab });
         let id = call(&mut api, command)["id"].as_i64().unwrap();
         call(&mut api, Command::TogglePins { ids: vec![id] });
         call(
@@ -216,7 +217,6 @@ fn tagged_search_still_finds_text_link_and_table_contents() {
                 slot: Some(2),
             },
         );
-        call(&mut api, Command::SetTab { tab });
         let query = || Command::BrowseShelfSorted {
             query: needle.into(),
             limit: 100,
@@ -297,4 +297,28 @@ fn tag_filter_intersects_current_tab_and_batch_lookup_preserves_order() {
         },
     );
     assert_eq!(page["events"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn desktop_ids_are_rejected_outside_desktop_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    for command in [
+        Command::GetTagSlot { id: i64::MIN },
+        Command::GetTagSlots {
+            ids: vec![i64::MIN],
+        },
+        Command::AssignTagSlot {
+            ids: vec![i64::MIN],
+            slot: Some(1),
+        },
+    ] {
+        let reply = api.execute(Request {
+            api_version: 1,
+            request_id: "scope".into(),
+            command,
+        });
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["error"]["code"], "invalid_argument");
+    }
 }

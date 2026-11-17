@@ -19,6 +19,8 @@ pub fn icon(id: &str) -> Lucide {
         "files" => Lucide::File,
         "desktop" => Lucide::Monitor,
         "toggle_pinned_view" => Lucide::Pin,
+        "folder_favorites" => Lucide::Pin,
+        "folder_history" => Lucide::ArrowLeftRight,
         "pinned_move_up" => Lucide::ArrowUp,
         "pinned_move_down" => Lucide::ArrowDown,
         "shelf_search" => Lucide::Search,

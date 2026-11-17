@@ -34,7 +34,7 @@ pub(crate) fn rank(db: &Connection, id: i64) -> Result<Option<i64>> {
 pub(crate) fn slot(db: &Connection, id: i64) -> Result<Option<u8>> {
     Ok(db
         .query_row(
-            "SELECT slot_number FROM desktop_pins WHERE asset_id=?1",
+            "SELECT slot_number FROM desktop_scoped_assignments WHERE asset_id=?1",
             [id],
             |row| row.get(0),
         )
@@ -61,7 +61,7 @@ pub(crate) fn assign_slot(
             return Err(ApiError::new("invalid_tag_slot", "slot must be 1..9"));
         }
         let configured: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tag_slots WHERE number=?1)",
+            "SELECT EXISTS(SELECT 1 FROM tag_scoped_slots WHERE scope='desktop' AND number=?1)",
             [number],
             |row| row.get(0),
         )?;
@@ -83,10 +83,14 @@ pub(crate) fn assign_slot(
             } else {
                 number
             };
-            tx.execute(
-                "UPDATE desktop_pins SET slot_number=?2 WHERE asset_id=?1",
-                params![id, next],
-            )?;
+            if let Some(next) = next {
+                tx.execute("INSERT INTO desktop_scoped_assignments(asset_id,slot_number) VALUES(?1,?2) ON CONFLICT(asset_id) DO UPDATE SET slot_number=excluded.slot_number", params![id,next])?;
+            } else {
+                tx.execute(
+                    "DELETE FROM desktop_scoped_assignments WHERE asset_id=?1",
+                    [id],
+                )?;
+            }
             tag_slots::Outcome::Applied
         };
         outcomes.push(tag_slots::ItemOutcome { id, outcome });
@@ -117,6 +121,10 @@ pub(crate) fn toggle(db: &Connection, ids: &[i64]) -> Result<Vec<pinned::ItemRes
         if any_unpinned {
             tx.execute("INSERT OR IGNORE INTO desktop_pins(asset_id,position) VALUES(?1,(SELECT COALESCE(MAX(position),0)+1 FROM desktop_pins))", [id])?;
         } else {
+            tx.execute(
+                "DELETE FROM desktop_scoped_assignments WHERE asset_id=?1",
+                [id],
+            )?;
             tx.execute("DELETE FROM desktop_pins WHERE asset_id=?1", [id])?;
         }
         results.push(pinned::ItemResult {
@@ -151,6 +159,10 @@ pub(crate) fn swap_visible(
 }
 
 pub(crate) fn remove(db: &Connection, id: i64) -> Result<()> {
+    db.execute(
+        "DELETE FROM desktop_scoped_assignments WHERE asset_id=?1",
+        [id],
+    )?;
     db.execute("DELETE FROM desktop_pins WHERE asset_id=?1", [id])?;
     Ok(())
 }

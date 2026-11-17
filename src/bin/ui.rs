@@ -1012,6 +1012,7 @@ impl Shelf {
                     .iter()
                     .filter(|s| {
                         (!self.actions || s.id == "settings")
+                            && !matches!(s.id.as_str(), "folder_favorites" | "folder_history")
                             && (!self.open_apps.open || s.id == "open_with")
                             && (s.id != "toggle_pinned_view"
                                 || (self.state["preview"].is_null()

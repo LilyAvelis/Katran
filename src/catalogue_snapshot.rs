@@ -73,7 +73,7 @@ impl Service {
             ),
         )?;
         let ids: Vec<_> = events.iter().map(|event| event.id).collect();
-        let materials = self.get_tag_slots(ids)?;
+        let materials = self.get_tag_slots_for_tab(tab, ids)?;
         let assignments: Vec<_> = materials["items"]
             .as_array()
             .into_iter()
@@ -81,7 +81,7 @@ impl Service {
             .filter(|item| !item["slot"].is_null())
             .cloned()
             .collect();
-        let slots = self.list_tag_slots()?;
+        let slots = self.list_tag_slots_for_tab(tab)?;
         let page = self.decorate_page(json!({
             "events":events,
             // Active-session cursors carry view_generation and cannot be

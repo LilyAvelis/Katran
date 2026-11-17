@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 12;
+pub(crate) const VERSION: i64 = 13;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -172,6 +172,16 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         crate::pinned_order::ensure_schema(&tx)?;
         crate::desktop_pins::ensure_schema(&tx)?;
         tx.execute_batch("PRAGMA user_version=12;")?;
+    }
+    if version < 13 {
+        tx.execute_batch("CREATE TABLE tag_scoped_slots(scope TEXT NOT NULL, number INTEGER NOT NULL CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295), opacity INTEGER NOT NULL CHECK(opacity BETWEEN 0 AND 100), PRIMARY KEY(scope,number));
+        CREATE TABLE tag_scoped_assignments(scope TEXT NOT NULL, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL, PRIMARY KEY(scope,event_id), FOREIGN KEY(scope,slot_number) REFERENCES tag_scoped_slots(scope,number));
+        CREATE INDEX tag_scoped_assignments_slot ON tag_scoped_assignments(scope,slot_number,event_id DESC);
+        CREATE TABLE desktop_scoped_assignments(asset_id INTEGER PRIMARY KEY REFERENCES desktop_pins(asset_id) ON DELETE CASCADE, slot_number INTEGER NOT NULL);
+        WITH scopes(scope) AS (VALUES ('images'),('screenshots'),('downloads'),('text'),('links'),('tables'),('pods'),('files'),('desktop')) INSERT INTO tag_scoped_slots SELECT scope,number,name,color,material,scale,intensity,angle,seed,opacity FROM scopes CROSS JOIN tag_slots;
+        WITH scopes(scope) AS (VALUES ('images'),('screenshots'),('downloads'),('text'),('links'),('tables'),('pods'),('files')) INSERT INTO tag_scoped_assignments SELECT scope,event_id,slot_number FROM scopes CROSS JOIN tag_slot_assignments;
+        INSERT INTO desktop_scoped_assignments SELECT asset_id,slot_number FROM desktop_pins WHERE slot_number IS NOT NULL;
+        PRAGMA user_version=13;")?;
     }
     tx.commit()?;
     Ok(())
