@@ -9,8 +9,9 @@ remain invalid and Windows-reserved combinations can still fail registration.
 
 Settings → Tabs places a recorder and clear control to the right of each eye.
 There are no default bindings. `Settings.tab_hotkeys` maps stable `ShelfTab`
-values to canonical physical Win32 chords. Win/Ctrl/Alt/Shift plus a letter,
-digit, Space or F1–F24 are supported. Disabled tabs retain their assignment but
+values to canonical physical Win32 chords. Win/Ctrl/Alt/Shift plus letters,
+digits, Space, F1–F24, standard punctuation or navigation keys are supported.
+Disabled tabs retain their assignment but
 do not register it or become enabled when invoked.
 
 `SetTabGlobalHotkey` validates and persists through the common settings path;

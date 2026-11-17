@@ -2,6 +2,12 @@
 
 ## Enter + Ctrl/Shift punctuation follow-up · 2026-11-17
 
+Installed source `fed4815`, one release UI build 1m44s. Source/resource hashes
+matched, UI and copied helper hashes verified. Primary `fb5e69b83a48`, SHA256
+`fb5e69b83a48571f83cd03dfad796c6d176c4b5d298a4ae6dddc7838e1623466`.
+Previous `4a4340fd4d26` plus new consistent v13 backup retained. No migration,
+model reinstall, process close or GitHub publication.
+
 Dispatcher overlay 5/5, copy-before-paste 2/2, new intent API 6/6, observer policy
 4/4 and file publication 11/11 passed with synthetic inputs. Emoji catalogue API
 7/7, smart copy 2/2 and tab summon API 3/3 passed. Keyboard parser/persistence 2/2

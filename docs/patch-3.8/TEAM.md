@@ -6,6 +6,16 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current Enter/keyboard source `fed4815`, one optimized build 1m44s (new Windows
+Accessibility feature compiled in the existing cache). Compiled inputs matched
+before/after. Primary runtime `fb5e69b83a48`, SHA256
+`fb5e69b83a48571f83cd03dfad796c6d176c4b5d298a4ae6dddc7838e1623466`.
+Copied UI/helpers verified; primary pointer changed atomically from
+`4a4340fd4d26`. Previous runtime and integrity-checked schema-v13 backup retained
+in private `runtime/rollback-enter.json`. Running app untouched. All affected
+gates/review complete; next: owner tray exit/Raycast launch, record Text shortcut
+again and native B→Katran/Notion/chat acceptance. No GitHub publication.
+
 Enter implementation handoff: Mira native observer/activation, Nemi lease API
 and Fenna file publication are frozen; first API gates passed. Owner then reported
 Ctrl+Shift+Slash/Shift recording: Polly owns parser/VK aliases and persistence
