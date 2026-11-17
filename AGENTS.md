@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Local 3.8 global tab shortcuts · 2026-11-17
+
+`SetTabGlobalHotkey` persists canonical per-tab global bindings; `SummonTabOverlay`
+always shows the enabled target tab through the standard tab/view restoration
+path and validated overlay capture. Never route it through the toggle command.
+The native UI reports registration separately from persistence; hidden tabs keep
+bindings unregistered. See `docs/patch-3.8/TAB-GLOBAL-HOTKEYS.md`. Local main and
+primary installation only; no public release/push. Enter paste interoperability
+is separately under owner-approved Azuros audit, not accepted as fixed.
+
 ## Owner workflow correction · 2026-11-17
 
 For Katran, integrate completed local changes into local `main` and stage the

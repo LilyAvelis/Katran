@@ -48,6 +48,7 @@ pub struct Editor {
     selected: Option<usize>,
     release: bool,
     physical_keys: bool,
+    super_held: bool,
     alt_armed: bool,
 }
 impl Editor {
@@ -148,15 +149,36 @@ impl Editor {
                 let fresh = input.events.iter().any(candidate);
                 self.release = !released && !fresh;
                 if !fresh {
+                    self.super_held &= input.focused;
+                    for event in &input.events {
+                        if let egui::Event::Key {
+                            key: Key::SuperLeft | Key::SuperRight,
+                            pressed,
+                            ..
+                        } = event
+                        {
+                            self.super_held = *pressed && input.focused;
+                        }
+                    }
                     discard(input);
                     return None;
                 }
             }
-            let captured = input
-                .events
-                .iter()
-                .filter(|event| candidate(event))
-                .find_map(|e| match e {
+            let mut super_held = self.super_held && input.focused;
+            let mut captured = None;
+            for event in &input.events {
+                if let egui::Event::Key {
+                    key: Key::SuperLeft | Key::SuperRight,
+                    pressed,
+                    ..
+                } = event
+                {
+                    super_held = *pressed;
+                }
+                if captured.is_some() || !candidate(event) {
+                    continue;
+                }
+                captured = match event {
                     egui::Event::Key {
                         key,
                         pressed: _,
@@ -169,10 +191,15 @@ impl Editor {
                         } else {
                             *key
                         },
-                        *modifiers,
+                        egui::Modifiers {
+                            mac_cmd: modifiers.mac_cmd || (self.physical_keys && super_held),
+                            ..*modifiers
+                        },
                     )),
                     _ => None,
-                });
+                };
+            }
+            self.super_held = super_held && input.focused;
             if !input.modifiers.alt {
                 self.alt_armed = false;
             }
@@ -377,6 +404,25 @@ pub fn take_action_with_editing(
 mod tests {
     use super::*;
     #[test]
+    fn physical_windows_modifier_is_released_without_sticking() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new("tab", "Tab", "").with_physical_keys();
+        for (keys, expected) in [
+            (vec![(Key::SuperLeft, true), (Key::Num5, true)], "Super 5"),
+            (
+                vec![(Key::SuperLeft, false), (Key::Num5, false), (Key::R, true)],
+                "R",
+            ),
+        ] {
+            let mut out = ctx.run_ui(egui::RawInput {
+                events: keys.into_iter().map(|(key,pressed)| egui::Event::Key {
+                    key,physical_key:Some(key),pressed,repeat:false,modifiers:egui::Modifiers::NONE,
+                }).collect(), ..Default::default()
+            }, |ui| assert!(matches!(editor.input(ui.ctx()), Some(Intent::Set {binding,..}) if binding == expected)));
+            out.textures_delta.clear();
+        }
+    }
+    #[test]
     fn alt_system_key_release_is_recorded_only_after_alt_was_pressed_in_editor() {
         for armed in [false, true] {
             let ctx = egui::Context::default();
@@ -445,7 +491,7 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput {events: vec![egui::Event::Key {
             key:Key::K,physical_key:Some(Key::R),pressed:true,repeat:false,modifiers:egui::Modifiers::ALT,
         }], ..Default::default()}, |ui| {
-            assert!(matches!(editor.input(ui.ctx()),Some(Intent::Set {binding,..}) if binding=="Alt R"));
+            assert!(matches!(editor.input(ui.ctx()),Some(Intent::Set {binding,..}) if binding=="Alt Super R"));
             assert!(ui.ctx().input(|i|i.events.is_empty()));
         });
         output.textures_delta.clear();

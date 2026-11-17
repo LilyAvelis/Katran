@@ -3,6 +3,7 @@ use super::i18n::tr;
 use super::*;
 #[derive(Default)]
 pub(super) struct State {
+    pub(super) tab_hotkeys: super::tab_hotkey_ui::State,
     pub(super) animation: summon_animation::State,
     configured: Option<String>,
     #[cfg(windows)]
@@ -11,7 +12,7 @@ pub(super) struct State {
     tray: Option<katran::tray::Listener>,
     tray_attempted: bool,
     pub(super) pending: bool,
-    summoned: bool,
+    pub(super) summoned: bool,
     registration_status: String,
     recorder_suspended: bool,
     registration_retry_at: Option<Instant>,
@@ -24,7 +25,9 @@ impl Shelf {
     }
     pub(super) fn resident_close_requested(&mut self, ctx: &egui::Context) {
         #[cfg(windows)]
-        let resident = self.overlay_ui.tray.is_some() || self.overlay_ui.listener.is_some();
+        let resident = self.overlay_ui.tray.is_some()
+            || self.overlay_ui.listener.is_some()
+            || self.overlay_ui.tab_hotkeys.is_active();
         #[cfg(not(windows))]
         let resident = false;
         if resident && !self.overlay_ui.quitting && ctx.input(|i| i.viewport().close_requested()) {
@@ -118,7 +121,9 @@ impl Shelf {
     }
     pub(super) fn close_or_hide(&mut self, ctx: &egui::Context) {
         #[cfg(windows)]
-        let resident = self.overlay_ui.listener.is_some() || self.overlay_ui.tray.is_some();
+        let resident = self.overlay_ui.listener.is_some()
+            || self.overlay_ui.tray.is_some()
+            || self.overlay_ui.tab_hotkeys.is_active();
         #[cfg(not(windows))]
         let resident = false;
         if resident {
@@ -151,6 +156,9 @@ impl Shelf {
             return;
         }
         if self.settings_ui.is_recording_overlay() {
+            self.overlay_ui.tab_hotkeys.suspend();
+            self.settings_ui
+                .set_tab_hotkey_statuses(self.overlay_ui.tab_hotkeys.statuses());
             #[cfg(windows)]
             {
                 self.overlay_ui.listener = None;
@@ -165,7 +173,18 @@ impl Shelf {
             self.overlay_ui.recorder_suspended = false;
             self.overlay_ui.configured = None;
         }
-        let binding = self.call(Command::GetSettings)["overlay_hotkey"]
+        let settings = self.call(Command::GetSettings);
+        if let Ok(parsed) = serde_json::from_value::<katran::settings::Settings>(settings.clone()) {
+            if self.overlay_ui.tab_hotkeys.prepare(&parsed) {
+                #[cfg(windows)]
+                {
+                    self.overlay_ui.listener = None;
+                }
+                self.overlay_ui.configured = None;
+            }
+            self.tab_hotkeys_tick(ctx, &parsed);
+        }
+        let binding = settings["overlay_hotkey"]
             .as_str()
             .unwrap_or("")
             .trim()

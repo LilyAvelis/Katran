@@ -6,6 +6,21 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Global-tab follow-up: Nemi `/root/nemi` (gpt-6.1-terra/high) finished domain,
+persistence and API tests; Fenna `/root/fenna` (gpt-6.1-terra/high) finished
+Settings recorder/status UI. Mira `/root/mira` (gpt-6.1-terra/high) delivered
+read-only `PASTE-RECON.md`. Polly `/root` owns native integration, shared files,
+checks, docs and primary installation. Iris `/root/iris` (gpt-6.1-sol/low) and
+Kiki `/root/kiki` (requested Luna/high) are retained, not replaced or duplicated.
+
+Owner explicitly approved one targeted expansion for Enter audit:
+Azuros Claudapi `/root/azuros`, actual gpt-6.1-sol/xhigh, spawned after hotkey
+API/UI gates passed. Scope acknowledged: read-only code audit plus
+`PASTE-AUDIT.md`; no desktop, clipboard, build or code mutations. No blockers;
+recipient acceptance requires owner-operated native checks. Garden refresh was
+unavailable; the cached profile was used. Next: ranked causes and bounded patch
+plan. This is not an Enter-fix acceptance or permission to publish.
+
 Persistent-index work complete: source `4c882ff`, primary runtime `17ab92129b84`,
 one 1m23s optimized build with verified compiled inputs and installed hash.
 Nemi's SQLite/cache test handoff and Polly's three-process CUDA proof are closed.

@@ -304,13 +304,13 @@ mod native {
     }
     impl HotkeyListener {
         pub fn start(hotkey: Hotkey, wake: impl Fn() + Send + 'static) -> Result<Self> {
-            if !(hotkey.ctrl || hotkey.alt || hotkey.shift)
+            if !(hotkey.win || hotkey.ctrl || hotkey.alt || hotkey.shift)
                 || !(1..=255).contains(&hotkey.key)
                 || matches!(hotkey.key, 0x10..=0x12 | 0x5b | 0x5c | 0xa0..=0xa5)
             {
                 return Err(fail(
                     "invalid_hotkey",
-                    "Expected Ctrl, Alt or Shift and a non-modifier key",
+                    "Expected Win, Ctrl, Alt or Shift and a non-modifier key",
                 ));
             }
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -367,6 +367,9 @@ mod native {
         }
         if hotkey.shift {
             flags |= MOD_SHIFT;
+        }
+        if hotkey.win {
+            flags |= MOD_WIN;
         }
         if let Err(error) = unsafe { RegisterHotKey(None, 1, flags, hotkey.key) } {
             let _ = ready.send(Err(fail("hotkey_registration_failed", error)));

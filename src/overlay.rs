@@ -16,14 +16,43 @@ pub struct WorkArea {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Hotkey {
+    #[serde(default)]
+    pub win: bool,
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
     pub key: u32,
 }
 impl Hotkey {
+    /// Canonical presentation for the same physical Win32 key and modifiers.
+    pub fn canonical(self) -> String {
+        let mut parts = Vec::new();
+        if self.win {
+            parts.push("Win".to_owned());
+        }
+        if self.ctrl {
+            parts.push("Ctrl".to_owned());
+        }
+        if self.alt {
+            parts.push("Alt".to_owned());
+        }
+        if self.shift {
+            parts.push("Shift".to_owned());
+        }
+        if (u32::from(b'A')..=u32::from(b'Z')).contains(&self.key)
+            || (u32::from(b'0')..=u32::from(b'9')).contains(&self.key)
+        {
+            parts.push(char::from_u32(self.key).expect("ASCII letter").to_string());
+        } else if self.key == 0x20 {
+            parts.push("Space".to_owned());
+        } else {
+            parts.push(format!("F{}", self.key - 0x6f));
+        }
+        parts.join("+")
+    }
     pub fn parse(text: &str) -> Result<Self> {
         let mut hotkey = Self {
+            win: false,
             ctrl: false,
             alt: false,
             shift: false,
@@ -31,13 +60,16 @@ impl Hotkey {
         };
         for part in text.split(['+', ' ']).filter(|part| !part.is_empty()) {
             match part.to_ascii_lowercase().as_str() {
+                "win" | "super" | "meta" if !hotkey.win => hotkey.win = true,
                 "ctrl" | "control" if !hotkey.ctrl => hotkey.ctrl = true,
                 "alt" if !hotkey.alt => hotkey.alt = true,
                 "shift" if !hotkey.shift => hotkey.shift = true,
                 token if hotkey.key == 0 => {
                     let bytes = token.as_bytes();
-                    hotkey.key = if bytes.len() == 1 && bytes[0].is_ascii_alphabetic() {
+                    hotkey.key = if bytes.len() == 1 && bytes[0].is_ascii_alphanumeric() {
                         u32::from(bytes[0].to_ascii_uppercase())
+                    } else if token == "space" {
+                        0x20
                     } else if let Some(number) = token
                         .strip_prefix('f')
                         .and_then(|v| v.parse::<u32>().ok())
@@ -47,7 +79,7 @@ impl Hotkey {
                     } else {
                         return Err(OverlayError::new(
                             "invalid_hotkey",
-                            "Use Ctrl, Alt, Shift and one letter or F key",
+                            "Use Win, Ctrl, Alt or Shift with one letter, digit, Space or F key",
                         ));
                     };
                 }
@@ -59,7 +91,7 @@ impl Hotkey {
                 }
             }
         }
-        if hotkey.key == 0 || !(hotkey.ctrl || hotkey.alt || hotkey.shift) {
+        if hotkey.key == 0 || !(hotkey.win || hotkey.ctrl || hotkey.alt || hotkey.shift) {
             return Err(OverlayError::new(
                 "invalid_hotkey",
                 "Hotkey needs a modifier and a key",

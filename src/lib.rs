@@ -747,6 +747,62 @@ impl Service {
                 Ok(serde_json::json!({"items":results}))
             }
             Command::DescribePod { id } => self.describe_pod(id),
+            Command::SetTabGlobalHotkey { tab, binding } => {
+                let mut settings = self.settings.clone();
+                if let Some(binding) = binding.filter(|binding| !binding.trim().is_empty()) {
+                    let parsed = overlay::Hotkey::parse(&binding)
+                        .map_err(|e| ApiError::new(&e.code, e.message))?;
+                    settings.tab_hotkeys.insert(tab, parsed.canonical());
+                } else {
+                    settings.tab_hotkeys.remove(&tab);
+                }
+                settings
+                    .validate_tab_hotkeys()
+                    .map_err(|e| ApiError::new(&e.code, e.message))?;
+                self.dispatch(Command::SetSettings { settings })
+            }
+            Command::SummonTabOverlay {
+                tab,
+                owner_window,
+                capture,
+            } => {
+                if self.overlay_copy.is_some() {
+                    return Err(ApiError::new("paste_busy", "Вставка ещё выполняется"));
+                }
+                if !self.settings.tab_enabled(tab) {
+                    return Err(ApiError::new(
+                        "tab_disabled",
+                        "Enable this tab in Settings → Tabs first",
+                    ));
+                }
+                let captured = if let Some(capture) = capture {
+                    Some(self.summon_captured_overlay(owner_window, capture)?)
+                } else {
+                    let foreground = self
+                        .overlay_host
+                        .foreground()
+                        .map_err(|e| ApiError::new(&e.code, e.message))?;
+                    let current = self
+                        .overlay_host
+                        .identity(foreground)
+                        .map_err(|e| ApiError::new(&e.code, e.message))?;
+                    let own = self
+                        .overlay_host
+                        .identity(owner_window)
+                        .map_err(|e| ApiError::new(&e.code, e.message))?;
+                    if current.pid != own.pid {
+                        return Err(ApiError::new(
+                            "foreground_changed",
+                            "Katran is no longer the foreground application",
+                        ));
+                    }
+                    None
+                };
+                self.select_tab(tab)?;
+                self.interaction.settings_open = false;
+                self.window_visible = true;
+                Ok(serde_json::json!({"visible":true,"tab":tab,"capture":captured}))
+            }
             Command::SummonCapturedOverlay {
                 owner_window,
                 capture,
@@ -1581,6 +1637,9 @@ impl Service {
                             .map_err(|e| ApiError::new("video_background_error", e))?;
                     }
                 }
+                settings
+                    .canonicalize_tab_hotkeys()
+                    .map_err(|e| ApiError::new(&e.code, e.message))?;
                 settings
                     .validate(self.usage()?)
                     .map_err(|e| ApiError::new("invalid_settings", e))?;

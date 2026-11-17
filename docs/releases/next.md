@@ -2,6 +2,11 @@
 
 ## Local 3.8 work · 2026-11-17
 
+Global tab shortcuts are implemented through the domain summon API, with
+settings recording and actual Windows registration status. See
+[the follow-up contract](../patch-3.8/TAB-GLOBAL-HOTKEYS.md). Enter interoperability
+is separately under the owner-approved deep audit.
+
 The owner confirmed the local base tag/search experience and requested complete
 tag reordering in Settings; see [the team and contract](../patch-3.8/TEAM.md) and
 [local candidate notes](3.8.0.md). Local main and the primary Raycast installation

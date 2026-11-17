@@ -166,3 +166,25 @@ fn overlay_window_identity_round_trips_without_precision_loss() {
     }
     assert!(wire_v2::decode(json!({"api_version":2,"request_id":"x","command":{"type":"summon_overlay","owner_window":u64::MAX}})).is_err());
 }
+
+#[test]
+fn tab_summon_decodes_lossless_window_identity() {
+    let identity = "18446744073709551615";
+    let command = json!({"type":"summon_tab_overlay", "tab":"text", "owner_window":identity,
+        "capture":{"previous":{"hwnd":identity,"pid":1,"process_started":identity},
+        "work_area":{"left":0,"top":0,"right":100,"bottom":100}}});
+    let request =
+        wire_v2::decode(json!({"api_version":2,"request_id":"tab","command":command})).unwrap();
+    match request.command {
+        katran::Command::SummonTabOverlay {
+            owner_window,
+            capture: Some(capture),
+            ..
+        } => {
+            assert_eq!(owner_window, u64::MAX);
+            assert_eq!(capture.previous.hwnd, u64::MAX);
+            assert_eq!(capture.previous.process_started, u64::MAX);
+        }
+        _ => panic!("unexpected command"),
+    }
+}

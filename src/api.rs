@@ -82,6 +82,15 @@ pub enum Command {
     DescribePod {
         id: i64,
     },
+    SetTabGlobalHotkey {
+        tab: crate::interaction::ShelfTab,
+        binding: Option<String>,
+    },
+    SummonTabOverlay {
+        tab: crate::interaction::ShelfTab,
+        owner_window: u64,
+        capture: Option<crate::overlay::SummonReceipt>,
+    },
     SummonCapturedOverlay {
         owner_window: u64,
         capture: crate::overlay::SummonReceipt,

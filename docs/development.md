@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Local 3.8 global tab shortcuts use `SetTabGlobalHotkey` / `SummonTabOverlay`.
+`settings.rs` validates/persists the map; `tab_hotkey_ui.rs` owns registration
+lifetimes through `overlay_windows::HotkeyListener`, and Settings shows actual
+registration status. See [the contract and evidence](patch-3.8/TAB-GLOBAL-HOTKEYS.md).
+Enter interoperability is a separate audit, not fixed by this shortcut feature.
+
 Local 3.8 work (2026-11-17) is tracked in [FEATURE-5](patch-3.8/TEAM.md).
 The team reuses five existing named runtime sessions, with single ownership of
 shared files. Per-tab tag persistence/migration belongs to Nemi; Everything

@@ -37,6 +37,9 @@ pub struct Settings {
     pub language: Language,
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
+    /// Global hotkeys are retained even when the associated tab is hidden.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tab_hotkeys: BTreeMap<ShelfTab, String>,
     /// Allow the user to resize the main shelf window. Defaults to a fixed window.
     pub window_resizable: bool,
     /// Last wallpaper installed by Katran; retained even when Desktop tab is hidden.
@@ -93,6 +96,7 @@ impl Settings {
                 ..Default::default()
             },
             overlay_hotkey: String::new(),
+            tab_hotkeys: BTreeMap::new(),
             window_resizable: false,
             desktop_wallpaper_id: None,
             emoji_font: "apple".into(),
@@ -168,6 +172,30 @@ impl Settings {
             .copied()
             .filter(|tab| self.tab_enabled(*tab))
             .collect()
+    }
+    pub(crate) fn validate_tab_hotkeys(&self) -> crate::overlay::Result<()> {
+        let mut seen = Vec::new();
+        if !self.overlay_hotkey.trim().is_empty() {
+            seen.push(crate::overlay::Hotkey::parse(&self.overlay_hotkey)?);
+        }
+        for binding in self.tab_hotkeys.values() {
+            let hotkey = crate::overlay::Hotkey::parse(binding)?;
+            if seen.contains(&hotkey) {
+                return Err(crate::overlay::OverlayError::new(
+                    "hotkey_conflict",
+                    "Global hotkey is already assigned",
+                ));
+            }
+            seen.push(hotkey);
+        }
+        Ok(())
+    }
+    pub(crate) fn canonicalize_tab_hotkeys(&mut self) -> crate::overlay::Result<()> {
+        self.validate_tab_hotkeys()?;
+        for binding in self.tab_hotkeys.values_mut() {
+            *binding = crate::overlay::Hotkey::parse(binding)?.canonical();
+        }
+        Ok(())
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
         if !crate::emoji_fonts::valid_id(&self.emoji_font) {
@@ -245,9 +273,7 @@ impl Settings {
         if !(1..=12).contains(&self.pods_columns) || !(1..=12).contains(&self.links_columns) {
             return Err("Pods/Links: число плиток в строке должно быть 1–12".into());
         }
-        if !self.overlay_hotkey.trim().is_empty() {
-            crate::overlay::Hotkey::parse(&self.overlay_hotkey).map_err(|error| error.message)?;
-        }
+        self.validate_tab_hotkeys().map_err(|error| error.message)?;
         if self
             .desktop_wallpaper_id
             .as_ref()

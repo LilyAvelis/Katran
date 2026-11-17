@@ -44,7 +44,7 @@ impl Shelf {
             self.close_open_apps();
         }
     }
-    fn close_open_apps(&mut self) {
+    pub(super) fn close_open_apps(&mut self) {
         if let Some(job_id) = self.open_apps.job.take() {
             self.call(Command::CancelJob { job_id });
         }

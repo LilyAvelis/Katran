@@ -1,5 +1,22 @@
 # Katran 3.8 verification handoff
 
+## Global tab shortcuts · 2026-11-17
+
+- Domain overlay/settings gate passed (overlay 5, settings 2); final new tab API
+  3/3, wire v2 5/5 and full headless UI 250/250 passed. Logs under ignored
+  `target/build/tab-hotkeys-{gate,recorder}.log`.
+- Native Windows registration/conflict/unregister/re-register passed 1/1 using
+  Ctrl+Alt+Shift+F24, without injected input or desktop manipulation. Restricted
+  execution first returned access denied; authorized native execution passed.
+- All-targets Clippy with UI/clipboard-events and denied warnings passed after
+  one local collapsible-if cleanup. Formatting and offline metadata passed.
+  Existing filesystem hard-link cache warnings did not require clearing cache.
+- Initial UI failures were a recorder modifier-state bug (fixed and press/release
+  regression added) and test first-frame geometry (waits for settled layout).
+  Domain acknowledgement remains distinct from actual registration.
+- Native owner acceptance of tab activation remains pending; Enter audit has
+  separate scope and no paste-delivery success claim.
+
 ## Persistent derived Folder index · 2026-11-17
 
 New worker SQLite persistence and Rust profile-cache wiring were verified with

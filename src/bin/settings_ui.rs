@@ -28,6 +28,8 @@ pub struct State {
     draft: Option<Settings>,
     error: String,
     editor: Option<super::shortcuts_ui::Editor>,
+    tab_hotkey_target: Option<katran::interaction::ShelfTab>,
+    tab_hotkey_statuses: std::collections::BTreeMap<katran::interaction::ShelfTab, String>,
     overlay_status: String,
     overlay_retry: bool,
     shortcut_filter: String,
@@ -42,11 +44,70 @@ fn apply_editor_intent(
     editor: &mut super::shortcuts_ui::Editor,
     intent: super::shortcuts_ui::Intent,
     draft: &mut Option<Settings>,
+    tab_target: Option<katran::interaction::ShelfTab>,
 ) -> bool {
     if editor.id == "overlay_hotkey" {
         apply_global_hotkey(api, editor, intent, draft)
+    } else if editor.id == "tab_global_hotkey" {
+        apply_tab_hotkey(api, editor, intent, draft, tab_target)
     } else {
         super::shortcuts_ui::apply(api, editor, intent)
+    }
+}
+fn apply_tab_hotkey(
+    api: &mut Service,
+    editor: &mut super::shortcuts_ui::Editor,
+    intent: super::shortcuts_ui::Intent,
+    draft: &mut Option<Settings>,
+    target: Option<katran::interaction::ShelfTab>,
+) -> bool {
+    let super::shortcuts_ui::Intent::Set { binding, .. } = intent else {
+        return true;
+    };
+    let Some(tab) = target else {
+        editor.failed(
+            binding,
+            super::i18n::tr("Вкладка не выбрана", "No tab selected").into(),
+            false,
+        );
+        return false;
+    };
+    let response = call(
+        api,
+        Command::SetTabGlobalHotkey {
+            tab,
+            binding: (!binding.trim().is_empty()).then_some(binding.clone()),
+        },
+    );
+    if response["ok"] == true {
+        let current = call(api, Command::GetSettings);
+        if let Ok(settings) = serde_json::from_value::<Settings>(current["result"].clone()) {
+            if let Some(draft) = draft.as_mut() {
+                draft.tab_hotkeys = settings.tab_hotkeys;
+            }
+            true
+        } else {
+            editor.failed(
+                binding,
+                super::i18n::tr(
+                    "Сохранено, но не удалось перечитать настройки",
+                    "Saved, but settings could not be reloaded",
+                )
+                .into(),
+                false,
+            );
+            false
+        }
+    } else {
+        editor.failed(
+            binding,
+            response["error"]["message"]
+                .as_str()
+                .unwrap_or(super::i18n::tr("Ошибка сохранения", "Save failed"))
+                .into(),
+            false,
+        );
+        false
     }
 }
 fn apply_global_hotkey(
@@ -389,6 +450,7 @@ fn call(api: &mut Service, command: Command) -> serde_json::Value {
 fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.tab_order = current.tab_order.clone();
     draft.hidden_tabs = current.hidden_tabs.clone();
+    draft.tab_hotkeys = current.tab_hotkeys.clone();
     draft.downloads_enabled = current.downloads_enabled;
     draft.text_enabled = current.text_enabled;
     draft.links_enabled = current.links_enabled;
@@ -471,6 +533,12 @@ impl State {
 
     pub fn set_overlay_status(&mut self, status: String) {
         self.overlay_status = status;
+    }
+    pub fn set_tab_hotkey_statuses(
+        &mut self,
+        statuses: std::collections::BTreeMap<katran::interaction::ShelfTab, String>,
+    ) {
+        self.tab_hotkey_statuses = statuses;
     }
     pub fn take_overlay_retry(&mut self) -> bool {
         std::mem::take(&mut self.overlay_retry)
@@ -805,6 +873,7 @@ impl State {
             self.sharex_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
+            self.tab_hotkey_target = None;
             self.requested_section = None;
             return false;
         }
@@ -873,7 +942,7 @@ impl State {
     if key_events>0 && let Some(log)=logger.as_ref() {log.record("shortcut_editor_input",serde_json::json!({"target":self.editor.as_ref().map(|e|e.id.as_str()),"key_events":key_events,"viewport":"settings"}));}
    }
 
-   if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx) && apply_editor_intent(api,editor,intent,&mut self.draft){self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+   if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
    let toggle_close=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::Comma));
    let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
    if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape||toggle_close; }
@@ -892,12 +961,17 @@ impl State {
      ui.add_space(16.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")).margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new(super::i18n::tr("РАЗДЕЛЫ", "WORKSPACE")).size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){self.section=index;self.editor=None;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
      egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui|{
+      if self.section != 2 && self.tab_hotkey_target.is_some() && let Some(editor)=self.editor.as_mut() {
+       ui.separator();
+       if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}
+       ui.separator();
+      }
       if self.section==0 {
        ui.heading(super::i18n::tr("Основные", "General"));ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
@@ -912,8 +986,8 @@ impl State {
         SettingsSection::group(ui,super::i18n::tr("Запуск и управление", "Startup and controls"),|ui|{
          let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{
-          if ui.button(super::i18n::tr("Изменить", "Change")).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
-          if ui.button(super::i18n::tr("Очистить", "Clear")).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
+          if ui.add_enabled(self.tab_hotkey_target.is_none(),egui::Button::new(super::i18n::tr("Изменить", "Change"))).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+          if ui.add_enabled(self.tab_hotkey_target.is_none(),egui::Button::new(super::i18n::tr("Очистить", "Clear"))).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});}
           if ui.button(super::i18n::tr("Повторить", "Retry")).clicked(){self.overlay_retry=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
@@ -994,15 +1068,21 @@ impl State {
        ui.heading(super::i18n::tr("Вкладки", "Tabs"));ui.add_space(8.0);
        ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Исключение: фоны рабочего стола сохраняются и при скрытой вкладке. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Exception: Desktop backgrounds are still saved while its tab is hidden. Saved data stays in place."));ui.add_space(16.0);
        let result=call(api,Command::Tabs);
+       let saved_hotkeys=call(api,Command::GetSettings);
        if let Some(tabs)=result["result"]["tabs"].as_array() {
         SettingsSection::group(ui,super::i18n::tr("Доступные вкладки", "Available tabs"),|ui|{
          for entry in tabs {
           let label=localized_tab_label(entry["label"].as_str().unwrap_or(""));
           let enabled=entry["enabled"]==true;
           let can_toggle=entry["can_toggle"]==true;
-          if let Ok(tab)=serde_json::from_value(entry["tab"].clone()) {
-           SettingsRow::show(ui,label,if can_toggle {if enabled {super::i18n::tr("Включена", "Enabled")} else {super::i18n::tr("Выключена", "Disabled")}} else {super::i18n::tr("Всегда включена", "Always enabled")},|ui|{
-            if ui.add_enabled(can_toggle,egui::Button::image(if enabled {egui_lucide::Lucide::Eye.size(18.0).image()} else {egui_lucide::Lucide::EyeOff.size(18.0).image()})).on_hover_text(if enabled {super::i18n::tr("Выключить вкладку", "Disable tab")} else {super::i18n::tr("Включить вкладку", "Enable tab")}).clicked() {
+          if let Ok(tab)=serde_json::from_value::<katran::interaction::ShelfTab>(entry["tab"].clone()) {
+           let tab_key=entry["tab"].as_str().unwrap_or("");
+           let binding=saved_hotkeys["result"]["tab_hotkeys"][tab_key].as_str().unwrap_or("").to_owned();
+           let status=if binding.is_empty(){super::i18n::tr("Не назначена", "Not assigned").to_owned()}else if !enabled{super::i18n::tr("Вкладка отключена; сочетание неактивно", "Tab disabled; shortcut inactive").to_owned()}else{self.tab_hotkey_statuses.get(&tab).cloned().unwrap_or_else(||super::i18n::tr("Сохранено · ожидание регистрации", "Saved · registration pending").into())};
+           SettingsRow::show(ui,label,&status,|ui|{ui.horizontal(|ui|{
+            let eye=ui.add_enabled(can_toggle,egui::Button::image(if enabled {egui_lucide::Lucide::Eye.size(18.0).image()} else {egui_lucide::Lucide::EyeOff.size(18.0).image()})).on_hover_text(if enabled {super::i18n::tr("Выключить вкладку", "Disable tab")} else {super::i18n::tr("Включить вкладку", "Enable tab")});
+            #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tab-hotkey-eye",tab_key)),eye.rect));
+            if eye.clicked() {
              let response=call(api,Command::SetTabEnabled{tab,enabled:!enabled});
              if response["ok"]==true {
               tabs_changed=true;
@@ -1010,7 +1090,26 @@ impl State {
               self.error.clear();
              } else {self.error=response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}
             }
-           });
+            let caption=if binding.is_empty(){super::i18n::tr("Назначить", "Set shortcut")}else{binding.as_str()};
+            let key_button=ui.add_enabled(self.editor.is_none(),egui::Button::new(caption)).on_hover_text(super::i18n::tr("Глобальное сочетание Windows для вкладки", "Global Windows shortcut for this tab"));
+            #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tab-hotkey-button",tab_key)),key_button.rect));
+            if key_button.clicked() {
+             self.tab_hotkey_target=Some(tab);
+             self.editor=Some(super::shortcuts_ui::Editor::new("tab_global_hotkey",label,binding.clone()).with_physical_keys());
+             self.tab_hotkey_statuses.remove(&tab);
+            }
+            if !binding.is_empty() && ui.add_enabled(self.editor.is_none(),egui::Button::new("×")).on_hover_text(super::i18n::tr("Снять сочетание", "Clear shortcut")).clicked() {
+             self.tab_hotkey_target=Some(tab);
+             self.editor=Some(super::shortcuts_ui::Editor::new("tab_global_hotkey",label,binding.clone()).with_physical_keys());
+             self.tab_hotkey_statuses.remove(&tab);
+             global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});
+            }
+           });});
+           if self.tab_hotkey_target==Some(tab) && let Some(editor)=self.editor.as_mut(){
+            ui.separator();
+            if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}
+            ui.separator();
+           }
           }
          }
         });
@@ -1170,12 +1269,12 @@ impl State {
           SettingsRow::show(ui,shortcut_label,shortcut.binding.as_deref().unwrap_or(super::i18n::tr("Не назначено", "Not assigned")),|ui|{
            ui.add(super::action_icons::icon(&shortcut.id).size(16.0).image());
            if shortcut.rebindable {
-            if ui.button(super::i18n::tr("Изменить", "Change")).clicked(){edit=Some(shortcut.clone());}
+            if ui.add_enabled(self.tab_hotkey_target.is_none(),egui::Button::new(super::i18n::tr("Изменить", "Change"))).clicked(){edit=Some(shortcut.clone());}
             if ui.button(super::i18n::tr("Сбросить", "Reset")).clicked(){let r=call(api,Command::SetShortcut{id:shortcut.id.clone(),binding:None,replace:false,reset:true});if r["ok"]==false{self.error=r["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}}
            }else{ui.weak(super::i18n::tr("Системное сочетание", "System shortcut"));}
           });
           if self.editor.as_ref().is_some_and(|e|e.id==shortcut.id) && let Some(editor)=self.editor.as_mut() {
-           ui.separator();if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft){self.editor=None;}ui.separator();
+           ui.separator();if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}ui.separator();
           }
          });
         }
@@ -1205,9 +1304,12 @@ impl State {
         }
         if let Some(intent) = global_intent
             && let Some(editor) = self.editor.as_mut()
-            && apply_editor_intent(api, editor, intent, &mut self.draft)
+            && apply_editor_intent(api, editor, intent, &mut self.draft, self.tab_hotkey_target)
         {
             self.editor = None;
+            if let Some(tab) = self.tab_hotkey_target.take() {
+                self.tab_hotkey_statuses.remove(&tab);
+            }
             ctx.request_repaint();
         }
         let draft_after = self
@@ -1294,6 +1396,206 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tab_hotkey_button_is_right_of_eye_and_does_not_toggle_tab() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        call(&mut api, Command::ShowTabSettings);
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(true);
+        super::super::ui_style::install(&ctx);
+        let mut state = State::default();
+        // The embedded settings viewport performs an initial sizing pass; use
+        // settled geometry before synthesizing the click.
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                state.show(ui.ctx(), &mut api);
+            });
+            out.textures_delta.clear();
+        }
+        let (eye, button): (egui::Rect, egui::Rect) = ctx.data(|data| {
+            (
+                data.get_temp(egui::Id::new(("tab-hotkey-eye", "images")))
+                    .unwrap(),
+                data.get_temp(egui::Id::new(("tab-hotkey-button", "images")))
+                    .unwrap(),
+            )
+        });
+        assert!(button.left() >= eye.right());
+        let before = call(&mut api, Command::Tabs)["result"]["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["tab"] == "images")
+            .unwrap()["enabled"]
+            .clone();
+        let pos = button.center();
+        for pressed in [true, false] {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    state.show(ui.ctx(), &mut api);
+                },
+            );
+            out.textures_delta.clear();
+        }
+        assert_eq!(state.tab_hotkey_target, Some(ShelfTab::Images));
+        assert!(state.editor.is_some());
+        assert_eq!(
+            call(&mut api, Command::Tabs)["result"]["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["tab"] == "images")
+                .unwrap()["enabled"],
+            before
+        );
+    }
+    #[test]
+    fn tab_hotkey_recording_keeps_target_across_section_change() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        call(&mut api, Command::ShowTabSettings);
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(true);
+        super::super::ui_style::install(&ctx);
+        let mut state = State {
+            section: 0,
+            requested_section: Some(2),
+            tab_hotkey_target: Some(ShelfTab::Text),
+            editor: Some(
+                super::super::shortcuts_ui::Editor::new("tab_global_hotkey", "Text", "")
+                    .with_physical_keys(),
+            ),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::R,
+                    physical_key: Some(egui::Key::R),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::ALT,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                state.show(ui.ctx(), &mut api);
+            },
+        );
+        output.textures_delta.clear();
+        assert_eq!(
+            call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"],
+            "Alt+R"
+        );
+        assert!(state.editor.is_none() && state.tab_hotkey_target.is_none());
+    }
+    #[test]
+    fn tab_shortcut_editor_sets_rebinds_clears_and_keeps_disabled_tab_disabled() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        let mut draft = Some(
+            serde_json::from_value::<Settings>(
+                call(&mut api, Command::GetSettings)["result"].clone(),
+            )
+            .unwrap(),
+        );
+        let stale = draft.clone().unwrap();
+        assert_eq!(
+            call(
+                &mut api,
+                Command::SetTabEnabled {
+                    tab: ShelfTab::Text,
+                    enabled: false
+                }
+            )["ok"],
+            true
+        );
+        let mut editor = super::super::shortcuts_ui::Editor::new("tab_global_hotkey", "Text", "")
+            .with_physical_keys();
+        let set = |binding: &str| super::super::shortcuts_ui::Intent::Set {
+            binding: binding.into(),
+            replace: false,
+        };
+        assert!(apply_editor_intent(
+            &mut api,
+            &mut editor,
+            set("Ctrl Shift V"),
+            &mut draft,
+            Some(ShelfTab::Text)
+        ));
+        assert_eq!(
+            call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"],
+            "Ctrl+Shift+V"
+        );
+        assert!(apply_editor_intent(
+            &mut api,
+            &mut editor,
+            set("Alt 7"),
+            &mut draft,
+            Some(ShelfTab::Text)
+        ));
+        assert_eq!(
+            call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"],
+            "Alt+7"
+        );
+        save_general_settings(&mut api, &stale).unwrap();
+        assert_eq!(
+            call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"],
+            "Alt+7"
+        );
+        assert_eq!(
+            call(&mut api, Command::Tabs)["result"]["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["tab"] == "text")
+                .unwrap()["enabled"],
+            false
+        );
+        assert!(!apply_editor_intent(
+            &mut api,
+            &mut editor,
+            set("Alt 7"),
+            &mut draft,
+            Some(ShelfTab::Images)
+        ));
+        assert!(call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["images"].is_null());
+        assert!(!apply_editor_intent(
+            &mut api,
+            &mut editor,
+            set("Q"),
+            &mut draft,
+            Some(ShelfTab::Text)
+        ));
+        assert_eq!(
+            call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"],
+            "Alt+7"
+        );
+        assert!(apply_editor_intent(
+            &mut api,
+            &mut editor,
+            set(""),
+            &mut draft,
+            Some(ShelfTab::Text)
+        ));
+        assert!(call(&mut api, Command::GetSettings)["result"]["tab_hotkeys"]["text"].is_null());
+    }
     #[test]
     fn folder_gpu_checkbox_updates_and_persists_setting() {
         let root = tempfile::tempdir().unwrap();

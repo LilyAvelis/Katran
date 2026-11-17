@@ -61,6 +61,7 @@ fn command(value: &mut Value) -> Result<(), String> {
         }
         "toggle_resident_overlay"
         | "summon_captured_overlay"
+        | "summon_tab_overlay"
         | "summon_overlay"
         | "begin_paste_previous"
         | "complete_paste_previous"

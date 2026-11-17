@@ -21,6 +21,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         pods_columns: 9,
         links_columns: 8,
         overlay_hotkey: String::new(),
+        tab_hotkeys: Default::default(),
         emoji_font: "apple".into(),
         sort: Default::default(),
         tab_preferences: Default::default(),

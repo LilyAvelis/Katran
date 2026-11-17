@@ -41,6 +41,7 @@ mod source_jobs;
 mod special_mode_bar;
 mod summon_animation;
 mod tab_bar;
+mod tab_hotkey_ui;
 mod tab_preload_ui;
 mod table_preview_ui;
 mod tag_material_ui;

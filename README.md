@@ -9,6 +9,8 @@ physical backslash in the folder picker; ordinary search remains available.
 Neural queries submit on Enter with 10 results per page; Down at the last result
 requests the next 10. Settings can opt into a separately installed CUDA component.
 The bounded neural index persists across restarts and updates changed descriptors.
+Settings → Tabs can assign a [global Windows shortcut to each tab](docs/patch-3.8/TAB-GLOBAL-HOTKEYS.md),
+opening Katran directly on that tab with its saved view.
 The owner now uses local `main` and the primary Raycast launch with the existing
 profile for manual acceptance; retain the previous runtime and database backup
 for rollback. This work is not a public release. See the

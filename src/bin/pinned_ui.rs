@@ -13,7 +13,7 @@ pub(super) struct State {
     error: String,
 }
 impl Shelf {
-    fn pinned_close(&mut self) {
+    pub(super) fn pinned_close(&mut self) {
         if let Some(job_id) = self.pinned_ui.job.take() {
             self.call(Command::CancelJob { job_id });
         }
