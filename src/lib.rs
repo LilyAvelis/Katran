@@ -846,6 +846,16 @@ impl Service {
             Command::ListTagSlots => self.list_tag_slots(),
             Command::ListTagSlotsForTab { tab } => self.list_tag_slots_for_tab(tab),
             Command::SaveTagSlotForTab { tab, slot } => self.save_tag_slot_for_tab(tab, slot),
+            Command::SaveTagSlotChecked {
+                tab,
+                slot,
+                expected_revision,
+            } => self.save_tag_slot_checked(tab, slot, expected_revision),
+            Command::ReorderTagSlots {
+                tab,
+                order,
+                expected_revision,
+            } => self.reorder_tag_slots(tab, order, expected_revision),
             Command::SaveTagSlot { slot } => self.save_tag_slot(slot),
             Command::AssignTagSlot { ids, slot } => {
                 if ids.iter().any(|id| pods::is_emoji_id(*id)) {

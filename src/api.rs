@@ -175,6 +175,16 @@ pub enum Command {
         tab: crate::interaction::ShelfTab,
         slot: crate::tag_slots::Slot,
     },
+    SaveTagSlotChecked {
+        tab: crate::interaction::ShelfTab,
+        slot: crate::tag_slots::Slot,
+        expected_revision: String,
+    },
+    ReorderTagSlots {
+        tab: crate::interaction::ShelfTab,
+        order: Vec<u8>,
+        expected_revision: String,
+    },
     SaveTagSlot {
         slot: crate::tag_slots::Slot,
     },

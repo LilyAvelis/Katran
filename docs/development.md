@@ -19,9 +19,20 @@ use the active tab. Folder rejects tags. See [migration](patch-3.8/TAGS.md).
 limit. `ListKnownFolders` uses an injectable `known_folders::Provider`; opening
 still revalidates through `ChooseFolder`. See [search evidence](patch-3.8/SEARCH.md).
 The tag palette's local editor reuses `tag_settings_ui::edit_controls`; its
-captured tab and slot save through `SaveTagSlotForTab`. Ctrl+Shift+Comma edits
+captured tab and slot save through `SaveTagSlotChecked` with the list revision.
+`ReorderTagSlots` accepts a full permutation (`order[new-1] = old`) and the
+expected revision, moving definitions and assignments atomically. Both Settings
+and the palette reject stale saves instead of overwriting another tag after a
+reorder. Legacy numeric save commands remain compatible. Ctrl+Shift+Comma edits
 the highlighted palette tag without opening Settings. Folder Standard folders
 uses the contextual, rebindable `folder_standard` action (default Ctrl+Y).
+
+The requested third dense list/detail mode is research only; see the
+[architecture and provider matrix](patch-3.8/DETAILS-VIEW-RESEARCH.md) and
+[UX contract](patch-3.8/DETAILS-VIEW-UX.md). It should follow the cursor without
+entering full-screen preview or changing selection. Optional Folder embeddings
+are separately evaluated in [semantic research](patch-3.8/FOLDER-SEMANTIC-RESEARCH.md);
+no neural Folder search is wired into the product.
 
 Owner decision 2026-11-15: use the public 3.7 source as the sole Katran host. The optional emoji AI mode now follows `SearchEmojiAi` through the standard dispatcher and job service, with `src/bin/emoji_ai_ui.rs` as its UI client. Its runtime lives under the active profile's `emoji-ai-runtime` directory, outside versioned executables; a missing model must not break ordinary Katran. The earlier separate E distribution plan is superseded for 3.7. See [the model setup](emoji-ai.md).
 

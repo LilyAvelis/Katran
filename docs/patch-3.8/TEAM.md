@@ -6,6 +6,18 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Current follow-up, 2026-11-17: the base is accepted for the owner's tag/search
+workflow and recorded in [Notion 3.8](https://app.notion.com/p/41b49fda329681d985ddeab05ac2ced1).
+Fenna owns Settings drag UI and revision-checked saves in both tag editors;
+Nemi owns reorder/checked-save domain, public commands/dispatcher and synthetic
+tests (temporary explicit shared-file ownership transferred from Polly for this
+bounded change). Mira delivered `DETAILS-VIEW-RESEARCH.md`; Fenna delivered
+`DETAILS-VIEW-UX.md`. Kiki independently reviews the reorder boundary; Polly
+integrates, maintains this map, records the offline semantic feasibility probe
+and stages one verified artifact. No new agents were created. The third view
+and Folder AI remain research only. Historical status rows below describe the
+completed base, not the current follow-up workload.
+
 These are real canonical runtime session identifiers returned by spawn_agent. Reuse them with followup_task; do not spawn replacements. Completed sessions retain their handoff, not permanent persona memory.
 
 | Persona | Runtime ID | Requested model / effort | Ownership | State / next step |

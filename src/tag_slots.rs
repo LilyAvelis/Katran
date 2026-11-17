@@ -9,6 +9,8 @@ use std::{collections::HashSet, fmt};
 #[derive(Debug)]
 pub(crate) enum StoreError {
     Invalid(&'static str),
+    Conflict,
+    Revision(&'static str),
     Database(rusqlite::Error),
 }
 impl From<rusqlite::Error> for StoreError {
@@ -20,6 +22,8 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(message) => f.write_str(message),
+            Self::Conflict => f.write_str("tag slots changed since they were read"),
+            Self::Revision(message) => f.write_str(message),
             Self::Database(error) => error.fmt(f),
         }
     }
@@ -107,10 +111,43 @@ fn validate(slot: &Slot) -> Result<()> {
 }
 
 /// Changes settings only; existing object assignments are unaffected.
-pub(crate) fn save_slot(db: &Connection, scope: &str, slot: &Slot) -> Result<()> {
+fn write_slot(db: &Connection, scope: &str, slot: &Slot) -> Result<()> {
     validate(slot)?;
     db.execute("INSERT INTO tag_scoped_slots(scope,number,name,color,material,scale,intensity,angle,seed,opacity) VALUES(?10,?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(scope,number) DO UPDATE SET name=excluded.name,color=excluded.color,material=excluded.material,scale=excluded.scale,intensity=excluded.intensity,angle=excluded.angle,seed=excluded.seed,opacity=excluded.opacity", params![slot.number,slot.name,slot.color,slot.material.as_str(),slot.scale,slot.intensity,slot.angle,slot.seed,slot.opacity,scope])?;
     Ok(())
+}
+
+pub(crate) fn save_slot(db: &Connection, scope: &str, slot: &Slot) -> Result<()> {
+    validate(slot)?;
+    let tx = rusqlite::Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
+    let next = next_counter(&tx, scope)?;
+    write_slot(&tx, scope, slot)?;
+    write_counter(&tx, scope, next)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Save only against the exact slot set selected by the editor. The check,
+/// write, counter bump, and returned revision share one write transaction.
+pub(crate) fn save_slot_checked(
+    db: &Connection,
+    scope: &str,
+    slot: &Slot,
+    expected_revision: &str,
+) -> Result<String> {
+    validate(slot)?;
+    let tx = rusqlite::Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
+    let slots = list_slots(&tx, scope)?;
+    let next = next_counter(&tx, scope)?;
+    if revision(&tx, scope, &slots)? != expected_revision {
+        return Err(StoreError::Conflict);
+    }
+    write_slot(&tx, scope, slot)?;
+    write_counter(&tx, scope, next)?;
+    let slots = list_slots(&tx, scope)?;
+    let result = revision(&tx, scope, &slots)?;
+    tx.commit()?;
+    Ok(result)
 }
 
 pub(crate) fn list_slots(db: &Connection, scope: &str) -> Result<Vec<Slot>> {
@@ -135,6 +172,110 @@ pub(crate) fn list_slots(db: &Connection, scope: &str) -> Result<Vec<Slot>> {
         validate(slot)?;
     }
     Ok(slots)
+}
+
+fn counter(db: &Connection, scope: &str) -> Result<u64> {
+    let key = format!("tag_slots_revision:{scope}");
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT document FROM preferences WHERE key=?1",
+            [&key],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(0);
+    };
+    if raw.is_empty()
+        || (raw.len() > 1 && raw.starts_with('0'))
+        || !raw.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(StoreError::Revision("invalid tag slot revision counter"));
+    }
+    raw.parse::<u64>()
+        .map_err(|_| StoreError::Revision("invalid tag slot revision counter"))
+}
+fn next_counter(db: &Connection, scope: &str) -> Result<u64> {
+    counter(db, scope)?
+        .checked_add(1)
+        .ok_or(StoreError::Revision("tag slot revision counter overflow"))
+}
+fn write_counter(db: &Connection, scope: &str, value: u64) -> Result<()> {
+    let key = format!("tag_slots_revision:{scope}");
+    db.execute("INSERT INTO preferences(key,document) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET document=excluded.document", params![key,value.to_string()])?;
+    Ok(())
+}
+/// Opaque fingerprint combines definitions and the persistent change counter.
+pub(crate) fn revision(db: &Connection, scope: &str, slots: &[Slot]) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let data = serde_json::to_vec(&(scope, counter(db, scope)?, slots))
+        .expect("Slot serialization is infallible");
+    Ok(format!("{:x}", Sha256::digest(data)))
+}
+
+/// `order[new - 1]` is the old slot number. Definitions and assignments move
+/// together in one transaction, with the old-number snapshot checked first.
+pub(crate) fn reorder(
+    db: &mut Connection,
+    scope: &str,
+    order: &[u8],
+    expected_revision: &str,
+) -> Result<(Vec<Slot>, String)> {
+    let mut seen = [false; 10];
+    if order.len() != 9 {
+        return Err(StoreError::Invalid(
+            "order must be a permutation of slots 1..9",
+        ));
+    }
+    for &number in order {
+        if !valid_slot_number(number) || seen[number as usize] {
+            return Err(StoreError::Invalid(
+                "order must be a permutation of slots 1..9",
+            ));
+        }
+        seen[number as usize] = true;
+    }
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let slots = list_slots(&tx, scope)?;
+    if slots.len() != 9
+        || slots
+            .iter()
+            .enumerate()
+            .any(|(i, slot)| slot.number as usize != i + 1)
+    {
+        return Err(StoreError::Invalid("scope does not contain all nine slots"));
+    }
+    let next = next_counter(&tx, scope)?;
+    if revision(&tx, scope, &slots)? != expected_revision {
+        return Err(StoreError::Conflict);
+    }
+    let mut new_slots = Vec::with_capacity(9);
+    for (index, &old_number) in order.iter().enumerate() {
+        let mut slot = slots[old_number as usize - 1].clone();
+        slot.number = (index + 1) as u8;
+        write_slot(&tx, scope, &slot)?;
+        new_slots.push(slot);
+    }
+    let mut cases = String::from("CASE slot_number");
+    for (index, old_number) in order.iter().enumerate() {
+        cases.push_str(&format!(" WHEN {old_number} THEN {}", index + 1));
+    }
+    cases.push_str(" ELSE slot_number END");
+    if scope == "desktop" {
+        tx.execute(
+            &format!("UPDATE desktop_scoped_assignments SET slot_number={cases}"),
+            [],
+        )?;
+    } else {
+        tx.execute(
+            &format!("UPDATE tag_scoped_assignments SET slot_number={cases} WHERE scope=?1"),
+            [scope],
+        )?;
+    }
+    write_counter(&tx, scope, next)?;
+    let new_revision = revision(&tx, scope, &new_slots)?;
+    tx.commit()?;
+    Ok((new_slots, new_revision))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

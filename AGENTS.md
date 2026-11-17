@@ -16,6 +16,14 @@ Native product acceptance still belongs to Lilia.
 
 ## Local 3.8 implementation · owner instruction 2026-11-17
 
+Owner extension: drag-reorder complete tag definitions and assignments in Settings,
+with revision-checked saves in both editors. No schema bump. Lilia confirmed the
+base tags/search experience useful; the new third dense list/detail view and
+optional Folder neural search remain separate research, not accepted implementations.
+See `docs/patch-3.8/DETAILS-VIEW-RESEARCH.md` and
+`docs/patch-3.8/FOLDER-SEMANTIC-RESEARCH.md`. Preserve ordinary search and do not
+download a model or index personal folders merely to evaluate this possibility.
+
 FEATURE-5 / Мастерская + Iris is implementing per-tab tag definitions and
 assignments, an inline live tag editor, algorithmic Everything folder ranking,
 direct Folder favorites/history and Windows Known Folders navigation.

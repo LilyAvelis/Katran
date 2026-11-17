@@ -5,6 +5,11 @@ use serde_json::{Value, json};
 fn error(value: tag_slots::StoreError) -> ApiError {
     match value {
         tag_slots::StoreError::Invalid(message) => ApiError::new("invalid_tag_slot", message),
+        tag_slots::StoreError::Revision(message) => ApiError::new("storage_error", message),
+        tag_slots::StoreError::Conflict => ApiError::new(
+            "tag_slots_changed",
+            "Tag slots changed; refresh before editing or reordering",
+        ),
         tag_slots::StoreError::Database(error) => ApiError::new("storage_error", error),
     }
 }
@@ -109,8 +114,10 @@ impl Service {
         &self,
         tab: crate::interaction::ShelfTab,
     ) -> Result<Value> {
-        let slots = tag_slots::list_slots(&self.db, scope(tab)?).map_err(error)?;
-        Ok(json!({"slots":slots,"tab":tab}))
+        let scope = scope(tab)?;
+        let slots = tag_slots::list_slots(&self.db, scope).map_err(error)?;
+        let revision = tag_slots::revision(&self.db, scope, &slots).map_err(error)?;
+        Ok(json!({"slots":slots,"tab":tab,"revision":revision}))
     }
 
     pub(crate) fn save_tag_slot(&mut self, slot: tag_slots::Slot) -> Result<Value> {
@@ -125,6 +132,49 @@ impl Service {
         tag_slots::save_slot(&self.db, scope(tab)?, &slot).map_err(error)?;
         self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
         Ok(json!({"slot":slot,"tab":tab}))
+    }
+
+    pub(crate) fn save_tag_slot_checked(
+        &mut self,
+        tab: crate::interaction::ShelfTab,
+        slot: tag_slots::Slot,
+        expected_revision: String,
+    ) -> Result<Value> {
+        let revision =
+            tag_slots::save_slot_checked(&self.db, scope(tab)?, &slot, &expected_revision)
+                .map_err(error)?;
+        self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+        Ok(json!({"tab":tab,"slot":slot,"revision":revision}))
+    }
+
+    pub(crate) fn reorder_tag_slots(
+        &mut self,
+        tab: crate::interaction::ShelfTab,
+        order: Vec<u8>,
+        expected_revision: String,
+    ) -> Result<Value> {
+        let scope = scope(tab)?;
+        let (slots, revision) =
+            tag_slots::reorder(&mut self.db, scope, &order, &expected_revision).map_err(error)?;
+        if self.interaction.tab == tab {
+            let filter = self.interaction.tag_slot_filter.and_then(|old| {
+                order
+                    .iter()
+                    .position(|&n| n == old)
+                    .map(|index| (index + 1) as u8)
+            });
+            let pinned_only = self.interaction.pinned_only;
+            let tag_filter = self.interaction.tag_filter.clone();
+            let browse_query = std::mem::take(&mut self.interaction.browse_query);
+            self.interaction.reset_context();
+            self.interaction.pinned_only = pinned_only;
+            self.interaction.tag_filter = tag_filter;
+            self.interaction.tag_slot_filter = filter;
+            self.interaction.browse_query = browse_query;
+        } else {
+            self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+        }
+        Ok(json!({"tab":tab,"order":order,"slots":slots,"revision":revision}))
     }
 
     pub(crate) fn assign_tag_slot(&mut self, ids: Vec<i64>, slot: Option<u8>) -> Result<Value> {

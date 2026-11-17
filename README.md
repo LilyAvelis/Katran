@@ -1,7 +1,10 @@
 # Katran
 
 Local development is preparing **3.8.0**: per-tab tag sets with preservation of
-legacy assignments, inline live tag settings and improved Folder navigation.
+legacy assignments, inline live tag settings, drag reordering of complete tags
+and improved Folder navigation. The third dense list/detail view and optional
+semantic Folder search are [separate research](docs/patch-3.8/DETAILS-VIEW-RESEARCH.md),
+not implemented features of this checkpoint.
 The owner now uses local `main` and the primary Raycast launch with the existing
 profile for manual acceptance; retain the previous runtime and database backup
 for rollback. This work is not a public release. See the

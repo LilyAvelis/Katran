@@ -1,5 +1,33 @@
 # Katran 3.8 verification handoff
 
+## Complete tag reorder follow-up · 2026-11-17
+
+The owner's latest feedback accepts the base tag/search usability, before the
+new reorder, dense-list/detail and neural-search extensions. The base checkpoint
+is separately saved in [Notion 3.8](https://app.notion.com/p/41b49fda329681d985ddeab05ac2ced1).
+
+API-first reorder gate passed: snapshot 4, Desktop shelf 5, reorder API 1,
+tag storage 5 and existing tag API 7 checks (`target/build/tag-reorder-api.log`).
+After adding atomic checked-save, its API suite passed 2/2 and storage 5/5.
+These use synthetic profiles, never reorder the owner's real tags as a test.
+The targeted UI suite passed 22/22, including actual egui grip/drop frames,
+full tag movement, editor following, conflict drafts and both stale editors.
+Palette numeric actions also reject an obsolete list before dispatch. Within
+the ordinary single-Service UI, validation and dispatch run sequentially;
+the legacy numeric Filter/Assign API itself is not a cross-client identity lock.
+
+Kiki independently reviewed the bounded domain changes and found no reproducible
+integrity defect. Her shared conflict-message finding was fixed. Initial Clippy
+failed only because a production helper included by a standalone storage fixture
+was unused there; a test-module-only allow fixes that fixture without suppressing
+production diagnostics. Final all-targets Clippy with `-D warnings` and formatting
+passed. The known incremental hardlink warnings use copying fallback.
+
+The third view is researched, not built. The offline 16-folder synthetic neural
+probe is feasibility evidence only, not real-index quality or production latency;
+see [its scope and numbers](FOLDER-SEMANTIC-RESEARCH.md). No model was downloaded
+and no private-folder index or content was scanned for this research.
+
 ## Status
 
 Independent CLI smoke was completed against the staged artifacts for

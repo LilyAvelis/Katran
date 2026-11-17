@@ -2,10 +2,12 @@
 
 ## Local 3.8 work · 2026-11-17
 
-Owner-authorized implementation of per-tab tags and Folder navigation is in
-progress; see [the team and contract](../patch-3.8/TEAM.md) and
-[local candidate notes](3.8.0.md). No public release, push or replacement of
-the installed working application is authorized. AI folder search is deferred.
+The owner confirmed the local base tag/search experience and requested complete
+tag reordering in Settings; see [the team and contract](../patch-3.8/TEAM.md) and
+[local candidate notes](3.8.0.md). Local main and the primary Raycast installation
+with the existing profile are explicitly authorized; GitHub publication is not.
+The third dense list/detail mode and neural Folder search remain separate
+research. Ordinary search stays available without a model.
 
 ## 3.7.1 unified application
 

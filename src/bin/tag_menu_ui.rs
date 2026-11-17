@@ -8,6 +8,8 @@ struct Editor {
     tab: ShelfTab,
     slot: Slot,
     dirty: bool,
+    revision: String,
+    conflicted: bool,
 }
 
 #[derive(Default)]
@@ -25,6 +27,8 @@ pub struct State {
     editor: Option<Editor>,
     editing: bool,
     save_requested: bool,
+    revision: Option<String>,
+    reload_requested: bool,
 }
 #[derive(Clone, Copy)]
 pub enum Intent {
@@ -94,7 +98,9 @@ impl State {
                         egui::ScrollArea::vertical()
                             .max_height((ctx.content_rect().height() - 140.0).max(80.0))
                             .show(ui, |ui| {
-                                super::tag_settings_ui::edit_controls(ui, &mut editor.slot)
+                                ui.add_enabled_ui(!editor.conflicted, |ui| {
+                                    super::tag_settings_ui::edit_controls(ui, &mut editor.slot)
+                                });
                             });
                         if editor.slot != before {
                             editor.dirty = true;
@@ -105,11 +111,22 @@ impl State {
                                 Color32::LIGHT_RED,
                                 format!("{}: {}", tr("Не сохранено", "Not saved"), self.error),
                             );
-                            if ui
-                                .button(tr("Повторить сохранение", "Retry save"))
-                                .clicked()
+                            if !editor.conflicted
+                                && ui
+                                    .button(tr("Повторить сохранение", "Retry save"))
+                                    .clicked()
                             {
                                 self.save_requested = true;
+                            }
+                            if editor.conflicted
+                                && ui
+                                    .button(tr(
+                                        "Отменить черновик и обновить",
+                                        "Discard draft and reload",
+                                    ))
+                                    .clicked()
+                            {
+                                self.reload_requested = true;
                             }
                         }
                         ui.weak(tr("Esc · назад к тегам", "Esc · back to tags"));
@@ -201,14 +218,18 @@ impl State {
                     .find(|slot| slot.number == number)
                     .cloned()
                 {
-                    if !self.editor.as_ref().is_some_and(|editor| editor.dirty) {
+                    if !self.editor.as_ref().is_some_and(|editor| editor.dirty)
+                        && let Some(revision) = self.revision.clone()
+                    {
                         self.editor = Some(Editor {
                             tab: self.tab,
                             slot,
                             dirty: false,
+                            revision,
+                            conflicted: false,
                         });
                     }
-                    self.editing = true;
+                    self.editing = self.editor.is_some();
                     ctx.request_repaint();
                 }
             }
@@ -415,6 +436,7 @@ impl super::Shelf {
                 self.tag_menu.start(slots);
                 self.tag_menu.tab =
                     serde_json::from_value(self.state["tab"].clone()).unwrap_or_default();
+                self.tag_menu.revision = response["revision"].as_str().map(str::to_owned);
             }
             Err(_) => {
                 if self.message.is_empty() {
@@ -474,6 +496,17 @@ impl super::Shelf {
             self.tag_menu
                 .show(ctx, eligible, ids.len(), has_tag, &summary, active)
         {
+            let numeric = matches!(intent, Intent::Filter(Some(_)) | Intent::Assign(Some(_)))
+                || matches!(intent, Intent::Retry)
+                    && self
+                        .tag_menu
+                        .retry
+                        .as_ref()
+                        .is_some_and(|(_, slot)| slot.is_some());
+            if numeric && !self.tag_menu_revision_current() {
+                self.tag_menu.open = true;
+                return;
+            }
             match intent {
                 Intent::Filter(slot) => {
                     let state = self.call(katran::Command::FilterTagSlot { slot });
@@ -495,21 +528,63 @@ impl super::Shelf {
                 }
             }
         }
+        if self.tag_menu.reload_requested {
+            self.tag_menu.reload_requested = false;
+            self.tag_menu.editor = None;
+            self.tag_menu.editing = false;
+            self.tag_menu.error.clear();
+            self.open_tag_menu();
+        }
         if self.tag_menu.save_requested {
             self.tag_menu.save_requested = false;
             if let Some(editor) = self.tag_menu.editor.as_ref() {
                 let tab = editor.tab;
                 let slot = editor.slot.clone();
-                let result = self.call(katran::Command::SaveTagSlotForTab {
-                    tab,
-                    slot: slot.clone(),
-                });
-                if result.is_null() {
-                    self.tag_menu.error = self.message.clone();
+                let revision = editor.revision.clone();
+                if editor.conflicted {
+                    return;
+                }
+                let result = self
+                    .api
+                    .as_mut()
+                    .map(|api| {
+                        api.execute(katran::Request {
+                            api_version: 1,
+                            request_id: "tag-menu-save".into(),
+                            command: katran::Command::SaveTagSlotChecked {
+                                tab,
+                                slot: slot.clone(),
+                                expected_revision: revision,
+                            },
+                        })
+                    })
+                    .unwrap_or_default();
+                if result["ok"] != true {
+                    let conflict = result["error"]["code"] == "tag_slots_changed";
+                    if let Some(editor) = self.tag_menu.editor.as_mut() {
+                        editor.conflicted = conflict;
+                    }
+                    self.tag_menu.error = if conflict {
+                        tr(
+                            "Теги изменились в другом окне; черновик не сохранён",
+                            "Tags changed elsewhere; the draft was not saved",
+                        )
+                        .into()
+                    } else {
+                        result["error"]["message"]
+                            .as_str()
+                            .unwrap_or(tr("Не удалось сохранить тег", "Could not save tag"))
+                            .into()
+                    };
                 } else {
+                    let next_revision = result["result"]["revision"].as_str().map(str::to_owned);
                     if let Some(editor) = self.tag_menu.editor.as_mut() {
                         editor.dirty = false;
+                        if let Some(revision) = next_revision.clone() {
+                            editor.revision = revision;
+                        }
                     }
+                    self.tag_menu.revision = next_revision;
                     if self.tag_menu.tab == tab
                         && let Some(old) = self
                             .tag_menu
@@ -526,6 +601,39 @@ impl super::Shelf {
                 }
             }
         }
+    }
+    fn tag_menu_revision_current(&mut self) -> bool {
+        let tab = self.tag_menu.tab;
+        if serde_json::from_value::<ShelfTab>(self.state["tab"].clone()).ok() != Some(tab) {
+            self.tag_menu.error = tr(
+                "Вкладка изменилась; откройте теги снова",
+                "Tab changed; reopen tags",
+            )
+            .into();
+            return false;
+        }
+        let response = self.call(katran::Command::ListTagSlotsForTab { tab });
+        let revision = response["revision"].as_str().map(str::to_owned);
+        if revision.is_some() && revision == self.tag_menu.revision {
+            return true;
+        }
+        if let (Some(revision), Ok(slots)) = (
+            revision,
+            serde_json::from_value::<Vec<Slot>>(response["slots"].clone()),
+        ) {
+            self.tag_menu.revision = Some(revision);
+            self.tag_menu.slots = slots;
+            self.tag_menu.selected = 0;
+            self.tag_menu.retry = None;
+            self.tag_menu.error = tr(
+                "Теги изменились; выберите действие снова",
+                "Tags changed; choose the action again",
+            )
+            .into();
+        } else {
+            self.tag_menu.error = tr("Не удалось проверить теги", "Could not check tags").into();
+        }
+        false
     }
     fn assign_tag_menu(&mut self, ids: Vec<i64>, slot: Option<u8>) {
         let result = self.call(katran::Command::AssignTagSlot {
@@ -570,6 +678,96 @@ impl super::Shelf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn palette_reloads_and_rejects_numeric_action_after_reorder() {
+        use katran::{Command, interaction::ShelfTab};
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: ShelfTab::Images,
+        });
+        app.open_tag_menu();
+        let revision = app.tag_menu.revision.clone().unwrap();
+        let mut draft = app.tag_menu.slots[0].clone();
+        draft.name = "Draft".into();
+        app.tag_menu.editor = Some(super::Editor {
+            tab: ShelfTab::Images,
+            slot: draft,
+            dirty: true,
+            revision: revision.clone(),
+            conflicted: false,
+        });
+        let reordered = app.call(Command::ReorderTagSlots {
+            tab: ShelfTab::Images,
+            order: vec![2, 1, 3, 4, 5, 6, 7, 8, 9],
+            expected_revision: revision,
+        });
+        assert!(!app.tag_menu_revision_current());
+        assert_eq!(
+            app.tag_menu.revision.as_deref(),
+            reordered["revision"].as_str()
+        );
+        assert_eq!(app.tag_menu.editor.as_ref().unwrap().slot.name, "Draft");
+        assert!(!app.tag_menu.error.is_empty());
+        assert!(app.tag_menu_revision_current());
+    }
+    #[test]
+    fn stale_compact_editor_cannot_overwrite_tag_after_reorder() {
+        use katran::{Command, interaction::ShelfTab};
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: ShelfTab::Images,
+        });
+        app.open_tag_menu();
+        let old_revision = app.tag_menu.revision.clone().unwrap();
+        let mut draft = app.tag_menu.slots[0].clone();
+        draft.name = "Unsaved draft".into();
+        app.tag_menu.editor = Some(super::Editor {
+            tab: ShelfTab::Images,
+            slot: draft,
+            dirty: true,
+            revision: old_revision.clone(),
+            conflicted: false,
+        });
+        app.tag_menu.editing = true;
+        let reordered = app.call(Command::ReorderTagSlots {
+            tab: ShelfTab::Images,
+            order: vec![2, 1, 3, 4, 5, 6, 7, 8, 9],
+            expected_revision: old_revision,
+        });
+        assert!(reordered["revision"].is_string());
+        let before = app.call(Command::ListTagSlotsForTab {
+            tab: ShelfTab::Images,
+        });
+        app.tag_menu.save_requested = true;
+        let ctx = eframe::egui::Context::default();
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |_| {
+            app.tag_menu_panel(&ctx)
+        });
+        out.textures_delta.clear();
+        let editor = app.tag_menu.editor.as_ref().unwrap();
+        assert!(editor.conflicted && editor.dirty);
+        assert_eq!(editor.slot.name, "Unsaved draft");
+        assert!(!app.tag_menu.error.is_empty());
+        assert_eq!(
+            app.call(Command::ListTagSlotsForTab {
+                tab: ShelfTab::Images
+            })["slots"],
+            before["slots"]
+        );
+        app.tag_menu.save_requested = true;
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |_| {
+            app.tag_menu_panel(&ctx)
+        });
+        out.textures_delta.clear();
+        assert_eq!(
+            app.call(Command::ListTagSlotsForTab {
+                tab: ShelfTab::Images
+            })["slots"],
+            before["slots"]
+        );
+    }
     #[test]
     fn shell_shortcut_opens_compact_editor_without_settings_or_preview() {
         use eframe::egui::{self, Key, Modifiers};
@@ -671,6 +869,8 @@ mod tests {
             tab: ShelfTab::Images,
             slot,
             dirty: true,
+            revision: images["revision"].as_str().unwrap().to_owned(),
+            conflicted: false,
         });
         app.tag_menu.editor.as_mut().unwrap().slot.color = "invalid".into();
         app.tag_menu.save_requested = true;
@@ -690,11 +890,19 @@ mod tests {
         out.textures_delta.clear();
         assert!(!app.tag_menu.editor.as_ref().unwrap().dirty);
         assert_eq!(app.tag_menu.slots[0].color, "#123456");
+        app.tag_menu.editor.as_mut().unwrap().slot.color = "#654321".into();
+        app.tag_menu.save_requested = true;
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |_| {
+            app.tag_menu_panel(&ctx)
+        });
+        out.textures_delta.clear();
+        assert!(!app.tag_menu.editor.as_ref().unwrap().dirty);
+        assert_eq!(app.tag_menu.slots[0].color, "#654321");
         assert_eq!(
             app.call(Command::ListTagSlotsForTab {
                 tab: ShelfTab::Images
             })["slots"][0]["color"],
-            "#123456"
+            "#654321"
         );
         assert_eq!(
             app.call(Command::ListTagSlotsForTab {
@@ -711,7 +919,7 @@ mod tests {
                 tab: ShelfTab::Images,
             },
         });
-        assert_eq!(persisted["result"]["slots"][0]["color"], "#123456");
+        assert_eq!(persisted["result"]["slots"][0]["color"], "#654321");
     }
     #[test]
     fn shortcut_edits_highlighted_tag_and_escape_returns_to_palette() {
@@ -719,6 +927,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = super::State::default();
         state.start(vec![slot(1), slot(2)]);
+        state.revision = Some("test".into());
         state.tab = katran::interaction::ShelfTab::Text;
         let key = |key, modifiers| egui::Event::Key {
             key,

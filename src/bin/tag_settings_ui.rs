@@ -13,6 +13,23 @@ fn default_texture_strength(slot: &mut Slot, previous: Material) {
     }
 }
 
+#[derive(Clone)]
+struct TagDrag {
+    tab: katran::interaction::ShelfTab,
+    source: u8,
+    revision: String,
+}
+
+fn move_order(source: u8, target: u8) -> Option<Vec<u8>> {
+    if !(1..=9).contains(&source) || !(1..=9).contains(&target) || source == target {
+        return None;
+    }
+    let mut order: Vec<u8> = (1..=9).collect();
+    let item = order.remove(usize::from(source - 1));
+    order.insert(usize::from(target - 1), item);
+    Some(order)
+}
+
 pub(super) fn edit_controls(ui: &mut egui::Ui, slot: &mut Slot) {
     ui.label(tr("Название", "Name"));
     ui.text_edit_singleline(&mut slot.name);
@@ -64,6 +81,8 @@ pub struct State {
     preview_cursor: bool,
     tab: Option<katran::interaction::ShelfTab>,
     dirty: bool,
+    revision: Option<String>,
+    conflicted: bool,
 }
 impl State {
     pub fn reset(&mut self) {
@@ -73,15 +92,21 @@ impl State {
         if !self.dirty {
             return true;
         }
-        let (Some(tab), Some(slot)) = (self.tab, self.draft.clone()) else {
+        let (Some(tab), Some(slot), Some(revision)) =
+            (self.tab, self.draft.clone(), self.revision.clone())
+        else {
             return false;
         };
+        if self.conflicted {
+            return false;
+        }
         let response = api.execute(Request {
             api_version: 1,
             request_id: "tag-settings-save".into(),
-            command: Command::SaveTagSlotForTab {
+            command: Command::SaveTagSlotChecked {
                 tab,
                 slot: slot.clone(),
+                expected_revision: revision,
             },
         });
         if response["ok"] == true {
@@ -91,13 +116,108 @@ impl State {
                 *old = slot;
             }
             self.dirty = false;
+            self.revision = response["result"]["revision"].as_str().map(str::to_owned);
             self.error.clear();
             true
         } else {
+            self.conflicted = response["error"]["code"] == "tag_slots_changed";
             self.error = response["error"]["message"]
                 .as_str()
                 .unwrap_or(tr("Не удалось сохранить тег", "Could not save tag"))
                 .into();
+            false
+        }
+    }
+    fn load_slots(&mut self, api: &mut Service) -> bool {
+        let Some(tab) = self.tab else {
+            return false;
+        };
+        let response = api.execute(Request {
+            api_version: 1,
+            request_id: "tag-settings-list".into(),
+            command: Command::ListTagSlotsForTab { tab },
+        });
+        if response["ok"] == true
+            && let (Ok(slots), Some(revision)) = (
+                serde_json::from_value::<Vec<Slot>>(response["result"]["slots"].clone()),
+                response["result"]["revision"].as_str(),
+            )
+        {
+            self.slots = Some(slots);
+            self.revision = Some(revision.to_owned());
+            true
+        } else {
+            self.error = response["error"]["message"]
+                .as_str()
+                .unwrap_or(tr("Не удалось загрузить теги", "Could not load tags"))
+                .into();
+            false
+        }
+    }
+
+    fn reorder(&mut self, api: &mut Service, drag: &TagDrag, target: u8) -> bool {
+        let Some(order) = move_order(drag.source, target) else {
+            return false;
+        };
+        if self.tab != Some(drag.tab) || !self.flush(api) {
+            return false;
+        }
+        let response = api.execute(Request {
+            api_version: 1,
+            request_id: "tag-settings-reorder".into(),
+            command: Command::ReorderTagSlots {
+                tab: drag.tab,
+                order: order.clone(),
+                expected_revision: drag.revision.clone(),
+            },
+        });
+        if response["ok"] == true {
+            let Some(revision) = response["result"]["revision"].as_str() else {
+                self.slots = None;
+                self.revision = None;
+                self.draft = None;
+                self.error = tr(
+                    "Тег перемещён; не удалось прочитать список",
+                    "Tag moved; could not read the list",
+                )
+                .into();
+                return true;
+            };
+            let Ok(slots) =
+                serde_json::from_value::<Vec<Slot>>(response["result"]["slots"].clone())
+            else {
+                self.slots = None;
+                self.revision = None;
+                self.draft = None;
+                self.error = tr(
+                    "Тег перемещён; не удалось прочитать список",
+                    "Tag moved; could not read the list",
+                )
+                .into();
+                return true;
+            };
+            if let Some(draft) = self.draft.as_mut()
+                && let Some(position) = order.iter().position(|number| *number == draft.number)
+            {
+                draft.number = (position + 1) as u8;
+            }
+            self.slots = Some(slots);
+            self.revision = Some(revision.to_owned());
+            self.error.clear();
+            true
+        } else {
+            let stale = response["error"]["code"] == "tag_slots_changed";
+            let error = response["error"]["message"]
+                .as_str()
+                .unwrap_or(tr("Не удалось переместить тег", "Could not move tag"))
+                .to_owned();
+            if stale {
+                self.draft = None;
+                self.slots = None;
+                self.revision = None;
+                self.load_slots(api);
+            }
+            self.error = error;
             false
         }
     }
@@ -148,6 +268,7 @@ impl State {
                 changed |= was_dirty;
                 self.tab = Some(next_tab);
                 self.slots = None;
+                self.revision = None;
                 self.draft = None;
             }
         }
@@ -156,27 +277,30 @@ impl State {
             "Configure the set and appearance. Assign tags on the shelf.",
         ));
         if self.slots.is_none() {
-            let response = api.execute(Request {
-                api_version: 1,
-                request_id: "tag-settings-list".into(),
-                command: Command::ListTagSlotsForTab {
-                    tab: self.tab.unwrap_or_default(),
-                },
-            });
-            if response["ok"] == true {
-                self.slots = serde_json::from_value(response["result"]["slots"].clone()).ok();
-                if self.slots.is_none() {
-                    self.error = tr(
-                        "Не удалось прочитать слоты тегов",
-                        "Could not read tag slots",
-                    )
-                    .into();
-                }
-            } else {
-                self.error = response["error"]["message"]
-                    .as_str()
-                    .unwrap_or(tr("Не удалось загрузить теги", "Could not load tags"))
-                    .into();
+            self.load_slots(api);
+        }
+        if self.conflicted {
+            ui.colored_label(
+                Color32::LIGHT_RED,
+                tr(
+                    "Теги изменились в другом окне. Черновик не сохранён.",
+                    "Tags changed elsewhere. The draft was not saved.",
+                ),
+            );
+            if ui
+                .button(tr(
+                    "Отменить черновик и обновить",
+                    "Discard draft and reload",
+                ))
+                .clicked()
+            {
+                self.draft = None;
+                self.dirty = false;
+                self.conflicted = false;
+                self.slots = None;
+                self.revision = None;
+                self.error.clear();
+                self.load_slots(api);
             }
         }
         ui.heading(tr("Теги", "Tags"));
@@ -188,6 +312,7 @@ impl State {
         let slots = self.slots.clone().unwrap_or_default();
         let mut clicked = None;
         let mut draft_changed = false;
+        let mut drop = None;
         SettingsSection::show(ui, |ui| {
             for row in &slots {
                 ui.push_id((format!("{:?}", self.tab), row.number), |ui| {
@@ -195,22 +320,80 @@ impl State {
                         .draft
                         .as_ref()
                         .is_some_and(|slot| slot.number == row.number);
-                    SettingsRow::show(ui, &format!("{} · {}", row.number, row.name), "", |ui| {
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
-                        ui.painter()
-                            .rect_filled(rect, 4.0, super::tag_material_ui::color(row));
-                        if ui
-                            .button(if expanded {
-                                tr("Закрыть", "Close")
-                            } else {
-                                tr("Изменить", "Edit")
-                            })
-                            .clicked()
-                        {
-                            clicked = Some(row.clone());
-                        }
+                    let geometry = SettingsRow::show(
+                        ui,
+                        &format!("{} · {}", row.number, row.name),
+                        "",
+                        |ui| {
+                            let grip = ui
+                                .add(egui::Button::new("⠿").sense(egui::Sense::drag()))
+                                .on_hover_text(tr("Перетащить тег", "Drag tag"));
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new(("tag-grip", row.number)), grip.rect)
+                            });
+                            if grip.drag_started() && self.flush(api) {
+                                let previous = self.slots.clone();
+                                if self.load_slots(api)
+                                    && previous == self.slots
+                                    && let (Some(tab), Some(revision)) =
+                                        (self.tab, self.revision.clone())
+                                {
+                                    grip.dnd_set_drag_payload(TagDrag {
+                                        tab,
+                                        source: row.number,
+                                        revision,
+                                    });
+                                } else {
+                                    if previous != self.slots {
+                                        self.draft = None;
+                                    }
+                                    self.error = tr(
+                                        "Теги изменились; перетащите снова",
+                                        "Tags changed; drag again",
+                                    )
+                                    .into();
+                                }
+                            }
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+                            ui.painter()
+                                .rect_filled(rect, 4.0, super::tag_material_ui::color(row));
+                            if ui
+                                .button(if expanded {
+                                    tr("Закрыть", "Close")
+                                } else {
+                                    tr("Изменить", "Edit")
+                                })
+                                .clicked()
+                            {
+                                clicked = Some(row.clone());
+                            }
+                        },
+                    );
+                    let target = ui.interact(
+                        geometry.labels.union(geometry.controls),
+                        ui.id().with("tag-drop"),
+                        egui::Sense::hover(),
+                    );
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(egui::Id::new(("tag-target", row.number)), target.rect)
                     });
+                    if let Some(payload) = target.dnd_hover_payload::<TagDrag>()
+                        && payload.tab == self.tab.unwrap_or_default()
+                        && payload.source != row.number
+                    {
+                        ui.painter().rect_stroke(
+                            target.rect,
+                            4.0,
+                            ui.visuals().selection.stroke,
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if let Some(payload) = target.dnd_release_payload::<TagDrag>() {
+                        drop = Some(((*payload).clone(), row.number));
+                    }
                     #[cfg(test)]
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(
@@ -229,7 +412,7 @@ impl State {
                         let before = slot.clone();
                         ui.add_space(14.0);
                         ui.heading(format!("{} {}", tr("Тег", "Tag"), slot.number));
-                        edit_controls(ui, slot);
+                        ui.add_enabled_ui(!self.conflicted, |ui| edit_controls(ui, slot));
                         ui.label(tr("Предпросмотр материала", "Material preview"));
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.preview_selected, tr("Выбрано", "Selected"));
@@ -301,6 +484,11 @@ impl State {
                 changed = true;
             }
         }
+        if let Some((drag, target)) = drop
+            && self.reorder(api, &drag, target)
+        {
+            changed = true;
+        }
         if let Some(row) = clicked
             && self.flush(api)
         {
@@ -315,6 +503,7 @@ impl State {
             }
         }
         if self.dirty
+            && !self.conflicted
             && ui
                 .button(tr("Повторить сохранение", "Retry save"))
                 .clicked()
@@ -335,6 +524,148 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_settings_editor_preserves_draft_and_cannot_overwrite_reordered_tag() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 100_000).unwrap();
+        let mut state = State {
+            tab: Some(ShelfTab::Images),
+            ..Default::default()
+        };
+        assert!(state.load_slots(&mut api));
+        let revision = state.revision.clone().unwrap();
+        let mut draft = state.slots.as_ref().unwrap()[0].clone();
+        draft.name = "Pending".into();
+        state.draft = Some(draft);
+        state.dirty = true;
+        let result = api.execute(Request {
+            api_version: 1,
+            request_id: "reorder".into(),
+            command: Command::ReorderTagSlots {
+                tab: ShelfTab::Images,
+                order: vec![2, 1, 3, 4, 5, 6, 7, 8, 9],
+                expected_revision: revision,
+            },
+        });
+        assert_eq!(result["ok"], true);
+        assert!(!state.flush(&mut api));
+        assert!(state.conflicted && state.dirty);
+        assert_eq!(state.draft.as_ref().unwrap().name, "Pending");
+        assert!(!state.flush(&mut api));
+        let after = api.execute(Request {
+            api_version: 1,
+            request_id: "list".into(),
+            command: Command::ListTagSlotsForTab {
+                tab: ShelfTab::Images,
+            },
+        });
+        assert_eq!(after["result"]["slots"], result["result"]["slots"]);
+    }
+
+    #[test]
+    fn dragging_grip_moves_tag_to_drop_row() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 100_000).unwrap();
+        let mut state = State {
+            tab: Some(ShelfTab::Images),
+            ..Default::default()
+        };
+        assert!(state.load_slots(&mut api));
+        let before = state.slots.as_ref().unwrap()[0].clone();
+        let ctx = egui::Context::default();
+        {
+            let mut run = |events| {
+                let mut changed = false;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(900.0, 2000.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        changed = state.show(ui, &mut api);
+                    },
+                );
+                output.textures_delta.clear();
+                changed
+            };
+            run(vec![]);
+            let (source, target): (egui::Rect, egui::Rect) = ctx.data(|d| {
+                (
+                    d.get_temp(egui::Id::new(("tag-grip", 1))).unwrap(),
+                    d.get_temp(egui::Id::new(("tag-target", 3))).unwrap(),
+                )
+            });
+            let from = source.center();
+            let to = target.center();
+            run(vec![
+                egui::Event::PointerMoved(from),
+                egui::Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            run(vec![egui::Event::PointerMoved(to)]);
+            assert!(run(vec![egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE
+            }]));
+        }
+        let after = &state.slots.as_ref().unwrap()[2];
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.color, before.color);
+        assert_eq!(after.number, 3);
+    }
+
+    #[test]
+    fn drag_reorder_follows_tag_and_rejects_stale_snapshot() {
+        use katran::interaction::ShelfTab;
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 100_000).unwrap();
+        let mut state = State {
+            tab: Some(ShelfTab::Images),
+            ..Default::default()
+        };
+        assert!(state.load_slots(&mut api));
+        let mut draft = state.slots.as_ref().unwrap()[0].clone();
+        draft.name = "Moved".into();
+        state.draft = Some(draft);
+        state.dirty = true;
+        assert!(state.flush(&mut api));
+        assert!(state.load_slots(&mut api));
+        let drag = TagDrag {
+            tab: ShelfTab::Images,
+            source: 1,
+            revision: state.revision.clone().unwrap(),
+        };
+        assert!(state.reorder(&mut api, &drag, 3));
+        assert_eq!(state.slots.as_ref().unwrap()[2].name, "Moved");
+        assert_eq!(state.draft.as_ref().unwrap().number, 3);
+        let after = state.slots.clone();
+        assert!(!state.reorder(&mut api, &drag, 3));
+        assert_eq!(state.slots, after);
+        assert!(state.draft.is_none());
+        let text = api.execute(Request {
+            api_version: 1,
+            request_id: "test".into(),
+            command: Command::ListTagSlotsForTab {
+                tab: ShelfTab::Text,
+            },
+        });
+        assert_ne!(text["result"]["slots"][2]["name"], "Moved");
+        assert_eq!(move_order(3, 1).unwrap(), vec![3, 1, 2, 4, 5, 6, 7, 8, 9]);
+        assert!(move_order(1, 1).is_none());
+    }
 
     #[test]
     fn expanded_editor_is_between_its_row_and_next_row() {
@@ -398,6 +729,7 @@ mod tests {
             tab: Some(ShelfTab::Text),
             draft: Some(slot.clone()),
             dirty: true,
+            revision: response["result"]["revision"].as_str().map(str::to_owned),
             ..Default::default()
         };
         assert!(state.flush(&mut api));
