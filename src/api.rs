@@ -22,6 +22,11 @@ pub struct Request {
 // change every dispatcher client just to reduce this enum's stack size.
 #[allow(clippy::large_enum_variant)]
 pub enum Command {
+    AiComponentsStatus,
+    LaunchAiComponent {
+        component: crate::ai_components::Component,
+        action: crate::ai_components::Action,
+    },
     MediaRuntimeStatus,
     EnsureMediaRuntime,
     RestartApplication,

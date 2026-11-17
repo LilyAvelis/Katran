@@ -1,4 +1,6 @@
 use rusqlite::{Connection, OptionalExtension, params};
+mod ai_component_bundle;
+pub mod ai_components;
 pub mod capture;
 pub mod capture_events;
 mod catalogue_query;
@@ -26,6 +28,7 @@ mod files_pointer;
 mod files_service;
 mod files_store;
 mod folder_commit;
+mod folder_cpu_runtime;
 mod folder_delete;
 mod folder_gpu_runtime;
 mod folder_import;
@@ -116,6 +119,7 @@ pub mod wallpaper_engine;
 pub struct Service {
     known_folder_provider: Box<dyn known_folders::Provider>,
     emoji_ai: std::sync::Arc<std::sync::Mutex<Box<dyn emoji_ai::Backend>>>,
+    ai_components: ai_components::Manager,
     emoji_ai_backend_injected: bool,
     folder_semantic: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Backend>>>,
     folder_semantic_source: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Source>>>,
@@ -284,6 +288,7 @@ impl Service {
             shortcuts::Shortcuts::load(&root).map_err(|e| ApiError::new(&e.code, e.message))?;
         Ok(Self {
             known_folder_provider: Box::new(known_folders::NativeProvider),
+            ai_components: Default::default(),
             emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 emoji_ai::Resident::new(root.clone()),
             ))),
@@ -376,6 +381,7 @@ impl Service {
             .map_err(|error| ApiError::new("settings_error", error))?;
         Ok(Self {
             known_folder_provider: Box::new(known_folders::NativeProvider),
+            ai_components: Default::default(),
             emoji_ai: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 emoji_ai::Resident::new(root.clone()),
             ))),
@@ -509,6 +515,10 @@ impl Service {
             ));
         }
         match command {
+            Command::AiComponentsStatus => self.ai_components.status(&self.root),
+            Command::LaunchAiComponent { component, action } => {
+                self.ai_components.launch(&self.root, component, action)
+            }
             Command::MediaRuntimeStatus => Ok(media_runtime::status()),
             Command::EnsureMediaRuntime => {
                 media_runtime::install().map_err(|e| ApiError::new("media_runtime_error", e))

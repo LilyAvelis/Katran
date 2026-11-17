@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Optional component setup is API-first through `AiComponentsStatus` and
+`LaunchAiComponent`. `ai_components.rs` owns visible launch/receipt state,
+`ai_component_bundle.rs` embeds version-matched helpers, and
+`folder_cpu_runtime.rs` validates the independent Folder runtime. See
+[AI setup](patch-3.8/AI-COMPONENTS.md) before changing installation or packaging.
+
 Local 3.8 global tab shortcuts use `SetTabGlobalHotkey` / `SummonTabOverlay`.
 `settings.rs` validates/persists the map; `tab_hotkey_ui.rs` owns registration
 lifetimes through `overlay_windows::HotkeyListener`, and Settings shows actual

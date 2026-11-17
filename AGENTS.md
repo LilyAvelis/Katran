@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Local optional AI setup · 2026-11-17
+
+Settings → AI uses `AiComponentsStatus` / `LaunchAiComponent`. Installation and
+verification require explicit user action and a visible terminal, never a silent
+background install. Embed version-bound helpers so executable-only updates can
+install optional components without a repository. Do not equate file presence
+with inference success or overwrite existing runtimes. Folder has an independent
+CPU runtime; absent-only fallback preserves existing verified emoji installations.
+See `docs/patch-3.8/AI-COMPONENTS.md` for evidence and clean-machine limitations.
+
 ## Local 3.8 global tab shortcuts · 2026-11-17
 
 `SetTabGlobalHotkey` persists canonical per-tab global bindings; `SummonTabOverlay`

@@ -1,5 +1,18 @@
 # Katran 3.8 verification handoff
 
+## Optional AI setup · 2026-11-17
+
+New domain API 1/1, helper-bundle/argument tests 2/2, CPU resolver 2/2 and semantic
+API 3/3 passed. Python offline checks 3/3 and terminal/package synthetic contracts
+passed. UI aggregate passed 250/251; unchanged native file-move fixture failed on
+restricted access and passed its isolated authorized rerun. AI user-click test
+passed and launches nothing on ordinary render. All-targets Clippy passed.
+Actual installed emoji worker verification passed. GPU diagnostics passed with
+349 CUDA nodes and the actual Folder worker on two synthetic paths with a temp
+cache. No installed environment/model was replaced. Clean-machine bootstrap,
+fresh pip installs and visible terminal/manual GUI remain pending acceptance.
+See [AI contract](AI-COMPONENTS.md) and [separate Enter audit](PASTE-AUDIT.md).
+
 ## Global tab shortcuts · 2026-11-17
 
 - Domain overlay/settings gate passed (overlay 5, settings 2); final new tab API

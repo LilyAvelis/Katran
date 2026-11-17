@@ -37,6 +37,9 @@ pub struct State {
     downloads_folder: String,
     refresh_links_requested: bool,
     pending_save: Option<Instant>,
+    ai_components: Option<serde_json::Value>,
+    ai_last_poll: Option<Instant>,
+    ai_error: String,
 }
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(450);
 fn apply_editor_intent(
@@ -185,6 +188,7 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
             "themes тема цвета акцент выделение интенсивность окно compact компактное стекло оптика gpu преломление размытие фон background лилии изображение видео components компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
         }
         5 => "tags метки теги tag",
+        6 => "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты",
         _ => "",
     };
     let query = query.trim().to_lowercase();
@@ -515,6 +519,216 @@ fn apply_theme(
     Ok(())
 }
 impl State {
+    fn refresh_ai_components(&mut self, api: &mut Service) {
+        let result = call(api, Command::AiComponentsStatus);
+        self.ai_last_poll = Some(Instant::now());
+        if result["ok"] == true {
+            self.ai_components = Some(result["result"].clone());
+            self.ai_error.clear();
+        } else {
+            self.ai_components = None;
+            self.ai_error = result["error"]["message"]
+                .as_str()
+                .unwrap_or(super::i18n::tr(
+                    "Не удалось проверить компоненты",
+                    "Could not check components",
+                ))
+                .into();
+        }
+    }
+
+    fn show_ai_components(&mut self, ui: &mut egui::Ui, api: &mut Service) {
+        use katran::ai_components::{Action, Component};
+        if self.ai_last_poll.is_none() {
+            self.refresh_ai_components(api);
+        }
+        let running = self
+            .ai_components
+            .as_ref()
+            .and_then(|v| v["components"].as_array())
+            .is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["operation"]["state"] == "running")
+            });
+        if running {
+            let elapsed = self.ai_last_poll.map(|at| at.elapsed()).unwrap_or_default();
+            if elapsed >= Duration::from_secs(1) {
+                self.refresh_ai_components(api);
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
+            } else {
+                ui.ctx()
+                    .request_repaint_after(Duration::from_secs(1) - elapsed);
+            }
+        }
+        ui.heading(super::i18n::tr("AI", "AI"));
+        ui.label(super::i18n::tr("Компоненты необязательны и устанавливаются только по вашему запросу. Обычный поиск работает без них.", "Components are optional and installed only when you request them. Ordinary search works without them."));
+        ui.weak(super::i18n::tr("Установка и проверка открываются в отдельном терминале. Он остаётся открытым с результатом; журнал можно передать другому ИИ для диагностики.", "Installation and verification open a separate terminal. It stays open with the result; you can share its log with another assistant for troubleshooting."));
+        if ui
+            .button(super::i18n::tr("Обновить статусы", "Refresh status"))
+            .clicked()
+        {
+            self.refresh_ai_components(api);
+        }
+        if !self.ai_error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, &self.ai_error);
+        }
+        let components = self.ai_components.clone();
+        let mut requested = None;
+        for (component, title, description) in [
+            (
+                Component::Emoji,
+                super::i18n::tr("Поиск эмодзи с AI", "Emoji AI search"),
+                super::i18n::tr(
+                    "Локальный смысловой поиск по каталогу эмодзи.",
+                    "Local semantic search in the emoji catalogue.",
+                ),
+            ),
+            (
+                Component::Folder,
+                super::i18n::tr("Нейропоиск Folder", "Folder neural search"),
+                super::i18n::tr(
+                    "Локальный поиск папок по смыслу. Поддерживается ранее установленная модель Emoji AI.",
+                    "Local semantic folder search. A previously installed Emoji AI model is supported.",
+                ),
+            ),
+            (
+                Component::FolderGpu,
+                super::i18n::tr("Дополнительный CUDA-компонент", "Optional CUDA component"),
+                super::i18n::tr(
+                    "Ускоряет нейроиндексацию Folder на совместимом GPU. Требуется отдельный компонент.",
+                    "Accelerates Folder neural indexing on a compatible GPU. A separate component is required.",
+                ),
+            ),
+        ] {
+            let item = components
+                .as_ref()
+                .and_then(|value| value["components"].as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item["component"] == component.name())
+                });
+            SettingsSection::group(ui, title, |ui| {
+                ui.label(description);
+                if let Some(item) = item {
+                    ui.weak(if item["files_found"] == true {
+                        super::i18n::tr(
+                            "Файлы найдены, требуется проверка",
+                            "Files found; verification required",
+                        )
+                    } else {
+                        super::i18n::tr("Файлы не найдены", "Files not found")
+                    });
+                    let operation = &item["operation"];
+                    if operation["state"] == "running" {
+                        ui.label(super::i18n::tr(
+                            "Операция выполняется в отдельном терминале…",
+                            "Operation running in a separate terminal…",
+                        ));
+                    } else if operation["state"] == "unknown" {
+                        ui.colored_label(
+                            Color32::LIGHT_RED,
+                            super::i18n::tr(
+                                "Результат неизвестен; проверьте журнал",
+                                "Result unknown; check the log",
+                            ),
+                        );
+                    }
+                    let receipt = &operation["receipt"];
+                    if receipt.is_object() {
+                        let timestamp = receipt["completed_at"].as_str().unwrap_or("");
+                        if receipt["state"] == "succeeded" && receipt["verified"] == true {
+                            ui.label(format!(
+                                "{} {timestamp}",
+                                super::i18n::tr(
+                                    "Последняя проверка прошла:",
+                                    "Last verification passed:"
+                                )
+                            ));
+                        } else if receipt["code"] == "model_missing" {
+                            ui.label(super::i18n::tr("CUDA-компонент установлен; для проверки установите модель Folder или Emoji AI.", "CUDA component installed; install the Folder or Emoji AI model to verify it."));
+                        } else {
+                            ui.colored_label(
+                                Color32::LIGHT_RED,
+                                format!(
+                                    "{} {}",
+                                    super::i18n::tr("Последняя операция:", "Last operation:"),
+                                    receipt["message"].as_str().unwrap_or(super::i18n::tr(
+                                        "не удалось проверить",
+                                        "verification failed"
+                                    ))
+                                ),
+                            );
+                        }
+                    }
+                    if let Some(path) = operation["log_path"]
+                        .as_str()
+                        .or_else(|| receipt["log_path"].as_str())
+                    {
+                        ui.weak(super::i18n::tr("Журнал", "Log"));
+                        ui.add(egui::Label::new(path).selectable(true).wrap());
+                    }
+                    let available =
+                        item["installer_available"] == true && operation["state"] != "running";
+                    if item["installer_available"] != true {
+                        ui.weak(super::i18n::tr(
+                            "Установщик недоступен в этой сборке",
+                            "Installer unavailable in this build",
+                        ));
+                    }
+                    ui.horizontal(|ui| {
+                        let install = ui.add_enabled(
+                            available,
+                            egui::Button::new(super::i18n::tr("Установить", "Install")),
+                        );
+                        #[cfg(test)]
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(
+                                egui::Id::new(("ai-install", component.name())),
+                                install.rect,
+                            )
+                        });
+                        if install.clicked() {
+                            requested = Some((component, Action::Install));
+                        }
+                        if ui
+                            .add_enabled(
+                                available,
+                                egui::Button::new(super::i18n::tr("Проверить", "Verify")),
+                            )
+                            .clicked()
+                        {
+                            requested = Some((component, Action::Verify));
+                        }
+                    });
+                } else {
+                    ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
+                }
+                if component == Component::FolderGpu
+                    && let Some(draft) = self.draft.as_mut()
+                {
+                    ui.add_space(6.0);
+                    folder_gpu_checkbox(ui, &mut draft.folder_ai_gpu);
+                }
+            });
+        }
+        if let Some((component, action)) = requested {
+            let response = call(api, Command::LaunchAiComponent { component, action });
+            if response["ok"] == true {
+                self.refresh_ai_components(api);
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
+            } else {
+                self.ai_error = response["error"]["message"]
+                    .as_str()
+                    .unwrap_or(super::i18n::tr(
+                        "Не удалось открыть терминал",
+                        "Could not open terminal",
+                    ))
+                    .into();
+            }
+        }
+    }
     pub(super) fn background_busy(&self) -> bool {
         self.picker.is_some()
             || self.background_job.is_some()
@@ -875,6 +1089,9 @@ impl State {
             self.editor = None;
             self.tab_hotkey_target = None;
             self.requested_section = None;
+            self.ai_components = None;
+            self.ai_last_poll = None;
+            self.ai_error.clear();
             return false;
         }
         let requested = interaction["result"]["settings_section"]
@@ -961,7 +1178,7 @@ impl State {
      ui.add_space(16.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")).margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new(super::i18n::tr("РАЗДЕЛЫ", "WORKSPACE")).size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags"),("AI","AI")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){if index==6 && self.section!=6 {self.ai_components=None;self.ai_last_poll=None;self.ai_error.clear();}self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
@@ -1028,7 +1245,6 @@ impl State {
          }
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
-         SettingsRow::show(ui,super::i18n::tr("Нейроиндекс Folder · GPU", "Folder neural index · GPU"),super::i18n::tr("Ускоряет индексацию для нейропоиска Folder. Требуется отдельно установленный GPU-компонент; при его отсутствии Katran покажет ошибку.", "Accelerates indexing for Folder neural search. Requires the separately installed GPU component; Katran shows an error if it is unavailable."),|ui|{folder_gpu_checkbox(ui,&mut draft.folder_ai_gpu);});
          SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
           let response=ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots"));
           path_editing |= response.has_focus();
@@ -1256,6 +1472,8 @@ impl State {
        } else {ui.label(response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Не удалось загрузить темы", "Could not load themes")));}
       } else if self.section==5 {
        if self.tags.show(ui,api){tabs_changed=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
+      } else if self.section==6 {
+       self.show_ai_components(ui,api);
       } else {
        ui.heading(super::i18n::tr("Горячие клавиши", "Shortcuts"));ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}
@@ -1396,6 +1614,96 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ai_cards_only_launch_explicit_clicked_component() {
+        use std::sync::{Arc, Mutex};
+        struct Pending;
+        impl katran::ai_components::Installation for Pending {
+            fn finished(&mut self) -> katran::Result<bool> {
+                Ok(false)
+            }
+        }
+        struct Fake(Arc<Mutex<Vec<serde_json::Value>>>);
+        impl katran::ai_components::Launcher for Fake {
+            fn launch(
+                &mut self,
+                request: &std::path::Path,
+                _: &std::path::Path,
+            ) -> katran::Result<Box<dyn katran::ai_components::Installation>> {
+                let data = std::fs::read(request).unwrap();
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_slice(&data).unwrap());
+                Ok(Box::new(Pending))
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let bundle = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(bundle.path().join("scripts/ai-components")).unwrap();
+        std::fs::write(
+            bundle.path().join("scripts/ai-components/terminal.ps1"),
+            "# test only",
+        )
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        api.set_ai_component_launcher(Box::new(Fake(calls.clone())), bundle.path().into());
+        let mut state = State::default();
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| state.show_ai_components(ui, &mut api),
+            );
+            out.textures_delta.clear();
+        }
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(
+            state.ai_components.as_ref().unwrap()["components"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let rect: egui::Rect = ctx.data(|data| {
+            data.get_temp(egui::Id::new(("ai-install", "folder")))
+                .unwrap()
+        });
+        let pos = rect.center();
+        for pressed in [true, false] {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 1000.0),
+                    )),
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| state.show_ai_components(ui, &mut api),
+            );
+            out.textures_delta.clear();
+        }
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["component"], "folder");
+        assert_eq!(calls[0]["action"], "install");
+    }
     #[test]
     fn tab_hotkey_button_is_right_of_eye_and_does_not_toggle_tab() {
         use katran::interaction::ShelfTab;

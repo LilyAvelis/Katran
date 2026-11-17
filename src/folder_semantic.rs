@@ -124,24 +124,39 @@ impl Worker {
         gpu: bool,
         cancel: &Cancellation,
     ) -> Result<Self> {
-        let runtime = crate::emoji_ai::runtime::resolve(root, Some(cancel)).map_err(|error| {
-            if error.code == "model_unavailable" { ApiError::new("model_unavailable", "Local AI model or runtime is not installed. Installation: https://github.com/LilyAvelis/Katran/blob/main/docs/emoji-ai.md") } else { error }
-        })?;
-        let base = runtime
-            .worker
-            .parent()
-            .ok_or_else(|| unavailable("Invalid local AI runtime"))?;
+        // An installed but invalid Folder runtime fails explicitly: only a truly
+        // absent one may use the previously verified emoji runtime.
+        let (cpu_python, model, tokenizer) = match crate::folder_cpu_runtime::resolve(
+            root,
+            Some(cancel),
+        )? {
+            Some(runtime) => (runtime.python, runtime.model, runtime.tokenizer),
+            None => {
+                let runtime = crate::emoji_ai::runtime::resolve(root, Some(cancel)).map_err(|error| {
+                    if error.code == "model_unavailable" { ApiError::new("model_unavailable", "Local Folder AI model is not installed. Install it from Settings → AI.") } else { error }
+                })?;
+                let base = runtime
+                    .worker
+                    .parent()
+                    .ok_or_else(|| unavailable("Invalid local AI runtime"))?;
+                (
+                    runtime.python,
+                    base.join("model/onnx/model.onnx"),
+                    base.join("model/onnx/tokenizer.json"),
+                )
+            }
+        };
         let python = if gpu {
             crate::folder_gpu_runtime::resolve(root)?
         } else {
-            runtime.python
+            cpu_python
         };
         let mut command = Command::new(python);
         command
             .arg("-c")
             .arg(include_str!("../scripts/folder-semantic/worker.py"))
-            .arg(base.join("model/onnx/model.onnx"))
-            .arg(base.join("model/onnx/tokenizer.json"))
+            .arg(model)
+            .arg(tokenizer)
             .arg(if gpu { "gpu" } else { "cpu" })
             .arg(cache_directory.join(if gpu { "cuda.sqlite3" } else { "cpu.sqlite3" }))
             .stdin(Stdio::piped())

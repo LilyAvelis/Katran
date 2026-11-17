@@ -33,6 +33,12 @@ Source: "{#PackageRoot}\katran-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PackageRoot}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageRoot}\scripts\install-emoji-ai-model.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\create-emoji-ai-runtime-manifest.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\ai-components\terminal.ps1"; DestDir: "{app}\scripts\ai-components"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\ai-components\ensure-python.ps1"; DestDir: "{app}\scripts\ai-components"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\ai-components\verify.py"; DestDir: "{app}\scripts\ai-components"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\folder-semantic\setup.ps1"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\folder-semantic\setup-gpu.ps1"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\folder-semantic\worker.py"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\emoji-ai\worker.py"; DestDir: "{app}\scripts\emoji-ai"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\emoji-ai\semantic_search.py"; DestDir: "{app}\scripts\emoji-ai"; Flags: ignoreversion
 Source: "{#PackageRoot}\assets\unicode\emoji-test.txt"; DestDir: "{app}\assets\unicode"; Flags: ignoreversion

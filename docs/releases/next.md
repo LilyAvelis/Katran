@@ -2,6 +2,12 @@
 
 ## Local 3.8 work · 2026-11-17
 
+Settings → AI now owns explicit visible-terminal component installation and
+functional verification, independent Folder CPU setup and optional CUDA. See
+[the setup contract](../patch-3.8/AI-COMPONENTS.md) for evidence and remaining
+clean-machine acceptance. [Enter audit](../patch-3.8/PASTE-AUDIT.md) is complete;
+the target/focus/file-publication fixes are not part of this setup change.
+
 Global tab shortcuts are implemented through the domain summon API, with
 settings recording and actual Windows registration status. See
 [the follow-up contract](../patch-3.8/TAB-GLOBAL-HOTKEYS.md). Enter interoperability

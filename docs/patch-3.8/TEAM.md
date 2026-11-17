@@ -6,6 +6,22 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+AI-component follow-up: same Mira `/root/mira` (Terra/high) owns setup/verify
+scripts and package whitelist, Nemi `/root/nemi` (Terra/high) owns independent
+CPU resolver/Folder adapter, Fenna `/root/fenna` (Terra/high) owns Settings AI.
+Polly owns dispatcher/visible launcher/bundle, integration/gates/docs/install.
+All three acknowledged their scopes and delivered frozen files; no new agents.
+Azuros `/root/azuros` (actual gpt-6.1-sol/xhigh) completed `PASTE-AUDIT.md`.
+Next paste patch is target acquisition plus immutable pending-paste lease and
+bounded activation; a separate clipboard-owner fix is justified. No Enter fix
+or recipient acceptance is claimed. Clean-machine AI setup remains manual QA.
+
+Global hotkeys source `ada44aa` was built once in 1m24s and staged as primary
+runtime `8c447197c96e` (SHA256 `8c447197c96e164a7a65cc5c26b743ab01f2818ea549a41d5a4b5ae741421546`).
+Backup receipt `runtime/rollback-tab-hotkeys.json`; previous `17ab92129b84`
+retained. The running app was untouched. The subsequent AI change requires one
+new source build; unchanged hotkey checks/artifact are retained as evidence.
+
 Global-tab follow-up: Nemi `/root/nemi` (gpt-6.1-terra/high) finished domain,
 persistence and API tests; Fenna `/root/fenna` (gpt-6.1-terra/high) finished
 Settings recorder/status UI. Mira `/root/mira` (gpt-6.1-terra/high) delivered

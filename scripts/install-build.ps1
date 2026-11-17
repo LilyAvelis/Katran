@@ -14,7 +14,12 @@ function Get-KatranSources([string]$Root) {
         $files += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object FullName)
     }
     if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
-    return @($files | Sort-Object | ForEach-Object { [ordered]@{ path = $_.Substring($Root.Length + 1); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
+    # Optional AI installer resources are embedded, so their bytes are build inputs.
+    foreach ($inputDir in @('scripts/ai-components','scripts/emoji-ai','assets/emoji-ai/cldr')) {
+        $files += @((Get-ChildItem -LiteralPath (Join-Path $Root $inputDir) -File).FullName)
+    }
+    foreach ($inputFile in @('scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py')) { $files += (Join-Path $Root $inputFile) }
+    return @($files | Sort-Object -Unique | ForEach-Object { [ordered]@{ path = $_.Substring($Root.Length + 1); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
 }
 function Invoke-KatranInstall {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][scriptblock]$Build, [Parameter(Mandatory)][scriptblock]$Register)

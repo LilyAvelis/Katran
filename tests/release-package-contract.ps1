@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('katran-release-test-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/branding'),(Join-Path $sandbox 'assets/themes/lilies'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode'),(Join-Path $sandbox 'assets/emoji-ai/cldr'),(Join-Path $sandbox 'scripts/emoji-ai') | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $sandbox 'src'),(Join-Path $sandbox 'binaries'),(Join-Path $sandbox 'katran-data'),(Join-Path $sandbox 'runtime/old'),(Join-Path $sandbox 'assets/branding'),(Join-Path $sandbox 'assets/themes/lilies'),(Join-Path $sandbox 'assets/everything'),(Join-Path $sandbox 'assets/emoji-flags'),(Join-Path $sandbox 'assets/unicode'),(Join-Path $sandbox 'assets/emoji-ai/cldr'),(Join-Path $sandbox 'scripts/emoji-ai'),(Join-Path $sandbox 'scripts/ai-components'),(Join-Path $sandbox 'scripts/folder-semantic') | Out-Null
 try {
     foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windows')) {
         foreach ($dir in @("crates/$crate/src/nested", "crates/$crate/src/target", "crates/$crate/target")) { New-Item -ItemType Directory -Path (Join-Path $sandbox $dir) -Force | Out-Null }
@@ -12,6 +12,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $sandbox 'src/catalogue_schema.rs'), 'pub(crate) const VERSION: i64 = 12;')
     foreach ($file in @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt','assets/emoji-flags/LICENSE-GRAPHICS','assets/emoji-flags/ATTRIBUTION.md','assets/unicode/LICENSE.txt','assets/unicode/SOURCE.md')) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
     $emojiInputs = @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')
+    $emojiInputs += @('scripts/ai-components/terminal.ps1','scripts/ai-components/ensure-python.ps1','scripts/ai-components/verify.py','scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/folder-semantic/worker.py')
     foreach ($file in $emojiInputs) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
     $out = Join-Path $sandbox 'output'
     & (Join-Path $root 'scripts/package-release.ps1') -Root $sandbox -BinaryDirectory 'binaries' -OutputDirectory $out -Version '2.0.0' -DependencyNoticesPath (Join-Path $sandbox 'THIRD-PARTY-NOTICES.txt')
