@@ -61,7 +61,22 @@ UI-binary Clippy, reusing the unaffected integrated evidence. These include
 configured Ctrl+Y inside the focused picker and physical backslash text/paste
 handling. Public source includes the embedded Python worker in the build-input
 fingerprint. No successful optimized compilation has yet been repeated for this
-source; the final staging receipt is recorded below when available.
+source; the final staging receipt follows.
+
+### Primary installation
+
+Source: local main `c5f592f9ddc22129fe585d2d80d1ed2ec6e03a6a`. One optimized UI
+build completed in **1m20s** using the existing target/toolchain/features.
+Pre/post compiled-input hashes matched, including the embedded Python worker.
+Unchanged Everything helper and notices were reused and copy-hash verified.
+Primary Raycast runtime now selects **`52d064dd97cb`**, UI SHA-256:
+`52d064dd97cbb04e6f3133c8d5dc94f4627ae8a5f3ba9132fd43dbb95d91a28d`.
+Previous `070eaf9b06b7` remains immutable; a fresh consistent v13 profile backup
+passed integrity check. Private rollback receipt:
+`runtime/rollback-details-neural.json`. No schema migration or shortcut
+replacement occurred. The owner must fully exit the old process via the tray
+and use normal Raycast launch to activate the new Display/settings entries.
+The existing process was not closed or controlled. Nothing was pushed to GitHub.
 
 ## Complete tag reorder follow-up · 2026-11-17
 

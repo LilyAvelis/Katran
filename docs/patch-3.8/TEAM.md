@@ -6,6 +6,16 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Final follow-up staging complete: source local main `c5f592f`, primary runtime
+`52d064dd97cb`, one optimized build 1m20s with matched compiled inputs including
+the embedded worker. Fenna/Mira/Nemi handoffs and targeted checks are closed;
+Polly verified actual CPU runtime/model and bounded live-index behavior, with
+known quality/initial-index latency limitations in `VERIFICATION.md`. No new
+agent was created, no GPU runtime was installed. Current next step: Lilia exits
+the old tray process and relaunches through Raycast for native Mini stream and
+Folder search feedback. Previous binary/settings-aware backup are retained.
+No GitHub push, tag or public release. Earlier records below are historical.
+
 Latest owner follow-up: tag dragging is now confirmed working natively by Lilia.
 She requested actual implementation of the researched third view, plus Ctrl+Y
 inside the open Folder picker and physical-backslash neural search with a gold
