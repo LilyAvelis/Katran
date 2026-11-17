@@ -23,6 +23,25 @@ was unused there; a test-module-only allow fixes that fixture without suppressin
 production diagnostics. Final all-targets Clippy with `-D warnings` and formatting
 passed. The known incremental hardlink warnings use copying fallback.
 
+Final integrated check (`target/build/tag-reorder-integrated.log`): **228/228 UI**
+tests, **2/2** reorder API, **2/2** scoped migration and **7/7** existing tag API
+passed. The UI suite ran single-threaded to avoid competing native clipboard
+fixtures. No native application window was opened or controlled for these tests.
+Source checkpoint: `1a3fc6fb7abbf57287c84f688ec31d4be31d95f4`, local main only.
+
+One optimized UI compilation completed in **1m19s**, using the existing
+`target/build` cache, Rust/Cargo 1.95.0, Windows x64 and default features plus
+`ui,clipboard-events`. Pre/post compiled-input hashes matched. Reused unchanged
+Everything helper and dependency notices were copied and hash-verified.
+Primary runtime pointer now selects **`070eaf9b06b7`**; UI SHA-256:
+`070eaf9b06b759fe5dc36a6560f91f663218a158525fbcb6158d200b72407fd6`.
+The previous `55356f72deb8` runtime remains immutable. A fresh consistent v13
+SQLite backup passed integrity check; private rollback receipt:
+`runtime/rollback-tag-reorder.json`. No migration, shortcut replacement, model
+download or forced application restart occurred. Exit the old process via the
+tray once and launch normally through Raycast to activate the new version.
+Native visual acceptance of dragging remains open. No GitHub push/tag/release.
+
 The third view is researched, not built. The offline 16-folder synthetic neural
 probe is feasibility evidence only, not real-index quality or production latency;
 see [its scope and numbers](FOLDER-SEMANTIC-RESEARCH.md). No model was downloaded

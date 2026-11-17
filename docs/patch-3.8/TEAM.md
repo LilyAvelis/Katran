@@ -6,6 +6,20 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Reorder source frozen at local main `1a3fc6f`. Nemi's domain and Fenna's UI
+are complete; Kiki's bounded independent review is closed. Final integrated
+checks: UI 228/228, reorder API 2/2, scoped migration 2/2, existing tag API 7/7;
+all-targets Clippy and formatting passed. Polly owns the single optimized build,
+hash-bound primary staging and final documentation receipt. Native acceptance
+of drag reordering remains the owner's next step.
+
+Staging complete: one 1m19s optimized build, matched compiled-input hashes,
+primary runtime `070eaf9b06b7` (full SHA-256 in `VERIFICATION.md`). Previous
+`55356f72deb8` retained; new consistent schema-v13 backup verified. Private
+receipt `runtime/rollback-tag-reorder.json`. Polly's integration/staging is
+complete; next step is the owner's normal tray-exit/Raycast relaunch and drag
+feedback. No running application was closed and no GitHub changes were pushed.
+
 Current follow-up, 2026-11-17: the base is accepted for the owner's tag/search
 workflow and recorded in [Notion 3.8](https://app.notion.com/p/41b49fda329681d985ddeab05ac2ced1).
 Fenna owns Settings drag UI and revision-checked saves in both tag editors;
