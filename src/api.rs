@@ -137,6 +137,12 @@ pub enum Command {
         query: String,
         limit: u32,
     },
+    SearchFoldersSemanticPage {
+        query: String,
+        offset: u32,
+        limit: u32,
+        snapshot: Option<String>,
+    },
     FolderHistory {
         query: String,
     },

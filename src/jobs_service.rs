@@ -220,6 +220,63 @@ pub(crate) fn prepare_reference(
     })
 }
 impl Service {
+    fn begin_folder_semantic(
+        &mut self,
+        query: String,
+        offset: u32,
+        limit: u32,
+        snapshot: Option<String>,
+    ) -> Result<crate::domain_jobs::JobId> {
+        crate::folder_semantic::validate(&query, limit)?;
+        if offset >= 8192 || (offset > 0 && snapshot.is_none()) {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "A valid snapshot is required for subsequent pages",
+            ));
+        }
+        let saved: Vec<_> = crate::pinned::folder_favorites(&self.db)?
+            .into_iter()
+            .chain(crate::pinned::folder_history(&self.db)?)
+            .map(|entry| entry.path)
+            .collect();
+        let backend = std::sync::Arc::clone(&self.folder_semantic);
+        let source = std::sync::Arc::clone(&self.folder_semantic_source);
+        let gpu = self.settings.folder_ai_gpu;
+        let session = self.folder_semantic_session.clone();
+        self.jobs.submit(Lane::Discovery, move |cancel| {
+            cancel.check()?;
+            let mut backend = backend.lock().map_err(|_| {
+                ApiError::new(
+                    "folder_ai_unavailable",
+                    "Local folder AI backend is unavailable",
+                )
+            })?;
+            let mut source = source.lock().map_err(|_| {
+                ApiError::new(
+                    "folder_ai_unavailable",
+                    "Folder search index is unavailable",
+                )
+            })?;
+            let request = crate::folder_semantic::PageRequest {
+                query: &query,
+                offset,
+                limit,
+                expected_snapshot: snapshot.as_deref(),
+                gpu,
+                session: &session,
+            };
+            let result = crate::folder_semantic::search(
+                &mut **backend,
+                &mut **source,
+                request,
+                &saved,
+                &cancel,
+            )?;
+            cancel.check()?;
+            Ok(PreparedWork::Value(result))
+        })
+    }
+
     pub(crate) fn reference_paths(&self) -> Result<Vec<PathBuf>> {
         let mut statement = self
             .db
@@ -788,40 +845,14 @@ impl Service {
                 })?
             }
             Command::SearchFoldersSemantic { query, limit } => {
-                crate::folder_semantic::validate(&query, limit)?;
-                let saved: Vec<_> = crate::pinned::folder_favorites(&self.db)?
-                    .into_iter()
-                    .chain(crate::pinned::folder_history(&self.db)?)
-                    .map(|entry| entry.path)
-                    .collect();
-                let backend = std::sync::Arc::clone(&self.folder_semantic);
-                let source = std::sync::Arc::clone(&self.folder_semantic_source);
-                self.jobs.submit(Lane::Discovery, move |cancel| {
-                    cancel.check()?;
-                    let mut backend = backend.lock().map_err(|_| {
-                        ApiError::new(
-                            "folder_ai_unavailable",
-                            "Local folder AI backend is unavailable",
-                        )
-                    })?;
-                    let mut source = source.lock().map_err(|_| {
-                        ApiError::new(
-                            "folder_ai_unavailable",
-                            "Folder search index is unavailable",
-                        )
-                    })?;
-                    let result = crate::folder_semantic::search(
-                        &mut **backend,
-                        &mut **source,
-                        &query,
-                        limit,
-                        &saved,
-                        &cancel,
-                    )?;
-                    cancel.check()?;
-                    Ok(PreparedWork::Value(result))
-                })?
+                self.begin_folder_semantic(query, 0, limit, None)?
             }
+            Command::SearchFoldersSemanticPage {
+                query,
+                offset,
+                limit,
+                snapshot,
+            } => self.begin_folder_semantic(query, offset, limit, snapshot)?,
             Command::SearchFolders { query, limit } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     cancel.check()?;

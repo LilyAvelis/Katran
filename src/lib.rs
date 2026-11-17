@@ -27,6 +27,7 @@ mod files_service;
 mod files_store;
 mod folder_commit;
 mod folder_delete;
+mod folder_gpu_runtime;
 mod folder_import;
 pub mod folder_launch;
 pub mod folder_search_rank;
@@ -118,6 +119,7 @@ pub struct Service {
     emoji_ai_backend_injected: bool,
     folder_semantic: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Backend>>>,
     folder_semantic_source: std::sync::Arc<std::sync::Mutex<Box<dyn folder_semantic::Source>>>,
+    folder_semantic_session: String,
     window_visible: bool,
     overlay_session: overlay::Session,
     overlay_host: Box<dyn overlay::Host + Send>,
@@ -292,6 +294,7 @@ impl Service {
             folder_semantic_source: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 folder_semantic::EverythingSource,
             ))),
+            folder_semantic_session: folder_semantic::new_session(),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -383,6 +386,7 @@ impl Service {
             folder_semantic_source: std::sync::Arc::new(std::sync::Mutex::new(Box::new(
                 folder_semantic::EverythingSource,
             ))),
+            folder_semantic_session: folder_semantic::new_session(),
             window_visible: true,
             overlay_session: Default::default(),
             overlay_host: Box::new(overlay_windows::WindowsHost),
@@ -779,10 +783,12 @@ impl Service {
                     .map(|v| serde_json::json!(v))
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
-            Command::SearchFoldersSemantic { .. } => Err(ApiError::new(
-                "background_required",
-                "Folder AI search must run as a background job",
-            )),
+            Command::SearchFoldersSemantic { .. } | Command::SearchFoldersSemanticPage { .. } => {
+                Err(ApiError::new(
+                    "background_required",
+                    "Folder AI search must run as a background job",
+                ))
+            }
             Command::FolderHistory { query } => self.folder_entries(false, &query),
             Command::FolderRecovery => {
                 let path = self

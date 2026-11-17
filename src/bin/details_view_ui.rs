@@ -4,6 +4,33 @@ use super::*;
 
 const ROW_HEIGHT: f32 = 40.0;
 
+pub(super) fn display_title(event: &Value, tab: &str) -> String {
+    if let Some(name) = event["properties"]["display_name"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+    {
+        return name.to_owned();
+    }
+    if tab == "text" && event["kind"] == "text_fragment" {
+        let title = katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""));
+        return if title.is_empty() {
+            tr("Текст", "Text").into()
+        } else {
+            title
+        };
+    }
+    event["name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            event["text_preview"]
+                .as_str()
+                .filter(|text| !text.is_empty())
+        })
+        .unwrap_or(tr("Объект", "Item"))
+        .to_owned()
+}
+
 impl Shelf {
     pub(super) fn details_view(
         &mut self,
@@ -126,12 +153,8 @@ impl Shelf {
                             {
                                 super::tag_material_ui::paint(ui, rect, slot);
                             }
-                            let label = event["properties"]["display_name"]
-                                .as_str()
-                                .filter(|s| !s.is_empty())
-                                .or_else(|| event["name"].as_str())
-                                .or_else(|| event["text_preview"].as_str())
-                                .unwrap_or(tr("Объект", "Item"));
+                            let label =
+                                display_title(event, self.state["tab"].as_str().unwrap_or(""));
                             let icon = match event["kind"].as_str() {
                                 Some("managed_image") => egui_lucide::Lucide::Image,
                                 Some("text_fragment") => egui_lucide::Lucide::FileText,
@@ -149,12 +172,12 @@ impl Shelf {
                                 .paint_at(ui, icon_rect);
                             let line = egui::Rect::from_min_max(
                                 rect.min + egui::vec2(32.0, 0.0),
-                                rect.max - egui::vec2(8.0, 0.0),
+                                rect.max - egui::vec2(24.0, 0.0),
                             );
                             super::gallery_card::text(
                                 ui,
                                 line,
-                                label,
+                                &label,
                                 14.0,
                                 Color32::from_gray(235),
                             );
@@ -168,6 +191,27 @@ impl Shelf {
                             }
                             if cursor {
                                 super::shelf_view::paint_cursor(ui, rect);
+                            }
+                            if event["properties"]["pinned"] == true {
+                                let color = self
+                                    .tag_material_cache
+                                    .assignments
+                                    .get(&id)
+                                    .and_then(|number| {
+                                        self.tag_material_cache
+                                            .slots
+                                            .iter()
+                                            .find(|slot| slot.number == *number)
+                                    })
+                                    .map(super::tag_material_ui::color)
+                                    .unwrap_or(Color32::from_rgb(236, 159, 72));
+                                let dot = rect.right_center() - egui::vec2(10.0, 0.0);
+                                ui.painter().circle_filled(dot, 4.0, color);
+                                ui.painter().circle_stroke(
+                                    dot,
+                                    4.0,
+                                    egui::Stroke::new(1.0, Color32::from_black_alpha(115)),
+                                );
                             }
                             let response = response.on_hover_text(label);
                             if response.drag_started() {
@@ -288,6 +332,114 @@ impl Shelf {
 mod tests {
     use super::*;
 
+    fn painted_details_list(
+        app: &mut Shelf,
+        ctx: &egui::Context,
+        events: &[Value],
+    ) -> (String, Vec<(egui::Pos2, Color32)>) {
+        fn collect(shape: &egui::Shape, text: &mut String, dots: &mut Vec<(egui::Pos2, Color32)>) {
+            match shape {
+                egui::Shape::Text(value) => {
+                    text.push_str(&value.galley.job.text);
+                    text.push('\n');
+                }
+                egui::Shape::Circle(value)
+                    if value.radius == 4.0 && value.fill != Color32::TRANSPARENT =>
+                {
+                    dots.push((value.center, value.fill))
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, text, dots);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 650.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.details_list(ui, ctx, events),
+        );
+        let mut text = String::new();
+        let mut dots = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut text, &mut dots);
+        }
+        output.textures_delta.clear();
+        (text, dots)
+    }
+
+    #[test]
+    fn text_rows_paint_first_meaningful_line_or_explicit_rename() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"text", "cursor":null, "selected":[], "emoji_catalogue":false});
+        let ctx = egui::Context::default();
+        let events = vec![
+            serde_json::json!({"id":1,"kind":"text_fragment","name":"technical-1.txt","text_preview":"\n  First meaningful line  \nsecond", "properties":{}}),
+            serde_json::json!({"id":2,"kind":"text_fragment","name":"technical-2.txt","text_preview":"original text", "properties":{"display_name":"My renamed item"}}),
+        ];
+        let (text, _) = painted_details_list(&mut app, &ctx, &events);
+        assert!(text.contains("First meaningful line"), "{text:?}");
+        assert!(text.contains("My renamed item"), "{text:?}");
+        assert!(
+            !text.contains("technical-1.txt") && !text.contains("technical-2.txt"),
+            "{text:?}"
+        );
+        let pods = serde_json::json!({"kind":"text_fragment", "name":"Pods name", "text_preview":"🐄", "properties":{}});
+        assert_eq!(display_title(&pods, "pods"), "Pods name");
+        assert!(!display_title(&serde_json::json!({"kind":"text_fragment", "name":"technical.txt", "text_preview":" \n", "properties":{}}), "text").contains("technical"));
+    }
+
+    #[test]
+    fn pinned_markers_are_painted_for_each_provider_and_use_tag_color() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.tag_material_cache.slots = vec![katran::tag_slots::Slot {
+            number: 1,
+            name: "Tag".into(),
+            color: "#12A0FF".into(),
+            opacity: 0,
+            material: katran::tag_slots::Material::Solid,
+            scale: 50,
+            intensity: 0,
+            angle: 0,
+            seed: 0,
+        }];
+        for (tab, kind, id) in [
+            ("images", "managed_image", 1_i64),
+            ("text", "text_fragment", 2),
+            ("links", "link_fragment", 3),
+            ("tables", "table_fragment", 4),
+            ("pods", "text_fragment", 5),
+            ("folder", "file_reference", -2),
+            ("desktop", "managed_image", -(1_i64 << 62) - 1),
+        ] {
+            app.state =
+                serde_json::json!({"tab":tab,"cursor":null,"selected":[],"emoji_catalogue":false});
+            app.tag_material_cache.assignments.clear();
+            let event = serde_json::json!({"id":id,"kind":kind,"name":"Item","text_preview":"Example","properties":{"pinned":true}});
+            let (_, dots) = painted_details_list(&mut app, &ctx, std::slice::from_ref(&event));
+            assert_eq!(dots.len(), 1, "{tab}: {dots:?}");
+            assert_eq!(dots[0].1, Color32::from_rgb(236, 159, 72));
+            app.tag_material_cache.assignments.insert(id, 1);
+            let (_, dots) = painted_details_list(&mut app, &ctx, std::slice::from_ref(&event));
+            assert_eq!(dots.len(), 1, "{tab}: {dots:?}");
+            assert_eq!(dots[0].1, Color32::from_rgb(18, 160, 255));
+            let mut unpinned = event;
+            unpinned["properties"]["pinned"] = false.into();
+            let (_, dots) = painted_details_list(&mut app, &ctx, &[unpinned]);
+            assert!(dots.is_empty(), "{tab}: {dots:?}");
+        }
+    }
+
     #[test]
     fn shell_details_action_and_arrow_use_cursor_without_fullscreen_preview() {
         use katran::interaction::{ShelfTab, View};
@@ -392,7 +544,18 @@ mod tests {
                 collect(&shape.shape, &mut text);
             }
             output.textures_delta.clear();
-            assert!(text.contains("CURSOR-ITEM"), "{tab}: {text:?}");
+            let expected = if tab == "text" {
+                "sample"
+            } else {
+                "CURSOR-ITEM"
+            };
+            assert!(text.contains(expected), "{tab}: {text:?}");
+            if tab == "text" {
+                assert!(
+                    !text.contains("CURSOR-ITEM"),
+                    "technical text filename must not be its title"
+                );
+            }
             assert!(app.state["preview"].is_null());
             assert_eq!(app.state["cursor"], id);
             assert_eq!(app.state["selected"], serde_json::json!([]));

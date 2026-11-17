@@ -16,6 +16,20 @@ const START_TIMEOUT: Duration = Duration::from_secs(45);
 const COLD_TIMEOUT: Duration = Duration::from_secs(180);
 const WARM_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub fn new_session() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "{}-{now}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 pub fn validate(query: &str, limit: u32) -> Result<()> {
     if query.trim().is_empty()
         || query.chars().count() > 512
@@ -36,6 +50,7 @@ pub trait Backend: Send {
         query: &str,
         paths: &[PathBuf],
         limit: u32,
+        gpu: bool,
         cancel: &Cancellation,
     ) -> Result<Vec<usize>>;
 }
@@ -44,6 +59,7 @@ pub struct Resident {
     worker: Option<Worker>,
     next_id: u64,
     snapshot: Option<Vec<PathBuf>>,
+    gpu: Option<bool>,
 }
 impl Resident {
     pub fn new(root: PathBuf) -> Self {
@@ -52,6 +68,7 @@ impl Resident {
             worker: None,
             next_id: 0,
             snapshot: None,
+            gpu: None,
         }
     }
 }
@@ -87,7 +104,7 @@ fn wait<T>(receiver: &Receiver<T>, timeout: Duration, cancel: &Cancellation) -> 
     }
 }
 impl Worker {
-    fn start(root: &std::path::Path, cancel: &Cancellation) -> Result<Self> {
+    fn start(root: &std::path::Path, gpu: bool, cancel: &Cancellation) -> Result<Self> {
         let runtime = crate::emoji_ai::runtime::resolve(root, Some(cancel)).map_err(|error| {
             if error.code == "model_unavailable" { ApiError::new("model_unavailable", "Local AI model or runtime is not installed. Installation: https://github.com/LilyAvelis/Katran/blob/main/docs/emoji-ai.md") } else { error }
         })?;
@@ -95,12 +112,18 @@ impl Worker {
             .worker
             .parent()
             .ok_or_else(|| unavailable("Invalid local AI runtime"))?;
-        let mut command = Command::new(runtime.python);
+        let python = if gpu {
+            crate::folder_gpu_runtime::resolve(root)?
+        } else {
+            runtime.python
+        };
+        let mut command = Command::new(python);
         command
             .arg("-c")
             .arg(include_str!("../scripts/folder-semantic/worker.py"))
             .arg(base.join("model/onnx/model.onnx"))
             .arg(base.join("model/onnx/tokenizer.json"))
+            .arg(if gpu { "gpu" } else { "cpu" })
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -156,7 +179,14 @@ impl Worker {
         let ready = wait(&worker.reader, START_TIMEOUT, cancel)?
             .ok_or_else(|| unavailable("Local folder AI startup failed"))?;
         if ready["type"] != "ready" || ready["protocol"] != 1 {
-            return Err(unavailable("Local folder AI startup failed"));
+            return Err(if gpu {
+                ApiError::new(
+                    "folder_gpu_unavailable",
+                    "GPU acceleration could not start; check the local GPU runtime",
+                )
+            } else {
+                unavailable("Local folder AI startup failed")
+            });
         }
         Ok(worker)
     }
@@ -187,18 +217,42 @@ impl Backend for Resident {
         query: &str,
         paths: &[PathBuf],
         limit: u32,
+        gpu: bool,
         cancel: &Cancellation,
     ) -> Result<Vec<usize>> {
-        validate(query, limit)?;
+        if query.trim().is_empty()
+            || query.chars().count() > 512
+            || query.contains('\0')
+            || !(1..=MAX_ITEMS as u32).contains(&limit)
+        {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Invalid semantic search request",
+            ));
+        }
         if paths.len() > MAX_ITEMS || paths.iter().any(|p| p.to_str().is_none()) {
             return Err(ApiError::new(
                 "folder_ai_input_limit",
                 "Folder snapshot is invalid or too large",
             ));
         }
-        if self.worker.is_none() {
-            self.worker = Some(Worker::start(&self.root, cancel)?);
+        if self.gpu != Some(gpu) {
+            self.worker = None;
             self.snapshot = None;
+        }
+        if self.worker.is_none() {
+            self.worker = Some(Worker::start(&self.root, gpu, cancel).map_err(|error| {
+                if gpu && error.code == "folder_ai_unavailable" {
+                    ApiError::new(
+                        "folder_gpu_unavailable",
+                        "GPU folder search could not start; check the local GPU runtime",
+                    )
+                } else {
+                    error
+                }
+            })?);
+            self.snapshot = None;
+            self.gpu = Some(gpu);
         }
         self.next_id = self.next_id.wrapping_add(1);
         let id = self.next_id;
@@ -246,7 +300,15 @@ impl Backend for Resident {
             Err(error) => {
                 self.worker = None;
                 self.snapshot = None;
-                Err(error)
+                self.gpu = None;
+                Err(if gpu && error.code == "folder_ai_unavailable" {
+                    ApiError::new(
+                        "folder_gpu_unavailable",
+                        "GPU folder search failed; check the local GPU runtime",
+                    )
+                } else {
+                    error
+                })
             }
         }
     }
@@ -278,15 +340,36 @@ impl Source for EverythingSource {
         })
     }
 }
+pub struct PageRequest<'a> {
+    pub query: &'a str,
+    pub offset: u32,
+    pub limit: u32,
+    pub expected_snapshot: Option<&'a str>,
+    pub gpu: bool,
+    pub session: &'a str,
+}
 pub fn search(
     backend: &mut dyn Backend,
     source: &mut dyn Source,
-    query: &str,
-    limit: u32,
+    request: PageRequest<'_>,
     saved: &[PathBuf],
     cancel: &Cancellation,
 ) -> Result<Value> {
+    let PageRequest {
+        query,
+        offset,
+        limit,
+        expected_snapshot,
+        gpu,
+        session,
+    } = request;
     validate(query, limit)?;
+    if offset as usize >= MAX_ITEMS || (offset > 0 && expected_snapshot.is_none()) {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "A valid snapshot is required for subsequent pages",
+        ));
+    }
     let snapshot = source.snapshot(query, cancel)?;
 
     let mut incomplete = snapshot.incomplete;
@@ -329,11 +412,22 @@ pub fn search(
             paths.push(path.clone());
         }
     }
+    use sha2::{Digest, Sha256};
+    let token_data = serde_json::to_vec(&(session, query, gpu, &paths, &snapshot.exact_candidates))
+        .map_err(|_| unavailable("Invalid folder search snapshot"))?;
+    let token = format!("{:x}", Sha256::digest(token_data));
+    if expected_snapshot.is_some_and(|expected| expected != token) {
+        return Err(ApiError::new(
+            "folder_ai_snapshot_changed",
+            "Folder search changed; start a new search",
+        ));
+    }
+    let prefix = (offset as usize + limit as usize + 1).min(MAX_ITEMS);
     cancel.check()?;
     // This call must succeed even when there are exact matches: no lexical-only success.
-    let indices = backend.search(query, &paths, limit, cancel)?;
+    let indices = backend.search(query, &paths, prefix as u32, gpu, cancel)?;
     cancel.check()?;
-    if indices.len() > limit as usize
+    if indices.len() > prefix
         || indices.iter().copied().collect::<HashSet<_>>().len() != indices.len()
     {
         return Err(unavailable("Invalid local folder AI response"));
@@ -361,7 +455,7 @@ pub fn search(
             && used.insert(key)
         {
             result.push(json!({"path":path}));
-            if result.len() == limit as usize {
+            if result.len() == prefix {
                 break;
             }
         }
@@ -376,11 +470,19 @@ pub fn search(
         } else {
             text.into_owned()
         };
-        if used.insert(key) && result.len() < limit as usize {
+        if used.insert(key) && result.len() < prefix {
             result.push(json!({"path":paths[i]}));
         }
     }
+    let offset = offset as usize;
+    let has_more = result.len() > offset.saturating_add(limit as usize);
+    let items: Vec<_> = result
+        .into_iter()
+        .skip(offset)
+        .take(limit as usize)
+        .collect();
+    let next_offset = has_more.then_some(offset + items.len());
     Ok(
-        json!({"items":result,"incomplete":incomplete,"indexed_count":indexed_count,"scope":"bounded_everything_index_and_saved_folders"}),
+        json!({"query":query,"offset":offset,"items":items,"next_offset":next_offset,"has_more":has_more,"snapshot":token,"incomplete":incomplete,"indexed_count":indexed_count,"scope":"bounded_everything_index_and_saved_folders"}),
     )
 }

@@ -6,6 +6,15 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Latest native-feedback follow-up: Lilia confirmed Mini stream and neural search
+work and requested Text titles/pin markers/Ctrl+arrow, Enter-only neural search,
+10-item pages and optional GPU. Fenna owns row presentation and Settings checkbox;
+Nemi owns settings/Page API/snapshot/GPU worker switching; Mira owns isolated GPU
+setup/resolver and real provider verification; Polly owns input/pagination UI,
+shared metadata titles, integration/testing/docs/staging. Same sessions reused,
+no additions or substitutions. UI 245/245 and all-targets Clippy have passed;
+GPU setup/provider evidence and final staging are tracked in `VERIFICATION.md`.
+
 Final follow-up staging complete: source local main `c5f592f`, primary runtime
 `52d064dd97cb`, one optimized build 1m20s with matched compiled inputs including
 the embedded worker. Fenna/Mira/Nemi handoffs and targeted checks are closed;

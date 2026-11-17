@@ -13,6 +13,12 @@ Favorites and Standard folders remain separate picker sections. The configured
 Standard-folders shortcut (default Ctrl+Y) now works inside the already open
 picker, including while its query field is focused; it remains rebindable.
 
+Owner UX refinement: neural search starts **only on Enter**, not while typing.
+The first reply contains the top **10** results. Press Down on the last row for
+the next 10; existing rows remain and the cursor moves to the first new result.
+Enter on a completed result opens the selected folder. Changing the query cancels
+the old job and waits for a new Enter. Ordinary search keeps its prior behavior.
+
 ## Domain and scope
 
 `BeginJob(SearchFoldersSemantic {query, limit})` runs in the bounded Discovery
@@ -20,6 +26,13 @@ lane. Direct synchronous execution returns `background_required`. Ordinary
 `SearchFolders` is unchanged. A successful semantic reply contains paths,
 `indexed_count`, `scope` and explicit `incomplete`. Selection still passes through
 the existing `ChooseFolder` validation/history path.
+
+The picker uses `SearchFoldersSemanticPage {query,offset,limit,snapshot}` with
+limit 10. Replies add query/offset, next_offset, has_more and an opaque snapshot.
+The token binds query, candidate order, CPU/GPU choice and Service instance;
+changed inputs reject continuation with `folder_ai_snapshot_changed`. Enter
+starts a fresh search after that error. Top-k limits presentation of ranked
+matches; it is not a calibrated confidence threshold or a quality guarantee.
 
 This initial version embeds **names and paths only**, from a bounded Everything
 directory snapshot, ordinary-search candidates and saved favorites/history. It indexes at most **8192**
@@ -43,8 +56,8 @@ reuse the resident encoder and RAM vectors for unchanged paths. Reordering does
 not re-encode them; only newly added paths are encoded, and removed paths are
 evicted. This also permits query-specific lexical candidates without rebuilding
 the entire index on each query or history update.
-Query changes cancel old jobs and stale replies are ignored. Neural input uses
-a 350ms debounce; ordinary search keeps its 120ms debounce. Initial indexing can
+Query changes cancel old jobs and stale replies are ignored. Neural input waits
+for Enter; ordinary search keeps its 120ms debounce. Initial indexing can
 take substantially longer than a warm query and the UI shows preparation/loading.
 
 CPU inference uses four threads, batches of 64 and 128-token descriptors with the
@@ -52,6 +65,26 @@ folder basename first. Worker requests/results are bounded by 4MiB. Startup,
 cold and warm stages have explicit timeout budgets (45s, 180s and 30s respectively);
 cancellation is checked while waiting and failed/cancelled workers are killed.
 Everything acquisition remains separately bounded by its existing helper timeout.
+
+## Optional GPU component
+
+Settings → General → Folders and storage → **Folder neural index · GPU** selects
+CUDA for this feature; default is off. `folder_ai_gpu` persists only when true.
+The separate `folder-ai-gpu-runtime` in the active profile owns its own Python
+environment; existing emoji CPU environment, manifests and model weights are
+unchanged. Weights still pass the existing integrity resolver and are reused.
+`scripts/folder-semantic/setup-gpu.ps1 -Profile <absolute profile>` installs pinned
+ONNX Runtime GPU 1.23.2 and CUDA/cuDNN wheels locally, without changing drivers
+or installing a global CUDA toolkit. Model download is not part of this setup.
+The resolver checks the isolated runtime, and worker startup must activate CUDA.
+Unavailable CUDA returns `folder_gpu_unavailable`; it is never labeled GPU while
+silently using CPU. Turn the checkbox off to use CPU again.
+
+Older binaries can reject settings with the new true GPU field; controlled
+rollback must restore/adjust settings as with the new `details` view. Runtime
+installation itself does not enable the setting or restart Katran. Actual CUDA
+availability/performance evidence is recorded in `VERIFICATION.md`, not inferred
+from the checkbox or installed package names.
 
 This is an initial bounded local feature, not a quality guarantee. Candidate
 coverage and ambiguous-language ranking remain limitations. See the dated

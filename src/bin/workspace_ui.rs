@@ -53,6 +53,10 @@ pub(super) struct State {
     incomplete: bool,
     neural: bool,
     indexed_count: Option<u64>,
+    submitted_query: Option<String>,
+    snapshot: Option<String>,
+    next_offset: Option<u32>,
+    page_offset: u32,
     selected: usize,
     focus: bool,
     scroll: bool,
@@ -81,12 +85,16 @@ impl Shelf {
         self.workspace.standard_details.clear();
         self.workspace.incomplete = false;
         self.workspace.indexed_count = None;
+        self.workspace.submitted_query = None;
+        self.workspace.snapshot = None;
+        self.workspace.next_offset = None;
+        self.workspace.page_offset = 0;
         self.workspace.selected = 0;
         self.workspace.error = None;
         if self.workspace.mode == Mode::Search {
-            if !self.workspace.query.trim().is_empty() {
+            if !self.workspace.neural && !self.workspace.query.trim().is_empty() {
                 self.workspace.loading = true;
-                let debounce = Duration::from_millis(if self.workspace.neural { 350 } else { 120 });
+                let debounce = Duration::from_millis(120);
                 self.workspace.due = Some(Instant::now() + debounce);
                 ctx.request_repaint_after(debounce);
             }
@@ -123,16 +131,61 @@ impl Shelf {
     fn workspace_set_items(&mut self, result: &Value) {
         self.workspace.incomplete = result["incomplete"] == true;
         self.workspace.indexed_count = result["indexed_count"].as_u64();
-        self.workspace.items = result["items"]
+        let items: Vec<PathBuf> = result["items"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|v| v["path"].as_str().map(PathBuf::from))
             .collect();
+        if self.workspace.neural && self.workspace.mode == Mode::Search {
+            self.workspace.snapshot = result["snapshot"].as_str().map(str::to_owned);
+            self.workspace.next_offset = result["next_offset"]
+                .as_u64()
+                .and_then(|offset| u32::try_from(offset).ok());
+            if self.workspace.page_offset > 0 {
+                let old_len = self.workspace.items.len();
+                for path in items {
+                    if !self.workspace.items.contains(&path) {
+                        self.workspace.items.push(path);
+                    }
+                }
+                if self.workspace.items.len() > old_len {
+                    self.workspace.selected = old_len;
+                    self.workspace.scroll = true;
+                }
+            } else {
+                self.workspace.items = items;
+            }
+        } else {
+            self.workspace.items = items;
+        }
         self.workspace.selected = self
             .workspace
             .selected
             .min(self.workspace.items.len().saturating_sub(1));
+    }
+    fn workspace_submit_neural(&mut self, ctx: &egui::Context, next: bool) {
+        if self.workspace.loading || self.workspace.query.trim().is_empty() {
+            return;
+        }
+        if next {
+            let Some(offset) = self.workspace.next_offset else {
+                return;
+            };
+            self.workspace.page_offset = offset;
+        } else {
+            self.workspace_cancel();
+            self.workspace.items.clear();
+            self.workspace.selected = 0;
+            self.workspace.snapshot = None;
+            self.workspace.next_offset = None;
+            self.workspace.page_offset = 0;
+            self.workspace.submitted_query = Some(self.workspace.query.clone());
+        }
+        self.workspace.error = None;
+        self.workspace.loading = true;
+        self.workspace.due = Some(Instant::now());
+        ctx.request_repaint();
     }
     fn workspace_mode(&mut self, mode: Mode, ctx: &egui::Context) {
         self.workspace.mode = mode;
@@ -474,7 +527,12 @@ impl Shelf {
             self.workspace.due = None;
             let query = self.workspace.query.clone();
             let command = if self.workspace.neural {
-                Command::SearchFoldersSemantic { query, limit: 100 }
+                Command::SearchFoldersSemanticPage {
+                    query,
+                    offset: self.workspace.page_offset,
+                    limit: 10,
+                    snapshot: self.workspace.snapshot.clone(),
+                }
             } else {
                 Command::SearchFolders { query, limit: 100 }
             };
@@ -501,17 +559,29 @@ impl Shelf {
         let count = state.items.len();
         let previous = state.selected;
         let armed = ctx.cumulative_frame_nr() > state.opened_frame;
+        let mut next_page = false;
         let enter = ctx.input_mut(|i| {
             if count > 0 && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                state.selected = (state.selected + 1) % count;
+                if state.neural && state.mode == Mode::Search && state.selected + 1 == count {
+                    next_page = !state.loading && state.next_offset.is_some();
+                } else {
+                    state.selected = (state.selected + 1) % count;
+                }
             }
             if count > 0 && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                 state.selected = (state.selected + count - 1) % count;
             }
             i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) && armed
         });
+        let submit = enter
+            && state.neural
+            && state.mode == Mode::Search
+            && !state.loading
+            && (state.submitted_query.as_deref() != Some(state.query.as_str())
+                || state.items.is_empty()
+                || state.error.is_some());
         state.scroll |= previous != state.selected;
-        let mut chosen = if enter && !state.loading {
+        let mut chosen = if enter && !submit && !state.loading {
             state
                 .items
                 .get(state.selected)
@@ -565,14 +635,14 @@ impl Shelf {
                     }
                     if state.loading { ui.weak(if neural { tr("Подготовка локального индекса и поиск…", "Preparing local index and searching…") } else { tr("Поиск папок…", "Searching folders…") }); }
                     else if let Some(error) = &state.error { ui.colored_label(Color32::LIGHT_RED, error); }
-                    else if state.items.is_empty() { ui.weak(if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
+                    else if state.items.is_empty() { ui.weak(if neural && state.submitted_query.is_none() { tr("Введите запрос и нажмите Enter", "Type a query and press Enter") } else if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
                 });
                 ui.separator();
                 let field = egui::Frame::new().inner_margin(4).stroke(egui::Stroke::new(if neural { 1.5 } else { 0.0 }, Color32::from_rgb(221, 178, 75))).show(ui, |ui| {
                     ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY))
                 }).inner;
                 if state.focus { field.request_focus(); state.focus = false; }
-                if state.mode == Mode::Search { ui.weak(if neural { tr("\\ · обычный поиск", "\\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }
+                if state.mode == Mode::Search { ui.weak(if neural { tr("Enter · искать / открыть    ↓ на последнем · ещё 10    \\ · обычный поиск", "Enter · search / open    ↓ on last · 10 more    \\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }
                 ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
             });
         if let Some(mode) =
@@ -583,7 +653,7 @@ impl Shelf {
         }
         let mut direct = false;
         let mut direct_error = None;
-        if enter && state.mode == Mode::Search {
+        if enter && state.mode == Mode::Search && !state.neural {
             match katran::everything::direct_folder_query(&query) {
                 Ok(Some(path)) => {
                     chosen = Some(path);
@@ -601,6 +671,9 @@ impl Shelf {
             state.query = query;
             if !direct {
                 self.workspace_reload(ctx);
+                if enter && self.workspace.neural && self.workspace.mode == Mode::Search {
+                    self.workspace_submit_neural(ctx, false);
+                }
                 return;
             }
         }
@@ -612,7 +685,9 @@ impl Shelf {
                 return;
             }
         }
-        if let Some(path) = chosen {
+        if submit || next_page {
+            self.workspace_submit_neural(ctx, next_page);
+        } else if let Some(path) = chosen {
             if !self.open_working_folder(path) {
                 self.workspace.error = Some(self.message.clone());
             }
@@ -625,6 +700,69 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neural_query_waits_for_enter_and_last_down_appends_ten() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.workspace.open = true;
+        app.workspace.neural = true;
+        app.workspace.query = "travel".into();
+        let ctx = egui::Context::default();
+        app.workspace_reload(&ctx);
+        assert!(app.workspace.due.is_none());
+        assert!(!app.workspace.loading);
+        let mut initial = ctx.run_ui(egui::RawInput::default(), |_| app.workspace_panel(&ctx));
+        initial.textures_delta.clear();
+        let mut enter = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |_| app.workspace_panel(&ctx),
+        );
+        enter.textures_delta.clear();
+        assert!(app.workspace.loading && app.workspace.due.is_some());
+        assert_eq!(app.workspace.submitted_query.as_deref(), Some("travel"));
+        let page = |offset| serde_json::json!({"items":(offset..offset+10).map(|i| serde_json::json!({"path":format!("C:/Synthetic/{i}")})).collect::<Vec<_>>(),"snapshot":"same","next_offset":offset+10,"has_more":true,"indexed_count":30});
+        app.workspace.loading = false;
+        app.workspace.due = None;
+        app.workspace_set_items(&page(0));
+        assert_eq!(app.workspace.items.len(), 10);
+        app.workspace.selected = 9;
+        let mut down = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |_| app.workspace_panel(&ctx),
+        );
+        down.textures_delta.clear();
+        assert!(app.workspace.loading && app.workspace.due.is_some());
+        assert_eq!(app.workspace.page_offset, 10);
+        assert_eq!(app.workspace.items.len(), 10);
+        app.workspace.loading = false;
+        app.workspace.due = None;
+        app.workspace_set_items(&page(10));
+        assert_eq!(app.workspace.items.len(), 20);
+        assert_eq!(app.workspace.selected, 10);
+        app.workspace.query = "changed query".into();
+        app.workspace_reload(&ctx);
+        assert!(app.workspace.due.is_none() && app.workspace.snapshot.is_none());
+        assert!(app.workspace.items.is_empty());
+    }
 
     #[test]
     fn folder_shortcuts_open_existing_modes_and_respect_text_focus() {

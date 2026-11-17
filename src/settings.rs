@@ -11,6 +11,10 @@ pub enum Language {
     Russian,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn legacy_language() -> Language {
     Language::Russian
 }
@@ -68,6 +72,9 @@ pub struct Settings {
     pub default_view: View,
     pub capture_on_start: bool,
     pub search_keyboard_only: bool,
+    /// Optional local Folder AI acceleration. Missing means CPU.
+    #[serde(skip_serializing_if = "is_false")]
+    pub folder_ai_gpu: bool,
     /// Opt-in network retrieval of site favicons for Links cards.
     pub link_favicons_online: bool,
 }
@@ -112,6 +119,7 @@ impl Settings {
             capture_on_start: true,
             search_keyboard_only: false,
             link_favicons_online: false,
+            folder_ai_gpu: false,
         };
         settings.materialize_tab_preferences();
         for tab in [ShelfTab::Text, ShelfTab::Links] {

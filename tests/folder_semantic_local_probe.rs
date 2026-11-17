@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct SyntheticSource;
+struct SyntheticSource {
+    count: usize,
+}
 impl Source for SyntheticSource {
     fn snapshot(&mut self, query: &str, _: &Cancellation) -> katran::Result<Snapshot> {
         let mut indexed = vec![
@@ -19,7 +21,8 @@ impl Source for SyntheticSource {
             PathBuf::from("C:/Synthetic/Craft/Florist"),
         ];
         indexed.extend(
-            (0..8189).map(|i| PathBuf::from(format!("C:/Synthetic/Archive/Folder-{i:05}"))),
+            (0..self.count.saturating_sub(3))
+                .map(|i| PathBuf::from(format!("C:/Synthetic/Archive/Folder-{i:05}"))),
         );
         if query == "цветочная мастерская" {
             *indexed.last_mut().unwrap() = PathBuf::from("C:/Synthetic/New/Added-After-Index");
@@ -49,10 +52,21 @@ fn resident_model_and_dispatcher_cold_warm_probe() {
     let live = std::env::var_os("KATRAN_FOLDER_PROBE_LIVE_INDEX").is_some();
     let temp = tempfile::tempdir().unwrap();
     let mut api = Service::open(temp.path(), 100_000).unwrap();
+    if std::env::var_os("KATRAN_FOLDER_PROBE_GPU").is_some() {
+        let mut settings: katran::settings::Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)).unwrap();
+        settings.folder_ai_gpu = true;
+        call(&mut api, Command::SetSettings { settings });
+    }
+    let count = std::env::var("KATRAN_FOLDER_PROBE_COUNT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(8192)
+        .clamp(4, 8192);
     let source: Box<dyn Source> = if live {
         Box::new(EverythingSource)
     } else {
-        Box::new(SyntheticSource)
+        Box::new(SyntheticSource { count })
     };
     api.set_folder_semantic_backend(Box::new(Resident::new(PathBuf::from(profile))), source);
     for (query, target) in if live {

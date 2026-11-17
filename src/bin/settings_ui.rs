@@ -115,7 +115,7 @@ fn apply_global_hotkey(
 fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
     let terms = match index {
         0 => {
-            "general language язык запуск startup controls управление вызов katran захват capture поиск search сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш quota квота история folder"
+            "general language язык запуск startup controls управление вызов katran захват capture поиск search сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш quota квота история folder gpu нейроиндекс neural index видеокарта"
         }
         1 => "shortcuts команда клавиатура сочетание shortcut hotkey",
         2 => "tabs доступные вкладки включить выключить сбор данных",
@@ -193,6 +193,10 @@ pub(super) fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'stati
         ShelfTab::Files => super::i18n::tr("Файлы", "Files"),
         ShelfTab::Desktop => super::i18n::tr("Рабочий стол", "Desktop"),
     }
+}
+
+fn folder_gpu_checkbox(ui: &mut egui::Ui, enabled: &mut bool) -> egui::Response {
+    ui.checkbox(enabled, super::i18n::tr("Использовать GPU", "Use GPU"))
 }
 
 fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferences) -> bool {
@@ -950,6 +954,7 @@ impl State {
          }
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Нейроиндекс Folder · GPU", "Folder neural index · GPU"),super::i18n::tr("Ускоряет индексацию для нейропоиска Folder. Требуется отдельно установленный GPU-компонент; при его отсутствии Katran покажет ошибку.", "Accelerates indexing for Folder neural search. Requires the separately installed GPU component; Katran shows an error if it is unavailable."),|ui|{folder_gpu_checkbox(ui,&mut draft.folder_ai_gpu);});
          SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
           let response=ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots"));
           path_editing |= response.has_focus();
@@ -1289,6 +1294,49 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn folder_gpu_checkbox_updates_and_persists_setting() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10000).unwrap();
+        let mut draft: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        assert!(!draft.folder_ai_gpu);
+        let ctx = egui::Context::default();
+        let mut rect = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = folder_gpu_checkbox(ui, &mut draft.folder_ai_gpu).rect
+        });
+        output.textures_delta.clear();
+        let pos = rect.center();
+        for pressed in [true, false] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    folder_gpu_checkbox(ui, &mut draft.folder_ai_gpu);
+                },
+            );
+            output.textures_delta.clear();
+        }
+        assert!(draft.folder_ai_gpu);
+        save_general_settings(&mut api, &draft).unwrap();
+        drop(api);
+        let mut reopened = Service::open(root.path(), 10000).unwrap();
+        assert_eq!(
+            call(&mut reopened, Command::GetSettings)["result"]["folder_ai_gpu"],
+            true
+        );
+    }
     #[test]
     fn automatic_save_uses_domain_settings_and_preserves_concurrent_tab_changes() {
         let root = tempfile::tempdir().unwrap();

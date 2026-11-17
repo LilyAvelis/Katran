@@ -1,5 +1,35 @@
 # Katran 3.8 verification handoff
 
+## Text snippets, Enter/top-10 and optional CUDA follow-up · 2026-11-17
+
+Latest native owner feedback accepts the functioning split view/neural mode and
+requests the concrete UX refinements recorded in `DETAILS-VIEW.md` and
+`FOLDER-NEURAL.md`. Existing named sessions were reused with disjoint ownership.
+
+- UI **245/245** passed (`target/build/mini-text-gpu-pages-ui.log`): actual
+  painted first-line/renamed Text titles, pinned/unpinned dot and tag color,
+  Ctrl+arrow through the real split shell without selection/cursor/fullscreen
+  changes, Enter-only neural input, appending the next 10 on last-row Down,
+  settings checkbox click/save/restart and the unchanged UI scenarios.
+- Initial UI run had 241 passed/2 fixture failures: the old cross-provider
+  expectation still demanded a technical Text filename, and the new keyboard
+  fixture sent input before the first render enabled text preview. Expectations
+  and initialization were corrected, then the affected integrated UI gate passed.
+- Domain semantic Page API **3/3**, settings **2/2**, isolated runtime resolver
+  **1/1**, Python cache **2/2** passed. Page tests cover 10+10+5 without repeats,
+  snapshot invalidation, explicit backend errors/cancel and GPU preference restart.
+  These synthetic checks alone do not prove CUDA availability.
+- All-targets Clippy `-D warnings` and formatting passed. Unchanged domain,
+  model-quality and broad migration evidence were reused.
+- Actual CPU-mode API probe after the new device switch: 512 synthetic paths,
+  cold **8914ms**, warm **25ms**, one-path-change **25ms**, three intended targets
+  ranked first (`target/build/folder-cpu-mode-final.log`). One run each, including
+  runtime validation/startup and polling; not a controlled throughput benchmark.
+
+The requested GPU component is installed separately from the emoji CPU runtime;
+provider/kernel and end-to-end GPU evidence is recorded below once confirmed.
+No native window was controlled and no personal tags/content were changed by tests.
+
 ## Mini stream and local Folder neural mode · later 2026-11-17 follow-up
 
 Tag dragging was confirmed working by Lilia. The earlier third-view/neural

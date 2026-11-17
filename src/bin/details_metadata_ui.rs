@@ -111,7 +111,7 @@ impl DetailsMetadata {
     }
     pub fn show(&mut self, ui: &mut egui::Ui, event: &Value, state: &Value) {
         ui.heading(tr("Информация", "Information"));
-        for (label, value) in fields(event) {
+        for (label, value) in fields(event, state["tab"].as_str().unwrap_or("")) {
             field(ui, &label, &value);
         }
         if state["tab"] != "pods" || event["kind"] != "text_fragment" {
@@ -187,18 +187,22 @@ fn field(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add(egui::Label::new(text).selectable(true).wrap());
     ui.add_space(3.0);
 }
-fn fields(event: &Value) -> Vec<(String, String)> {
+fn fields(event: &Value, tab: &str) -> Vec<(String, String)> {
     let mut result = Vec::new();
     let mut add = |label: &str, value: Option<&str>| {
         if let Some(value) = value.filter(|text| !text.is_empty()) {
             result.push((label.to_owned(), value.to_owned()));
         }
     };
+    let text_title = (tab == "text" && event["kind"] == "text_fragment")
+        .then(|| super::details_view_ui::display_title(event, tab));
     add(
         tr("Имя", "Name"),
-        event["properties"]["display_name"]
-            .as_str()
-            .or(event["name"].as_str()),
+        text_title.as_deref().or_else(|| {
+            event["properties"]["display_name"]
+                .as_str()
+                .or(event["name"].as_str())
+        }),
     );
     let kind = match event["kind"].as_str() {
         Some("managed_image") => tr("Изображение", "Image"),
@@ -277,6 +281,7 @@ mod tests {
     fn metadata_omits_missing_zero_timestamps_and_internal_identifiers() {
         let values = fields(
             &json!({"id":-123,"revision":"internal","size":0,"detected_at_ms":0,"modified_at_ms":null,"name":"Synthetic","kind":"link_fragment","path":"","origin":{}}),
+            "links",
         );
         assert_eq!(values.len(), 2);
         assert!(!format!("{values:?}").contains("internal"));

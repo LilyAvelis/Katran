@@ -11,6 +11,16 @@ right pane follows the cursor, showing preview above independently scrollable
 metadata. Below 480 points the panes stack vertically. Rows remain fixed-density;
 density commands leave this view and the other views' preferences unchanged.
 
+Text UX follow-up: Text rows and the displayed Name use the first nonempty line
+of content instead of generated `Text-*.txt` names. An explicit user display name
+takes priority; renaming and storage paths are unchanged. The preview heading
+also honors the explicit name. All pinned rows show the standard dot, orange
+by default or the assigned tag's color, with reserved space beside the title.
+While browsing Text in Mini stream, **Ctrl+Left** selects Markdown and
+**Ctrl+Right** selects source text, using the same controls as Space preview.
+Neither changes cursor/selection or enters full-screen preview; focused text
+editing keeps its own Ctrl+arrow navigation. Other tabs retain their shortcuts.
+
 All providers retain their ordinary domain interactions: selection modifiers,
 keyboard navigation, Actions, copy, drag, pin/tag and delete restrictions. Opening
 the view does not activate full-screen preview or change the selected set. Space

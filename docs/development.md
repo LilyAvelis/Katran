@@ -40,7 +40,18 @@ installed integrity-checked E5 runtime with a separate embedded worker. The
 [Folder neural contract](patch-3.8/FOLDER-NEURAL.md) records input limits,
 incompleteness, errors, cache, cancellation and physical backslash UI. Its worker
 source is a compiled input included by `Get-KatranSources`. Runtime absence never
-turns a lexical-only reply into neural success. See the historical
+turns a lexical-only reply into neural success.
+
+Latest owner refinements: `SearchFoldersSemanticPage` binds 10-item continuation
+to a query/candidate/device/Service snapshot. The picker waits for Enter; Down on
+the last item appends the next page. `Settings.folder_ai_gpu` opts into the
+isolated CUDA runtime resolved by `folder_gpu_runtime.rs`; disabled settings omit
+the new field for compatibility. GPU startup verifies CUDA and fails explicitly.
+Mini stream Text uses a shared display-title helper (manual alias before first
+nonempty line) and standard pin dots. Ctrl+Left/Right activates text rendering
+controls for the Text cursor pane without altering full-screen preview state.
+
+Earlier research:
 [architecture](patch-3.8/DETAILS-VIEW-RESEARCH.md), [UX](patch-3.8/DETAILS-VIEW-UX.md)
 and [semantic research](patch-3.8/FOLDER-SEMANTIC-RESEARCH.md) for the earlier study.
 

@@ -37,6 +37,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         capture_on_start: false,
         search_keyboard_only: true,
         link_favicons_online: true,
+        folder_ai_gpu: false,
         sharex_folder: None,
         downloads_folder: None,
         downloads_enabled: true,

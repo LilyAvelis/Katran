@@ -231,7 +231,7 @@ impl TextPreview {
         let title = if is_link {
             link_heading(event).to_owned()
         } else if event["kind"] == "text_fragment" {
-            katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""))
+            card_title(event)
         } else {
             event["name"].as_str().unwrap_or("").to_owned()
         };
@@ -376,6 +376,12 @@ pub(super) fn paint_card(ui: &egui::Ui, event: &Value, rect: egui::Rect) {
         );
 }
 pub(super) fn card_title(event: &Value) -> String {
+    if let Some(name) = event["properties"]["display_name"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+    {
+        return name.to_owned();
+    }
     let title = katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""));
     if title.is_empty() {
         tr("Текст", "Text").into()
@@ -386,6 +392,84 @@ pub(super) fn card_title(event: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn details_ctrl_arrows_switch_text_without_opening_fullscreen_or_changing_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Text,
+            enabled: true,
+        });
+        let id = app.call(Command::IngestText {
+            text: "# Synthetic heading\nBody".into(),
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Text,
+        });
+        app.call(Command::SetView {
+            view: katran::interaction::View::Details,
+        });
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let before = app.state.clone();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let mut initial = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(940.0, 680.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        initial.textures_delta.clear();
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        for (key, expected) in [(egui::Key::ArrowRight, false), (egui::Key::ArrowLeft, true)] {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(940.0, 680.0),
+                )),
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+            assert_eq!(app.text_preview.rendered, expected);
+            assert!(app.state["preview"].is_null());
+            assert_eq!(app.state["cursor"], before["cursor"]);
+            assert_eq!(app.state["selected"], before["selected"]);
+        }
+    }
+    #[test]
+    fn renamed_text_heading_precedes_its_first_line() {
+        let event = serde_json::json!({"text_preview":"\n First line\nSecond", "properties":{"display_name":"My snippet"}});
+        assert_eq!(card_title(&event), "My snippet");
+        assert_eq!(
+            card_title(&serde_json::json!({"text_preview":"\n First line\nSecond"})),
+            "First line"
+        );
+    }
     #[test]
     fn late_response_from_other_context_is_not_rendered() {
         let root = tempfile::tempdir().unwrap();

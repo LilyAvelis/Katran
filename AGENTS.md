@@ -16,6 +16,15 @@ Native product acceptance still belongs to Lilia.
 
 ## Local 3.8 implementation · owner instruction 2026-11-17
 
+Latest owner UX instruction: Mini stream Text shows the first nonempty content
+line unless explicitly renamed; all pinned rows show standard pin dots. Text
+Ctrl+Left/Right switches Markdown/source while browsing the split pane. Neural
+Folder search submits only on Enter, initially 10 results and 10 more on Down at
+the last row, with snapshot-bound pagination. Optional GPU indexing is a persisted
+checkbox using an isolated CUDA component, never a mutation of the emoji runtime
+or silent CPU fallback. No public push/release is authorized. See current details
+and Folder neural docs plus `VERIFICATION.md` for actual CUDA evidence.
+
 Later owner instruction implements the previously researched Mini stream and local
 Folder neural mode. `View::Details` must be discoverable through Display and Tab
 view settings; a cursor-driven pane must not set full-screen preview or selection.

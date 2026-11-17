@@ -1571,7 +1571,12 @@ impl Shelf {
             && !self.save
             && self.pending_delete.is_empty()
         {
-            let document_preview = self.state["preview"].as_i64().is_some_and(|id| {
+            let document_target = self.state["preview"].as_i64().or_else(|| {
+                (self.state["view"] == "details" && self.state["tab"] == "text")
+                    .then(|| self.state["cursor"].as_i64())
+                    .flatten()
+            });
+            let document_preview = document_target.is_some_and(|id| {
                 self.events.iter().any(|event| {
                     event["id"] == id
                         && (event["kind"] == "text_fragment"

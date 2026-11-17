@@ -38,7 +38,9 @@ def run():
     import numpy as np
     import onnxruntime as ort
     from tokenizers import Tokenizer
-    model, tokenizer_file = sys.argv[1:3]
+    model, tokenizer_file, mode = sys.argv[1:4]
+    if mode not in ("cpu", "gpu"):
+        raise ValueError("mode")
     tokenizer = Tokenizer.from_file(tokenizer_file)
     pad = tokenizer.token_to_id("<pad>")
     if pad is None:
@@ -48,7 +50,18 @@ def run():
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = 4
     opts.inter_op_num_threads = 1
-    session = ort.InferenceSession(model, sess_options=opts, providers=["CPUExecutionProvider"])
+    if mode == "gpu":
+        if hasattr(ort, "preload_dlls"):
+            ort.preload_dlls(directory="")
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            raise ValueError("CUDA unavailable")
+        opts.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+        session = ort.InferenceSession(model, sess_options=opts, providers=["CUDAExecutionProvider"])
+        session.disable_fallback()
+        if "CUDAExecutionProvider" not in session.get_providers():
+            raise ValueError("CUDA inactive")
+    else:
+        session = ort.InferenceSession(model, sess_options=opts, providers=["CPUExecutionProvider"])
     inputs = {x.name: x for x in session.get_inputs()}
     if not {"input_ids", "attention_mask"}.issubset(inputs) or set(inputs) - {"input_ids", "attention_mask", "token_type_ids"}:
         raise ValueError("model inputs")
@@ -89,7 +102,7 @@ def run():
             raise ValueError("frame")
         request = json.loads(line)
         q, paths, limit = request["query"], request["paths"], request["limit"]
-        if not isinstance(q,str) or not q.strip() or len(q)>MAX_QUERY or not isinstance(paths,list) or len(paths)>MAX_ITEMS or not all(isinstance(p,str) and p and "\0" not in p for p in paths) or type(limit) is not int or not 1<=limit<=100:
+        if not isinstance(q,str) or not q.strip() or len(q)>MAX_QUERY or not isinstance(paths,list) or len(paths)>MAX_ITEMS or not all(isinstance(p,str) and p and "\0" not in p for p in paths) or type(limit) is not int or not 1<=limit<=MAX_ITEMS:
             raise ValueError("request")
         key = hashlib.sha256(json.dumps(paths, ensure_ascii=True, separators=(",", ":")).encode("ascii")).digest()
         if key != cached_key:
@@ -107,7 +120,8 @@ if __name__ == "__main__":
     except Exception:
         # Never print paths, prompts, exception details, or tracebacks.
         try:
-            emit({"type":"error", "code":"folder_ai_unavailable"})
+            code = "folder_gpu_unavailable" if len(sys.argv) > 3 and sys.argv[3] == "gpu" else "folder_ai_unavailable"
+            emit({"type":"error", "code":code})
         except Exception:
             pass
         sys.exit(1)
