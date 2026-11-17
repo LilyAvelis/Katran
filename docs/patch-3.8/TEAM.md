@@ -26,7 +26,7 @@ Project session inventory: earlier chats `Katran 3.7` (`01a1db19-4256-7f33-aa64-
 - Mira acquires/deduplicates candidates; Nemi owns pure `rank_folders(query, &mut [EverythingFolder])`; final display limit follows ranking. Bounded acquisition must expose incompleteness. No project-name hardcode, cloud requests, or AI requirement.
 - Tags: both definitions and assignments are scoped by tab. Migration preserves v12 definitions, styling and links in every tag-capable context; subsequent changes are independent. Nemi owns schema and all SQL changes; Polly owns public enum/dispatcher integration. Synthetic old-profile fixture only.
 - Fenna owns UI after domain behavior is verified; Iris supplies UX contract without separate redesign. Kiki independently checks the integrated result. Native Windows acceptance belongs to Lilia; no desktop automation authorized.
-- User clarification: `Ctrl+Shift+,` is intentionally contextual; preserve Actions recording and existing tag/settings context. Folder AI deferred until ordinary search is improved and assessed. `Ctrl+Y` remains a proposed contextual key, not final approval.
+- Latest owner clarification: `Ctrl+Shift+,` edits the highlighted concrete tag inside the `/` palette, using compact shared controls with no preview or settings footer button; preserve the Actions recorder. Folder AI remains deferred. The owner now explicitly approved rebindable `Ctrl+Y` for Standard folders in Folder.
 
 ## Evidence / open boundaries
 
@@ -95,3 +95,25 @@ with existing data. This supersedes the initial no-install restriction.
   through the tray and use normal Raycast launch for 3.8 activation. Migration
   is intentionally deferred to that startup to avoid concurrent old/new writers.
 - Native owner acceptance remains pending. Nothing was pushed to GitHub.
+
+## Native-feedback follow-up · 2026-11-17
+
+- Lilia confirmed live tag styling works, but rejected the palette shortcut
+  opening Settings and the added footer button. Fenna (`/root/fenna`, same
+  Terra/high session) owns the compact local editor and shared controls.
+- Lilia requested a small worker for the separately approved Ctrl+Y binding.
+  Kiki (`/root/kiki`, existing Luna/high session) owns the bounded command,
+  shortcut and Folder-picker wiring. This is a tiny implementation assignment;
+  it is not independent acceptance of her own change. No roster expansion.
+- Polly owns the one generic shortcut-loop exclusion in `ui.rs`, integration,
+  targeted checks, a single optimized build and primary runtime activation.
+  Fenna and Kiki have disjoint implementation files.
+- API/persistence and existing schema v13 are reused. No migration or model
+  change is required; unchanged broader evidence remains valid. Source changes
+  require the affected domain/UI checks and one rebuilt UI executable. The
+  owner performs native acceptance using the primary profile on local main.
+- Follow-up gate passed: new action API 1/1, catalogue 1/1, shortcut policy 4/4,
+  corrected tag-menu module 7/7, full-shell rendering and configurable Folder
+  shortcut cases passed; final Clippy all-targets and formatting passed. See
+  `VERIFICATION.md` for the split aggregate/targeted results and one unrelated
+  Windows fixture's parallel access-denied observation.

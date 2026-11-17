@@ -23,7 +23,10 @@ See `docs/patch-3.8/TEAM.md` for the existing runtime roster and file ownership,
 and `docs/patch-3.8/PRODUCT.md` for the complete contract. Reuse these sessions.
 The scope does not authorize a public release, push, or replacing the installed
 working build. Folder AI search is deferred until ordinary search is assessed.
-Ctrl+Shift+Comma remains contextual; Ctrl+Y is still only a proposal.
+Ctrl+Shift+Comma remains contextual: in the `/` tag palette it edits the
+highlighted tag locally, without opening Settings or showing a material preview
+or settings footer button. Actions retains its shortcut recorder. The owner now
+approved rebindable Ctrl+Y for Standard folders in Folder.
 The public baseline below remains 3.7.1 until a separately authorized release.
 The local candidate uses schema v13: scoped tag definitions and assignments,
 with transactional v12 migration after the standard consistent backup. See

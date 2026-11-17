@@ -1,7 +1,14 @@
 //! Actions-style tag picker. Domain operations remain dispatcher commands.
 use super::i18n::tr;
 use eframe::egui::{self, Color32, RichText};
+use katran::interaction::ShelfTab;
 use katran::tag_slots::Slot;
+
+struct Editor {
+    tab: ShelfTab,
+    slot: Slot,
+    dirty: bool,
+}
 
 #[derive(Default)]
 pub struct State {
@@ -14,22 +21,27 @@ pub struct State {
     scroll: bool,
     retry: Option<(Vec<i64>, Option<u8>)>,
     error: String,
+    tab: ShelfTab,
+    editor: Option<Editor>,
+    editing: bool,
+    save_requested: bool,
 }
 #[derive(Clone, Copy)]
 pub enum Intent {
     Filter(Option<u8>),
     Assign(Option<u8>),
     Retry,
-    Settings,
 }
 impl State {
     pub fn start(&mut self, slots: Vec<Slot>) {
+        let editor = self.editor.take().filter(|editor| editor.dirty);
         *self = Self {
             open: true,
             slots,
             focus: false,
             fresh: true,
             scroll: true,
+            editor,
             ..Default::default()
         };
     }
@@ -45,9 +57,70 @@ impl State {
         if !self.open {
             return None;
         }
-        if super::shortcuts_ui::take_assignment_key(ctx) {
-            self.open = false;
-            return Some(Intent::Settings);
+        if self.editing {
+            let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            if escape {
+                self.editing = false;
+                if self.editor.as_ref().is_some_and(|editor| !editor.dirty) {
+                    self.editor = None;
+                }
+                ctx.request_repaint();
+                return None;
+            }
+            let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
+            let anchor = ctx
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("tags-button-rect")))
+                .map(|r| r.right_top() + egui::vec2(0.0, -6.0))
+                .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
+            let mut optical = None;
+            let result = egui::Modal::new(egui::Id::new("tag-menu"))
+                .area(
+                    egui::Area::new(egui::Id::new("tag-menu"))
+                        .order(egui::Order::Foreground)
+                        .pivot(egui::Align2::RIGHT_BOTTOM)
+                        .fixed_pos(anchor),
+                )
+                .backdrop_color(Color32::from_black_alpha(24))
+                .frame(super::action_row::popup_frame(ctx))
+                .show(ctx, |ui| {
+                    optical = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
+                    ui.set_width(width);
+                    if let Some(editor) = self.editor.as_mut() {
+                        ui.label(
+                            RichText::new(format!("{} · {}", tr("Тег", "Tag"), editor.slot.number))
+                                .strong(),
+                        );
+                        let before = editor.slot.clone();
+                        egui::ScrollArea::vertical()
+                            .max_height((ctx.content_rect().height() - 140.0).max(80.0))
+                            .show(ui, |ui| {
+                                super::tag_settings_ui::edit_controls(ui, &mut editor.slot)
+                            });
+                        if editor.slot != before {
+                            editor.dirty = true;
+                            self.save_requested = true;
+                        }
+                        if editor.dirty && !self.error.is_empty() {
+                            ui.colored_label(
+                                Color32::LIGHT_RED,
+                                format!("{}: {}", tr("Не сохранено", "Not saved"), self.error),
+                            );
+                            if ui
+                                .button(tr("Повторить сохранение", "Retry save"))
+                                .clicked()
+                            {
+                                self.save_requested = true;
+                            }
+                        }
+                        ui.weak(tr("Esc · назад к тегам", "Esc · back to tags"));
+                    }
+                });
+            if let Some((painter, index)) = optical
+                && let Some(shape) = super::theme_ui::optical_shape(ctx, result.response.rect, 12.0)
+            {
+                painter.set(index, shape);
+            }
+            return None;
         }
         if self.fresh {
             ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("tag-menu-search")));
@@ -106,6 +179,41 @@ impl State {
         let query = self.query.to_lowercase();
         rows.retain(|(label, _, _)| label.to_lowercase().contains(&query));
         self.selected = self.selected.min(rows.len().saturating_sub(1));
+        if super::shortcuts_ui::take_assignment_key(ctx) {
+            let number = rows
+                .get(self.selected)
+                .and_then(|(_, intent, _)| match intent {
+                    Intent::Filter(Some(number)) | Intent::Assign(Some(number)) => Some(*number),
+                    _ => None,
+                });
+            if let Some(number) = number {
+                if self.editor.as_ref().is_some_and(|editor| {
+                    editor.dirty && (editor.tab != self.tab || editor.slot.number != number)
+                }) {
+                    self.error = tr(
+                        "Сначала сохраните предыдущий тег",
+                        "Save the previous tag first",
+                    )
+                    .into();
+                } else if let Some(slot) = self
+                    .slots
+                    .iter()
+                    .find(|slot| slot.number == number)
+                    .cloned()
+                {
+                    if !self.editor.as_ref().is_some_and(|editor| editor.dirty) {
+                        self.editor = Some(Editor {
+                            tab: self.tab,
+                            slot,
+                            dirty: false,
+                        });
+                    }
+                    self.editing = true;
+                    ctx.request_repaint();
+                }
+            }
+            return None;
+        }
         let search_focused = ctx.memory(|m| m.has_focus(egui::Id::new("tag-menu-search")));
         let shortcut = if search_focused {
             None
@@ -260,15 +368,6 @@ impl State {
                         }
                     });
                 ui.separator();
-                if ui
-                    .button(tr(
-                        "Настройки тегов · Ctrl Shift ,",
-                        "Tag settings · Ctrl Shift ,",
-                    ))
-                    .clicked()
-                {
-                    picked = Some(Intent::Settings);
-                }
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
@@ -312,7 +411,11 @@ impl super::Shelf {
         }
         let response = self.call(katran::Command::ListTagSlots);
         match serde_json::from_value::<Vec<Slot>>(response["slots"].clone()) {
-            Ok(slots) => self.tag_menu.start(slots),
+            Ok(slots) => {
+                self.tag_menu.start(slots);
+                self.tag_menu.tab =
+                    serde_json::from_value(self.state["tab"].clone()).unwrap_or_default();
+            }
             Err(_) => {
                 if self.message.is_empty() {
                     self.message = tr("Не удалось загрузить теги", "Could not load tags").into();
@@ -390,8 +493,35 @@ impl super::Shelf {
                         self.assign_tag_menu(ids, slot);
                     }
                 }
-                Intent::Settings => {
-                    self.state = self.call(katran::Command::ShowTagSettings);
+            }
+        }
+        if self.tag_menu.save_requested {
+            self.tag_menu.save_requested = false;
+            if let Some(editor) = self.tag_menu.editor.as_ref() {
+                let tab = editor.tab;
+                let slot = editor.slot.clone();
+                let result = self.call(katran::Command::SaveTagSlotForTab {
+                    tab,
+                    slot: slot.clone(),
+                });
+                if result.is_null() {
+                    self.tag_menu.error = self.message.clone();
+                } else {
+                    if let Some(editor) = self.tag_menu.editor.as_mut() {
+                        editor.dirty = false;
+                    }
+                    if self.tag_menu.tab == tab
+                        && let Some(old) = self
+                            .tag_menu
+                            .slots
+                            .iter_mut()
+                            .find(|old| old.number == slot.number)
+                    {
+                        *old = slot;
+                    }
+                    self.tag_menu.error.clear();
+                    self.state = self.call(katran::Command::Interaction);
+                    self.refresh();
                     ctx.request_repaint();
                 }
             }
@@ -441,28 +571,200 @@ impl super::Shelf {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn tag_settings_shortcut_is_contextual() {
+    fn shell_shortcut_opens_compact_editor_without_settings_or_preview() {
+        use eframe::egui::{self, Key, Modifiers};
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(katran::Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        app.open_tag_menu();
+        app.tag_menu.selected = 1;
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(940.0, 680.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: Key::Comma,
+                physical_key: Some(Key::Comma),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+            }],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app, &ctx, &mut input);
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(app.tag_menu.editing && app.tag_menu.open);
+        assert_eq!(
+            app.call(katran::Command::Interaction)["settings_open"],
+            false
+        );
+        fn collect(shape: &egui::Shape, text: &mut String) {
+            match shape {
+                egui::Shape::Text(value) => {
+                    text.push_str(&value.galley.job.text);
+                    text.push('\n');
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut text = String::new();
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(940.0, 680.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            text.clear();
+            for shape in &output.shapes {
+                collect(&shape.shape, &mut text);
+            }
+            output.textures_delta.clear();
+            if text.contains("Название") || text.contains("Name") {
+                break;
+            }
+        }
+        assert!(
+            text.contains("Название") || text.contains("Name"),
+            "editor controls missing; emitted text: {text:?}"
+        );
+        assert!(!text.contains("Предпросмотр материала") && !text.contains("Material preview"));
+        assert!(
+            !text.contains("Настройки тегов · Ctrl Shift")
+                && !text.contains("Tag settings · Ctrl Shift")
+        );
+    }
+    #[test]
+    fn local_editor_persists_captured_scope_and_keeps_failed_draft() {
+        use katran::{Command, interaction::ShelfTab};
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = app.call(Command::SetTab {
+            tab: ShelfTab::Images,
+        });
+        let images = app.call(Command::ListTagSlotsForTab {
+            tab: ShelfTab::Images,
+        });
+        let text = app.call(Command::ListTagSlotsForTab {
+            tab: ShelfTab::Text,
+        });
+        let slot: katran::tag_slots::Slot =
+            serde_json::from_value(images["slots"][0].clone()).unwrap();
+        app.tag_menu.start(vec![slot.clone()]);
+        app.tag_menu.tab = ShelfTab::Images;
+        app.tag_menu.editing = true;
+        app.tag_menu.editor = Some(super::Editor {
+            tab: ShelfTab::Images,
+            slot,
+            dirty: true,
+        });
+        app.tag_menu.editor.as_mut().unwrap().slot.color = "invalid".into();
+        app.tag_menu.save_requested = true;
+        let ctx = eframe::egui::Context::default();
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |_| {
+            app.tag_menu_panel(&ctx)
+        });
+        out.textures_delta.clear();
+        assert!(app.tag_menu.editor.as_ref().unwrap().dirty);
+        assert!(!app.tag_menu.error.is_empty());
+        assert_eq!(app.call(Command::Interaction)["settings_open"], false);
+        app.tag_menu.editor.as_mut().unwrap().slot.color = "#123456".into();
+        app.tag_menu.save_requested = true;
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |_| {
+            app.tag_menu_panel(&ctx)
+        });
+        out.textures_delta.clear();
+        assert!(!app.tag_menu.editor.as_ref().unwrap().dirty);
+        assert_eq!(app.tag_menu.slots[0].color, "#123456");
+        assert_eq!(
+            app.call(Command::ListTagSlotsForTab {
+                tab: ShelfTab::Images
+            })["slots"][0]["color"],
+            "#123456"
+        );
+        assert_eq!(
+            app.call(Command::ListTagSlotsForTab {
+                tab: ShelfTab::Text
+            })["slots"],
+            text["slots"]
+        );
+        drop(app);
+        let mut reopened = katran::Service::open(root.path(), 100_000).unwrap();
+        let persisted = reopened.execute(katran::Request {
+            api_version: 1,
+            request_id: "local-editor-restart".into(),
+            command: Command::ListTagSlotsForTab {
+                tab: ShelfTab::Images,
+            },
+        });
+        assert_eq!(persisted["result"]["slots"][0]["color"], "#123456");
+    }
+    #[test]
+    fn shortcut_edits_highlighted_tag_and_escape_returns_to_palette() {
         use eframe::egui::{self, Key, Modifiers};
         let ctx = egui::Context::default();
         let mut state = super::State::default();
-        state.start(vec![slot(1)]);
-        let mut intent = None;
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key: Key::Comma,
-                    physical_key: Some(Key::Comma),
-                    pressed: true,
-                    repeat: false,
-                    modifiers: Modifiers::CTRL | Modifiers::SHIFT,
-                }],
-                ..Default::default()
-            },
-            |ui| intent = state.show(ui.ctx(), true, 1, false, "", None),
+        state.start(vec![slot(1), slot(2)]);
+        state.tab = katran::interaction::ShelfTab::Text;
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let frame = |state: &mut super::State, event| {
+            let mut result = None;
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| result = state.show(ui.ctx(), true, 1, false, "", None),
+            );
+            out.textures_delta.clear();
+            assert!(result.is_none());
+        };
+        frame(
+            &mut state,
+            key(Key::Comma, Modifiers::CTRL | Modifiers::SHIFT),
         );
-        output.textures_delta.clear();
-        assert!(matches!(intent, Some(super::Intent::Settings)));
-        assert!(!state.open);
+        assert!(!state.editing); // All is not a tag.
+        frame(
+            &mut state,
+            egui::Event::Key {
+                key: Key::Comma,
+                physical_key: Some(Key::Comma),
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+            },
+        );
+        state.selected = 2;
+        frame(
+            &mut state,
+            key(Key::Comma, Modifiers::CTRL | Modifiers::SHIFT),
+        );
+        assert!(state.editing && state.open);
+        let editor = state.editor.as_ref().unwrap();
+        assert_eq!(editor.slot.number, 2);
+        assert_eq!(editor.tab, katran::interaction::ShelfTab::Text);
+        frame(&mut state, key(Key::Escape, Modifiers::NONE));
+        assert!(state.open && !state.editing);
     }
     fn slot(number: u8) -> katran::tag_slots::Slot {
         katran::tag_slots::Slot {

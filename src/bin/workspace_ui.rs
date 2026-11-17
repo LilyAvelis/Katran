@@ -103,6 +103,20 @@ impl Shelf {
         self.workspace.focus = true;
         self.workspace_reload(ctx);
     }
+    fn workspace_action(&mut self, id: String, ctx: &egui::Context) {
+        let result = self.call(Command::RunAction { id });
+        let mode = match result["intent"].as_str() {
+            Some("folder_favorites") => Some(Mode::Favorites),
+            Some("folder_history") => Some(Mode::History),
+            Some("folder_standard") => Some(Mode::Standard),
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            self.workspace.open = true;
+            self.workspace.opened_frame = ctx.cumulative_frame_nr();
+            self.workspace_mode(mode, ctx);
+        }
+    }
     /// Shared client for picker and Explorer launch; domain owns validation/history.
     pub(super) fn open_working_folder(&mut self, path: PathBuf) -> bool {
         let result = self.call(Command::ChooseFolder { path });
@@ -266,24 +280,43 @@ impl Shelf {
                 serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
             let folder_shortcuts: Vec<_> = shortcuts
                 .into_iter()
-                .filter(|s| matches!(s.id.as_str(), "folder_favorites" | "folder_history"))
+                .filter(|s| {
+                    matches!(
+                        s.id.as_str(),
+                        "folder_favorites" | "folder_history" | "folder_standard"
+                    )
+                })
                 .collect();
             if let Some(id) = shortcuts_ui::take_action_with_editing(ctx, &folder_shortcuts, false)
             {
-                let result = self.call(Command::RunAction { id });
-                let mode = match result["intent"].as_str() {
-                    Some("folder_favorites") => Some(Mode::Favorites),
-                    Some("folder_history") => Some(Mode::History),
-                    _ => None,
-                };
-                if let Some(mode) = mode {
-                    self.workspace.open = true;
-                    self.workspace.opened_frame = ctx.cumulative_frame_nr();
-                    self.workspace_mode(mode, ctx);
-                }
+                self.workspace_action(id, ctx);
             }
         }
         if self.workspace.open {
+            if !self.actions
+                && !self.open_apps.open
+                && !self.save
+                && self.shortcut_editor.is_none()
+                && self.pending_delete.is_empty()
+                && !self.info.is_open()
+                && !self.pinned_ui.open
+                && !self.tag_menu.open
+                && self.state["settings_open"] != true
+                && !ctx.egui_wants_keyboard_input()
+                && !super::search_or_text_edit_focused(ctx)
+            {
+                let shortcuts: Vec<katran::shortcuts::ShortcutInfo> =
+                    serde_json::from_value(self.call(Command::Shortcuts)).unwrap_or_default();
+                let standard_shortcut: Vec<_> = shortcuts
+                    .into_iter()
+                    .filter(|shortcut| shortcut.id == "folder_standard")
+                    .collect();
+                if let Some(id) =
+                    shortcuts_ui::take_action_with_editing(ctx, &standard_shortcut, false)
+                {
+                    self.workspace_action(id, ctx);
+                }
+            }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Period))
                 && let Some(path) = self.workspace.items.get(self.workspace.selected).cloned()
                 && !path.as_os_str().is_empty()
@@ -585,6 +618,140 @@ mod tests {
         );
         output.textures_delta.clear();
         assert!(!app.workspace.open);
+    }
+
+    #[test]
+    fn standard_folder_shortcut_uses_custom_binding_and_yields_to_text_editing() {
+        struct FakeKnownFolders;
+        impl katran::known_folders::Provider for FakeKnownFolders {
+            fn resolve(
+                &self,
+                folder: katran::known_folders::KnownFolder,
+            ) -> std::result::Result<PathBuf, String> {
+                Ok(PathBuf::from(format!("synthetic/{folder:?}")))
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_known_folder_provider(Box::new(FakeKnownFolders));
+        app.state = app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::All,
+        });
+        let assigned: Vec<katran::shortcuts::ShortcutInfo> =
+            serde_json::from_value(app.call(Command::SetShortcut {
+                id: "folder_standard".into(),
+                binding: Some("Ctrl+Shift+Y".into()),
+                replace: false,
+                reset: false,
+            }))
+            .unwrap();
+        assert_eq!(
+            assigned
+                .iter()
+                .find(|shortcut| shortcut.id == "folder_standard")
+                .unwrap()
+                .binding
+                .as_deref(),
+            Some("Ctrl Shift Y")
+        );
+        let custom_press = egui::Event::Key {
+            key: egui::Key::Y,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        };
+        let default_press = egui::Event::Key {
+            key: egui::Key::Y,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        };
+
+        let outside_ctx = egui::Context::default();
+        send_workspace_key(&mut app, &outside_ctx, custom_press.clone());
+        assert!(app.workspace.open);
+        assert!(app.workspace.mode == Mode::Standard);
+        assert_eq!(app.workspace.items.len(), 6);
+
+        app.workspace_close();
+        let old_chord_ctx = egui::Context::default();
+        send_workspace_key(&mut app, &old_chord_ctx, default_press.clone());
+        assert!(
+            !app.workspace.open,
+            "the old default must stop after rebinding"
+        );
+
+        app.workspace.open = true;
+        app.workspace.mode = Mode::Search;
+        let picker_ctx = egui::Context::default();
+        send_workspace_key(&mut app, &picker_ctx, custom_press);
+        assert!(app.workspace.open);
+        assert!(app.workspace.mode == Mode::Standard);
+
+        let reset: Vec<katran::shortcuts::ShortcutInfo> =
+            serde_json::from_value(app.call(Command::SetShortcut {
+                id: "folder_standard".into(),
+                binding: None,
+                replace: false,
+                reset: true,
+            }))
+            .unwrap();
+        assert_eq!(
+            reset
+                .iter()
+                .find(|shortcut| shortcut.id == "folder_standard")
+                .unwrap()
+                .binding
+                .as_deref(),
+            Some("Ctrl Y")
+        );
+        app.workspace.mode = Mode::Search;
+        let text_ctx = egui::Context::default();
+        let mut query = String::new();
+        let mut retained = false;
+        let mut output = text_ctx.run_ui(
+            egui::RawInput {
+                events: vec![default_press],
+                ..Default::default()
+            },
+            |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut query)
+                        .id(egui::Id::new("workspace-query")),
+                )
+                .request_focus();
+                app.workspace_input(&text_ctx);
+                retained = text_ctx.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key: egui::Key::Y, pressed: true, modifiers, .. } if modifiers.ctrl && !modifiers.shift)
+                    })
+                });
+            },
+        );
+        output.textures_delta.clear();
+        assert!(app.workspace.open);
+        assert!(app.workspace.mode == Mode::Search);
+        assert!(
+            retained,
+            "Ctrl+Y redo input must be left to the text editor"
+        );
+    }
+
+    fn send_workspace_key(app: &mut Shelf, ctx: &egui::Context, event: egui::Event) {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![event],
+                ..Default::default()
+            },
+            |_| app.workspace_input(ctx),
+        );
+        output.textures_delta.clear();
     }
 
     fn frame(app: &mut Shelf, ctx: &egui::Context, event: Option<egui::Event>) {

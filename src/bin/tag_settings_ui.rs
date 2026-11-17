@@ -13,6 +13,48 @@ fn default_texture_strength(slot: &mut Slot, previous: Material) {
     }
 }
 
+pub(super) fn edit_controls(ui: &mut egui::Ui, slot: &mut Slot) {
+    ui.label(tr("Название", "Name"));
+    ui.text_edit_singleline(&mut slot.name);
+    let c = super::tag_material_ui::color(slot);
+    let mut rgb = [c.r(), c.g(), c.b()];
+    ui.horizontal(|ui| {
+        ui.label(tr("Цвет", "Color"));
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            slot.color = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
+        }
+    });
+    let previous_material = slot.material;
+    egui::ComboBox::from_id_salt("tag-material")
+        .selected_text(match slot.material {
+            Material::Solid => tr("Цвет", "Color"),
+            Material::Dots => tr("Точки", "Dots"),
+            Material::Lines => tr("Линии", "Lines"),
+            Material::Grain => tr("Зерно", "Grain"),
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut slot.material, Material::Solid, tr("Цвет", "Color"));
+            ui.selectable_value(&mut slot.material, Material::Dots, tr("Точки", "Dots"));
+            ui.selectable_value(&mut slot.material, Material::Lines, tr("Линии", "Lines"));
+            ui.selectable_value(&mut slot.material, Material::Grain, tr("Зерно", "Grain"));
+        });
+    default_texture_strength(slot, previous_material);
+    ui.add(
+        egui::Slider::new(&mut slot.opacity, 0..=100)
+            .text(tr("Непрозрачность цвета", "Color opacity")),
+    );
+    if slot.material != Material::Solid {
+        ui.add(
+            egui::Slider::new(&mut slot.intensity, 0..=100)
+                .text(tr("Сила фактуры", "Texture intensity")),
+        );
+        ui.add(egui::Slider::new(&mut slot.scale, 1..=100).text(tr("Масштаб", "Scale")));
+        if slot.material == Material::Lines {
+            ui.add(egui::Slider::new(&mut slot.angle, 0..=359).text(tr("Угол", "Angle")));
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct State {
     slots: Option<Vec<Slot>>,
@@ -187,67 +229,7 @@ impl State {
                         let before = slot.clone();
                         ui.add_space(14.0);
                         ui.heading(format!("{} {}", tr("Тег", "Tag"), slot.number));
-                        ui.label(tr("Название", "Name"));
-                        ui.text_edit_singleline(&mut slot.name);
-                        let c = super::tag_material_ui::color(slot);
-                        let mut rgb = [c.r(), c.g(), c.b()];
-                        ui.horizontal(|ui| {
-                            ui.label(tr("Цвет", "Color"));
-                            if ui.color_edit_button_srgb(&mut rgb).changed() {
-                                slot.color = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
-                            }
-                        });
-                        let previous_material = slot.material;
-                        egui::ComboBox::from_id_salt("tag-material")
-                            .selected_text(match slot.material {
-                                Material::Solid => tr("Цвет", "Color"),
-                                Material::Dots => tr("Точки", "Dots"),
-                                Material::Lines => tr("Линии", "Lines"),
-                                Material::Grain => tr("Зерно", "Grain"),
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut slot.material,
-                                    Material::Solid,
-                                    tr("Цвет", "Color"),
-                                );
-                                ui.selectable_value(
-                                    &mut slot.material,
-                                    Material::Dots,
-                                    tr("Точки", "Dots"),
-                                );
-                                ui.selectable_value(
-                                    &mut slot.material,
-                                    Material::Lines,
-                                    tr("Линии", "Lines"),
-                                );
-                                ui.selectable_value(
-                                    &mut slot.material,
-                                    Material::Grain,
-                                    tr("Зерно", "Grain"),
-                                );
-                            });
-                        default_texture_strength(slot, previous_material);
-                        ui.add(
-                            egui::Slider::new(&mut slot.opacity, 0..=100)
-                                .text(tr("Непрозрачность цвета", "Color opacity")),
-                        );
-                        if slot.material != Material::Solid {
-                            ui.add(
-                                egui::Slider::new(&mut slot.intensity, 0..=100)
-                                    .text(tr("Сила фактуры", "Texture intensity")),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut slot.scale, 1..=100)
-                                    .text(tr("Масштаб", "Scale")),
-                            );
-                            if slot.material == Material::Lines {
-                                ui.add(
-                                    egui::Slider::new(&mut slot.angle, 0..=359)
-                                        .text(tr("Угол", "Angle")),
-                                );
-                            }
-                        }
+                        edit_controls(ui, slot);
                         ui.label(tr("Предпросмотр материала", "Material preview"));
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.preview_selected, tr("Выбрано", "Selected"));

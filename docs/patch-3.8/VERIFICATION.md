@@ -83,3 +83,36 @@ general recall guarantee.
 
 These remain pending. API results and successful packaging do not substitute
 for the owner's native UI review.
+
+## Native-feedback follow-up: local tag editor and Ctrl+Y
+
+The owner confirmed that live styling works but clarified the palette editor
+contract and requested a configurable Standard-folders shortcut. The following
+targeted evidence covers the follow-up implementation, not native acceptance:
+
+- API: `folder_standard_action` and the shared catalogue each passed 1/1.
+  The new action is Folder-only, defaults to Ctrl+Y and persists a changed
+  binding across restart. Shortcut policy tests passed 4/4, including preservation
+  of an older user-defined Ctrl+Y assignment.
+- Headless UI: the aggregate run passed 220 cases and initially failed three.
+  Two new menu fixtures needed a real key release between presses and enough
+  idle frames for egui sizing; their actual control/absence assertions were
+  retained. The corrected tag-menu module passed 7/7, including the full shell
+  route, rendered Name control, absence of preview/footer, captured-tab
+  persistence, failed draft retention and Escape back-navigation.
+- The Standard-folders UI test passed custom binding from Folder and an open
+  picker, removal of the previous key after rebinding, and retention of Ctrl+Y
+  by the focused query field. Settings accordion/live-save checks and the
+  existing Actions shortcut recorder also passed in the aggregate run.
+- The unrelated Windows synthetic cut/paste test reported access denied once
+  in the parallel aggregate. Its isolated, single-thread rerun passed 1/1;
+  the cause of the parallel sensitivity was not established. No source change
+  or real clipboard/user-file operation was made to address that fixture.
+- Final Clippy all-targets (`-D warnings`), formatting and whitespace checks
+  passed. Schema v13, dependency lock, model/runtime, media and broader storage
+  contracts are unchanged; their previous evidence was not rerun.
+
+The primary local-main installation uses one newly built UI executable after
+these checks. Its exact source checkpoint, hash and previous runtime are recorded
+in the follow-up activation record in `TEAM.md` and the ignored runtime receipt.
+Native owner acceptance of the new palette and physical keys remains pending.

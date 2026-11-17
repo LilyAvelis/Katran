@@ -89,6 +89,7 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
         "save" => "Сохранить выбранное в папку…",
         "delete" => "Удалить выбранное…",
         "refresh" => "Обновить содержимое",
+        "folder_standard" => "Открыть стандартные папки",
         "gallery" => "Галерея",
         "list" => "Поток",
         "density_less" => "Увеличить карточки",
@@ -157,6 +158,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "transfer_selection" => "Move between shelf and Folder",
         "add_to_katran" => "Add to Katran",
         "all" => "Folder tab",
+        "folder_standard" => "Standard folders",
         "images" => "Images tab",
         "screenshots" => "Screenshots tab",
         "downloads" => "Downloads tab",
@@ -800,6 +802,14 @@ pub const DEFS: &[Definition] = &[
         in_palette: false,
     },
     Definition {
+        id: "folder_standard",
+        label: "Стандартные папки",
+        default_binding: "Ctrl Y",
+        rebindable: true,
+        group: "Folder",
+        in_palette: false,
+    },
+    Definition {
         id: "shelf_search",
         label: "Поиск на полке",
         default_binding: "Ctrl T",
@@ -931,6 +941,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }
         "folder_history" if state.tab == crate::interaction::ShelfTab::All => {
             Dispatch::Intent(serde_json::json!({"intent":"folder_history"}))
+        }
+        "folder_standard" if state.tab == crate::interaction::ShelfTab::All => {
+            Dispatch::Intent(serde_json::json!({"intent":"folder_standard"}))
         }
         "search_with_ai" => Dispatch::Intent(serde_json::json!({"intent":"search_with_ai"})),
         "files" => command(Command::SetTab {

@@ -128,7 +128,11 @@ impl Shortcuts {
         {
             value.overrides.insert("select_all".into(), None);
         }
-        for (id, chord) in [("folder_favorites", "Ctrl F"), ("folder_history", "Ctrl H")] {
+        for (id, chord) in [
+            ("folder_favorites", "Ctrl F"),
+            ("folder_history", "Ctrl H"),
+            ("folder_standard", "Ctrl Y"),
+        ] {
             if !value.overrides.contains_key(id)
                 && value.overrides.iter().any(|(other, binding)| {
                     other != id
@@ -253,6 +257,20 @@ mod tests {
                 .set(root.path(), "save", Some("Ctrl F".into()), false, false)
                 .is_err()
         );
+    }
+    #[test]
+    fn new_standard_folder_default_does_not_steal_an_existing_ctrl_y_override() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("shortcuts.json"),
+            r#"{"version":1,"overrides":{"save":"Ctrl Y"}}"#,
+        )
+        .unwrap();
+
+        let shortcuts = Shortcuts::load(root.path()).unwrap();
+
+        assert_eq!(shortcuts.binding("save"), "Ctrl Y");
+        assert_eq!(shortcuts.binding("folder_standard"), "");
     }
     #[test]
     fn conflicts_replace_persist_and_clear() {

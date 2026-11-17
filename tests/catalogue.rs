@@ -6,7 +6,10 @@ fn catalogue_has_unique_routable_ids_and_matching_shortcuts() {
     for def in actions::DEFS {
         assert!(ids.insert(def.id));
         let mut context = Interaction::default();
-        if matches!(def.id, "folder_favorites" | "folder_history") {
+        if matches!(
+            def.id,
+            "folder_favorites" | "folder_history" | "folder_standard"
+        ) {
             assert!(actions::resolve(def.id, &context, false).is_none());
             context.tab = katran::interaction::ShelfTab::All;
         }
