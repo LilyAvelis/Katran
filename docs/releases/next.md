@@ -2,10 +2,11 @@
 
 ## Local follow-up after v3.8.0 · 2026-11-18
 
-[Native video with audio](../video-preview.md) adds explicit playback in Space
-and Mini stream, pause, seek and volume. One dispatcher-owned session stops on
-close, object/surface change or hiding; ordinary browsing does not autoplay.
-Windows Media Foundation supplies codecs/audio without a separate player install.
+[Video with audio](../video-preview.md) adds playback in Space and Mini stream,
+pause, seek and volume overlaid on the canvas. Space autoplays; Mini waits for
+Play. One dispatcher-owned session stops on close, object/surface change or hiding.
+The first Media Foundation candidate failed owner Folder/Unicode checks. A pinned
+libmpv runtime replaces it, retaining domain policy and bounded CPU-frame output.
 This work has no schema migration and does not alter the immutable v3.8.0 tag.
 See the verification handoff for automated evidence and owner acceptance status.
 

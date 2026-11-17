@@ -46,7 +46,7 @@ mod link_visual;
 pub mod markdown;
 pub mod media_playback;
 #[cfg(windows)]
-pub mod media_playback_windows;
+pub mod media_playback_mpv;
 pub mod media_runtime;
 mod media_service;
 pub mod open_file;

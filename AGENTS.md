@@ -3,10 +3,14 @@
 ## Local native video preview · 2026-11-18
 
 Post-v3.8.0 local follow-up: Space and Mini stream use one explicit video/audio
-session via `media_playback`, `media_service` and the Windows Media Foundation
-backend. GUI opens through `BeginJob(OpenMedia)`; source preparation and guarded
+session via `media_playback`, `media_service` and `media_playback_mpv`. The first
+Media Foundation candidate failed owner Folder/Unicode checks and is replaced.
+GUI opens through `BeginJob(OpenMedia)`; source preparation and guarded
 commit belong to the dispatcher. Switching object/surface, closing, hiding or
-Settings closes playback; metadata-only tag/pin updates preserve it. No autoplay.
+Settings closes playback; metadata-only tag/pin updates preserve it. Space now
+autoplays once per target; Mini stream waits for Play. Controls overlay the canvas
+and hide during idle playback. libmpv is separately pinned/verified; the current
+bridge uses bounded CPU RGBA frames, not Afio's GPU rendering path.
 Read [the contract](docs/video-preview.md) before changing playback or preview
 routing. No schema change or new GitHub publication is authorized for this work.
 

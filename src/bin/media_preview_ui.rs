@@ -65,6 +65,9 @@ pub(super) struct State {
     error: Option<String>,
     chosen_volume: Option<f64>,
     seek_position: Option<u64>,
+    auto_start: bool,
+    last_activity: Option<Instant>,
+    controls_focused: bool,
 }
 
 impl State {
@@ -86,6 +89,15 @@ impl State {
         if self.target != target {
             self.error = None;
             self.stop(call);
+            self.auto_start = target.as_ref().is_some_and(|target| {
+                serde_json::from_str::<Value>(&target.context)
+                    .ok()
+                    .and_then(|value| value.get(2).and_then(Value::as_str).map(str::to_owned))
+                    .as_deref()
+                    == Some("preview")
+            });
+            self.last_activity = Some(Instant::now());
+            self.controls_focused = false;
             self.target = target;
             self.texture = None;
             self.serial = 0;
@@ -339,6 +351,33 @@ impl State {
         true
     }
 
+    fn start(&mut self, target: &Target, call: &mut dyn FnMut(Command) -> Value) {
+        self.target = Some(target.clone());
+        self.error = None;
+        let result = call(Command::BeginJob {
+            command: Box::new(Command::OpenMedia {
+                id: target.id,
+                revision: target.revision.clone(),
+            }),
+        });
+        if result["ok"] != true {
+            self.error = Some(Self::message(&result));
+        } else if result["result"]["state"] == "succeeded" {
+            if self.accept_session(&result["result"]["result"], target) {
+                self.play_opened(call);
+            }
+        } else if let Some(id) = result["result"]["job_id"].as_u64() {
+            self.pending = Some(Pending {
+                id: JobId(id),
+                target: target.clone(),
+                cancelled: false,
+                cancel_sent: false,
+            });
+        } else {
+            self.error = Some(tr("Не удалось запустить видео", "Could not start video").into());
+        }
+    }
+
     pub(super) fn show_with_poster(
         &mut self,
         ui: &mut egui::Ui,
@@ -351,7 +390,7 @@ impl State {
         if self.texture.is_none() {
             let size = egui::vec2(
                 ui.available_width().max(1.0),
-                (ui.available_height() - 90.0).max(48.0),
+                ui.available_height().max(1.0),
             );
             let canvas = egui::Rect::from_min_size(ui.next_widget_position(), size);
             ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
@@ -367,8 +406,13 @@ impl State {
         call: &mut dyn FnMut(Command) -> Value,
     ) {
         self.sync(ui.ctx(), Some(target.clone()), call);
+        if self.auto_start && self.pending.is_none() && self.session.is_none() && !self.stopping {
+            self.auto_start = false;
+            self.start(target, call);
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+        }
         let width = ui.available_width().max(1.0);
-        let height = (ui.available_height() - 90.0).max(48.0);
+        let height = ui.available_height().max(1.0);
         let (canvas, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         if let Some(texture) = &self.texture {
             ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
@@ -381,113 +425,220 @@ impl State {
             );
         }
         let busy = self.pending.is_some() || self.stopping;
-        ui.horizontal(|ui| {
-            if self.session.is_none() {
-                let play = ui.add_enabled(!busy, egui::Button::new(tr("Воспроизвести", "Play")));
+        let now = Instant::now();
+        let activity = ui.input(|input| {
+            input
+                .pointer
+                .hover_pos()
+                .is_some_and(|p| canvas.contains(p))
+                && (input.pointer.delta() != egui::Vec2::ZERO || input.pointer.any_down())
+        });
+        if activity {
+            self.last_activity = Some(now);
+        }
+        let visible = controls_visible(
+            self.snapshot["state"].as_str(),
+            busy,
+            self.error.is_some(),
+            self.controls_focused,
+            self.last_activity,
+            now,
+        );
+        if !visible {
+            return;
+        }
+        if self.snapshot["state"] == "playing" && !busy && self.error.is_none() {
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+        }
+        let panel_height = canvas.height().min(70.0);
+        let panel = egui::Rect::from_min_max(
+            egui::pos2(canvas.left(), canvas.bottom() - panel_height),
+            canvas.max,
+        );
+        #[cfg(test)]
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("media-canvas"), canvas);
+            data.insert_temp(egui::Id::new("media-panel"), panel);
+        });
+        ui.painter()
+            .rect_filled(panel, 5.0, Color32::from_black_alpha(190));
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .id_salt("media-controls")
+                .max_rect(panel.shrink(6.0)),
+            |ui| {
+                ui.set_clip_rect(canvas.intersect(ui.clip_rect()));
+                let mut focused = false;
+                let mut position = self.snapshot["position_ms"].as_u64().unwrap_or(0);
+                let duration = self.snapshot["duration_ms"].as_u64().unwrap_or(0);
+                if self.session.is_some() && duration > 0 {
+                    position = self.seek_position.unwrap_or(position).min(duration);
+                    let width = ui.available_width().max(1.0);
+                    ui.spacing_mut().slider_width = width;
+                    let response = ui.add_sized(
+                        [width, 16.0],
+                        egui::Slider::new(&mut position, 0..=duration).show_value(false),
+                    );
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(egui::Id::new("media-seek"), response.rect)
+                    });
+                    focused |= response.has_focus();
+                    if response.dragged() {
+                        self.seek_position = Some(position);
+                    }
+                    if response.drag_stopped() {
+                        let position_ms = self.seek_position.take().unwrap_or(position);
+                        self.control(Action::Seek { position_ms }, call);
+                    } else if response.changed() && !response.dragged() {
+                        self.control(
+                            Action::Seek {
+                                position_ms: position,
+                            },
+                            call,
+                        );
+                    }
+                }
+                let mut group_rect = egui::Rect::NOTHING;
+                let label = if self.session.is_none() {
+                    tr("Воспроизвести", "Play")
+                } else if self.snapshot["state"] == "playing" {
+                    tr("Пауза", "Pause")
+                } else if self.snapshot["state"] == "ended" {
+                    tr("Сначала", "Replay")
+                } else {
+                    tr("Воспроизвести", "Play")
+                };
+                let button_font = egui::TextStyle::Button.resolve(ui.style());
+                let body_font = egui::TextStyle::Body.resolve(ui.style());
+                let measure = |ui: &egui::Ui, text: &str, font: egui::FontId| {
+                    ui.painter()
+                        .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                        .size()
+                        .x
+                };
+                let gap = ui.spacing().item_spacing.x;
+                let button_width = (measure(ui, label, button_font)
+                    + 2.0 * ui.spacing().button_padding.x)
+                    .max(ui.spacing().interact_size.x);
+                let mut row_width = if self.stopping { 0.0 } else { button_width };
+                if busy {
+                    row_width += gap + measure(ui, tr("Загрузка…", "Loading…"), body_font.clone());
+                }
+                if self.session.is_some() && !self.stopping {
+                    row_width += 2.0 * gap
+                        + measure(
+                            ui,
+                            &format!("{} / {}", timestamp(position), timestamp(duration)),
+                            body_font,
+                        )
+                        + 130.0;
+                }
+                row_width = row_width.min(ui.available_width()).max(1.0);
+                let (allocated, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+                    egui::Sense::hover(),
+                );
+                let row = egui::Rect::from_center_size(
+                    allocated.center(),
+                    egui::vec2(row_width, allocated.height()),
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        if self.session.is_none() {
+                            let play = ui
+                                .add_enabled(!busy, egui::Button::new(tr("Воспроизвести", "Play")));
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("media-play"), play.rect)
+                            });
+                            group_rect = group_rect.union(play.rect);
+                            focused |= play.has_focus();
+                            if play.clicked() {
+                                self.start(target, call);
+                                ui.ctx().request_repaint_after(Duration::from_millis(100));
+                            }
+                        } else if !self.stopping {
+                            let playing = self.snapshot["state"] == "playing";
+                            let button = ui.button(if playing {
+                                tr("Пауза", "Pause")
+                            } else if self.snapshot["state"] == "ended" {
+                                tr("Сначала", "Replay")
+                            } else {
+                                tr("Воспроизвести", "Play")
+                            });
+                            group_rect = group_rect.union(button.rect);
+                            focused |= button.has_focus();
+                            if button.clicked() {
+                                if self.snapshot["state"] == "ended"
+                                    && !self.control(Action::Seek { position_ms: 0 }, call)
+                                {
+                                    return;
+                                }
+                                self.control(
+                                    if playing { Action::Pause } else { Action::Play },
+                                    call,
+                                );
+                            }
+                        }
+                        if busy {
+                            ui.weak(tr("Загрузка…", "Loading…"));
+                        }
+                        if self.session.is_some() && !self.stopping {
+                            group_rect = group_rect.union(
+                                ui.label(format!(
+                                    "{} / {}",
+                                    timestamp(position),
+                                    timestamp(duration)
+                                ))
+                                .rect,
+                            );
+                            let mut volume = self.snapshot["volume"]
+                                .as_f64()
+                                .unwrap_or(1.0)
+                                .clamp(0.0, 1.0);
+                            let volume_width = 130.0_f32.min(ui.available_width().max(1.0));
+                            ui.spacing_mut().slider_width = volume_width;
+                            let response = ui.add_sized(
+                                [volume_width, 18.0],
+                                egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false),
+                            );
+                            let response = response.on_hover_text(tr("Громкость", "Volume"));
+                            group_rect = group_rect.union(response.rect);
+                            focused |= response.has_focus();
+                            if response.changed() {
+                                self.control(Action::SetVolume { volume }, call);
+                            }
+                        }
+                    },
+                );
                 #[cfg(test)]
                 ui.ctx()
-                    .data_mut(|data| data.insert_temp(egui::Id::new("media-play"), play.rect));
-                if play.clicked() {
-                    self.target = Some(target.clone());
-                    self.error = None;
-                    let result = call(Command::BeginJob {
-                        command: Box::new(Command::OpenMedia {
-                            id: target.id,
-                            revision: target.revision.clone(),
-                        }),
-                    });
-                    if result["ok"] != true {
-                        self.error = Some(Self::message(&result));
-                    } else if result["result"]["state"] == "succeeded" {
-                        if self.accept_session(&result["result"]["result"], target) {
-                            self.play_opened(call);
-                        }
-                    } else if let Some(id) = result["result"]["job_id"].as_u64() {
-                        self.pending = Some(Pending {
-                            id: JobId(id),
-                            target: target.clone(),
-                            cancelled: false,
-                            cancel_sent: false,
-                        });
-                    } else {
-                        self.error =
-                            Some(tr("Не удалось запустить видео", "Could not start video").into());
-                    }
-                    ui.ctx().request_repaint_after(Duration::from_millis(100));
+                    .data_mut(|data| data.insert_temp(egui::Id::new("media-group"), group_rect));
+                self.controls_focused = focused;
+                if let Some(error) = &self.error {
+                    ui.colored_label(Color32::LIGHT_RED, error);
                 }
-            } else if !self.stopping {
-                let playing = self.snapshot["state"] == "playing";
-                if ui
-                    .button(if playing {
-                        tr("Пауза", "Pause")
-                    } else if self.snapshot["state"] == "ended" {
-                        tr("Сначала", "Replay")
-                    } else {
-                        tr("Воспроизвести", "Play")
-                    })
-                    .clicked()
-                {
-                    if self.snapshot["state"] == "ended"
-                        && !self.control(Action::Seek { position_ms: 0 }, call)
-                    {
-                        return;
-                    }
-                    self.control(if playing { Action::Pause } else { Action::Play }, call);
-                }
-            }
-            if busy {
-                ui.weak(tr("Загрузка…", "Loading…"));
-            }
-        });
-        if self.session.is_some() && !self.stopping {
-            if let Some(duration) = self.snapshot["duration_ms"]
-                .as_u64()
-                .filter(|value| *value > 0)
-            {
-                let mut position = self
-                    .seek_position
-                    .unwrap_or_else(|| self.snapshot["position_ms"].as_u64().unwrap_or(0))
-                    .min(duration);
-                let response =
-                    ui.add(egui::Slider::new(&mut position, 0..=duration).show_value(false));
-                if response.dragged() {
-                    self.seek_position = Some(position);
-                }
-                if response.drag_stopped() {
-                    let position = self.seek_position.take().unwrap_or(position);
-                    self.control(
-                        Action::Seek {
-                            position_ms: position,
-                        },
-                        call,
-                    );
-                } else if response.changed() && !response.dragged() {
-                    self.control(
-                        Action::Seek {
-                            position_ms: position,
-                        },
-                        call,
-                    );
-                }
-                ui.label(format!("{} / {}", timestamp(position), timestamp(duration)));
-            } else {
-                ui.weak(tr("Длительность загружается…", "Loading duration…"));
-            }
-            let mut volume = self.snapshot["volume"]
-                .as_f64()
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-            if ui
-                .add(egui::Slider::new(&mut volume, 0.0..=1.0).text(tr("Громкость", "Volume")))
-                .changed()
-            {
-                self.control(Action::SetVolume { volume }, call);
-            }
-        }
-        if let Some(error) = &self.error {
-            ui.colored_label(Color32::LIGHT_RED, error);
-        }
+            },
+        );
     }
+}
+
+fn controls_visible(
+    state: Option<&str>,
+    busy: bool,
+    error: bool,
+    focused: bool,
+    last: Option<Instant>,
+    now: Instant,
+) -> bool {
+    busy || error
+        || focused
+        || state != Some("playing")
+        || last.is_none_or(|last| now.saturating_duration_since(last) < Duration::from_secs(2))
 }
 
 fn timestamp(ms: u64) -> String {
@@ -539,8 +690,138 @@ mod tests {
     }
 
     #[test]
-    fn mini_and_full_views_do_not_open_until_explicit_play() {
-        for context in ["details", "preview"] {
+    fn full_preview_autostarts_once_and_failure_does_not_retry() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let target = t(r#"["images",null,"preview"]"#);
+        let mut opens = 0;
+        let mut call = |command: Command| {
+            if matches!(command, Command::BeginJob { .. }) {
+                opens += 1;
+            }
+            json!({"ok":false,"error":{"code":"unavailable","message":"unavailable"}})
+        };
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(Default::default(), |ui| state.show(ui, &target, &mut call));
+            out.textures_delta.clear();
+        }
+        assert_eq!(opens, 1);
+        assert!(state.error.is_some());
+    }
+
+    #[test]
+    fn controls_hide_only_during_idle_play_and_stay_within_canvas() {
+        let now = Instant::now();
+        let old = Some(now - Duration::from_secs(3));
+        assert!(!controls_visible(
+            Some("playing"),
+            false,
+            false,
+            false,
+            old,
+            now
+        ));
+        assert!(controls_visible(
+            Some("paused"),
+            false,
+            false,
+            false,
+            old,
+            now
+        ));
+        assert!(controls_visible(
+            Some("playing"),
+            true,
+            false,
+            false,
+            old,
+            now
+        ));
+        assert!(controls_visible(
+            Some("playing"),
+            false,
+            true,
+            false,
+            old,
+            now
+        ));
+        assert!(controls_visible(
+            Some("playing"),
+            false,
+            false,
+            true,
+            old,
+            now
+        ));
+        assert!(controls_visible(
+            Some("playing"),
+            false,
+            false,
+            false,
+            Some(now),
+            now
+        ));
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let target = t(r#"["images",null,"details"]"#);
+        let mut call = |_| ok(Value::Null);
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 250.0),
+                )),
+                ..Default::default()
+            },
+            |ui| state.show(ui, &target, &mut call),
+        );
+        out.textures_delta.clear();
+        let (canvas, panel): (egui::Rect, egui::Rect) = ctx.data(|data| {
+            (
+                data.get_temp(egui::Id::new("media-canvas")).unwrap(),
+                data.get_temp(egui::Id::new("media-panel")).unwrap(),
+            )
+        });
+        assert!(canvas.contains_rect(panel));
+        assert!(canvas.height() > 200.0);
+        assert_eq!(panel.width(), canvas.width());
+        state.target = Some(target.clone());
+        state.session = Some(7);
+        state.snapshot = session(7, "paused")["snapshot"].clone();
+        state.next_poll = Some(Instant::now() + Duration::from_secs(60));
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 250.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| state.show(ui, &target, &mut call),
+            );
+            out.textures_delta.clear();
+        }
+        let (seek, group): (egui::Rect, egui::Rect) = ctx.data(|data| {
+            (
+                data.get_temp(egui::Id::new("media-seek")).unwrap(),
+                data.get_temp(egui::Id::new("media-group")).unwrap(),
+            )
+        });
+        assert!(
+            seek.width() >= canvas.width() - 14.0,
+            "seek {seek:?}, canvas {canvas:?}"
+        );
+        assert!(
+            (group.center().x - canvas.center().x).abs() < 2.0,
+            "group {group:?}, canvas {canvas:?}"
+        );
+    }
+
+    #[test]
+    fn mini_view_does_not_open_until_explicit_play() {
+        {
+            let context = r#"["images",null,"details"]"#;
             let ctx = egui::Context::default();
             let mut state = State::default();
             let target = t(context);

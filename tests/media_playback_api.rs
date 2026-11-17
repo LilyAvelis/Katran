@@ -9,14 +9,19 @@ use std::sync::{Arc, Mutex};
 struct Counts {
     opens: usize,
     closes: usize,
+    paths: Vec<std::path::PathBuf>,
+    controls: usize,
 }
 struct Fake(Arc<Mutex<Counts>>);
 impl Backend for Fake {
-    fn open(&mut self, _: Source) -> katran::Result<()> {
-        self.0.lock().unwrap().opens += 1;
+    fn open(&mut self, source: Source) -> katran::Result<()> {
+        let mut counts = self.0.lock().unwrap();
+        counts.opens += 1;
+        counts.paths.push(source.path);
         Ok(())
     }
     fn control(&mut self, _: Action) -> katran::Result<()> {
+        self.0.lock().unwrap().controls += 1;
         Ok(())
     }
     fn snapshot(&mut self) -> katran::Result<Snapshot> {
@@ -262,4 +267,109 @@ fn metadata_edits_keep_session_but_visibility_and_settings_close_it() {
     );
     assert_eq!(ok(&mut service, Command::MediaState), Value::Null);
     assert_eq!(counts.lock().unwrap().closes, 2);
+}
+#[test]
+fn folder_unicode_video_uses_browsed_source_and_closes_on_folder_change() {
+    use std::time::{Duration, Instant};
+    let profile = tempfile::tempdir().unwrap();
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let directory = first.path().join("Видео 文件");
+    std::fs::create_dir(&directory).unwrap();
+    let video = directory.join("Синтетика 影片.mp4");
+    std::fs::write(&video, b"synthetic media bytes").unwrap();
+    let mut service = Service::open(profile.path(), 100000).unwrap();
+    let counts = Arc::new(Mutex::new(Counts::default()));
+    service
+        .set_media_backend(Box::new(Fake(counts.clone())))
+        .unwrap();
+    let context = ok(
+        &mut service,
+        Command::ChooseFolder {
+            path: directory.clone(),
+        },
+    );
+    assert_eq!(
+        std::path::Path::new(context["folder_path"].as_str().unwrap()),
+        directory.canonicalize().unwrap()
+    );
+    let page = ok(
+        &mut service,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 100,
+            cursor: None,
+        },
+    );
+    let event = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["name"] == "Синтетика 影片.mp4")
+        .unwrap();
+    let id = event["id"].as_i64().unwrap();
+    let revision = event["revision"].as_str().unwrap().to_owned();
+    assert!(id < 0);
+    assert_eq!(
+        std::path::Path::new(event["path"].as_str().unwrap()),
+        video.canonicalize().unwrap()
+    );
+    ok(&mut service, Command::SetVisible { ids: vec![id] });
+    ok(
+        &mut service,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    assert_eq!(ok(&mut service, Command::TogglePreview)["preview"], id);
+    let job = ok(
+        &mut service,
+        Command::BeginJob {
+            command: Box::new(Command::OpenMedia { id, revision }),
+        },
+    );
+    let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let session = loop {
+        let status = ok(&mut service, Command::PollJob { job_id });
+        if status["state"] == "succeeded" {
+            break status["result"].clone();
+        }
+        assert_ne!(status["state"], "failed", "{status}");
+        assert!(Instant::now() < deadline, "{status}");
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    let token = session["token"].as_u64().unwrap();
+    assert_eq!(session["identity"]["id"], id);
+    assert_eq!(
+        counts.lock().unwrap().paths,
+        vec![video.canonicalize().unwrap()]
+    );
+    ok(
+        &mut service,
+        Command::ControlMedia {
+            session: token,
+            action: Action::Play,
+        },
+    );
+    assert_eq!(
+        ok(
+            &mut service,
+            Command::MediaFrame {
+                session: token,
+                after_serial: 0
+            }
+        )["frame"]["rgba_base64"],
+        "AQIDBA=="
+    );
+    ok(
+        &mut service,
+        Command::ChooseFolder {
+            path: second.path().to_owned(),
+        },
+    );
+    assert_eq!(ok(&mut service, Command::MediaState), Value::Null);
+    let counts = counts.lock().unwrap();
+    assert_eq!((counts.opens, counts.controls, counts.closes), (1, 1, 1));
 }

@@ -57,9 +57,7 @@ impl MediaState {
         let player = if read_only {
             media_playback::Player::default()
         } else {
-            media_playback::Player::new(Box::new(
-                crate::media_playback_windows::NativeBackend::default(),
-            ))
+            media_playback::Player::new(Box::new(crate::media_playback_mpv::MpvBackend::default()))
         };
         #[cfg(not(windows))]
         let player = {

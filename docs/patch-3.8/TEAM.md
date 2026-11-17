@@ -1,5 +1,23 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Current: libmpv and overlay controls · 2026-11-18
+
+Owner confirmed the first candidate plays in Desktop but fails in Folder and
+requested full-area video, translucent controls, idle hiding and Space autoplay.
+The first candidate is not accepted. Reused sessions, same models/efforts:
+
+| Session | Ownership | State / next step |
+| --- | --- | --- |
+| /root/mira · Terra/high | media_playback_mpv.rs | Frozen; muted Unicode MP4/MKV probe passed, 1/1 |
+| /root/fenna · Terra/high | media_preview_ui.rs | Frozen; 8 player UI tests passed, including measured centering/width |
+| /root/nemi · Terra/high | tests/media_playback_api.rs | Frozen; Folder Unicode source/context regression passed |
+| /root · lead | lib/service/Cargo switch, setup, docs, integration/install | API 15/15, UI 273 + isolated native-transfer retry 1/1; final lint/build/install |
+
+libmpv is pinned to Afio's existing runtime. Current bridge renders CPU RGBA,
+not Afio's OpenGL path; no performance/GPU claims. Setup reuses the verified
+local archive. Native controls are observed through events; acceptance of audible
+sound, owner videos and overlay appearance is still pending. No publication.
+
 ## Native video preview follow-up · 2026-11-18
 
 Owner authorized local native video+audio in Space and Mini stream, with explicit

@@ -1,5 +1,37 @@
 # Katran 3.8 verification handoff
 
+## Replacement: libmpv and overlay UI · 2026-11-18
+
+Owner refined scope after seeing Desktop playback: controls must overlay the
+full canvas and hide during idle playback; Space autoplays, Mini waits for Play.
+Default backend is now libmpv through Rust C ABI, using a pinned separate DLL
+informed by Afio. The first Windows backend is removed, not retained as a silent
+fallback. Its previously installed runtime remains available for rollback.
+
+Automated evidence for this replacement:
+- Mira's final muted native probe passed 1/1 in 6.46s (10.18s compile): Unicode
+  MP4/MKV, non-black frames, audio-stream metadata, observed pause/seek, actual
+  EOF, seek0/replay advancement, client lease expiry, close and handle release.
+  Initial startup failure was traced to a lease starting before DLL loading/
+  initialization; the lease now begins after initialization, with cancel checked
+  before loading playback. No test certifies audible sound or GPU performance.
+- UI integrated run passed 273/274 including all 8 player checks; the unrelated
+  synthetic recycle test got OSError5 in the restricted temporary directory.
+  Its exact isolated retry with native filesystem access passed 1/1, no source
+  change/rebuild. Thus all UI cases have passing evidence across these runs.
+- Media API 5/5, policy 4/4, wire-v2 6/6. New regression exercises real Folder
+  browse, Unicode source path, Space/OpenMedia job and stop on folder change
+  through an injected backend; it does not claim native decoding.
+- Setup reused Afio's pinned archive and verified both archive/DLL hashes;
+  component receipt and notice saved under ignored runtime/components.
+- Final locked offline Clippy passed for all targets with UI and warnings denied.
+  The only correction after the native probe was an equivalent condition cleanup
+  in the test; production backend inputs stayed unchanged. Passed gates are reused.
+
+Current bridge copies bounded CPU RGBA, not Afio's OpenGL renderer. No public
+redistribution, new schema or release authorization. See video-preview.md for
+runtime installation, threading/codec/path limitations and original failure.
+
 ## Native video/audio local follow-up · 2026-11-18
 
 **Owner check failed:** Folder playback shows Media Engine code 4 /

@@ -1608,6 +1608,7 @@ dependencies = [
  "egui_extras",
  "embed-resource",
  "image",
+ "libloading",
  "raw-window-handle",
  "reqwest",
  "resvg",
