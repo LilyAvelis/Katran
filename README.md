@@ -1,6 +1,6 @@
 # Katran
 
-Local development is preparing **3.8.0**: per-tab tag sets with preservation of
+**Katran 3.8.0** adds: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings, drag reordering of complete tags
 and improved Folder navigation. The third [Mini stream view](docs/patch-3.8/DETAILS-VIEW.md)
 is available through Actions → Display and Settings → Appearance → Tab view.
@@ -25,11 +25,11 @@ The same preview retention covers pinning, assigning tags and renaming items,
 while the shelf still recomputes search/filter/order metadata.
 Comma then Slash selects [tag-order sorting](docs/patch-3.8/TAG-SORT.md): current
 tag positions first, untagged last; custom pinned order remains separate.
-The owner now uses local `main` and the primary Raycast launch with the existing
-profile for manual acceptance; retain the previous runtime and database backup
-for rollback. This work is not a public release. See the
-[3.8 contract and team](docs/patch-3.8/TEAM.md); the released baseline below
-remains 3.7.1.
+See the [3.8 release notes](docs/releases/3.8.0.md) and
+[AI setup on another PC](docs/ai-setup.md). Models are optional downloads;
+installation runs visibly and preserves a diagnostic log. Before upgrading,
+retain a profile backup: schema v13 and new saved view/sort modes require a
+compatible rollback. Release assets are produced by the Windows release workflow.
 
 **Katran 3.7** adds an emoji catalogue in Pods, a Desktop background library,
 stronger file operations, and a new application icon. The latest patch unifies

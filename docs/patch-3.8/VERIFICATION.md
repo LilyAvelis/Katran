@@ -1,5 +1,15 @@
 # Katran 3.8 verification handoff
 
+## Public 3.8 release authorization · 2026-11-18
+
+Lilia accepted the combined local UI follow-up and explicitly authorized pushing
+main, tagging v3.8.0 and launching the existing public release automation. Earlier
+no-push/no-release entries below are historical. Prepare a single release run;
+checks/build/package/publish remain mandatory. Owner explicitly says **do not
+wait** for this run: return its URL/ID after dispatch and stop. Do not describe
+queued automation as a completed published release. AI setup on another PC is
+covered by docs/ai-setup.md; fresh-machine acceptance remains a known limitation.
+
 ## Native acceptance · 2026-11-18
 
 Owner restarted and answered **«Всё работает»** for the combined rename/pin/tag
@@ -521,3 +531,13 @@ compatibility was corrected during the read-only preflight (reparse attributes
 instead of newer is_junction methods), before any deletion. No Rust compilation
 or release publication was performed for maintenance. Existing UI acceptance
 remains the owner's «Всё работает» for Tags sorting and image retention.
+
+Release 3.8 preflight: remote main matches tracking c7c0b8e; v3.8.0 tag and
+release do not yet exist; workflow active. Synthetic package contract passed
+(including AI helper whitelist/private-canary exclusion/deterministic ZIP),
+release version contract passed, notice unit tests 3/3 passed. Existing local
+Rust/native evidence is reused; no extra local compilation. Fresh-machine AI
+guide and user-facing 3.8 notes prepared. Release preparation commit uses
+[skip ci] to avoid duplicate push/tag check runs; one explicit workflow_dispatch
+for v3.8.0 will run the full mandatory checks/build/package/publish chain. Owner
+asks to stop immediately after automation handoff; publication stays pending.

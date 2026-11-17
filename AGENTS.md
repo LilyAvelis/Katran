@@ -1,5 +1,15 @@
 # Katran development rules
 
+## Public 3.8 release authorization · 2026-11-18
+
+Lilia accepted the combined local UI follow-up and explicitly authorized pushing
+main, tagging v3.8.0 and launching the existing public release automation. Earlier
+no-push/no-release entries below are historical. Prepare a single release run;
+checks/build/package/publish remain mandatory. Owner explicitly says **do not
+wait** for this run: return its URL/ID after dispatch and stop. Do not describe
+queued automation as a completed published release. AI setup on another PC is
+covered by docs/ai-setup.md; fresh-machine acceptance remains a known limitation.
+
 ## Local build storage budget · 2026-11-18
 
 Use only `target/build` for Cargo tests/builds. Working dependency caches are
