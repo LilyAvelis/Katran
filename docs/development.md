@@ -5,8 +5,10 @@ The team reuses five existing named runtime sessions, with single ownership of
 shared files. Per-tab tag persistence/migration belongs to Nemi; Everything
 candidate acquisition and OS Known Folders to Mira; ranking to Nemi; UI to
 Fenna with Iris's UX contract; independent acceptance to Kiki. Polly integrates
-the public command enum and dispatcher. No public release or installed-app
-replacement is authorized. Folder AI is deferred; ordinary ranking is first.
+the public command enum and dispatcher. The owner's later 2026-11-17 correction
+authorizes local main integration and primary Raycast installation using the
+existing profile, with rollback backups. No public release or GitHub push is
+authorized. Folder AI is deferred; ordinary ranking is first.
 Schema v13 copies legacy tag definitions/materials and assignments into
 independent tab scopes, preserving the initial appearance. `tag_slots.rs`,
 `tag_service.rs`, `catalogue_schema.rs`, `catalogue_query.rs`,

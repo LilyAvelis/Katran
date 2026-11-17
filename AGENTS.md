@@ -1,5 +1,19 @@
 # Katran development rules
 
+## Owner workflow correction · 2026-11-17
+
+For Katran, integrate completed local changes into local `main` and stage the
+verified artifact into the primary application launched through Raycast, using
+the existing real profile. A separate empty-profile preview is not the default
+owner acceptance route. Preserve the previous immutable runtime and a consistent
+pre-migration database backup for rollback. Do not force-terminate the running
+application; an already open old process may need the owner to exit once before
+the next normal launch activates the staged version. Reuse verified binaries;
+installation does not justify recompilation. This decision supersedes the
+earlier 3.8 instruction against replacing the installed build. Local main and
+local installation do not authorize any GitHub push, tag or public release.
+Native product acceptance still belongs to Lilia.
+
 ## Local 3.8 implementation · owner instruction 2026-11-17
 
 FEATURE-5 / Мастерская + Iris is implementing per-tab tag definitions and

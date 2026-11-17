@@ -2,7 +2,9 @@
 
 Local development is preparing **3.8.0**: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings and improved Folder navigation.
-This work is not a public release or an installed-app update. See the
+The owner now uses local `main` and the primary Raycast launch with the existing
+profile for manual acceptance; retain the previous runtime and database backup
+for rollback. This work is not a public release. See the
 [3.8 contract and team](docs/patch-3.8/TEAM.md); the released baseline below
 remains 3.7.1.
 

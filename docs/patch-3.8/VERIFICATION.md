@@ -6,7 +6,10 @@ Independent CLI smoke was completed against the staged artifacts for
 commit `12360d1ab4e4e9394b09d821e8f4935dcb1f6260` on `codex/katran-3.8`.
 This is evidence for the commands and queries listed below. Native Windows UI
 and product acceptance remain **PENDING OWNER**. Do not describe 3.8 as
-accepted, install this preview over the working application, or publish it.
+accepted or publish it. After this isolated smoke, the owner separately
+authorized main integration and primary local installation with existing data;
+that later action is recorded in [TEAM.md](TEAM.md). It does not change the
+scope of the smoke or imply native acceptance.
 
 ## Artifact identity
 

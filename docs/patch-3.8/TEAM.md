@@ -1,6 +1,6 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
-Owner instruction: 2026-11-17. Preparation and implementation only; no public release, push, or replacement of the installed application. Product contract: [PRODUCT.md](PRODUCT.md).
+Initial owner instruction: 2026-11-17, preparation and implementation without publication. The later workflow correction authorizes local main integration and primary installation with existing data; see the activation record below. No public release or push. Product contract: [PRODUCT.md](PRODUCT.md).
 
 Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current session; no separate Lead spawned). Baseline `c7c0b8e`, Katran 3.7.1, schema v12. Existing untracked user files are outside this change.
 
@@ -68,6 +68,30 @@ Project session inventory: earlier chats `Katran 3.7` (`01a1db19-4256-7f33-aa64-
   `Katran` and `cat run` searches ranked this repository first. Details are
   recorded separately in `VERIFICATION.md`. Native UI acceptance belongs
   to Lilia and is not implied by any API or headless result.
-- Owner reminder: even a later positive native acceptance does not itself
-  authorize a GitHub push, tag, public release or installed-profile replacement;
-  those actions still require the owner's explicit instruction.
+- Owner reminder: native acceptance does not itself authorize a GitHub push,
+  tag or public release. Primary local installation was explicitly authorized
+  by the later correction recorded below.
+
+## Primary launch staging · owner correction 2026-11-17
+
+The owner rejected the empty-profile preview as the normal acceptance route and
+instructed Polly to integrate local main and install to the primary Raycast app
+with existing data. This supersedes the initial no-install restriction.
+
+- Verified the actual Start Menu/Raycast link points to `runtime/Katran.exe`
+  with the existing repository `katran-data` profile.
+- Created a consistent SQLite backup of schema v12 with SQLite's online backup
+  API and verified its integrity. Exact private paths and pointer backup are
+  recorded locally in ignored `runtime/rollback-3.8.json`.
+- Copied the already verified runtime and notices to
+  `runtime/versions/9266bfb24bfd`, verified every copied file hash, and atomically
+  changed the primary launch pointer from `d7eae2862b31` to `9266bfb24bfd`.
+  No compilation or shortcut replacement was needed. The materialized Apple
+  font remains in the existing profile; optional local runtimes are unchanged.
+- Previous runtime and pointer backup remain available. Full rollback after
+  migration requires stopping Katran and restoring the pre-v13 database, not
+  merely changing the executable pointer.
+- The existing 3.7.1 process was left running. The owner must fully exit it once
+  through the tray and use normal Raycast launch for 3.8 activation. Migration
+  is intentionally deferred to that startup to avoid concurrent old/new writers.
+- Native owner acceptance remains pending. Nothing was pushed to GitHub.
