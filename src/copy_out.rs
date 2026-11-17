@@ -251,6 +251,7 @@ pub struct PublicationFacts {
     pub item_count: usize,
     pub optional_pixel_warning: bool,
     pub sequence: u32,
+    pub sequence_verification: &'static str,
 }
 pub struct ClipboardWrite {
     pub sequence: u32,
@@ -587,6 +588,11 @@ pub fn commit(plan: &Plan, sink: &mut impl ClipboardSink) -> Result<CopyReceipt,
     // destructor must preserve these paths until the next successful copy.
     plan.published.set(true);
     for previous in &plan.previous {
+        // Without a settled sequence the current clipboard may belong to another
+        // writer; preserve older batches as well as the just-published files.
+        if sequence == 0 {
+            continue;
+        }
         if active_plans()
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -632,13 +638,78 @@ fn remember_file_token(tokens: &mut std::collections::VecDeque<String>, token: S
 }
 
 #[cfg(any(windows, test))]
+struct SettlementProof {
+    owner_none: bool,
+    formats_valid: bool,
+    marker_valid: bool,
+    payload_valid: bool,
+    sequence_before: u32,
+    sequence_after: u32,
+    sequence_closed: u32,
+}
+#[cfg(any(windows, test))]
+fn verified_settlement(proof: SettlementProof) -> Result<u32, &'static str> {
+    if !proof.owner_none {
+        return Err("owner_live");
+    }
+    if !proof.formats_valid {
+        return Err("formats_changed");
+    }
+    if !proof.marker_valid {
+        return Err("marker_missing");
+    }
+    if !proof.payload_valid {
+        return Err("payload_changed");
+    }
+    if proof.sequence_before == 0
+        || proof.sequence_before != proof.sequence_after
+        || proof.sequence_before != proof.sequence_closed
+    {
+        return Err("sequence_unstable");
+    }
+    Ok(proof.sequence_before)
+}
+#[cfg(any(windows, test))]
+fn accepted_formats(formats: &[u32], marker: u32, effect: Option<u32>, pixels: bool) -> bool {
+    if marker == 0 || !formats.contains(&15) || !formats.contains(&marker) {
+        return false;
+    }
+    if pixels && !formats.contains(&17) {
+        return false;
+    }
+    if effect.is_some_and(|id| !formats.contains(&id)) {
+        return false;
+    }
+    formats.iter().all(|id| {
+        *id == 15
+            || *id == marker
+            || effect == Some(*id)
+            || (pixels && matches!(*id, 2 | 8 | 9 | 17))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn same_bounded_payload(expected: &[u8], observed: &[u8], allocation: usize) -> bool {
+    allocation >= expected.len()
+        && allocation <= expected.len().saturating_add(16)
+        && observed == expected
+}
+
+#[cfg(any(windows, test))]
 trait FilePublication {
     fn owner_valid(&self) -> bool;
     fn primary(&mut self) -> Result<(), String>;
     fn pixels(&mut self) -> Result<(), String>;
     fn effect(&mut self) -> Result<bool, String>;
-    fn marker(&mut self) -> Result<bool, String>;
+    fn marker(&mut self) -> Result<Option<String>, String>;
     fn sequence(&self) -> u32;
+    /// Complete publication and establish ownership of the settled sequence.
+    fn finish(
+        self,
+        marker: Option<String>,
+        pixels: bool,
+        effect: bool,
+    ) -> Result<u32, &'static str>;
 }
 
 #[cfg(any(windows, test))]
@@ -663,18 +734,40 @@ fn publish_file_formats<B: FilePublication>(
             }
         }
     }
-    match backend.effect() {
-        Ok(true) => formats.push("Preferred DropEffect"),
-        Ok(false) => {}
-        Err(error) => warnings.push(format!("Copy effect unavailable: {error}")),
+    let effect = match backend.effect() {
+        Ok(true) => {
+            formats.push("Preferred DropEffect");
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            warnings.push(format!("Copy effect unavailable: {error}"));
+            false
+        }
+    };
+    let marker = match backend.marker() {
+        Ok(Some(token)) => {
+            formats.push("Katran owner marker");
+            Some(token)
+        }
+        Ok(None) => None,
+        Err(error) => {
+            warnings.push(format!("Clipboard ownership marker failed: {error}"));
+            None
+        }
+    };
+    let _before_close = backend.sequence();
+    let (sequence, sequence_verification) =
+        match backend.finish(marker, formats.contains(&"CF_DIBV5"), effect) {
+            Ok(sequence) if sequence != 0 => (sequence, "verified"),
+            Ok(_) => (0, "sequence_unstable"),
+            Err(category) => (0, category),
+        };
+    if sequence == 0 {
+        warnings.push(
+            "Files copied; clipboard ownership could not be verified for automatic paste".into(),
+        );
     }
-    match backend.marker() {
-        Ok(true) => formats.push("Katran owner marker"),
-        Ok(false) => {}
-        Err(error) => warnings.push(format!("Clipboard ownership marker failed: {error}")),
-    }
-    let sequence = backend.sequence();
-    drop(backend); // Close clipboard before destroying the owner window.
     Ok(ClipboardWrite {
         sequence,
         warnings,
@@ -683,6 +776,7 @@ fn publish_file_formats<B: FilePublication>(
             item_count,
             optional_pixel_warning,
             sequence,
+            sequence_verification,
         }),
     })
 }
@@ -800,6 +894,145 @@ mod native_publication {
             }
         }
     }
+    /// Verify only the exact payload just published, with no delayed owner.
+    /// OpenClipboard prevents other writers throughout the byte comparison.
+    fn settle(
+        files: &[u8],
+        pixels: Option<&[u8]>,
+        marker: Option<&str>,
+        effect: bool,
+    ) -> Result<u32, &'static str> {
+        use windows_sys::Win32::{
+            Foundation::{GetLastError, SetLastError},
+            System::DataExchange::{
+                CloseClipboard, EnumClipboardFormats, GetClipboardOwner,
+                GetClipboardSequenceNumber, OpenClipboard,
+            },
+        };
+        let expected_marker = marker.ok_or("marker_missing")?;
+        if files.is_empty()
+            || files.len() > 8 * 1024 * 1024
+            || pixels.is_some_and(|p| p.len() > 128_000_124)
+        {
+            return Err("payload_changed");
+        }
+        if unsafe { OpenClipboard(std::ptr::null_mut()) } == 0 {
+            return Err("busy");
+        }
+        struct Open(bool);
+        impl Drop for Open {
+            fn drop(&mut self) {
+                if self.0 {
+                    unsafe {
+                        CloseClipboard();
+                    }
+                }
+            }
+        }
+        let mut open = Open(true);
+        let before = unsafe { GetClipboardSequenceNumber() };
+        unsafe {
+            SetLastError(0);
+        }
+        let owner = unsafe { GetClipboardOwner() };
+        if owner.is_null() && unsafe { GetLastError() } != 0 {
+            return Err("owner_unavailable");
+        }
+        let owner_none = owner.is_null();
+        if !owner_none {
+            return Err("owner_live");
+        }
+        let marker_format =
+            clipboard_win::raw::register_format(crate::table_clipboard::OWNER_FORMAT)
+                .ok_or("marker_missing")?
+                .get();
+        let effect_format = if effect {
+            Some(
+                clipboard_win::raw::register_format("Preferred DropEffect")
+                    .ok_or("formats_changed")?
+                    .get(),
+            )
+        } else {
+            None
+        };
+        let mut formats = Vec::new();
+        let mut id = 0;
+        loop {
+            unsafe {
+                SetLastError(0);
+            }
+            id = unsafe { EnumClipboardFormats(id) };
+            if id == 0 {
+                if unsafe { GetLastError() } != 0 {
+                    return Err("formats_changed");
+                }
+                break;
+            }
+            formats.push(id);
+            if formats.len() > 64 {
+                return Err("formats_changed");
+            }
+        }
+        let formats_valid =
+            accepted_formats(&formats, marker_format, effect_format, pixels.is_some());
+        if !formats_valid {
+            return Err("formats_changed");
+        }
+        let marker_valid = crate::table_clipboard::read_owner_token_locked()
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some(expected_marker);
+        if !marker_valid {
+            return Err("marker_missing");
+        }
+        fn equal_bytes(format: u32, expected: &[u8]) -> bool {
+            use windows_sys::Win32::{
+                Foundation::{GetLastError, SetLastError},
+                System::{
+                    DataExchange::GetClipboardData,
+                    Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+                },
+            };
+            let handle = unsafe { GetClipboardData(format) };
+            if handle.is_null() {
+                return false;
+            }
+            let size = unsafe { GlobalSize(handle) };
+            if size < expected.len() || size > expected.len().saturating_add(16) {
+                return false;
+            }
+            let ptr = unsafe { GlobalLock(handle) };
+            if ptr.is_null() {
+                return false;
+            }
+            let observed = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), expected.len()) };
+            let equal = same_bounded_payload(expected, observed, size);
+            unsafe {
+                SetLastError(0);
+            }
+            let unlocked = unsafe { GlobalUnlock(handle) };
+            equal && (unlocked != 0 || unsafe { GetLastError() } == 0)
+        }
+        let payload_valid = equal_bytes(15, files)
+            && pixels.is_none_or(|bytes| equal_bytes(17, bytes))
+            && effect_format.is_none_or(|id| equal_bytes(id, &1u32.to_le_bytes()));
+        let after = unsafe { GetClipboardSequenceNumber() };
+        if unsafe { CloseClipboard() } == 0 {
+            return Err("close_failed");
+        }
+        open.0 = false;
+        let closed = unsafe { GetClipboardSequenceNumber() };
+        verified_settlement(SettlementProof {
+            owner_none,
+            formats_valid,
+            marker_valid,
+            payload_valid,
+            sequence_before: before,
+            sequence_after: after,
+            sequence_closed: closed,
+        })
+    }
     pub(super) struct Backend<'a> {
         // Fields drop in declaration order: CloseClipboard before DestroyWindow.
         _clipboard: clipboard_win::Clipboard,
@@ -842,7 +1075,7 @@ mod native_publication {
                 .map_err(|e| e.to_string())?;
             Ok(true)
         }
-        fn marker(&mut self) -> Result<bool, String> {
+        fn marker(&mut self) -> Result<Option<String>, String> {
             let mut tokens = FILE_OWNER_TOKENS
                 .lock()
                 .map_err(|_| "Clipboard ownership registry unavailable".to_owned())?;
@@ -854,11 +1087,22 @@ mod native_publication {
             let bytes = [token.as_bytes(), &[0]].concat();
             clipboard_win::raw::set_without_clear(format.get(), &bytes)
                 .map_err(|e| e.to_string())?;
-            remember_file_token(&mut tokens, token);
-            Ok(true)
+            remember_file_token(&mut tokens, token.clone());
+            Ok(Some(token))
         }
         fn sequence(&self) -> u32 {
             unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+        }
+        fn finish(
+            self,
+            marker: Option<String>,
+            pixels: bool,
+            effect: bool,
+        ) -> Result<u32, &'static str> {
+            let files = self.files;
+            let expected_pixels = if pixels { self.pixels } else { None };
+            drop(self);
+            settle(files, expected_pixels, marker.as_deref(), effect)
         }
     }
 }
@@ -930,6 +1174,7 @@ mod tests {
         valid_owner: bool,
         fail_primary: bool,
         fail_pixels: bool,
+        settled: Result<u32, &'static str>,
     }
     impl Drop for FakePublication {
         fn drop(&mut self) {
@@ -963,13 +1208,28 @@ mod tests {
             self.events.lock().unwrap().push("effect");
             Ok(true)
         }
-        fn marker(&mut self) -> Result<bool, String> {
+        fn marker(&mut self) -> Result<Option<String>, String> {
             self.events.lock().unwrap().push("marker");
-            Ok(true)
+            Ok(Some("synthetic-token".into()))
         }
         fn sequence(&self) -> u32 {
             self.events.lock().unwrap().push("sequence");
             42
+        }
+        fn finish(
+            self,
+            marker: Option<String>,
+            _pixels: bool,
+            _effect: bool,
+        ) -> Result<u32, &'static str> {
+            let events = self.events.clone();
+            let result = self.settled;
+            drop(self);
+            events.lock().unwrap().push("verify_settled");
+            if marker.is_none() {
+                return Err("marker_missing");
+            }
+            result
         }
     }
     fn fake_publication(
@@ -984,9 +1244,93 @@ mod tests {
                 valid_owner,
                 fail_primary,
                 fail_pixels,
+                settled: Ok(44),
             },
             events,
         )
+    }
+    fn proof() -> SettlementProof {
+        SettlementProof {
+            owner_none: true,
+            formats_valid: true,
+            marker_valid: true,
+            payload_valid: true,
+            sequence_before: 44,
+            sequence_after: 44,
+            sequence_closed: 44,
+        }
+    }
+    #[test]
+    fn settled_proof_rejects_foreign_payload_formats_owner_and_races() {
+        assert_eq!(verified_settlement(proof()), Ok(44));
+        let mut p = proof();
+        p.payload_valid = false;
+        assert_eq!(verified_settlement(p), Err("payload_changed"));
+        let mut p = proof();
+        p.marker_valid = false;
+        assert_eq!(verified_settlement(p), Err("marker_missing"));
+        let mut p = proof();
+        p.formats_valid = false;
+        assert_eq!(verified_settlement(p), Err("formats_changed"));
+        let mut p = proof();
+        p.owner_none = false;
+        assert_eq!(verified_settlement(p), Err("owner_live"));
+        let mut p = proof();
+        p.sequence_after = 45;
+        assert_eq!(verified_settlement(p), Err("sequence_unstable"));
+        let mut p = proof();
+        p.sequence_closed = 45;
+        assert_eq!(verified_settlement(p), Err("sequence_unstable"));
+        assert!(accepted_formats(
+            &[15, 17, 8, 2, 9, 50000, 50001],
+            50000,
+            Some(50001),
+            true
+        ));
+        assert!(!accepted_formats(
+            &[15, 17, 50000, 50001, 50002],
+            50000,
+            Some(50001),
+            true
+        ));
+        assert!(!accepted_formats(
+            &[15, 17, 50001],
+            50000,
+            Some(50001),
+            true
+        ));
+        // A foreign replacement that copied our marker still fails when it changes HDROP or pixels.
+        assert!(same_bounded_payload(b"hdrop", b"hdrop", 8));
+        assert!(!same_bounded_payload(b"hdrop", b"hdr0p", 8));
+        assert!(!same_bounded_payload(b"pixels", b"pixe1s", 8));
+        assert!(!same_bounded_payload(b"hdrop", b"hdrop", 99));
+    }
+    #[test]
+    fn failed_postpublication_proof_preserves_export() {
+        struct Unverified;
+        impl ClipboardSink for Unverified {
+            fn write(&mut self, _: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+                unreachable!()
+            }
+            fn write_with_facts(&mut self, paths: &[PathBuf]) -> Result<ClipboardWrite, String> {
+                let (mut backend, _) = fake_publication(true, false, false);
+                backend.settled = Err("payload_changed");
+                publish_file_formats(backend, paths.len(), true, vec![])
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("synthetic.bin");
+        std::fs::write(&source, b"fixture").unwrap();
+        let plan = prepare(root.path(), &[cached_event(source)]).unwrap();
+        let exported = plan.paths[0].clone();
+        let receipt = commit(&plan, &mut Unverified).unwrap();
+        assert_eq!(receipt.sequence, 0);
+        assert_eq!(
+            receipt.publication.unwrap().sequence_verification,
+            "payload_changed"
+        );
+        drop(plan);
+        assert!(exported.exists());
     }
     #[test]
     fn file_publication_requires_owner_and_closes_before_destroying_it() {
@@ -1002,7 +1346,8 @@ mod tests {
                 "marker",
                 "sequence",
                 "close_clipboard",
-                "destroy_owner"
+                "destroy_owner",
+                "verify_settled"
             ]
         );
         let facts = result.publication.unwrap();
@@ -1016,7 +1361,8 @@ mod tests {
             ]
         );
         assert_eq!(facts.item_count, 2);
-        assert_eq!(facts.sequence, 42);
+        assert_eq!(facts.sequence, 44);
+        assert_eq!(facts.sequence_verification, "verified");
         assert!(!facts.optional_pixel_warning);
         let encoded = serde_json::to_string(&facts).unwrap();
         assert!(!encoded.contains("path") && !encoded.contains("content"));
@@ -1038,12 +1384,13 @@ mod tests {
         let (backend, events) = fake_publication(true, false, true);
         let result = publish_file_formats(backend, 1, true, vec![]).unwrap();
         let facts = result.publication.unwrap();
-        assert_eq!(facts.sequence, 42);
+        assert_eq!(facts.sequence, 44);
+        assert_eq!(facts.sequence_verification, "verified");
         assert!(facts.optional_pixel_warning);
         assert!(!facts.formats.contains(&"CF_DIBV5"));
         assert!(facts.formats.contains(&"CF_HDROP"));
         assert_eq!(result.warnings.len(), 1);
-        assert_eq!(events.lock().unwrap().last(), Some(&"destroy_owner"));
+        assert_eq!(events.lock().unwrap().last(), Some(&"verify_settled"));
     }
     #[test]
     fn commit_exposes_publication_facts_without_changing_legacy_receipt() {
@@ -1063,7 +1410,7 @@ mod tests {
         let plan = prepare(root.path(), &[cached_event(source)]).unwrap();
         let receipt = commit(&plan, &mut FactSink).unwrap();
         assert_eq!(receipt.count, 1);
-        assert_eq!(receipt.sequence, 42);
+        assert_eq!(receipt.sequence, 44);
         assert!(receipt.failures.is_empty());
         assert_eq!(receipt.warnings.len(), 1);
         let facts = receipt.publication.unwrap();

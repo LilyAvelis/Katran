@@ -1,5 +1,15 @@
 # Katran 3.8 verification handoff
 
+## File receipt settlement · 2026-11-17
+
+Owner accepted Ctrl+Shift+Slash and reported Notion browser manual paste works,
+while Enter fails. Existing stage logs prove five image-file attempts failed
+`clipboard_changed` before input after successful publication. New synthetic file
+publication tests 13/13 passed; all-targets Clippy passed. Dispatcher zero-sequence
+gate and native acceptance are tracked in [the incident contract](PASTE-SEQUENCE.md).
+Azuros reviewed exact payload proof, teardown lifetime and export retention with
+no blocking findings. No native Clipboard/desktop manipulation or model tests.
+
 ## Enter + Ctrl/Shift punctuation follow-up · 2026-11-17
 
 Installed source `fed4815`, one release UI build 1m44s. Source/resource hashes

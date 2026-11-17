@@ -16,6 +16,8 @@ components, installed and verified in a visible terminal with a saved log.
 The [Enter follow-up](docs/patch-3.8/PASTE-IMPLEMENTATION.md) follows the last
 external window on returning to Katran, guards pending paste intent and fixes
 file Clipboard ownership. Global tab bindings now accept Ctrl+Shift+Slash.
+The [file receipt correction](docs/patch-3.8/PASTE-SEQUENCE.md) settles and verifies
+the clipboard sequence after publication teardown before authorizing Enter.
 The owner now uses local `main` and the primary Raycast launch with the existing
 profile for manual acceptance; retain the previous runtime and database backup
 for rollback. This work is not a public release. See the

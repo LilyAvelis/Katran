@@ -11,6 +11,7 @@ struct State {
     sequence: u32,
     sent: usize,
     fail_copy: bool,
+    zero_sequence: bool,
     text: String,
 }
 struct Sink(Arc<Mutex<State>>);
@@ -23,9 +24,9 @@ impl katran::text_fragments::ClipboardSink for Sink {
                 message: "no copy".into(),
             });
         }
-        state.sequence = 77;
+        state.sequence = if state.zero_sequence { 0 } else { 77 };
         state.text = text.into();
-        Ok(77)
+        Ok(state.sequence)
     }
 }
 struct Fake(Arc<Mutex<State>>);
@@ -79,11 +80,12 @@ fn call(api: &mut Service, c: Command) -> Value {
 }
 #[test]
 fn copy_must_succeed_before_paste_and_session_is_single_use() {
-    for fail in [false, true] {
+    for (fail, unverified) in [(false, false), (true, false), (false, true)] {
         let root = tempfile::tempdir().unwrap();
         let mut api = Service::open(root.path(), 10000).unwrap();
         let state = Arc::new(Mutex::new(State {
             fail_copy: fail,
+            zero_sequence: unverified,
             ..Default::default()
         }));
         api.set_text_clipboard_sink(Box::new(Sink(state.clone())));
@@ -164,14 +166,17 @@ fn copy_must_succeed_before_paste_and_session_is_single_use() {
         loop {
             let r = reply(&mut api, Command::CompletePastePrevious { owner_window: 8 });
             if r["result"]["state"] != "copying" {
-                assert_eq!(r["ok"], !fail, "{r}");
+                assert_eq!(r["ok"], !fail && !unverified, "{r}");
+                if unverified {
+                    assert_eq!(r["error"]["code"], "copy_unverified");
+                }
                 break;
             }
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
         let s = state.lock().unwrap();
-        assert_eq!(s.sent, usize::from(!fail));
+        assert_eq!(s.sent, usize::from(!fail && !unverified));
         if !fail {
             assert_eq!(s.text, "🦭");
         }

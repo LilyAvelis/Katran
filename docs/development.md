@@ -1,5 +1,10 @@
 # Developer and agent entry point
 
+File Clipboard receipts are settled after their native owner/open guard are
+released. `copy_out` verifies the exact fresh payload under a bounded read lock;
+sequence=0 preserves copy/export results while withholding automatic paste.
+Do not bypass delivery sequence checks. See [incident and proof contract](patch-3.8/PASTE-SEQUENCE.md).
+
 Enter policy uses `overlay::PasteLease` and `overlay_service::PendingPaste`;
 production UI initializes `WindowsHost::with_observer()` before creating its
 window. `foreground_windows.rs` owns native event/visit policy; test Services

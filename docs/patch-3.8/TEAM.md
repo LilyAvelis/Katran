@@ -6,6 +6,22 @@ Lead chat: `01a1ea4b-8cbb-7bf2-9d11-2efe604474d7`, runtime `/root` (current sess
 
 ## Runtime roster
 
+Settlement implementation frozen: same Mira `/root/mira` gpt-6.1-terra/high
+delivered post-teardown proof and 13/13 synthetic tests. Same Azuros `/root/azuros`
+gpt-6.1-sol/xhigh reviewed once without blocking findings. Polly's dispatcher
+zero-sequence copy gate passed 2/2 (expanded vectors), all-targets Clippy passed.
+No native Clipboard test or desktop automation. Next: one UI artifact from the
+existing cache, primary staging, owner retry and stage-log comparison.
+
+Notion-browser incident follow-up: owner confirmed manual Ctrl+C→Ctrl+V works
+for the same file/editor, while Enter fails. Polly read existing bounded stage
+logs and identified five file publications cancelled as `clipboard_changed`
+before SendInput. Mira `/root/mira` (existing gpt-6.1-terra/high) owns only
+`copy_out.rs` publication settlement and synthetic tests; Polly owns evidence,
+API integration/gates/docs and primary staging. No new agents, native clipboard
+inspection or desktop manipulation. See `PASTE-SEQUENCE.md` for the observed
+boundary and the approved strict verification contract.
+
 Current Enter/keyboard source `fed4815`, one optimized build 1m44s (new Windows
 Accessibility feature compiled in the existing cache). Compiled inputs matched
 before/after. Primary runtime `fb5e69b83a48`, SHA256

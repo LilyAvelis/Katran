@@ -1,5 +1,14 @@
 # Katran development rules
 
+## File Clipboard receipt settlement · 2026-11-17
+
+Do not authorize Enter from a sequence captured before file Clipboard teardown.
+`copy_out` settles after CloseClipboard/owner destruction using bounded exact
+fresh-publication proof; failed proof is copy success with sequence=0, preserves
+exports, and blocks automatic input. Delivery guards remain strict with no late
+general file fallback. See `docs/patch-3.8/PASTE-SEQUENCE.md` for native incident
+evidence and synthetic/native limits. Never add a fixed sequence delta or sleep.
+
 ## Enter follow-up · local 3.8 · 2026-11-17
 
 Begin/Complete paste use immutable owner/target/visit leases. Native foreground

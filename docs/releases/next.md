@@ -2,6 +2,10 @@
 
 ## Local 3.8 work · 2026-11-17
 
+The Notion-browser follow-up found `clipboard_changed` before SendInput despite
+successful manual paste. File receipts now settle after owner teardown with exact
+payload proof, retaining strict delivery checks. See [evidence](../patch-3.8/PASTE-SEQUENCE.md).
+
 The subsequently authorized [Enter follow-up](../patch-3.8/PASTE-IMPLEMENTATION.md)
 implements observed destination/immutable paste leases and owned file Clipboard
 publication. Global binding recording/parser now supports Ctrl+Shift+Slash.
