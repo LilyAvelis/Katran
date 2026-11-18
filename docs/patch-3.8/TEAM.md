@@ -482,3 +482,7 @@ bounded preview test helpers. Fenna implements/tests exact preview reservation;
 Polly reviews, runs targeted UI gates, updates documentation and stages one
 verified artifact in the primary runtime. Existing API/native player evidence
 is reused because that behavior is unchanged. No team expansion/publication.
+
+Mini stream sourceb8f34f1 integrated and staged in primary runtimee884d5e4b9e4.
+Fenna area frozen; Polly completed targeted31/31, Clippy, one build/install and
+backup/hash evidence. Owner visual acceptance pending; no public publication.

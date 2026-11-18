@@ -2,6 +2,19 @@
 
 ## Mini stream layout correction · 2026-11-18
 
+Installed sourceb8f34f1, one optimized Windows x64 UI build27.96s, Rust1.95.0,
+locked offline/ui+clipboard-events. Before/after compiled-source fingerprints matched.
+Primary runtime **e884d5e4b9e4**, executable SHA256
+`e884d5e4b9e4e7175a61d05dea2bb69ae3b6abec94ebe20d8b18ff6774a5be4a`.
+All inherited helper/runtime hashes verified. Previous accepted runtimed615d492be2e
+and fresh integrity-checked schema-v13 database backup retained through
+runtime/rollback-mini-stream-layout.json. Atomic pointer changed; running app
+untouched. Owner asked to tray-exit/Raycast-relaunch and check cursor changes,
+pin/unpin and metadata stability; native acceptance pending. No schema/settings
+migration or public push/tag/release. Post-install guarded maintenance removed
+0.34GiB, zero failures,34.22→33.87GiB; runtime unchanged. Protected dependencies /
+release outputs remain above32GiB budget without widening deletion scope.
+
 Owner authorized the fix after the investigation reproduced Links metadata y45→181
 between initial and following frames. Exact parent preview reservation plus clipped
 provider child removes content-dependent placement. Metadata retains the remaining
