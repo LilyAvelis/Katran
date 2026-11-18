@@ -638,6 +638,16 @@ impl State {
                     "Язык перевода: английский",
                     "Translation language: English",
                 ));
+                if let Some(draft) = self.draft.as_mut() {
+                    ui.checkbox(
+                        &mut draft.translation_numbered_only,
+                        super::i18n::tr("Только номера", "Numbered annotations only"),
+                    );
+                    ui.weak(super::i18n::tr(
+                        "Сохраняет исходный текст в бабблах. Переводы идут в карточки с парными номерами.",
+                        "Keep the original lettering in the bubbles and put translations in matching numbered cards.",
+                    ));
+                }
             },
         );
         if let Some(upscale) = self

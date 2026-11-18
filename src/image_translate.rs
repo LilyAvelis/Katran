@@ -360,6 +360,7 @@ impl Session {
         components: Components,
         language: ImageTranslationSource,
         target: &str,
+        numbered_only: bool,
         cancel: &Cancellation,
     ) -> Result<StagedTranslation> {
         cancel.check()?;
@@ -507,6 +508,9 @@ impl Session {
             .arg("--report")
             .arg(&report_path)
             .env("PYTHONNOUSERSITE", "1");
+        if numbered_only {
+            cmd.arg("--numbered-only");
+        }
         run(
             cmd,
             cancel,

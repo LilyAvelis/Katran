@@ -701,6 +701,7 @@ impl Service {
                     Command::TranslateSelectedImageFrom { source } => source,
                     _ => ImageTranslationSource::Japanese,
                 };
+                let numbered_only = self.settings.translation_numbered_only;
                 let selection = self.selected_refs()?;
                 if selection.len() > 1 {
                     if selection.len() > image_translation_batch::MAX_PAGES {
@@ -715,7 +716,7 @@ impl Service {
                         let mut session = session.lock()
                             .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?;
                         Ok(PreparedWork::ImageTranslationBatch(image_translation_batch::prepare(
-                            events, &root, quota, &references, source_language, &mut session, &cancel,
+                            events, &root, quota, &references, source_language, numbered_only, &mut session, &cancel,
                         )?))
                     })?;
                     return Ok(json!({"job_id":id,"state":"queued","total":selection.len()}));
@@ -751,7 +752,7 @@ impl Service {
                     let rendered = session
                         .lock()
                         .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?
-                        .translate(&source, &staging, components, source_language, language, &cancel)?;
+                        .translate(&source, &staging, components, source_language, language, numbered_only, &cancel)?;
                     let bytes = std::fs::read(rendered.path())?;
                     let name = format!("translation-{language}.png");
                     let blob = storage::prepare_bytes(

@@ -60,6 +60,8 @@ pub struct Settings {
     pub language: Language,
     #[serde(skip_serializing_if = "TranslationTarget::is_interface")]
     pub translation_target: TranslationTarget,
+    #[serde(skip_serializing_if = "is_false")]
+    pub translation_numbered_only: bool,
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
     /// Global hotkeys are retained even when the associated tab is hidden.
@@ -119,6 +121,7 @@ impl Settings {
         let mut settings = Self {
             language: Language::English,
             translation_target: TranslationTarget::Interface,
+            translation_numbered_only: false,
             theme: crate::theme::ThemePreferences {
                 preset: crate::theme::Preset::BlueExperimental,
                 lily_background: Some(1),

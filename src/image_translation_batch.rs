@@ -27,6 +27,7 @@ pub(crate) fn prepare(
     quota: u64,
     references: &[PathBuf],
     language: ImageTranslationSource,
+    numbered_only: bool,
     session: &mut Session,
     cancel: &Cancellation,
 ) -> Result<Prepared> {
@@ -55,8 +56,15 @@ pub(crate) fn prepare(
                     "Page changed or exceeds 32 MiB",
                 ));
             }
-            let rendered =
-                session.translate(&bytes, &staging, components.clone(), language, "en", cancel)?;
+            let rendered = session.translate(
+                &bytes,
+                &staging,
+                components.clone(),
+                language,
+                "en",
+                numbered_only,
+                cancel,
+            )?;
             let size = fs::metadata(rendered.path())?.len() as usize;
             if size > MAX_PAGE_BYTES
                 || bytes_count.saturating_add(36).saturating_add(size) > MAX_COLLECTION_BYTES

@@ -9,6 +9,13 @@ page, 256 MiB per collection and 8192 px / 32 million pixels per image.
 Errors are shown in the viewer. Large collections can take time to index, but
 indexing and decoding run outside the UI thread.
 
+The preview uses a clipped Canvas whose size is independent of the image. The
+last ready page remains visible while another loads or if it fails; successful
+page replacement is guarded by a request generation. Mouse wheel zooms around
+the pointer, Ctrl+wheel around the canvas centre, and left drag pans. Space is
+left to QuickLook. Each successfully loaded page starts fitted to the canvas.
+These interaction details still require visual testing in the actual host.
+
 Build against the matching installed QuickLook Common assembly; set
 `QuickLookCommonPath` to its absolute path and keep intermediate/output paths
 under the workspace's `target/build`. The local verified build used .NET SDK

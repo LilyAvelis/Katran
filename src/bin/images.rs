@@ -416,6 +416,11 @@ impl Images {
         edge: u32,
     ) {
         self.paint_image(ui, event, rect, edge, None);
+        if is_bull(event) {
+            let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
+            let badge = egui::Rect::from_min_size(rect.right_bottom() - size, size);
+            paint_bull_badge(ui, badge);
+        }
     }
     fn paint_image(
         &mut self,
@@ -515,6 +520,27 @@ impl Images {
         }
     }
 }
+
+/// Managed collection blobs have digest paths; ordinary files use their actual path.
+pub(super) fn is_bull(event: &Value) -> bool {
+    fn extension_is_bull(name: &str) -> bool {
+        std::path::Path::new(name).extension().and_then(|s| s.to_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case("bull"))
+    }
+    if event["source"] == "image_translation_collection" {
+        return event["name"].as_str().is_some_and(extension_is_bull);
+    }
+    event["path"].as_str().filter(|s| !s.is_empty())
+        .or_else(|| event["name"].as_str()).is_some_and(extension_is_bull)
+}
+
+pub(super) fn paint_bull_badge(ui: &egui::Ui, rect: egui::Rect) {
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, Color32::from_rgb(46, 52, 62));
+    painter.text(rect.center(), egui::Align2::CENTER_CENTER, "BK",
+        egui::FontId::proportional((rect.height() * 0.62).clamp(8.0, 13.0)),
+        Color32::WHITE);
+}
 impl Drop for Images {
     fn drop(&mut self) {
         let (lock, wake) = &*self.queue;
@@ -526,6 +552,21 @@ impl Drop for Images {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bull_badge_uses_exact_actual_extension() {
+        use serde_json::json;
+        assert!(is_bull(&json!({"path": "C:/media/album.bull", "name": "album"})));
+        assert!(is_bull(&json!({"path": "C:/media/album.BuLl"})));
+        assert!(is_bull(&json!({"name": "album.bull"})));
+        assert!(is_bull(&json!({"source": "image_translation_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "album.bull"})));
+        assert!(!is_bull(&json!({"source": "image_translation_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "album.bull.png"})));
+        assert!(!is_bull(&json!({"source": "manual", "path": "C:/profile/blobs/0123456789abcdef", "name": "album.bull"})));
+        assert!(!is_bull(&json!({"path": "C:/media/album.bull.png", "name": "album.bull"})));
+        assert!(!is_bull(&json!({"path": "C:/media/bull", "name": "album.bull"})));
+        assert!(!is_bull(&json!({"path": "C:/media/bull/album.png"})));
+        assert!(!is_bull(&json!({})));
+    }
 
     #[test]
     fn tag_filter_generation_retains_decoded_texture() {

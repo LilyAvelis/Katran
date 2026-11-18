@@ -14,6 +14,9 @@ page. Readable black-on-white placements can appear near a recognition region
 or in the closest available page margin. Matching colored numbers link the
 source regions to margin cards. Single-page output opens in QuickLook;
 multiple selected pages share one collection and a built-in page viewer.
+The viewer keeps its page frame stable and supports the same anchored zoom
+as image preview. BULL cards show a BK badge. Image translation settings
+offer a numbered-only layout.
 See [Translate](../patch-4.0/TRANSLATE.md).
 
 ## Katran 4.0 · Local static image upscale

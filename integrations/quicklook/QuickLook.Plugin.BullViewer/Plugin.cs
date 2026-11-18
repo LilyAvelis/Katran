@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -14,9 +15,15 @@ namespace QuickLook.Plugin.BullViewer
         private BullDocument document;
         private ContextObject context;
         private Image image;
+        private Canvas viewport;
+        private MatrixTransform imageTransform;
         private TextBlock status;
         private Button previous, next;
-        private int page, generation;
+        private int page = -1, generation;
+        private double fitScale = 1;
+        private bool needsFit, dragging;
+        private Point dragStart;
+        private Matrix dragMatrix;
         private bool closed;
         public int Priority { get { return 1; } }
         public void Init() { }
@@ -41,14 +48,22 @@ namespace QuickLook.Plugin.BullViewer
             context.Title = Path.GetFileName(path); context.IsBusy = true;
             var grid = new Grid(); grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); grid.RowDefinitions.Add(new RowDefinition());
             var toolbar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(8) };
-            previous = new Button { Content = "← Previous", Margin = new Thickness(4), Padding = new Thickness(10, 4, 10, 4), IsEnabled = false };
-            next = new Button { Content = "Next →", Margin = new Thickness(4), Padding = new Thickness(10, 4, 10, 4), IsEnabled = false };
+            previous = new Button { Content = "← Previous", Margin = new Thickness(4), Padding = new Thickness(10, 4, 10, 4), IsEnabled = false, Focusable = false };
+            next = new Button { Content = "Next →", Margin = new Thickness(4), Padding = new Thickness(10, 4, 10, 4), IsEnabled = false, Focusable = false };
             status = new TextBlock { Text = "Loading…", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) };
             previous.Click += (s, e) => ShowPage(page - 1); next.Click += (s, e) => ShowPage(page + 1);
             toolbar.Children.Add(previous); toolbar.Children.Add(status); toolbar.Children.Add(next); grid.Children.Add(toolbar);
-            image = new Image { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
-            var scroll = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = image };
-            Grid.SetRow(scroll, 1); grid.Children.Add(scroll); context.ViewerContent = grid;
+            imageTransform = new MatrixTransform();
+            image = new Image { Stretch = Stretch.Fill, RenderTransform = imageTransform, IsHitTestVisible = false };
+            viewport = new Canvas { ClipToBounds = true, Background = Brushes.Transparent };
+            viewport.Children.Add(image);
+            viewport.SizeChanged += (s, e) => { if (needsFit) FitImage(); };
+            viewport.PreviewMouseWheel += Zoom;
+            viewport.MouseLeftButtonDown += BeginPan;
+            viewport.MouseMove += Pan;
+            viewport.MouseLeftButtonUp += EndPan;
+            viewport.LostMouseCapture += (s, e) => { dragging = false; };
+            Grid.SetRow(viewport, 1); grid.Children.Add(viewport); context.ViewerContent = grid;
             BullDocument opened = null;
             try
             {
@@ -67,7 +82,7 @@ namespace QuickLook.Plugin.BullViewer
         {
             var current = document;
             if (closed || current == null || index < 0 || index >= current.Count) return;
-            int token = ++generation; page = index;
+            int token = ++generation;
             previous.IsEnabled = next.IsEnabled = false; status.Text = "Loading page…"; context.IsBusy = true;
             try
             {
@@ -80,20 +95,65 @@ namespace QuickLook.Plugin.BullViewer
                     }
                 });
                 if (closed || token != generation) return;
-                image.Source = bitmap; status.Text = string.Format("{0} / {1}", index + 1, current.Count);
+                // One UI turn commits the new ready image, page identity and transform.
+                image.Source = bitmap; image.Width = bitmap.PixelWidth; image.Height = bitmap.PixelHeight;
+                page = index; needsFit = true; FitImage();
+                status.Text = string.Format("{0} / {1}", index + 1, current.Count);
                 previous.IsEnabled = index > 0; next.IsEnabled = index + 1 < current.Count; context.IsBusy = false;
             }
             catch (Exception ex)
             {
-                if (!closed && token == generation) { image.Source = null; status.Text = "Cannot open page: " + ex.Message; previous.IsEnabled = index > 0; next.IsEnabled = index + 1 < current.Count; context.IsBusy = false; }
+                if (!closed && token == generation) { status.Text = "Cannot open page: " + ex.Message; previous.IsEnabled = page > 0; next.IsEnabled = page >= 0 && page + 1 < current.Count; context.IsBusy = false; }
             }
+        }
+        private void FitImage()
+        {
+            if (viewport == null || image == null || image.Source == null || viewport.ActualWidth <= 0 || viewport.ActualHeight <= 0) return;
+            fitScale = Math.Min(viewport.ActualWidth / image.Width, viewport.ActualHeight / image.Height);
+            if (fitScale <= 0 || double.IsNaN(fitScale) || double.IsInfinity(fitScale)) return;
+            imageTransform.Matrix = new Matrix(fitScale, 0, 0, fitScale,
+                (viewport.ActualWidth - image.Width * fitScale) / 2,
+                (viewport.ActualHeight - image.Height * fitScale) / 2);
+            needsFit = false;
+        }
+        private void Zoom(object sender, MouseWheelEventArgs e)
+        {
+            if (image == null || image.Source == null || needsFit) return;
+            Point anchor = (Keyboard.Modifiers & ModifierKeys.Control) != 0
+                ? new Point(viewport.ActualWidth / 2, viewport.ActualHeight / 2)
+                : e.GetPosition(viewport);
+            Matrix matrix = imageTransform.Matrix;
+            double scale = Math.Max(fitScale * 0.25, Math.Min(fitScale * 32, matrix.M11 * Math.Pow(1.12, e.Delta / 120.0)));
+            double ratio = scale / matrix.M11;
+            matrix.OffsetX = anchor.X - (anchor.X - matrix.OffsetX) * ratio;
+            matrix.OffsetY = anchor.Y - (anchor.Y - matrix.OffsetY) * ratio;
+            matrix.M11 = matrix.M22 = scale;
+            imageTransform.Matrix = matrix; e.Handled = true;
+        }
+        private void BeginPan(object sender, MouseButtonEventArgs e)
+        {
+            if (image == null || image.Source == null || !viewport.CaptureMouse()) return;
+            dragging = true; dragStart = e.GetPosition(viewport); dragMatrix = imageTransform.Matrix; e.Handled = true;
+        }
+        private void Pan(object sender, MouseEventArgs e)
+        {
+            if (!dragging) return;
+            Point point = e.GetPosition(viewport); Matrix matrix = dragMatrix;
+            matrix.OffsetX += point.X - dragStart.X; matrix.OffsetY += point.Y - dragStart.Y;
+            imageTransform.Matrix = matrix; e.Handled = true;
+        }
+        private void EndPan(object sender, MouseButtonEventArgs e)
+        {
+            if (!dragging) return;
+            dragging = false; viewport.ReleaseMouseCapture(); e.Handled = true;
         }
         public void Cleanup()
         {
             closed = true; generation++;
             var old = document; document = null;
             if (old != null) Task.Run(() => old.Dispose());
-            image = null; previous = next = null; status = null; context = null;
+            if (viewport != null && viewport.IsMouseCaptured) viewport.ReleaseMouseCapture();
+            dragging = false; image = null; viewport = null; imageTransform = null; previous = next = null; status = null; context = null;
         }
     }
 }

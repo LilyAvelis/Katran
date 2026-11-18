@@ -166,10 +166,14 @@ impl Shelf {
                                 rect.left_center() + egui::vec2(16.0, 0.0),
                                 egui::vec2(18.0, 18.0),
                             );
-                            icon.size(18.0)
-                                .image()
-                                .tint(Color32::from_gray(200))
-                                .paint_at(ui, icon_rect);
+                            if super::images::is_bull(event) {
+                                super::images::paint_bull_badge(ui, icon_rect);
+                            } else {
+                                icon.size(18.0)
+                                    .image()
+                                    .tint(Color32::from_gray(200))
+                                    .paint_at(ui, icon_rect);
+                            }
                             let line = egui::Rect::from_min_max(
                                 rect.min + egui::vec2(32.0, 0.0),
                                 rect.max - egui::vec2(24.0, 0.0),

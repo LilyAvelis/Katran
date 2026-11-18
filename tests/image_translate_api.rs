@@ -24,6 +24,7 @@ fn target_follows_interface_and_explicit_choice_persists() {
     let mut settings: Settings =
         serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
     assert_eq!(settings.translation_target, TranslationTarget::Interface);
+    assert!(!settings.translation_numbered_only);
     assert_eq!(
         settings.translation_target.language(Language::English),
         Language::English
@@ -34,11 +35,13 @@ fn target_follows_interface_and_explicit_choice_persists() {
     );
     settings.language = Language::English;
     settings.translation_target = TranslationTarget::Russian;
+    settings.translation_numbered_only = true;
     call(&mut service, Command::SetSettings { settings });
     drop(service);
     let mut service = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
     let settings: Settings =
         serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
+    assert!(settings.translation_numbered_only);
     assert_eq!(
         settings.translation_target.language(settings.language),
         Language::Russian
@@ -111,6 +114,19 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
         assert_eq!(result["skipped_blocks"], 0);
         results.push(result);
     }
+    let mut numbered_settings: Settings =
+        serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
+    numbered_settings.translation_numbered_only = true;
+    call(
+        &mut service,
+        Command::SetSettings {
+            settings: numbered_settings,
+        },
+    );
+    let numbered = translate_page(&mut service, &input, ImageTranslationSource::Japanese);
+    assert_eq!(numbered["fallback_blocks"], numbered["rendered_blocks"]);
+    assert_eq!(numbered["skipped_blocks"], 0);
+    results.push(numbered);
     let collection = complex.as_ref().map(|complex| {
         let result = reverse_batch(&mut service, &input, complex);
         results.push(result.clone());
@@ -170,7 +186,15 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
                 .unwrap();
             image::load_from_memory(&bytes).unwrap().width()
         };
-        assert!(read(&mut reopened, 0) > read(&mut reopened, 1));
+        let simple_width = image::image_dimensions(std::path::Path::new(&input))
+            .unwrap()
+            .0;
+        let second_width = read(&mut reopened, 1);
+        assert!(read(&mut reopened, 0) > second_width);
+        assert!(
+            second_width > simple_width,
+            "the batch must use the numbered mode too"
+        );
     }
 }
 

@@ -27,6 +27,13 @@ The gesture's direction, or Ctrl click order, determines the saved sequence.
 The Windows QuickLook adapter lives in `integrations/quicklook`. Katran exports
 a named snapshot to the external viewer. Its internal page viewer can reopen
 the same collection without an external app.
+Katran marks collection cards with a BK badge. When paging, the preview
+retains the last ready page in a fixed viewport until the requested page
+arrives. Wheel zoom anchors at the pointer, Ctrl+wheel at the center, and
+dragging pans the enlarged page. A successfully loaded new page starts fitted.
+The external QuickLook viewer also uses a clipped viewport, retains the last
+ready page and supports anchored zoom. Its updated plugin was built and
+checked with the bounded parser fixtures and WPF image decoding.
 The local .NET Framework 4.6.2 adapter was built against the installed
 QuickLook 4.4 bridge and placed in its user plugin directory. It loads on
 QuickLook startup. The synthetic reader checks cover valid two-page data,

@@ -48,6 +48,11 @@ size limits. The result reports margin entries, panel entries and skips.
 Bright matching numbers identify translations on the margins and the
 corresponding recognized areas on the image. When the image has no safe
 space for a number, its card shows the original coordinates.
+Enable **Numbered annotations only** in Settings → AI → Image translation
+to keep original lettering and put every translation in a numbered card.
+The renderer bypasses letter removal and in-bubble layout in this mode.
+The setting applies to newly submitted single-page and batch jobs. The
+hybrid layout remains the default.
 Nothing is published if no lettering can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
 The Katran UI opens a newly saved single-page PNG in QuickLook. QuickLook
@@ -124,6 +129,9 @@ path was about 5.2 times as fast. The detector stage by itself was about
 With the numbered markers, a later API run measured 14.2 s cold simple,
 1.2 s warm simple, and 3.7 s warm complex. All twelve margin cards in the
 complex fixture had matching markers. Cold initialization varied between runs.
+On the complex fixture, a renderer-only probe measured 1.24 s for the
+hybrid layout and 0.53 s for numbered-only. The latter produced 19 paired
+markers and preserved every source pixel outside the markers in that probe.
 
 On the approved simple page, separate cold workers spent 7.6 s in Paddle
 detection and recognition, 9.6 s in Manga OCR, and 0.5 s rendering. The earlier

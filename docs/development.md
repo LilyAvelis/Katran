@@ -13,7 +13,9 @@ request carries the page's numbered regions. The renderer can add a readable
 white card near the original text or in the page margin for regions that
 cannot be lettered in place. Matching colored numbers link source regions to
 margin cards. Batch translation follows the gesture order and saves one
-collection. See [Translate](patch-4.0/TRANSLATE.md) and
+collection. Numbered-only mode skips in-page typesetting. The BULL viewer
+retains its last ready page while loading and shares the image-preview zoom
+geometry. See [Translate](patch-4.0/TRANSLATE.md) and
 [the local BULL contract](patch-4.0/BULL.md).
 
 Static image upscale runs in its own job lane. `upscale_components.rs`

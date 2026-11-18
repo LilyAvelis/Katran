@@ -104,3 +104,8 @@ standalone Rust codec, Vela owned marker layout and the external QuickLook
 adapter, and Fenna owned Katran preview UX. Polly owned selection order,
 batch jobs, publication, package integration and verification. The requested
 Luna profile for Kiki was unavailable in this session.
+
+After owner acceptance of batch output and numbering, Fenna owned the Katran
+BULL viewport, Nemi the BK badge, and Vela the numbered-only lettering mode
+and QuickLook viewport. Polly owned the persisted preference, job routing,
+and verification.

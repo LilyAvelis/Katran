@@ -38,12 +38,18 @@ white cards near the source regions or along the page sides. Use the lower
 panel if side placements do not fit the output limits. Match side and lower
 cards to small colored source markers. Launch QuickLook for a committed
 single PNG using a named snapshot and the committed revision.
+Settings → AI can choose numbered-only output. Snapshot that setting at job
+submission for both single pages and batches. In numbered-only mode preserve
+the source lettering and artwork outside the paired markers.
 
 Translation batches follow Ctrl click order or the direction of the Shift
 gesture and publish one ordered collection. The local BULL v1 candidate
 is independent of translation. Keep validation in the collection codec and
 at each image decoding boundary. A failed page reports its original input
 position; successful pages remain in relative order.
+Keep the collection viewport stable while a page is pending. Retain the last
+ready texture with its own index until the requested page is ready. Wheel
+zoom anchors at the pointer, and Ctrl+wheel anchors at the viewport center.
 
 ## Ready text preview retention · 2026-11-18
 

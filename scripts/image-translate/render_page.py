@@ -180,7 +180,7 @@ def _panel_wrap(text, font, draw, width):
     return lines or None
 
 
-def render(source, blocks, output, font):
+def render(source, blocks, output, font, numbered_only=False):
     original = Image.open(source).convert("RGBA")
     alpha = original.getchannel("A")
     rgb = np.asarray(original.convert("RGB"))
@@ -214,13 +214,20 @@ def render(source, blocks, output, font):
             left, top, right, bottom = box
             if not (0 <= left < right <= width and 0 <= top < bottom <= height):
                 raise ValueError("text_box exceeds image bounds or is empty")
-            records.append({"region": region, "box": box, "explicit": "text_box" in block,
+            polygon_boxes = []
+            for polygon in polygons:
+                px, py, pw, ph = cv2.boundingRect(polygon)
+                polygon_boxes.append((px, py, px + pw, py + ph))
+            records.append({"region": region, "box": box, "polygon_boxes": polygon_boxes,
+                            "explicit": "text_box" in block,
                             "text": block.get("text"), "ink": None})
         except (AttributeError, KeyError, TypeError, ValueError, cv2.error) as exc:
             raise ValueError(f"block {index + 1}: invalid geometry: {exc}") from exc
 
     active = set()
     for index, record in enumerate(records):
+        if numbered_only:
+            break
         try:
             if not isinstance(record["text"], str) or not record["text"].strip():
                 raise ValueError("text must be nonempty")
@@ -303,67 +310,68 @@ def render(source, blocks, output, font):
     panel_font = ImageFont.truetype(str(font), 16)
     panel_draw = ImageDraw.Draw(Image.new("RGB", (1, 1), "white"))
     line_height = max(22, panel_draw.textbbox((0, 0), "Ag", font=panel_font)[3] + 7)
-    occupied = np.zeros((height, width), dtype=np.uint8)
-    for record in records:
-        occupied = cv2.bitwise_or(occupied, record["region"])
-    for (x0, y0, x1, y1), _ in placements:
-        occupied[y0:y1, x0:x1] = 255
-    opaque = np.asarray(alpha)
-    blocked = (np.min(rgb, axis=2) < 250) | (opaque < 250) | (occupied != 0)
-    blocked = cv2.dilate(blocked.astype(np.uint8), np.ones((5, 5), dtype=np.uint8))
-    integral = cv2.integral(blocked, sdepth=cv2.CV_32S)
     near = []
-    for index, record in enumerate(records):
-        if index in active or not isinstance(record["text"], str) or not record["text"].strip():
-            continue
-        # Ambiguous overlapping source areas always remain unchanged.
-        if any(np.any((record["region"] != 0) & (other["region"] != 0))
-               for pos, other in enumerate(records) if pos != index):
-            continue
-        x0, y0, x1, y1 = record["box"]
-        best = None
-        for box_width in (80, 120, 160, 200, 240):
-            if box_width > width:
+    if not numbered_only:
+        occupied = np.zeros((height, width), dtype=np.uint8)
+        for record in records:
+            occupied = cv2.bitwise_or(occupied, record["region"])
+        for (x0, y0, x1, y1), _ in placements:
+            occupied[y0:y1, x0:x1] = 255
+        opaque = np.asarray(alpha)
+        blocked = (np.min(rgb, axis=2) < 250) | (opaque < 250) | (occupied != 0)
+        blocked = cv2.dilate(blocked.astype(np.uint8), np.ones((5, 5), dtype=np.uint8))
+        integral = cv2.integral(blocked, sdepth=cv2.CV_32S)
+        for index, record in enumerate(records):
+            if index in active or not isinstance(record["text"], str) or not record["text"].strip():
                 continue
-            lines = _panel_wrap(record["text"], panel_font, panel_draw, box_width - 16)
-            if not lines:
+            # Ambiguous overlapping source areas always remain unchanged.
+            if any(np.any((record["region"] != 0) & (other["region"] != 0))
+                   for pos, other in enumerate(records) if pos != index):
                 continue
-            box_height = len(lines) * line_height + 12
-            if box_height > min(200, height):
-                continue
-            # Check a bounded grid around the source; all pixels must be white.
-            for y in range(max(0, y0 - 160), min(height - box_height, y1 + 160) + 1, 12):
-                for x in range(max(0, x0 - 160), min(width - box_width, x1 + 160) + 1, 12):
-                    right, bottom = x + box_width, y + box_height
-                    if integral[bottom, right] - integral[y, right] - integral[bottom, x] + integral[y, x]:
-                        continue
-                    if any(_overlaps((x, y, right, bottom), old[0]) for old in near):
-                        continue
-                    distance = abs((x + right) / 2 - (x0 + x1) / 2) + abs((y + bottom) / 2 - (y0 + y1) / 2)
-                    if best is None or distance < best[0]:
-                        best = (distance, (x, y, right, bottom), lines)
-        if best is not None:
-            _, box, lines = best
-            near.append((box, lines, index, panel_font, False))
-        else:
-            # Compact opaque label directly over a recognized text rectangle.
-            # Any darkness outside this OCR region may be art: do not cover it.
-            box = (x0, y0, x1, y1)
-            w, h = x1 - x0, y1 - y0
-            patch = rgb[y0:y1, x0:x1]
-            own = record["region"][y0:y1, x0:x1] != 0
-            others = any(np.any(item["region"][y0:y1, x0:x1])
-                         for pos, item in enumerate(records) if pos != index)
-            collision = any(_overlaps(box, item[0]) for item in placements + near)
-            if (w >= 55 and h >= 35 and w * h <= min(24000, width * height * 0.02)
-                    and not others and not collision and np.all(opaque[y0:y1, x0:x1] >= 250)
-                    and np.mean(np.min(patch, axis=2) >= 235) >= 0.90
-                    and np.mean((np.min(patch, axis=2) < 220) & ~own) <= 0.005):
-                face = ImageFont.truetype(str(font), 14)
-                lines = _panel_wrap(record["text"], face, panel_draw, w - 12)
-                compact_line_height = 19
-                if lines and len(lines) * compact_line_height + 10 <= h:
-                    near.append((box, lines, index, face, True))
+            x0, y0, x1, y1 = record["box"]
+            best = None
+            for box_width in (80, 120, 160, 200, 240):
+                if box_width > width:
+                    continue
+                lines = _panel_wrap(record["text"], panel_font, panel_draw, box_width - 16)
+                if not lines:
+                    continue
+                box_height = len(lines) * line_height + 12
+                if box_height > min(200, height):
+                    continue
+                # Check a bounded grid around the source; all pixels must be white.
+                for y in range(max(0, y0 - 160), min(height - box_height, y1 + 160) + 1, 12):
+                    for x in range(max(0, x0 - 160), min(width - box_width, x1 + 160) + 1, 12):
+                        right, bottom = x + box_width, y + box_height
+                        if integral[bottom, right] - integral[y, right] - integral[bottom, x] + integral[y, x]:
+                            continue
+                        if any(_overlaps((x, y, right, bottom), old[0]) for old in near):
+                            continue
+                        distance = abs((x + right) / 2 - (x0 + x1) / 2) + abs((y + bottom) / 2 - (y0 + y1) / 2)
+                        if best is None or distance < best[0]:
+                            best = (distance, (x, y, right, bottom), lines)
+            if best is not None:
+                _, box, lines = best
+                near.append((box, lines, index, panel_font, False))
+            else:
+                # Compact opaque label directly over a recognized text rectangle.
+                # Any darkness outside this OCR region may be art: do not cover it.
+                box = (x0, y0, x1, y1)
+                w, h = x1 - x0, y1 - y0
+                patch = rgb[y0:y1, x0:x1]
+                own = record["region"][y0:y1, x0:x1] != 0
+                others = any(np.any(item["region"][y0:y1, x0:x1])
+                             for pos, item in enumerate(records) if pos != index)
+                collision = any(_overlaps(box, item[0]) for item in placements + near)
+                if (w >= 55 and h >= 35 and w * h <= min(24000, width * height * 0.02)
+                        and not others and not collision and np.all(opaque[y0:y1, x0:x1] >= 250)
+                        and np.mean(np.min(patch, axis=2) >= 235) >= 0.90
+                        and np.mean((np.min(patch, axis=2) < 220) & ~own) <= 0.005):
+                    face = ImageFont.truetype(str(font), 14)
+                    lines = _panel_wrap(record["text"], face, panel_draw, w - 12)
+                    compact_line_height = 19
+                    if lines and len(lines) * compact_line_height + 10 <= h:
+                        near.append((box, lines, index, face, True))
 
     for (left, top, right, bottom), (face, text, spacing, text_bounds) in placements:
         x = left + (right - left - (text_bounds[2] - text_bounds[0])) / 2 - text_bounds[0]
@@ -467,16 +475,17 @@ def render(source, blocks, output, font):
     marker_for = {}
     outside_indices = sorted(side_indices | {item[0] for item in panel_items})
     for index in outside_indices:
-        x0, y0, x1, y1 = records[index]["box"]
-        cx = (x0 + x1) // 2 - marker_width // 2
-        cy = (y0 + y1) // 2 - marker_height // 2
         candidates = []
-        for delta in (0, 26, -26, 52, -52, 78, -78, 104, -104):
-            candidates.extend(((cx + delta, y0 - marker_height - 4),
-                               (cx + delta, y1 + 4),
-                               (x0 - marker_width - 4, cy + delta),
-                               (x1 + 4, cy + delta)))
-        for x, y in candidates:
+        for x0, y0, x1, y1 in records[index]["polygon_boxes"][:32]:
+            cx = (x0 + x1) // 2 - marker_width // 2
+            cy = (y0 + y1) // 2 - marker_height // 2
+            for delta in (0, 26, -26, 52, -52, 78, -78, 104, -104):
+                candidates.extend(((abs(delta), 0, cx + delta, y0 - marker_height - 4),
+                                   (abs(delta), 1, cx + delta, y1 + 4),
+                                   (abs(delta), 2, x0 - marker_width - 4, cy + delta),
+                                   (abs(delta), 3, x1 + 4, cy + delta)))
+        candidates.sort()
+        for _, _, x, y in candidates:
             right, bottom = x + marker_width, y + marker_height
             if x < 0 or y < 0 or right > width or bottom > height:
                 continue
@@ -554,10 +563,11 @@ def main():
     parser.add_argument("output")
     parser.add_argument("font")
     parser.add_argument("--report", help="Write rendered and skipped block counts as JSON")
+    parser.add_argument("--numbered-only", action="store_true", help="Keep the page intact and put every translation on numbered cards")
     args = parser.parse_args()
     with open(args.blocks_json, encoding="utf-8") as stream:
         blocks = json.load(stream)
-    report = render(args.source, blocks, args.output, args.font)
+    report = render(args.source, blocks, args.output, args.font, numbered_only=args.numbered_only)
     if args.report:
         with open(args.report, "x", encoding="utf-8") as receipt:
             json.dump(report, receipt)

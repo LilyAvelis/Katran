@@ -23,6 +23,8 @@ struct Collection {
     count: Option<usize>,
     pending: Option<(katran::domain_jobs::JobId, usize)>,
     texture: Option<egui::TextureHandle>,
+    ready_index: Option<usize>,
+    zoom: katran::preview_view::State,
     error: String,
 }
 
@@ -57,6 +59,10 @@ impl State {
     pub(super) fn collection_open(&self) -> bool {
         self.collection.is_some()
     }
+}
+
+fn collection_canvas_size(viewport: egui::Vec2) -> egui::Vec2 {
+    egui::vec2((viewport.x * 0.8).max(1.0), (viewport.y * 0.7).max(1.0))
 }
 
 fn decode_collection_page(encoded: &str) -> Result<egui::ColorImage, String> {
@@ -98,6 +104,8 @@ impl Shelf {
             count: None,
             pending: None,
             texture: None,
+            ready_index: None,
+            zoom: katran::preview_view::State::default(),
             error: String::new(),
         });
         self.request_translation_page(0, ctx);
@@ -119,7 +127,6 @@ impl Shelf {
             self.call(Command::CancelJob { job_id });
         }
         collection.index = index;
-        collection.texture = None;
         collection.error.clear();
         let response = self.call(Command::BeginJob {
             command: Box::new(Command::TranslationCollectionPage {
@@ -170,7 +177,9 @@ impl Shelf {
                                             "translated-collection-page",
                                             image,
                                             egui::TextureOptions::LINEAR,
-                                        ))
+                                        ));
+                                        collection.ready_index = Some(expected);
+                                        collection.zoom = katran::preview_view::State::default();
                                     }
                                     Err(error) => collection.error = error,
                                 }
@@ -200,11 +209,13 @@ impl Shelf {
             ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
         let next_key =
             ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
-        let collection = self.upscale.collection.as_ref().unwrap();
+        let collection = self.upscale.collection.as_mut().unwrap();
         let mut previous = previous_key;
         let mut next = next_key;
         let mut close = close_key;
+        let canvas_size = collection_canvas_size(ctx.content_rect().size());
         let modal = egui::Modal::new(egui::Id::new("translated-collection")).show(ctx, |ui| {
+            ui.set_min_width(canvas_size.x);
             ui.heading(tr("Перевод страниц", "Translated pages"));
             ui.horizontal(|ui| {
                 previous |= ui
@@ -213,14 +224,18 @@ impl Shelf {
                         egui::Button::new(tr("Назад", "Previous")),
                     )
                     .clicked();
-                ui.label(format!(
-                    "{} / {}",
-                    collection.index + 1,
-                    collection
-                        .count
-                        .map(|n| n.to_string())
-                        .unwrap_or_else(|| "…".into())
-                ));
+                let shown = collection
+                    .ready_index
+                    .map(|n| (n + 1).to_string())
+                    .unwrap_or_else(|| "…".into());
+                let total = collection
+                    .count
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "…".into());
+                ui.add_sized(
+                    [90.0, ui.spacing().interact_size.y],
+                    egui::Label::new(format!("{shown} / {total}")),
+                );
                 next |= ui
                     .add_enabled(
                         collection.count.is_some_and(|n| collection.index + 1 < n),
@@ -229,20 +244,115 @@ impl Shelf {
                     .clicked();
                 close |= ui.button(tr("Закрыть", "Close")).clicked();
             });
-            if collection.pending.is_some() {
-                ui.spinner();
-            }
-            if !collection.error.is_empty() {
-                ui.colored_label(egui::Color32::LIGHT_RED, &collection.error);
-            }
+            let (canvas, response) =
+                ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
+            #[cfg(test)]
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
+            let painter = ui.painter().with_clip_rect(canvas);
+            painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
             if let Some(texture) = collection.texture.as_ref() {
-                let available = ctx.content_rect().size() * 0.8;
                 let original = texture.size_vec2();
-                let scale = (available.x / original.x)
-                    .min((available.y - 80.0).max(1.0) / original.y)
-                    .min(1.0);
-                ui.add(egui::Image::new((texture.id(), original * scale)));
+                let fit_scale = (canvas.width() / original.x).min(canvas.height() / original.y);
+                let fitted = original * fit_scale;
+                use katran::preview_view::{Point, Size};
+                let viewport = Size {
+                    width: canvas.width(),
+                    height: canvas.height(),
+                };
+                let size = Size {
+                    width: fitted.x,
+                    height: fitted.y,
+                };
+                if response.hovered() {
+                    let (wheel, center_zoom, cursor) = ui.input(|i| {
+                        (
+                            i.smooth_scroll_delta().y,
+                            i.zoom_delta(),
+                            i.pointer.hover_pos(),
+                        )
+                    });
+                    if wheel.abs() > 0.01
+                        && let Some(cursor) = cursor
+                    {
+                        let _ = collection.zoom.zoom(
+                            (wheel * 0.003).exp(),
+                            Point {
+                                x: cursor.x - canvas.min.x,
+                                y: cursor.y - canvas.min.y,
+                            },
+                            viewport,
+                            size,
+                        );
+                    }
+                    if (center_zoom - 1.0).abs() > 0.001 {
+                        let _ = collection.zoom.zoom(
+                            center_zoom,
+                            Point {
+                                x: viewport.width / 2.0,
+                                y: viewport.height / 2.0,
+                            },
+                            viewport,
+                            size,
+                        );
+                    }
+                }
+                if response.dragged_by(egui::PointerButton::Primary)
+                    || response.dragged_by(egui::PointerButton::Middle)
+                {
+                    let delta = ui.input(|i| i.pointer.delta());
+                    let _ = collection.zoom.pan(
+                        Point {
+                            x: delta.x,
+                            y: delta.y,
+                        },
+                        viewport,
+                        size,
+                    );
+                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
+                if let Ok(geometry) = collection.zoom.geometry(viewport, size) {
+                    if let (Some(left), Some(top), Some(width), Some(height)) = (
+                        geometry["left"].as_f64(),
+                        geometry["top"].as_f64(),
+                        geometry["width"].as_f64(),
+                        geometry["height"].as_f64(),
+                    ) {
+                        let rect = egui::Rect::from_min_size(
+                            canvas.min + egui::vec2(left as f32, top as f32),
+                            egui::vec2(width as f32, height as f32),
+                        );
+                        painter.image(
+                            texture.id(),
+                            rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
             }
+            if collection.pending.is_some() || !collection.error.is_empty() {
+                let text = if collection.pending.is_some() {
+                    format!(
+                        "{} {}…",
+                        tr("Загрузка страницы", "Loading page"),
+                        collection.index + 1
+                    )
+                } else {
+                    collection.error.clone()
+                };
+                let anchor = canvas.left_top() + egui::vec2(12.0, 12.0);
+                painter.text(
+                    anchor,
+                    egui::Align2::LEFT_TOP,
+                    text,
+                    egui::FontId::proportional(15.0),
+                    egui::Color32::LIGHT_RED,
+                );
+            }
+        });
+        #[cfg(test)]
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("collection-test-modal"), modal.response.rect)
         });
         let current = collection.index;
         let count = collection.count;
@@ -556,6 +666,123 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::actions::upscale_operation;
+    #[test]
+    fn collection_canvas_and_modal_keep_size_when_page_arrives() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.upscale.collection = Some(Collection {
+            id: 1,
+            revision: "test".into(),
+            index: 0,
+            count: Some(2),
+            pending: None,
+            texture: None,
+            ready_index: None,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        });
+        let frame = |app: &mut Shelf| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |_| app.translation_collection_ui(&ctx),
+            );
+            output.textures_delta.clear();
+            ctx.data(|d| {
+                (
+                    d.get_temp::<egui::Rect>(egui::Id::new("collection-test-canvas"))
+                        .unwrap(),
+                    d.get_temp::<egui::Rect>(egui::Id::new("collection-test-modal"))
+                        .unwrap(),
+                )
+            })
+        };
+        frame(&mut app);
+        let before = frame(&mut app);
+        let texture = ctx.load_texture(
+            "fixture-page",
+            egui::ColorImage::from_rgba_unmultiplied([2, 1], &[255; 8]),
+            egui::TextureOptions::LINEAR,
+        );
+        let collection = app.upscale.collection.as_mut().unwrap();
+        collection.texture = Some(texture);
+        collection.ready_index = Some(0);
+        frame(&mut app);
+        let after = frame(&mut app);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn failed_new_page_request_keeps_the_last_ready_texture() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        let texture = ctx.load_texture(
+            "fixture-ready",
+            egui::ColorImage::from_rgba_unmultiplied([1, 1], &[255; 4]),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        app.upscale.collection = Some(Collection {
+            id: 99999,
+            revision: "missing".into(),
+            index: 0,
+            count: Some(2),
+            pending: None,
+            texture: Some(texture),
+            ready_index: Some(0),
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        });
+        app.request_translation_page(1, &ctx);
+        let collection = app.upscale.collection.as_ref().unwrap();
+        assert_eq!(collection.index, 1);
+        assert_eq!(collection.ready_index, Some(0));
+        assert_eq!(collection.texture.as_ref().unwrap().id(), texture_id);
+        assert!(!collection.error.is_empty());
+    }
+
+    #[test]
+    fn collection_zoom_uses_shared_anchor_and_pan_limits() {
+        use katran::preview_view::{Point, Size, State};
+        let viewport = Size {
+            width: 600.0,
+            height: 400.0,
+        };
+        let fitted = Size {
+            width: 400.0,
+            height: 400.0,
+        };
+        let mut cursor_zoom = State::default();
+        cursor_zoom
+            .zoom(2.0, Point { x: 450.0, y: 200.0 }, viewport, fitted)
+            .unwrap();
+        assert!(cursor_zoom.offset.x < 0.0);
+        let mut center_zoom = State::default();
+        center_zoom
+            .zoom(2.0, Point { x: 300.0, y: 200.0 }, viewport, fitted)
+            .unwrap();
+        assert_eq!(center_zoom.offset.x, 0.0);
+        center_zoom
+            .pan(
+                Point {
+                    x: 10000.0,
+                    y: 10000.0,
+                },
+                viewport,
+                fitted,
+            )
+            .unwrap();
+        assert_eq!(center_zoom.offset.x, 100.0);
+        assert_eq!(center_zoom.offset.y, 200.0);
+    }
+
     #[test]
     fn translation_actions_keep_sources_separate() {
         use katran::api::ImageTranslationSource::*;
