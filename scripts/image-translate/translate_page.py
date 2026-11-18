@@ -127,7 +127,7 @@ def main():
     parser.add_argument("--target", choices=("ru", "en"), default="ru")
     parser.add_argument("--manga", action="store_true")
     parser.add_argument("--ordered", action="store_true", help="Use pre-grouped regions for diagnostics")
-    parser.add_argument("--model", default="qwen3:30b")
+    parser.add_argument("--model", default="qwen3:1.7b")
     parser.add_argument("--port", type=int, default=11434)
     args = parser.parse_args()
     with args.ocr.open("rb") as source:

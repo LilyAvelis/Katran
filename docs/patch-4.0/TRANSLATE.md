@@ -41,7 +41,7 @@ the locally detected components. The default follows Katran's interface
 language at submission. Output is a separate, managed PNG in Translate.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
-The action uses PP-OCRv5, Manga OCR and the installed `qwen3:30b` tag.
+The action uses PP-OCRv5, Manga OCR and the installed `qwen3:1.7b` tag.
 Japanese is the only exposed recognition language for this integration.
 The worker embeds the tested scripts, starts an isolated loopback Ollama
 with cloud disabled, and contains its Windows process tree. Nothing is
@@ -52,6 +52,9 @@ downloaded on invoking the action. Setup/Portable can point
 reuse the existing probe files. Manga recognition and rendering use the
 existing portable ComfyUI Python. `KATRAN_OLLAMA_EXE` can point at a local
 executable, and `OLLAMA_MODELS` selects its model store.
+If the active profile has the model under `translate-ollama`, Katran uses
+that store first and passes its exact path to its private Ollama process.
+This avoids dependence on environment variables inherited from the launcher.
 
 ## Local one-page probe
 

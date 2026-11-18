@@ -20,7 +20,7 @@ pub struct Status {
     pub manga_python: Option<PathBuf>,
     pub manga_model: Option<PathBuf>,
     pub ollama_exe: Option<PathBuf>,
-    pub ollama_tag_found: bool,
+    pub ollama_models: Option<PathBuf>,
 }
 pub struct Components {
     pub paddle_python: PathBuf,
@@ -28,6 +28,7 @@ pub struct Components {
     pub manga_python: PathBuf,
     pub manga_model: PathBuf,
     pub ollama_exe: PathBuf,
+    pub ollama_models: PathBuf,
 }
 fn file(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
@@ -149,18 +150,23 @@ fn tag_manifest(tag: &str) -> Option<PathBuf> {
     if !valid(name) || !valid(version) {
         return None;
     }
-    let models = if std::env::var_os("OLLAMA_MODELS").is_some() {
-        env_path("OLLAMA_MODELS")?
-    } else {
-        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
-        PathBuf::from(home).join(".ollama/models")
-    };
     Some(
-        models
-            .join("manifests/registry.ollama.ai/library")
+        PathBuf::from("manifests/registry.ollama.ai/library")
             .join(name)
             .join(version),
     )
+}
+fn find_ollama_models(profile: &Path, manifest: &Path) -> Option<PathBuf> {
+    let default = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(|home| PathBuf::from(home).join(".ollama/models"));
+    [
+        Some(profile.join("translate-ollama")),
+        env_path("OLLAMA_MODELS"),
+        default,
+    ]
+    .into_iter()
+    .flatten()
+    .find(|root| file(&root.join(manifest)))
 }
 /// Report local files only. A model manifest is not evidence of valid blobs or inference.
 pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
@@ -191,7 +197,7 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
         manga_python: crate::upscale_components::resolve_python(),
         manga_model: manga_ok.then_some(manga),
         ollama_exe: ollama_executable(),
-        ollama_tag_found: file(&manifest),
+        ollama_models: find_ollama_models(profile, &manifest),
     })
 }
 /// Resolve all files for a local page job; no component is installed implicitly.
@@ -214,13 +220,9 @@ pub fn resolve(profile: &Path, ollama_tag: &str) -> Result<Components> {
         ollama_exe: status
             .ollama_exe
             .ok_or_else(|| missing("Ollama executable is missing"))?,
-    })
-    .and_then(|components| {
-        if status.ollama_tag_found {
-            Ok(components)
-        } else {
-            Err(missing("Local Ollama model tag is missing"))
-        }
+        ollama_models: status.ollama_models.ok_or_else(|| {
+            ApiError::new("translate_component_missing", format!("Ollama model {ollama_tag} was not found in the Katran model store or the configured Ollama store"))
+        })?,
     })
 }
 #[cfg(test)]
@@ -242,5 +244,15 @@ mod tests {
             assert!(tag_manifest(tag).is_none(), "{tag}");
         }
     }
+    #[test]
+    fn profile_model_store_wins_over_inherited_ollama_configuration() {
+        let profile = tempfile::tempdir().unwrap();
+        let store = profile.path().join("translate-ollama");
+        let manifest = tag_manifest(MODEL).unwrap();
+        let destination = store.join(&manifest);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(&destination, b"fixture").unwrap();
+        assert_eq!(find_ollama_models(profile.path(), &manifest), Some(store));
+    }
 }
-pub(crate) const MODEL: &str = "qwen3:30b";
+pub(crate) const MODEL: &str = "qwen3:1.7b";

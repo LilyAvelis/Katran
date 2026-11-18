@@ -133,7 +133,7 @@ fn hidden(command: &mut Command) {
 fn reachable(port: u16) -> bool {
     TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(250)).is_ok()
 }
-fn server(executable: &Path, cancel: &Cancellation) -> Result<(u16, OwnedServer)> {
+fn server(executable: &Path, models: &Path, cancel: &Cancellation) -> Result<(u16, OwnedServer)> {
     let socket = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| error(format!("Cannot reserve local translation port: {e}")))?;
     let port = socket.local_addr()?.port();
@@ -141,6 +141,7 @@ fn server(executable: &Path, cancel: &Cancellation) -> Result<(u16, OwnedServer)
     let mut command = Command::new(executable);
     command
         .arg("serve")
+        .env("OLLAMA_MODELS", models)
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_NO_CLOUD", "1")
         .env("OLLAMA_KEEP_ALIVE", "0");
@@ -324,7 +325,7 @@ pub(crate) fn translate(
         Duration::from_secs(300),
     )?;
     bounded_file(&grouped, 1_000_000)?;
-    let (port, _owned_server) = server(&components.ollama_exe, cancel)?;
+    let (port, _owned_server) = server(&components.ollama_exe, &components.ollama_models, cancel)?;
     let mut cmd = Command::new(&components.manga_python);
     cmd.arg(staged.dir.join("translate_page.py"))
         .arg(&grouped)
