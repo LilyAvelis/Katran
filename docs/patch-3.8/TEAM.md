@@ -9,7 +9,8 @@ Reused existing sessions, no team expansion:
 - /root/fenna · gpt-6.1-terra/high: relative-seek/hold UI, no queued repeats,
   serial gating/cancellation; frozen after API/native gate.
 - /root · lead: policy/dispatcher contract, key ownership, boundary correction,
-  tests/docs/lint/build/primary installation. Final gate/build pending.
+  tests/docs/lint/build/primary installation complete; source7fec1f5 installed as
+  runtime4acbfb44eca9. Manual keyboard acceptance pending, no publication.
 
 ## Current: P, seek/layout polish and optional GPU · 2026-11-18
 

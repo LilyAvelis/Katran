@@ -2,6 +2,21 @@
 
 ## Accepted GPU/UX and video key follow-up · 2026-11-18
 
+Installed source7fec1f5, single optimized UI build91.58s, Windows x64/Rust1.95.0/
+locked offline/ui+clipboard-events. Before/after source fingerprints matched.
+Primary runtime **4acbfb44eca9**, SHA256
+`4acbfb44eca94232c2e51de26b8289e45c3dec572e95ed15d05b91e9ecc87fd4`.
+Existing pinned runtime/helpers retained and every copied hash reverified.
+Accepted previous runtimead534e0b6952 and fresh integrity-checked v13 backup kept
+in runtime/rollback-frame-keys.json. Atomic pointer changed; running app untouched.
+Owner asked to tray-exit/Raycast-relaunch and check seek chords, both frame
+directions and stop on hold-release. Manual keyboard acceptance pending. No
+push/tag/public release or schema/model/runtime-component change.
+
+Post-batch pruning removed2.17GiB, zero failures, 36.23→34.06GiB. Protected
+dependencies/release outputs exceed the32GiB pruning target; installed UI/helpers
+verified unchanged. No whole-cache clean or personal-data deletion.
+
 Owner answered «works работает» for runtimead534e0b6952 (P, seek stability,
 panel and GPU), then requested Ctrl arrows1s, Shift arrows10s and Alt arrows
 paused native frame steps with hold. No new publication authorization.
@@ -18,7 +33,7 @@ keyboard-ownership test then passed focused player14/14 plus keys1/1, reusing
 unaffected successful cases. Logs: media-step-api-gate.log, media-step-ui-api.log,
 media-step-ui-final.log and media-step-keys-final.log. Final locked offline
 Clippy all-targets/UI/-D warnings passed26.20s, media-step-clippy.log. Build and
-owner keyboard acceptance remain pending.
+owner keyboard acceptance recorded separately; installed identity is above.
 
 ## Owner playback acceptance and GPU/UX follow-up · 2026-11-18
 
