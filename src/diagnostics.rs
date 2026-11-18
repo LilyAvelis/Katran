@@ -231,6 +231,11 @@ impl RotatingWriter {
 /// Summarizes commands without serializing image bytes, including nested ingestion.
 pub fn summarize_command(command: &crate::Command) -> Value {
     match command {
+        crate::Command::SearchNotionPages { .. } => json!({"type":"search_notion_pages"}),
+        crate::Command::SetNotionToken { .. } => json!({"type":"set_notion_token"}),
+        crate::Command::ReadNotionPage { .. } => json!({"type":"read_notion_page"}),
+        crate::Command::CopyNotionPage { .. } => json!({"type":"copy_notion_page"}),
+        crate::Command::BeginPasteNotionPage { .. } => json!({"type":"begin_paste_notion_page"}),
         crate::Command::IngestLink { url, source } => {
             json!({"type":"ingest_link","byte_count":url.len(),"source":source})
         }

@@ -43,6 +43,7 @@ impl Shelf {
         if !visible {
             self.stop_media_preview();
             self.tag_menu.close(ctx);
+            self.workspace_close_notion();
         }
         self.call(Command::SetWindowVisibility { visible });
         let theme = serde_json::from_value::<katran::theme::ThemePreferences>(
@@ -413,20 +414,22 @@ impl Shelf {
         );
     }
 
-    fn begin_paste_ui(&mut self, ctx: &egui::Context, command: Command) {
+    pub(super) fn begin_paste_ui(&mut self, ctx: &egui::Context, command: Command) -> bool {
         if self.job.is_some() || self.overlay_ui.pending {
             self.message = tr(
                 "Дождитесь завершения текущей операции",
                 "Wait for the current operation to finish",
             )
             .into();
-            return;
+            return false;
         }
         let reply = self.call(command);
         if reply["state"] == "copying" {
             self.overlay_ui.pending = true;
             self.actions = false;
             ctx.request_repaint();
+            return true;
         }
+        false
     }
 }

@@ -117,6 +117,10 @@ pub(crate) enum PreparedWork {
         operation: open_file::Operation,
         index: usize,
     },
+    CopyNotionText {
+        text: String,
+        sequence: u32,
+    },
     CopyCollectionPage {
         event: Event,
         stamp: media_service::Stamp,
@@ -1551,6 +1555,27 @@ impl Service {
                         .map_err(|e| ApiError::new(&e.code, e.message))?;
                     cancel.check()?;
                     Ok(PreparedWork::Value(json!(value)))
+                })?
+            }
+            Command::SearchNotionPages { query } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    crate::notion::search(&query, || cancel.check()).map(PreparedWork::Value)
+                })?
+            }
+            Command::ReadNotionPage { page_id } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    let markdown = crate::notion::markdown(&page_id, || cancel.check())?;
+                    Ok(PreparedWork::Value(json!({"markdown": markdown})))
+                })?
+            }
+            Command::CopyNotionPage { page_id } => {
+                let sequence = capture::sequence_number();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let text = crate::notion::markdown(&page_id, || cancel.check())?;
+                    if text.trim().is_empty() {
+                        return Err(ApiError::new("notion_empty", "This Notion page is empty"));
+                    }
+                    Ok(PreparedWork::CopyNotionText { text, sequence })
                 })?
             }
             Command::CheckUpdates => {
@@ -3024,6 +3049,13 @@ impl Service {
                         open_file::open_url(&text, launcher.as_ref())?;
                         Ok(json!({"opened_collection_link":true,"index":index}))
                     }
+                },
+                PreparedWork::CopyNotionText { text, sequence } => {
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let clipboard_sequence = self.text_clipboard.lock()
+                        .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
+                        .write_if_current(&text, sequence)?;
+                    Ok(json!({"text_copied":true,"clipboard_sequence":clipboard_sequence}))
                 },
                 PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index } => {
                     let current = self.saved_collection(event.id, &event.revision)?;

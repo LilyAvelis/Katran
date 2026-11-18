@@ -151,6 +151,10 @@ pub enum Command {
     BeginPastePrevious {
         owner_window: u64,
     },
+    BeginPasteNotionPage {
+        owner_window: u64,
+        page_id: String,
+    },
     BeginPasteCollectionPage {
         owner_window: u64,
         id: i64,
@@ -197,6 +201,19 @@ pub enum Command {
     SearchFolders {
         query: String,
         limit: u32,
+    },
+    NotionStatus,
+    SetNotionToken {
+        token: Option<crate::notion::Token>,
+    },
+    SearchNotionPages {
+        query: String,
+    },
+    ReadNotionPage {
+        page_id: String,
+    },
+    CopyNotionPage {
+        page_id: String,
     },
     SearchFoldersSemantic {
         query: String,

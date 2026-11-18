@@ -1,5 +1,10 @@
 # Developer and agent entry point
 
+The Ctrl+Shift+K Notion source uses `src/notion.rs` for bounded CLI requests,
+`src/jobs_service.rs` for job dispatch and guarded text publication, and
+`src/bin/workspace_notion_ui.rs` for the picker and Markdown preview.
+See [connection setup](notion.md).
+
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)
 and [local release notes](releases/next.md#katran-40--accepted-local-build).
 

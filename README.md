@@ -1,5 +1,9 @@
 # Katran
 
+**Notion** is available as a read-only source in Ctrl+Shift+K. Search pages by
+title, preview Markdown with Space and paste into the previous window with
+Enter. [Notion setup](docs/notion.md)
+
 ## Katran 4.0 · Collections, Translate and media
 
 **BULL** turns an ordered selection into one portable `.bull` file. Use

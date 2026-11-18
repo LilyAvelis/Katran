@@ -65,6 +65,7 @@ mod media_service;
 pub mod open_file;
 pub mod origin;
 mod paste_service;
+pub mod notion;
 pub mod pinned;
 mod pinned_open;
 pub mod pinned_order;
@@ -917,6 +918,9 @@ impl Service {
             } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
+            Command::BeginPasteNotionPage { owner_window, page_id } => {
+                self.begin_paste_with_copy(owner_window, Command::CopyNotionPage { page_id })
+            }
             Command::BeginPasteCollectionPage {
                 owner_window,
                 id,
@@ -960,6 +964,14 @@ impl Service {
                     .map(|v| serde_json::json!(v))
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
+            Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
+            Command::SetNotionToken { token } => {
+                notion::set_token(token)?;
+                Ok(serde_json::json!({"configured": notion::configured()}))
+            }
+            command @ (Command::SearchNotionPages { .. }
+            | Command::ReadNotionPage { .. }
+            | Command::CopyNotionPage { .. }) => self.begin_job(command),
             Command::SearchFoldersSemantic { .. } | Command::SearchFoldersSemanticPage { .. } => {
                 Err(ApiError::new(
                     "background_required",

@@ -40,6 +40,9 @@ pub struct State {
     ai_components: Option<serde_json::Value>,
     ai_last_poll: Option<Instant>,
     ai_error: String,
+    notion_configured: Option<bool>,
+    notion_token: String,
+    notion_error: String,
 }
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(450);
 fn apply_editor_intent(
@@ -191,6 +194,7 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
         6 => {
             "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese китайский chinese корейский korean ocr язык language"
         }
+        7 => "integrations интеграции notion pages токен token",
         _ => "",
     };
     let query = query.trim().to_lowercase();
@@ -1205,6 +1209,56 @@ impl State {
             }
         }
     }
+    fn show_integrations(&mut self, ui: &mut egui::Ui, api: &mut Service) {
+        use super::i18n::tr;
+        let configured = *self.notion_configured.get_or_insert_with(|| {
+            call(api, Command::NotionStatus)["result"]["configured"] == true
+        });
+        ui.heading(tr("Интеграции", "Integrations"));
+        SettingsSection::group(ui, "Notion", |ui| {
+            ui.label(tr(
+                "Создайте внутреннюю интеграцию с правом Read content и подключите к ней страницы.",
+                "Create an internal integration with Read content and connect your pages to it.",
+            ));
+            ui.hyperlink_to(
+                tr("Настроить интеграцию Notion", "Manage Notion integrations"),
+                "https://www.notion.so/my-integrations",
+            );
+            ui.label(if configured {
+                tr("Токен сохранён в Windows", "Token stored in Windows")
+            } else {
+                tr("Токен не настроен", "No token configured")
+            });
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut self.notion_token)
+                    .password(true)
+                    .hint_text(tr("Токен внутренней интеграции", "Internal integration token")),
+            );
+            let save = ui.add_enabled(
+                !self.notion_token.trim().is_empty(),
+                egui::Button::new(tr("Сохранить токен", "Save token")),
+            ).clicked();
+            let remove = ui.add_enabled(configured, egui::Button::new(tr("Отключить", "Disconnect"))).clicked();
+            if save || remove {
+                let input = std::mem::take(&mut self.notion_token);
+                // The password editor's undo history can retain the previous contents.
+                egui::widgets::text_edit::TextEditState::default().store(ui.ctx(), field.id);
+                let token = save.then(|| katran::notion::Token(input));
+                let reply = call(api, Command::SetNotionToken { token });
+                self.notion_error.clear();
+                if reply["ok"] == true {
+                    self.notion_configured = Some(reply["result"]["configured"] == true);
+                } else {
+                    self.notion_error = reply["error"]["message"].as_str()
+                        .unwrap_or(tr("Не удалось обновить токен", "Could not update the token")).into();
+                }
+            }
+            if !self.notion_error.is_empty() {
+                ui.colored_label(Color32::LIGHT_RED, &self.notion_error);
+            }
+        });
+    }
+
     pub fn show(&mut self, ctx: &egui::Context, api: &mut Service) -> bool {
         self.tick_background(api, ctx);
         self.tick_video(api, ctx);
@@ -1236,6 +1290,9 @@ impl State {
             self.ai_components = None;
             self.ai_last_poll = None;
             self.ai_error.clear();
+            self.notion_configured = None;
+            self.notion_token.clear();
+            self.notion_error.clear();
             return false;
         }
         let requested = interaction["result"]["settings_section"]
@@ -1323,7 +1380,7 @@ impl State {
      ui.add_space(16.0);
      ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")).margin(egui::vec2(10.0,9.0)));
      ui.add_space(24.0);ui.label(RichText::new(super::i18n::tr("РАЗДЕЛЫ", "WORKSPACE")).size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags"),("AI","AI")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){if index==6 && self.section!=6 {self.ai_components=None;self.ai_last_poll=None;self.ai_error.clear();}self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags"),("AI","AI"),("Интеграции","Integrations")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){if index==6 && self.section!=6 {self.ai_components=None;self.ai_last_poll=None;self.ai_error.clear();}if index!=7 {self.notion_token.clear();}self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
@@ -1620,6 +1677,8 @@ impl State {
        if self.tags.show(ui,api){tabs_changed=true;root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
       } else if self.section==6 {
        self.show_ai_components(ui,api);
+      } else if self.section==7 {
+       self.show_integrations(ui,api);
       } else {
        ui.heading(super::i18n::tr("Горячие клавиши", "Shortcuts"));ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}

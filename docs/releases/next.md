@@ -1,5 +1,12 @@
 # Local release notes and development log
 
+## Local follow-up · Notion search
+
+Ctrl+Shift+K adds a read-only Notion source alongside Everything. Search titles,
+preview Markdown and paste the source page into the previous window. The official
+Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
+[Setup and limits](../notion.md)
+
 ## Katran 4.0 · Accepted local build
 
 Lilia closed the 4.0 feature run after checking the local workflow. The final

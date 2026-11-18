@@ -474,6 +474,9 @@ fn prepare_owned_snapshot_features(
                 .collect();
             CapturePayload::PreparedFiles { origin, items }
         }
+        CapturePayload::Text { ref text, .. } if crate::notion::looks_like_token(text) => {
+            CapturePayload::Unsupported
+        }
         CapturePayload::Text { origin, text }
             if crate::link_fragments::recognize(&text).is_some() =>
         {

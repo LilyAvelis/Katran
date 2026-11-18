@@ -1,5 +1,14 @@
 # Katran development rules
 
+## Notion search pilot · 2026-11-18
+
+Ctrl+Shift+K hosts Everything and Notion search. Keep Notion IDs separate
+from Folder paths and use only title search and page Markdown through the
+official ntn CLI. Store the dedicated read-only connection token in Windows
+Credential Manager. Keep credentials, titles, queries and page contents out of
+diagnostics. Enter follows the existing overlay lease and owned text clipboard
+publication. No Notion writes or database browsing. See [setup](docs/notion.md).
+
 ## Katran 4.0.0 public release authorization · 2026-11-18
 
 Lilia accepted the local 4.0 build, requested removal of the page summary,

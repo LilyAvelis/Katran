@@ -1,7 +1,10 @@
-//! Working-folder picker: presentation and dispatcher jobs only.
+//! Search picker: presentation and dispatcher jobs only.
 use super::i18n::tr;
 use super::*;
 use katran::domain_jobs::JobId;
+
+#[path = "workspace_notion_ui.rs"]
+mod notion_ui;
 
 /// Consume the physical switch and only its paired text event. Paste stays intact.
 fn take_neural_toggle(input: &mut egui::InputState) -> bool {
@@ -46,6 +49,8 @@ enum Mode {
 #[derive(Default)]
 pub(super) struct State {
     pub open: bool,
+    notion_source: bool,
+    notion: notion_ui::State,
     mode: Mode,
     query: String,
     items: Vec<PathBuf>,
@@ -72,6 +77,7 @@ pub(super) struct State {
 }
 impl Shelf {
     fn workspace_cancel(&mut self) {
+        self.workspace_cancel_notion();
         if let Some((job_id, _)) = self.workspace.job.take() {
             self.call(Command::CancelJob { job_id });
         }
@@ -188,6 +194,7 @@ impl Shelf {
         ctx.request_repaint();
     }
     fn workspace_mode(&mut self, mode: Mode, ctx: &egui::Context) {
+        self.workspace.notion_source = false;
         self.workspace.mode = mode;
         self.workspace.query.clear();
         self.workspace.focus = true;
@@ -222,7 +229,13 @@ impl Shelf {
     }
     pub(super) fn workspace_close(&mut self) {
         self.workspace_cancel();
+        self.workspace.notion = notion_ui::State::default();
         self.workspace.open = false;
+    }
+    pub(super) fn workspace_close_notion(&mut self) {
+        if self.workspace.notion_source && self.workspace.open {
+            self.workspace_close();
+        }
     }
     pub(super) fn workspace_transfer_result(&mut self, result: &Value, import: bool) {
         let Some(items) = result["items"].as_array() else {
@@ -357,7 +370,11 @@ impl Shelf {
             self.actions = false;
             self.workspace.open = true;
             self.workspace.opened_frame = ctx.cumulative_frame_nr();
-            self.workspace_mode(Mode::Search, ctx);
+            if self.workspace.notion_source {
+                self.workspace_open_notion(ctx);
+            } else {
+                self.workspace_mode(Mode::Search, ctx);
+            }
         }
         if !self.workspace.open
             && self.state["tab"] == "folder"
@@ -381,6 +398,9 @@ impl Shelf {
             {
                 self.workspace_action(id, ctx);
             }
+        }
+        if self.workspace.open && self.workspace.notion_source {
+            return;
         }
         if self.workspace.open {
             if !self.actions
@@ -496,6 +516,10 @@ impl Shelf {
         if !self.workspace.open {
             return;
         }
+        if self.workspace.notion_source {
+            self.workspace_notion_tick(ctx);
+            return;
+        }
         if let Some((job_id, revision)) = self.workspace.job {
             let result = self.call(Command::PollJob { job_id });
             match result["state"].as_str() {
@@ -557,6 +581,10 @@ impl Shelf {
         if !self.workspace.open {
             return;
         }
+        if self.workspace.notion_source {
+            self.workspace_notion_panel(ctx);
+            return;
+        }
         let state = &mut self.workspace;
         let count = state.items.len();
         let previous = state.selected;
@@ -593,6 +621,7 @@ impl Shelf {
             None
         };
         let mut query = state.query.clone();
+        let mut open_notion = false;
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 600.0);
         let modal = egui::Modal::new(egui::Id::new("workspace-picker"))
             .area(egui::Modal::default_area(egui::Id::new("workspace-picker")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
@@ -606,6 +635,7 @@ impl Shelf {
                     for (mode, label) in [(Mode::Search, tr("Поиск", "Search")), (Mode::Favorites, tr("Избранное", "Favorites")), (Mode::History, tr("История", "History")), (Mode::Standard, tr("Стандартные папки", "Standard folders"))] {
                         if ui.selectable_label(state.mode == mode, label).clicked() { mode_change = Some(mode); }
                     }
+                    open_notion = ui.selectable_label(false, "Notion").clicked();
                 });
                 if let Some(mode) = mode_change { ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode)); }
                 if state.incomplete { ui.weak(tr("Показаны частичные результаты", "Partial results shown")); }
@@ -647,6 +677,10 @@ impl Shelf {
                 if state.mode == Mode::Search { ui.weak(if neural { tr("Enter · искать / открыть    ↓ на последнем · ещё 10    \\ · обычный поиск", "Enter · search / open    ↓ on last · 10 more    \\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }
                 ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
             });
+        if open_notion {
+            self.workspace_open_notion(ctx);
+            return;
+        }
         if let Some(mode) =
             ctx.data_mut(|d| d.remove_temp::<Mode>(egui::Id::new("workspace-mode-change")))
         {
