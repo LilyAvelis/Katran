@@ -128,6 +128,16 @@ pub fn delete_events(
         });
     }
     for id in &eligible {
+        let mut statement = tx.prepare(
+            "SELECT e.blob_hash FROM bull_members m JOIN events e ON e.id=m.member_id WHERE m.collection_id=?1 AND e.blob_hash IS NOT NULL",
+        )?;
+        for hash in statement.query_map([id], |row| row.get::<_, String>(0))? {
+            hashes.insert(hash?);
+        }
+        drop(statement);
+        // A collection owns its hidden shelf rows. Its own pin guards this
+        // deletion. File-reference rows never authorize deleting disk paths.
+        tx.execute("DELETE FROM events WHERE id IN (SELECT member_id FROM bull_members WHERE collection_id=?1)", [id])?;
         tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     }
     tx.commit()?;

@@ -2,6 +2,22 @@
 use super::i18n::tr;
 use super::*;
 
+fn is_collection_preview(event: &Value, id: i64) -> bool {
+    let source = event["source"].as_str();
+    matches!(
+        source,
+        Some(
+            "image_translation_collection"
+                | "image_collection"
+                | "file_image_collection"
+                | "file_bull_collection"
+                | "link_collection"
+                | "text_collection"
+        )
+    ) || (super::images::is_bs(event) && (source != Some("work_folder") || id < 0))
+        || ((id < 0 && source == Some("work_folder") || source == Some("files")) && super::images::is_bull(event))
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod folder_page_tests {
@@ -39,6 +55,20 @@ mod folder_page_tests {
         app.poll_link_metadata_jobs(&ctx);
         assert!(app.link_metadata_jobs.is_empty());
         assert_eq!(app.message, "pack succeeded");
+    }
+
+    #[test]
+    fn collection_preview_accepts_exact_folder_extensions_on_negative_ids() {
+        let bull =
+            serde_json::json!({"source":"work_folder","path":"C:/folder/book.BULL","name":"book"});
+        let bs =
+            serde_json::json!({"source":"work_folder","path":"C:/folder/book.bs","name":"book"});
+        let fake = serde_json::json!({"source":"work_folder","path":"C:/folder/book.bs.png","name":"book.bs"});
+        assert!(is_collection_preview(&bull, -1));
+        assert!(is_collection_preview(&bs, -2));
+        assert!(!is_collection_preview(&bull, 1));
+        assert!(!is_collection_preview(&bs, 2));
+        assert!(!is_collection_preview(&fake, -3));
     }
 
     #[test]
@@ -1593,6 +1623,29 @@ impl Shelf {
             self.message = tr("Страница скопирована", "Page copied").into();
             return;
         }
+        if result["folder_collection"] == true {
+            let count = result["count"].as_u64().unwrap_or(0);
+            let label = if result["unpacked"] == true {
+                tr("Извлечено элементов", "Items unpacked")
+            } else if result["merged"] == true {
+                tr(
+                    "Элементов в объединённой коллекции",
+                    "Items in merged collection",
+                )
+            } else {
+                tr(
+                    "Элементов собрано в коллекцию",
+                    "Items packed into collection",
+                )
+            };
+            self.message = format!("{label}: {count}");
+            if let Some(path) = result["path"].as_str() {
+                self.message.push_str(" · ");
+                self.message.push_str(path);
+            }
+            self.refresh();
+            return;
+        }
         if result["bs_collection"] == true {
             let count = result["count"].as_u64().unwrap_or(0);
             let label = if result["unpacked"] == true {
@@ -2164,23 +2217,10 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
-        if id == "create_bs_collection" {
-            if self.start_job(Command::CreateBsCollection, false, ctx.clone()) {
-                self.actions = false;
-                self.message = tr("Обработка BS…", "Processing BS…").into();
-            } else if self.job.is_some() {
-                self.message = tr(
-                    "Дождитесь завершения текущей операции",
-                    "Wait for the current operation to finish",
-                )
-                .into();
-            }
-            return;
-        }
         if id == "create_image_collection" {
             if self.start_job(Command::CreateImageCollection, false, ctx.clone()) {
                 self.actions = false;
-                self.message = tr("Обработка BULL…", "Processing BULL…").into();
+                self.message = tr("Обработка коллекции…", "Processing collection…").into();
             } else if self.job.is_some() {
                 self.message = tr(
                     "Дождитесь завершения текущей операции",
@@ -2215,15 +2255,8 @@ impl Shelf {
             let interaction = self.call(Command::Interaction);
             if let Some(event_id) = interaction["cursor"].as_i64() {
                 let event = self.call(Command::Get { id: event_id });
-                if (matches!(
-                    event["source"].as_str(),
-                    Some(
-                        "image_translation_collection"
-                            | "image_collection"
-                            | "link_collection"
-                            | "text_collection"
-                    )
-                ) || super::images::is_bs(&event)) && let Some(revision) = event["revision"].as_str()
+                if is_collection_preview(&event, event_id)
+                    && let Some(revision) = event["revision"].as_str()
                 {
                     self.actions = false;
                     self.open_translation_collection(event_id, revision.to_owned(), ctx);

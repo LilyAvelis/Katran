@@ -82,6 +82,15 @@ fn action(api: &mut Service) -> Value {
         },
     )
 }
+
+fn unified(api: &mut Service) -> Value {
+    finish(
+        api,
+        Command::RunAction {
+            id: "create_image_collection".into(),
+        },
+    )
+}
 fn add(api: &mut Service, paths: Vec<PathBuf>) -> Vec<i64> {
     call(api, Command::AddFiles { paths })["items"]
         .as_array()
@@ -151,7 +160,7 @@ fn heterogeneous_bs_packs_merges_previews_and_restores_without_touching_disk_sou
             .as_array()
             .unwrap()
             .iter()
-            .any(|entry| entry["id"] == "create_bs_collection")
+            .any(|entry| entry["id"] == "create_image_collection")
     );
     let first = action(&mut api)["event"].clone();
     assert!(files(&mut api, ShelfTab::Images).is_empty());
@@ -282,4 +291,136 @@ fn heterogeneous_bs_packs_merges_previews_and_restores_without_touching_disk_sou
         },
     );
     assert_eq!(page["file"]["name"], "memo.txt");
+}
+
+#[test]
+fn one_action_packs_homogeneous_files_into_bull_and_deletes_hidden_shelf_members() {
+    let profile = tempfile::tempdir().unwrap();
+    let disk = tempfile::tempdir().unwrap();
+    let a = disk.path().join("a.mp4");
+    let b = disk.path().join("b.webm");
+    std::fs::write(&a, b"a fixture").unwrap();
+    std::fs::write(&b, b"b fixture").unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Files,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Files,
+        },
+    );
+    let ids = add(&mut api, vec![a.clone(), b.clone()]);
+    select(&mut api, &ids);
+    let actions = call(&mut api, Command::Actions);
+    let actions = actions.as_array().unwrap();
+    assert!(
+        actions
+            .iter()
+            .any(|action| action["id"] == "create_image_collection")
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|action| action["id"] == "create_bs_collection")
+    );
+    let result = unified(&mut api);
+    let card = &result["event"];
+    assert_eq!(card["source"], "file_bull_collection");
+    let page = finish(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: id(card),
+            revision: revision(card),
+            index: 0,
+        },
+    );
+    assert_eq!(page["file"]["name"], "a.mp4");
+    assert_eq!(page["file"]["archive_kind"], "bull_file");
+    call(
+        &mut api,
+        Command::DeleteEvents {
+            ids: vec![id(card)],
+            confirmed: false,
+        },
+    );
+    assert!(files(&mut api, ShelfTab::Files).is_empty());
+    for id in ids {
+        assert_eq!(reply(&mut api, Command::Get { id })["ok"], false);
+    }
+    assert_eq!(std::fs::read(a).unwrap(), b"a fixture");
+    assert_eq!(std::fs::read(b).unwrap(), b"b fixture");
+}
+
+#[cfg(windows)]
+#[test]
+fn folder_uses_same_action_and_publishes_collections_alongside_originals() {
+    let profile = tempfile::tempdir().unwrap();
+    let disk = tempfile::tempdir().unwrap();
+    let a = disk.path().join("first.txt");
+    let b = disk.path().join("second.bin");
+    std::fs::write(&a, b"text fixture").unwrap();
+    std::fs::write(&b, [0, 4, 9]).unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: disk.path().into(),
+        },
+    );
+    let browse = |api: &mut Service| {
+        call(
+            api,
+            Command::BrowseShelfSorted {
+                query: String::new(),
+                limit: 20,
+                cursor: None,
+            },
+        )
+    };
+    let page = browse(&mut api);
+    let ids: Vec<_> = page["events"].as_array().unwrap().iter().map(id).collect();
+    select(&mut api, &ids);
+    let result = unified(&mut api);
+    assert_eq!(result["kind"], "bs");
+    let archive = PathBuf::from(result["path"].as_str().unwrap());
+    assert!(archive.exists() && a.exists() && b.exists());
+    let page = browse(&mut api);
+    let selected = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| {
+            entry["name"]
+                .as_str()
+                .is_some_and(|name| name.ends_with(".bs"))
+        })
+        .unwrap();
+    let page = finish(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: id(selected),
+            revision: revision(selected),
+            index: 0,
+        },
+    );
+    assert_eq!(page["count"], 2);
+    select(&mut api, &[id(selected)]);
+    let extracted = unified(&mut api);
+    assert_eq!(extracted["unpacked"], true);
+    let destination = PathBuf::from(extracted["path"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(destination.join("first.txt")).unwrap(),
+        b"text fixture"
+    );
+    assert_eq!(
+        std::fs::read(destination.join("second.bin")).unwrap(),
+        [0, 4, 9]
+    );
+    assert!(archive.exists());
 }

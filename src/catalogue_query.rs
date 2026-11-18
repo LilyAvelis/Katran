@@ -601,7 +601,7 @@ pub(crate) fn link_shelf_predicate() -> &'static str {
 }
 
 pub(crate) fn files_shelf_predicate() -> &'static str {
-    "(EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND (e.source='bs_extracted_file' OR (e.source='bs_collection' AND lower(substr(e.name,-3))='.bs'))))"
+    "(EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND (e.source='bs_extracted_file' OR (e.source='bs_collection' AND lower(substr(e.name,-3))='.bs') OR (e.source IN ('file_bull_collection','file_image_collection') AND lower(substr(e.name,-5))='.bull'))))"
 }
 
 pub(crate) fn text_shelf_predicate() -> &'static str {

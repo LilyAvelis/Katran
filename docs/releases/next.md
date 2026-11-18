@@ -47,9 +47,11 @@ Text BULL saves ordered UTF-8 entries and offers Markdown and source views.
 Ctrl+C in the viewer copies the current source only. Enter on a visible BULL
 entry uses the standard previous-window paste flow for images, Links and Text.
 
-Files has BS v1 for ordered mixed files. Packs replace the selected cards,
-BS collections merge with BS, and unpack restores archived content without
-editing disk originals. The built-in viewer opens one entry at a time.
+Files and Folder use one rebindable collection action. It selects BULL for
+compatible files and BS for a mix. Raw file preview centers a thumbnail or
+Windows file icon with the name. Shelf Delete removes the selected collection
+and its hidden member cards. Folder packs beside originals and unpacks into
+a new directory. Verified completed recycle stages are cleaned up automatically.
 
 ## Local follow-up · Google Lens
 

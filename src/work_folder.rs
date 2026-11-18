@@ -100,6 +100,9 @@ impl State {
         let mut files = Vec::new();
         for entry in fs::read_dir(root)? {
             let entry = entry?;
+            if entry.file_name().to_string_lossy().starts_with(".katran-stage-") {
+                continue;
+            }
             let path = entry.path();
             let metadata = match fs::symlink_metadata(&path) {
                 Ok(m) => m,

@@ -15,19 +15,24 @@ data in that order. BS supports 128 MiB per file and 256 MiB including framing.
 Empty files and repeated names are valid. Names are Windows-safe single leaf
 names up to 255 UTF-8 bytes. Readers check bounds, integrity and end of file.
 
-In Files, **Pack files into BS**, **Merge BS collections**, and **Unpack BS**
-share one rebindable Ctrl+K action. Pack and merge replace selected shelf
-cards in the chosen order. BS files merge with BS files. BS and BULL cannot
-share a selection or be nested through this action. Unpack restores the
-original shelf cards and metadata. For changed or unavailable disk files,
-Katran restores the archived bytes into Files while preserving the disk file.
+Files and Folder use **Pack / unpack collection**, the same rebindable Ctrl+K
+action used by BULL. Supported images form an image BULL. Video, audio and other
+files with a common extension form a file BULL. Mixed files form a BS.
+Merge accepts collections of the same kind and family, flattens their
+entries and preserves selection order.
 
-Space opens one file at a time with its name, type, size and optional image
-thumbnail. Open or Alt+Enter materializes the selected entry in the bounded
+On the shelf, pack and merge replace selected cards. Unpack restores their
+original cards and metadata, using archived bytes for changed or unavailable
+references. Delete removes the collection and its hidden member records
+without removing referenced disk files.
+
+Space opens one file at a time with a centered thumbnail or Windows file icon,
+name, type and size. Open or Alt+Enter materializes the selected entry in the bounded
 open cache for Windows. Ordinary data files use their registered application,
 other files can use the application picker, and executable or shortcut types
 are shown in Explorer. Copy or drag the shelf card to transfer the whole BS.
 A `.bs` file added to Files from disk can be viewed in Katran.
 
-Folder authoring is a separate step. Existing BULL image classification groups
-supported image formats, including JPEG, PNG and WebP, into one image type.
+Folder packs or merges into a new file beside the selected originals and
+unpacks into a new subfolder. Each output gets an available name. Source
+files stay in place.

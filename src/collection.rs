@@ -38,7 +38,7 @@ pub(crate) fn is_managed(event: &Event) -> bool {
     image_collection::is_managed(event) || is_link_collection(event) || is_text_collection(event)
 }
 
-fn read_links(event: &Event) -> Result<Vec<Link>> {
+pub(crate) fn read_links(event: &Event) -> Result<Vec<Link>> {
     open_file::validate(event)?;
     let entries = links::read(File::open(&event.path)?)?;
     if entries
@@ -407,7 +407,7 @@ pub(crate) fn packable_text(event: &Event) -> bool {
     event.kind == EventKind::TextFragment
 }
 
-fn read_texts(event: &Event) -> Result<Vec<String>> {
+pub(crate) fn read_texts(event: &Event) -> Result<Vec<String>> {
     open_file::validate(event)?;
     Ok(text::read(File::open(&event.path)?)?)
 }

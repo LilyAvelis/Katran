@@ -32,9 +32,12 @@ Text BULL keeps ordered exact source entries and can render each as Markdown.
 Ctrl+C copies the current source. Enter in the BULL viewer uses Katran's
 previous-window paste flow for the visible image, URL or text.
 
-Files supports BS for mixed file types. Pack, merge, unpack, preview and open
-use the Files shelf, with whole-file transfer through Copy or drag.
-See [BS v1](docs/patch-4.0/BS.md).
+Files and Folder use the same rebindable collection action. Compatible files
+form a BULL and mixed files form a BS. Folder writes the collection next to
+the originals and unpacks into a new subfolder. On the shelf, Delete removes
+the collection and its member cards. Use Unpack to get the cards back.
+Copy or drag a shelf card to transfer the entire file.
+See [BS and file collections](docs/patch-4.0/BS.md).
 
 For one selected image, Ctrl+K → **Search image with Google Lens** opens
 the default browser, which submits an image copy to Google Lens.

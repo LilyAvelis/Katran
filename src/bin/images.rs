@@ -577,7 +577,7 @@ impl Images {
 fn is_managed_collection(event: &Value) -> bool {
     matches!(
         event["source"].as_str(),
-        Some("image_translation_collection" | "image_collection")
+        Some("image_translation_collection" | "image_collection" | "file_image_collection")
     ) && is_bull(event)
 }
 
@@ -594,6 +594,8 @@ pub(super) fn is_bull(event: &Value) -> bool {
         Some(
             "image_translation_collection"
                 | "image_collection"
+                | "file_image_collection"
+                | "file_bull_collection"
                 | "link_collection"
                 | "text_collection"
         )
@@ -608,12 +610,17 @@ pub(super) fn is_bull(event: &Value) -> bool {
 }
 
 pub(super) fn is_bs(event: &Value) -> bool {
-    (event["source"] == "bs_collection" || event["source"] == "files")
-        && event["name"]
-            .as_str()
-            .and_then(|name| std::path::Path::new(name).extension())
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("bs"))
+    let value = if event["source"] == "work_folder" {
+        event["path"].as_str()
+    } else if event["source"] == "bs_collection" || event["source"] == "files" {
+        event["name"].as_str()
+    } else {
+        None
+    };
+    value
+        .and_then(|path| std::path::Path::new(path).extension())
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("bs"))
 }
 
 pub(super) fn paint_bs_badge(ui: &egui::Ui, rect: egui::Rect) {
@@ -662,6 +669,12 @@ mod tests {
         ));
         assert!(!is_bs(
             &json!({"source":"manual", "name":"files.bs", "path":"digest"})
+        ));
+        assert!(is_bs(
+            &json!({"source":"work_folder", "name":"files", "path":"C:/folder/files.BS"})
+        ));
+        assert!(!is_bs(
+            &json!({"source":"work_folder", "name":"files.bs", "path":"C:/folder/files.bs.png"})
         ));
     }
 

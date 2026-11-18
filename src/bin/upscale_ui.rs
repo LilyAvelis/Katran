@@ -616,23 +616,32 @@ impl Shelf {
                     .auto_shrink([false, false])
                     .show(&mut child, |ui| {
                         ui.set_width(inner.width());
-                        if let Some(texture) = collection.texture.as_ref() {
-                            let original = texture.size_vec2();
-                            let scale = (inner.width() / original.x)
-                                .min(240.0 / original.y)
-                                .min(1.0);
-                            ui.add(egui::Image::new((texture.id(), original * scale)));
-                        } else {
-                            ui.add(egui_lucide::Lucide::File.size(48.0).image());
-                        }
-                        ui.add_space(10.0);
-                        ui.heading(&file.name);
-                        let kind = if file.extension.is_empty() {
-                            tr("Файл", "File")
-                        } else {
-                            file.extension.as_str()
-                        };
-                        ui.weak(format!("{kind} · {} {}", file.size, tr("байт", "bytes")));
+                        ui.add_space((inner.height() * 0.12).clamp(0.0, 80.0));
+                        ui.vertical_centered(|ui| {
+                            let max_size = egui::vec2(
+                                inner.width().min(420.0),
+                                (inner.height() * 0.55).clamp(1.0, 360.0),
+                            );
+                            if let Some(texture) = collection.texture.as_ref() {
+                                let original = texture.size_vec2();
+                                let scale = (max_size.x / original.x).min(max_size.y / original.y);
+                                ui.add(egui::Image::new((texture.id(), original * scale)));
+                            } else {
+                                ui.add(
+                                    egui_lucide::Lucide::File
+                                        .size(128.0_f32.min(max_size.x).min(max_size.y))
+                                        .image(),
+                                );
+                            }
+                            ui.add_space(14.0);
+                            ui.heading(&file.name);
+                            let kind = if file.extension.is_empty() {
+                                tr("Файл", "File")
+                            } else {
+                                file.extension.as_str()
+                            };
+                            ui.weak(format!("{kind} · {} {}", file.size, tr("байт", "bytes")));
+                        });
                     });
             } else if let Some(text) = collection.text.as_mut() {
                 let inner = canvas.shrink(18.0);

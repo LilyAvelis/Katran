@@ -1,5 +1,10 @@
 # Katran 4.0 run · 2026-11-18
 
+For unified packing, Fenna owned the viewer and action wiring, Vela owned
+Folder output publication, and Nemi investigated and fixed completed recycle
+stage retention. Polly owned type selection, command integration, shelf
+deletion and local verification.
+
 For the standalone BULL shelf follow-up, Fenna owned the rebindable action and
 preview wiring, Nemi owned Images and its pin/tag catalogue projection, and
 Polly owned the command, pack/unpack jobs, storage and local verification.

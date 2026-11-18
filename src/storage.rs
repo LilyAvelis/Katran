@@ -200,7 +200,7 @@ pub(crate) struct PreparedBlob {
     verified_stamp: FileStamp,
     interest: PublicationInterest,
     name: String,
-    source: String,
+    pub(crate) source: String,
     origin: Origin,
     text: Option<String>,
     link: bool,
@@ -544,7 +544,7 @@ fn require_collection_input(db: &Connection, id: i64, tab: crate::interaction::S
 }
 
 fn retire_collection(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<String> {
-    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection','text_collection','bs_collection')", [id], |row| row.get(0))?;
+    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection','text_collection','bs_collection','file_bull_collection','file_image_collection')", [id], |row| row.get(0))?;
     tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     Ok(hash)
 }

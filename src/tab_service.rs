@@ -89,6 +89,12 @@ fn background_actions(
 }
 
 impl Service {
+    fn current_archive_selection(&self) -> bool {
+        let ids = if self.interaction.selected.is_empty() { self.interaction.cursor.as_slice() } else { self.interaction.selected.as_slice() };
+        (1..=baloh_collection::bs::MAX_FILES).contains(&ids.len())
+            && ids.iter().all(|&id| self.get(id).is_ok_and(|event| crate::collection_kind::external(&event) || crate::collection::is_managed(&event)))
+    }
+
     pub(crate) fn navigate_tab(&mut self, delta: i8) -> Result<Value> {
         if !matches!(delta, -1 | 1) {
             return Err(ApiError::new(
@@ -141,13 +147,14 @@ impl Service {
                 background.translate
             }
             "search_image_google_lens" => background.image,
-            "create_bs_collection" => self.interaction.tab == ShelfTab::Files
-                && (background.pack_bs || background.unpack_bs || background.merge_bs),
             "create_image_collection" => {
                 let supported = match self.interaction.tab {
                     ShelfTab::Images | ShelfTab::Translate => background.translate,
                     ShelfTab::Links => background.pack_links,
                     ShelfTab::Text => background.pack_text,
+                    ShelfTab::Files => return background.pack_bs || background.unpack_bs || background.merge_bs
+                        || background.unpack_bull || background.merge_bull,
+                    ShelfTab::All => return background.pack_bs || self.current_archive_selection(),
                     _ => return false,
                 };
                 supported || background.unpack_bull || background.merge_bull
@@ -174,14 +181,14 @@ impl Service {
 
     pub(crate) fn action_label(&self, id: &str, fallback: &str, background: BackgroundActions) -> String {
         let english = self.settings.language == crate::settings::Language::English;
-        if id == "create_bs_collection" {
+        if id == "create_image_collection" && matches!(self.interaction.tab, ShelfTab::Files | ShelfTab::All) {
             return match (background.unpack_bs, background.merge_bs, english) {
-                (true, _, true) => "Unpack BS",
-                (true, _, false) => "Разобрать BS",
-                (_, true, true) => "Merge BS collections",
-                (_, true, false) => "Объединить BS",
-                (_, _, true) => "Pack files into BS",
-                (_, _, false) => "Собрать файлы в BS",
+                (true, _, true) => "Unpack collection",
+                (true, _, false) => "Разобрать коллекцию",
+                (_, true, true) => "Merge collections",
+                (_, true, false) => "Объединить коллекции",
+                (_, _, true) => "Pack / unpack collection",
+                (_, _, false) => "Собрать / разобрать коллекцию",
             }.into();
         }
         if id == "create_image_collection" {

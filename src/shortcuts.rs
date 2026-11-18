@@ -104,6 +104,9 @@ impl Shortcuts {
             &fs::read(path).map_err(|e| ShortcutError::new("storage_error", e))?,
         )
         .map_err(|e| ShortcutError::new("invalid_shortcuts", e))?;
+        if let Some(binding) = value.overrides.remove("create_bs_collection") {
+            value.overrides.entry("create_image_collection".into()).or_insert(binding);
+        }
         value.overrides = avilon_actions::validate_overrides(&definitions(), &value.overrides)
             .map_err(|error| match error {
                 avilon_actions::Error::UnknownAction { id }

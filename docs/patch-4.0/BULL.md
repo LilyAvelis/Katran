@@ -78,7 +78,15 @@ Changing a collection's tags affects that card. Legacy and translation
 collections can contain pages without original shelf records. Unpacking
 those pages adds PNG cards from the portable BULL. Exported BULLs contain
 ordered pages without Katran pin or tag metadata. Images, Links and Text have
-separate collection types. Folder authoring is subsequent work.
+separate collection types. Delete removes the shelf card and its member
+records, while Unpack restores the original shelf cards. Folder uses side-by-side
+file creation and a separate unpack destination.
+
+Raw file BULL uses `BALOHCOL`, little-endian version 2 and the `FILE` tag.
+A byte gives the length of the ASCII family label (`video`, `audio` or
+`ext-<suffix>`), followed by the label and a complete BS v1 payload. Readers
+validate every entry's name against the declared family. The payload
+preserves file names and bytes. See [BS v1](BS.md).
 
 Enter inside the viewer pastes only the currently displayed entry to the
 previous window using Katran's standard verified clipboard flow. Copy or drag

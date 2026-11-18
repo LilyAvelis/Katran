@@ -1,9 +1,10 @@
 //! Portable BS file collections. Source bytes are never modified.
+use crate::collection_kind::{self, Kind};
 use crate::{
     ApiError, Event, EventKind, Result, domain_jobs::Cancellation, interaction::ShelfTab,
     media_service, open_file, origin::Origin, storage,
 };
-use baloh_collection::bs::{self, FileEntry, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES};
+use baloh_collection::bs::{FileEntry, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES};
 use base64::Engine;
 use image::ImageDecoder;
 use serde_json::{Value, json};
@@ -15,6 +16,7 @@ use std::{
 };
 
 pub(crate) const SOURCE: &str = "bs_collection";
+pub(crate) const TYPED_SOURCE: &str = "file_bull_collection";
 const EXTRACTED: &str = "bs_extracted_file";
 
 struct CancellableReader<'a, R> {
@@ -40,7 +42,10 @@ fn collection_extension(name: &Path) -> bool {
 }
 
 pub(crate) fn is_managed(event: &Event) -> bool {
-    event.storage == "cached" && event.source == SOURCE && bs_name(event)
+    event.storage == "cached"
+        && ((event.source == SOURCE && bs_name(event))
+            || (event.source == TYPED_SOURCE
+                && collection_kind::extension(Path::new(&event.name)).as_deref() == Some("bull")))
 }
 
 fn bs_name(event: &Event) -> bool {
@@ -75,9 +80,9 @@ fn no_nested(entries: &[FileEntry]) -> Result<()> {
     Ok(())
 }
 
-fn read_collection(event: &Event, cancel: &Cancellation) -> Result<Vec<FileEntry>> {
+pub(crate) fn read_collection(event: &Event, cancel: &Cancellation) -> Result<Vec<FileEntry>> {
     cancel.check()?;
-    if !can_view(event) {
+    if !can_view(event) && !collection_kind::external(event) {
         return Err(ApiError::new(
             "invalid_collection",
             "Expected a saved BS collection",
@@ -96,26 +101,42 @@ fn read_collection(event: &Event, cancel: &Cancellation) -> Result<Vec<FileEntry
         cancel,
         hash: Sha256::new(),
     };
-    let entries = match bs::read(&mut input) {
+    let kind = collection_kind::probe(event)?;
+    if !matches!(kind, Kind::Bs | Kind::Files(_)) {
+        return Err(ApiError::new(
+            "invalid_collection",
+            "Expected BS or file BULL",
+        ));
+    }
+    let entries = match collection_kind::read_raw(&mut input, &kind) {
         Ok(entries) => entries,
         Err(error) => {
             cancel.check()?;
-            return Err(error.into());
+            return Err(error);
         }
     };
     cancel.check()?;
     no_nested(&entries)?;
-    let prefix = if event.storage == "cached" {
-        "blob:"
+    verified_read(event, format!("{:x}", input.hash.finalize()), &stamp)?;
+    Ok(entries)
+}
+
+fn verified_read(event: &Event, hash: String, stamp: &media_service::Stamp) -> Result<()> {
+    let expected = event
+        .revision
+        .strip_prefix("blob:")
+        .or_else(|| event.revision.strip_prefix("ref:"));
+    let valid = if let Some(expected) = expected {
+        expected == hash
     } else {
-        "ref:"
+        event.source == "work_folder"
+            && event.revision.starts_with("file:")
+            && open_file::validate(event).is_ok()
     };
-    if event.revision != format!("{prefix}{:x}", input.hash.finalize())
-        || media_service::stamp(&event.path)? != stamp
-    {
+    if !valid || media_service::stamp(&event.path)? != *stamp {
         return Err(ApiError::new("source_changed", "BS changed while reading"));
     }
-    Ok(entries)
+    Ok(())
 }
 
 fn read_regular(event: &Event, cancel: &Cancellation) -> Result<(FileEntry, media_service::Stamp)> {
@@ -149,19 +170,7 @@ fn read_regular(event: &Event, cancel: &Cancellation) -> Result<(FileEntry, medi
         }
         bytes.extend_from_slice(&chunk[..n]);
     }
-    let expected = event
-        .revision
-        .strip_prefix("blob:")
-        .or_else(|| event.revision.strip_prefix("ref:"))
-        .ok_or_else(|| ApiError::new("stale_selection", "File has no verified content revision"))?;
-    if format!("{:x}", Sha256::digest(&bytes)) != expected
-        || media_service::stamp(&event.path)? != stamp
-    {
-        return Err(ApiError::new(
-            "source_changed",
-            "File changed while reading",
-        ));
-    }
+    verified_read(event, format!("{:x}", Sha256::digest(&bytes)), &stamp)?;
     Ok((
         FileEntry {
             name: event.name.clone(),
@@ -173,21 +182,56 @@ fn read_regular(event: &Event, cancel: &Cancellation) -> Result<(FileEntry, medi
 
 pub(crate) fn pack(
     events: Vec<Event>,
+    kind: Kind,
     root: &Path,
     quota: u64,
     references: &[PathBuf],
     cancel: &Cancellation,
 ) -> Result<storage::CollectionPack> {
+    let (inputs, portable, count) = encode(events, &kind, quota, cancel)?;
+    let blob = storage::prepare_bytes(
+        root,
+        quota,
+        storage::ByteIngest {
+            name: if kind == Kind::Bs {
+                "Files collection.bs"
+            } else {
+                "Files collection.bull"
+            },
+            source: if kind == Kind::Bs {
+                SOURCE
+            } else {
+                TYPED_SOURCE
+            },
+            bytes: &portable,
+            origin: &Origin::default(),
+        },
+        references,
+    )?;
+    Ok(storage::CollectionPack {
+        inputs,
+        blob,
+        tab: ShelfTab::Files,
+        count,
+    })
+}
+
+pub(crate) fn encode(
+    events: Vec<Event>,
+    kind: &Kind,
+    quota: u64,
+    cancel: &Cancellation,
+) -> Result<(Vec<storage::CollectionInput>, Vec<u8>, usize)> {
     if events.is_empty() {
         return Err(ApiError::new(
             "invalid_selection",
             "Select files or BS collections",
         ));
     }
-    let merge = is_managed(&events[0]);
+    let merge = is_managed(&events[0]) || collection_kind::external(&events[0]);
     if events.iter().any(|event| {
         if merge {
-            !is_managed(event)
+            !is_managed(event) && !collection_kind::external(event)
         } else {
             !is_packable_file(event)
         }
@@ -204,6 +248,12 @@ pub(crate) fn pack(
         cancel.check()?;
         let result = (|| -> Result<_> {
             if merge {
+                if collection_kind::probe(&event)? != *kind {
+                    return Err(ApiError::new(
+                        "invalid_selection",
+                        "Merge collections of the same type",
+                    ));
+                }
                 let stamp = media_service::stamp(&event.path)?;
                 let entries = read_collection(&event, cancel)?;
                 if media_service::stamp(&event.path)? != stamp {
@@ -251,7 +301,7 @@ pub(crate) fn pack(
     }
     cancel.check()?;
     let mut portable = Vec::new();
-    bs::write(&mut portable, &entries)?;
+    collection_kind::write_raw(&mut portable, &entries, kind)?;
     if portable.len() > MAX_TOTAL_BYTES as usize || portable.len() as u64 > quota {
         return Err(ApiError::new(
             "collection_size_limit",
@@ -259,23 +309,7 @@ pub(crate) fn pack(
         ));
     }
     cancel.check()?;
-    let blob = storage::prepare_bytes(
-        root,
-        quota,
-        storage::ByteIngest {
-            name: "Files collection.bs",
-            source: SOURCE,
-            bytes: &portable,
-            origin: &Origin::default(),
-        },
-        references,
-    )?;
-    Ok(storage::CollectionPack {
-        inputs,
-        blob,
-        tab: ShelfTab::Files,
-        count: entries.len(),
-    })
+    Ok((inputs, portable, entries.len()))
 }
 
 pub(crate) fn unpack(
@@ -370,11 +404,18 @@ fn thumbnail(bytes: &[u8]) -> Option<Vec<u8>> {
     (output.get_ref().len() <= 1024 * 1024).then(|| output.into_inner())
 }
 
-pub(crate) fn page(event: &Event, index: usize, cancel: &Cancellation) -> Result<Value> {
+pub(crate) fn page(
+    event: &Event,
+    index: usize,
+    root: &Path,
+    quota: u64,
+    cancel: &Cancellation,
+) -> Result<Value> {
     let (entry, count) = selected(event, index, cancel)?;
     cancel.check()?;
-    let preview_png =
-        thumbnail(&entry.bytes).map(|png| base64::engine::general_purpose::STANDARD.encode(png));
+    let preview_png = thumbnail(&entry.bytes)
+        .or_else(|| shell_preview(root, &entry, quota))
+        .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
     cancel.check()?;
     let extension = Path::new(&entry.name)
         .extension()
@@ -382,6 +423,23 @@ pub(crate) fn page(event: &Event, index: usize, cancel: &Cancellation) -> Result
         .unwrap_or("")
         .to_ascii_lowercase();
     Ok(
-        json!({"index":index,"count":count,"file":{"name":entry.name,"size":entry.bytes.len(),"extension":extension,"preview_png":preview_png}}),
+        json!({"index":index,"count":count,"file":{"name":entry.name,"size":entry.bytes.len(),"extension":extension,"preview_png":preview_png,"archive_kind":if bs_name(event) {"bs"} else {"bull_file"}}}),
     )
+}
+
+fn shell_preview(root: &Path, entry: &FileEntry, quota: u64) -> Option<Vec<u8>> {
+    use crate::file_visual::{Provider, ShellVisual};
+    let plan =
+        crate::copy_out::prepare_bs_entry(&root.join("collection-visuals"), entry, quota).ok()?;
+    let path = plan.paths.first()?;
+    let provider = crate::shell_visual_worker::IsolatedShell;
+    let rgba = provider
+        .extract(path, 384, ShellVisual::Thumbnail)
+        .or_else(|_| provider.extract(path, 384, ShellVisual::Icon))
+        .ok()?;
+    let mut output = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut output, image::ImageFormat::Png)
+        .ok()?;
+    Some(output.into_inner())
 }

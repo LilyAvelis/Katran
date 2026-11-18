@@ -118,12 +118,13 @@ pub(crate) fn recycle_locked(
         ));
     }
     let directory = fs::OpenOptions::new()
-        .read(true)
-        .share_mode(7)
+        .access_mode(0x80)
+        // Keep this operation's own stage from being renamed or replaced.
+        .share_mode(3)
         .custom_flags(0x02000000 | 0x00200000)
         .open(&stage)?;
-    let stage_volume = directory_volume(&directory)?;
-    if stage_volume != identity.volume {
+    let stage_identity = directory_identity(&directory)?;
+    if stage_identity.0 != identity.volume {
         return Err(ApiError::new(
             "unsafe_staging",
             "Source and staging directory are on different volumes",
@@ -141,14 +142,18 @@ pub(crate) fn recycle_locked(
     write_record(&stage.join("prepared.json"), &record)?;
     rename_locked_original(&mut locked, &staged)?;
     if let Err(error) = write_record(&stage.join("staged.json"), &record) {
-        return Ok(restore_locked(
+        let receipt = restore_locked(
             locked,
             &original,
             &staged,
             &stage,
             &operation_id,
             format!("Journal stage failed: {}", error.message),
-        ));
+        );
+        if receipt.status == "restored" {
+            cleanup_completed(&stage, directory, stage_identity, &record, &receipt);
+        }
+        return Ok(receipt);
     }
     drop(locked);
     // Reopen, verify content and file identity directly before handing the
@@ -190,10 +195,14 @@ pub(crate) fn recycle_locked(
             };
             // A failure to record completion cannot turn an already recycled
             // source into a retryable deletion. Return the confirmed result.
-            let _ = write_record(
+            if write_record(
                 &stage.join("outcome.json"),
                 &serde_json::json!({"receipt":receipt}),
-            );
+            )
+            .is_ok()
+            {
+                cleanup_completed(&stage, directory, stage_identity, &record, &receipt);
+            }
             Ok(receipt)
         }
         Ok(()) => Ok(recovery(
@@ -225,14 +234,18 @@ pub(crate) fn recycle_locked(
                     "Recycle failed and staged identity changed".into(),
                 ));
             }
-            Ok(restore_locked_handle(
+            let receipt = restore_locked_handle(
                 &mut handle,
                 &original,
                 &staged,
                 &stage,
                 &operation_id,
                 error.message,
-            ))
+            );
+            if receipt.status == "restored" {
+                cleanup_completed(&stage, directory, stage_identity, &record, &receipt);
+            }
+            Ok(receipt)
         }
     }
 }
@@ -259,6 +272,128 @@ fn write_record(path: &Path, value: &serde_json::Value) -> Result<()> {
     }
     std::fs::rename(temporary, path)?;
     Ok(())
+}
+
+/// Retire only this operation's exact completed journal and empty stage. This
+/// never enumerates older recovery directories and never recursively deletes.
+/// Any mismatch or I/O error leaves remaining material for inspection.
+#[cfg(windows)]
+fn cleanup_completed(
+    stage: &Path,
+    stage_guard: std::fs::File,
+    stage_identity: (u32, u64),
+    record: &serde_json::Value,
+    receipt: &RecycleReceipt,
+) {
+    use std::{
+        fs,
+        io::Read,
+        os::windows::fs::{MetadataExt, OpenOptionsExt},
+        os::windows::io::AsRawHandle,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
+    };
+    fn remove_open(file: &fs::File) -> std::io::Result<()> {
+        let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+        if unsafe {
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FileDispositionInfo,
+                (&info as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    let try_cleanup = || -> std::io::Result<()> {
+        // A directory handle with DELETE access blocks the journal's Win32
+        // renames. Upgrade after the final receipt and verify the same directory.
+        drop(stage_guard);
+        let stage_handle = fs::OpenOptions::new()
+            .access_mode(0x80000000 | 0x00010000)
+            .share_mode(3)
+            .custom_flags(0x02000000 | 0x00200000)
+            .open(stage)?;
+        if directory_identity(&stage_handle).ok() != Some(stage_identity) {
+            return Err(std::io::Error::other("recovery stage changed"));
+        }
+        let mut names = fs::read_dir(stage)?
+            .map(|e| e.map(|e| e.file_name()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        names.sort();
+        let mut expected: Vec<std::ffi::OsString> =
+            ["data", "prepared.json", "staged.json", "outcome.json"]
+                .into_iter()
+                .map(Into::into)
+                .collect();
+        expected.sort();
+        if names != expected {
+            return Err(std::io::Error::other("unexpected recovery entries"));
+        }
+        let data_path = stage.join("data");
+        let data_meta = fs::symlink_metadata(&data_path)?;
+        if !data_meta.is_dir()
+            || data_meta.file_attributes() & 0x400 != 0
+            || data_path.canonicalize()?.parent() != Some(stage)
+        {
+            return Err(std::io::Error::other("unsafe recovery data directory"));
+        }
+        let data = fs::OpenOptions::new()
+            .access_mode(0x80000000 | 0x00010000)
+            .share_mode(3)
+            .custom_flags(0x02000000 | 0x00200000)
+            .open(&data_path)?;
+        let opened_data = data.metadata()?;
+        if !opened_data.is_dir()
+            || opened_data.file_attributes() & 0x400 != 0
+            || data_path.canonicalize()?.parent() != Some(stage)
+        {
+            return Err(std::io::Error::other("recovery data changed"));
+        }
+        if fs::read_dir(&data_path)?.next().is_some() {
+            return Err(std::io::Error::other("recovery data is not empty"));
+        }
+        let expected_record = serde_json::to_vec(record)?;
+        let expected_outcome = serde_json::to_vec(&serde_json::json!({"receipt":receipt}))?;
+        let mut files = Vec::new();
+        for (name, expected) in [
+            ("staged.json", &expected_record),
+            ("prepared.json", &expected_record),
+            ("outcome.json", &expected_outcome),
+        ] {
+            let mut file = fs::OpenOptions::new()
+                .access_mode(0x80000000 | 0x00010000)
+                .share_mode(1)
+                .custom_flags(0x00200000)
+                .open(stage.join(name))?;
+            let meta = file.metadata()?;
+            if !meta.is_file()
+                || meta.file_attributes() & 0x400 != 0
+                || meta.len() != expected.len() as u64
+                || meta.len() > 65536
+            {
+                return Err(std::io::Error::other("unexpected recovery journal"));
+            }
+            let mut actual = Vec::new();
+            file.read_to_end(&mut actual)?;
+            if &actual != expected {
+                return Err(std::io::Error::other("changed recovery journal"));
+            }
+            files.push(file);
+        }
+        remove_open(&data)?;
+        drop(data);
+        for file in files {
+            remove_open(&file)?;
+        }
+        remove_open(&stage_handle)?;
+        Ok(())
+    };
+    let _ = try_cleanup();
 }
 
 #[cfg(windows)]
@@ -320,7 +455,7 @@ fn recovery(id: &str, original: &Path, staged: &Path, error: String) -> RecycleR
 }
 
 #[cfg(windows)]
-fn directory_volume(file: &std::fs::File) -> Result<u32> {
+fn directory_identity(file: &std::fs::File) -> Result<(u32, u64)> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
@@ -329,13 +464,16 @@ fn directory_volume(file: &std::fs::File) -> Result<u32> {
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
         return Err(std::io::Error::last_os_error().into());
     }
-    if info.dwFileAttributes & 0x400 != 0 {
+    if info.dwFileAttributes & 0x400 != 0 || info.dwFileAttributes & 0x10 == 0 {
         return Err(ApiError::new(
             "unsafe_staging",
             "Staging directory is a reparse point",
         ));
     }
-    Ok(info.dwVolumeSerialNumber)
+    Ok((
+        info.dwVolumeSerialNumber,
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
 }
 #[cfg(windows)]
 fn set_hidden(path: &Path) -> Result<()> {
@@ -561,6 +699,12 @@ mod tests {
         assert_eq!(receipt.status, "restored");
         assert!(!receipt.recycled);
         assert_eq!(fs::read(&original).unwrap(), b"synthetic original");
+        assert!(
+            !root
+                .path()
+                .join(format!(".katran-recovery-{}", receipt.operation_id))
+                .exists()
+        );
     }
     #[test]
     fn occupied_original_is_preserved_with_recovery_file() {
@@ -672,5 +816,35 @@ mod tests {
         assert_eq!(receipt.status, "recycled");
         assert!(!original.exists());
         assert!(receipt.recycled);
+        assert!(
+            !root
+                .path()
+                .join(format!(".katran-recovery-{}", receipt.operation_id))
+                .exists()
+        );
+    }
+    #[test]
+    fn unknown_stage_contents_are_never_removed() {
+        struct Extra;
+        impl Trash for Extra {
+            fn recycle(&self, staged: &Path) -> Result<()> {
+                let stage = staged.parent().unwrap().parent().unwrap();
+                fs::write(stage.join("unknown.bin"), b"preserve")?;
+                fs::remove_file(staged)?;
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("sample.txt");
+        fs::write(&original, b"synthetic original").unwrap();
+        let hash = crate::preview::content_hash(&original).unwrap();
+        let receipt = recycle_verified(&original, root.path(), &hash, &Extra).unwrap();
+        assert_eq!(receipt.status, "recycled");
+        let stage = root
+            .path()
+            .join(format!(".katran-recovery-{}", receipt.operation_id));
+        assert_eq!(fs::read(stage.join("unknown.bin")).unwrap(), b"preserve");
+        assert!(stage.join("prepared.json").exists());
+        assert!(stage.join("outcome.json").exists());
     }
 }

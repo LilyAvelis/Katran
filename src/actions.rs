@@ -27,7 +27,6 @@ pub fn palette_order(id: &str) -> usize {
         "reveal",
         "search_image_google_lens",
         "create_image_collection",
-        "create_bs_collection",
         "save",
         "delete",
         "video_pause",
@@ -94,7 +93,6 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "reveal"
         | "search_image_google_lens"
         | "create_image_collection"
-        | "create_bs_collection"
         | "save"
         | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -287,14 +285,6 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
-    Definition {
-        id: "create_bs_collection",
-        label: "Собрать / разобрать BS",
-        default_binding: "",
-        rebindable: true,
-        group: "Выбранное",
-        in_palette: true,
-    },
     Definition {
         id: "create_image_collection",
         label: "Собрать / разобрать BULL",

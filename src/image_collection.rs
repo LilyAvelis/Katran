@@ -16,7 +16,7 @@ pub(crate) fn is_managed(event: &Event) -> bool {
     event.storage == "cached"
         && matches!(
             event.source.as_str(),
-            SOURCE | "image_translation_collection"
+            SOURCE | "image_translation_collection" | "file_image_collection"
         )
         && Path::new(&event.name)
             .extension()
@@ -88,12 +88,42 @@ pub(crate) fn prepare_page_copy(
 
 pub(crate) fn pack(
     events: Vec<Event>,
-    translated: bool,
+    tab: crate::interaction::ShelfTab,
     root: &Path,
     quota: u64,
     references: &[PathBuf],
     cancel: &Cancellation,
 ) -> Result<storage::CollectionPack> {
+    use crate::interaction::ShelfTab;
+    let (inputs, portable, count) = encode(events, quota, cancel)?;
+    let blob = storage::prepare_bytes(
+        root,
+        quota,
+        storage::ByteIngest {
+            name: "Image collection.bull",
+            source: match tab {
+                ShelfTab::Translate => "image_translation_collection",
+                ShelfTab::Files => "file_image_collection",
+                _ => SOURCE,
+            },
+            bytes: &portable,
+            origin: &Origin::default(),
+        },
+        references,
+    )?;
+    Ok(storage::CollectionPack {
+        inputs,
+        blob,
+        tab,
+        count,
+    })
+}
+
+pub(crate) fn encode(
+    events: Vec<Event>,
+    quota: u64,
+    cancel: &Cancellation,
+) -> Result<(Vec<storage::CollectionInput>, Vec<u8>, usize)> {
     use baloh_collection::codec::{MAX_PAGE_BYTES, MAX_TOTAL_BYTES};
     let mut pages = Vec::with_capacity(events.len());
     let mut inputs = Vec::with_capacity(events.len());
@@ -102,7 +132,11 @@ pub(crate) fn pack(
         cancel.check()?;
         let page: Result<_> = (|| {
             let stamp = media_service::stamp(&event.path)?;
-            if is_managed(&event) {
+            if is_managed(&event)
+                || (crate::collection_kind::external(&event)
+                    && crate::collection_kind::probe(&event)?
+                        == crate::collection_kind::Kind::Images)
+            {
                 crate::open_file::validate(&event)?;
                 let pages = baloh_collection::codec::read(File::open(&event.path)?)?;
                 if media_service::stamp(&event.path)? != stamp {
@@ -181,27 +215,7 @@ pub(crate) fn pack(
     let mut portable = Vec::with_capacity(total);
     baloh_collection::codec::write(&mut portable, &pages)?;
     cancel.check()?;
-    let blob = storage::prepare_bytes(
-        root,
-        quota,
-        storage::ByteIngest {
-            name: "Image collection.bull",
-            source: if translated {
-                "image_translation_collection"
-            } else {
-                SOURCE
-            },
-            bytes: &portable,
-            origin: &Origin::default(),
-        },
-        references,
-    )?;
-    Ok(storage::CollectionPack {
-        inputs,
-        blob,
-        tab: if translated { crate::interaction::ShelfTab::Translate } else { crate::interaction::ShelfTab::Images },
-        count: pages.len(),
-    })
+    Ok((inputs, portable, pages.len()))
 }
 
 pub(crate) fn unpack(
@@ -238,7 +252,11 @@ pub(crate) fn unpack(
             quota,
             storage::ByteIngest {
                 name: &name,
-                source: "image_collection_page",
+                source: if event.source == "file_image_collection" {
+                    "bs_extracted_file"
+                } else {
+                    "image_collection_page"
+                },
                 bytes: png,
                 origin: &Origin::default(),
             },

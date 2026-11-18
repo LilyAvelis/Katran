@@ -48,11 +48,14 @@ lease before starting `CopyCollectionPage`. The existing completion path
 validates the lease and clipboard. Image-only publication proves the settled
 DIBV5 bytes and Katran marker after owner teardown before authorizing input.
 
-`CreateBsCollection` uses Files and the existing catalogue membership rules
-for packing, merging and unpacking. `baloh_collection::bs` stores independent
-raw files; `bs_collection` validates source revisions and prepares individual
-previews. `OpenBsEntry` reuses the guarded named snapshot cache and dispatches
-only one Windows open/reveal request. BS is excluded from BULL entry paste.
+`CreateImageCollection` is the shared rebindable action for Files and Folder
+as well. `collection_kind` chooses BULL or BS and handles file BULL framing.
+`baloh_collection::bs` stores the raw files. `OpenBsEntry` reuses the guarded
+snapshot cache to open one raw file. The viewer requests a Windows thumbnail
+or type icon. Folder publication checks the current context and input
+revisions, then publishes a new file or unpacked directory without replacing
+anything. Shelf Delete removes the hidden member rows before retiring the
+card. Successful recycling now clears its verified completed staging data.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
