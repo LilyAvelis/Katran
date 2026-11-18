@@ -10,7 +10,8 @@ Existing sessions reused; no expansion:
 - /root/nemi · gpt-6.1-terra/high: settings.rs/settings_ui.rs/settings tests;
   default-off field and targeted fresh-settings save, frozen.
 - /root · lead: input ownership/P, shared policy/service/Cargo/status integration,
-  API tests, final lint/docs/build/primary install. Manual follow-up pending.
+  API tests, lint/docs/build/primary install complete: runtime ad534e0b6952 from
+  source5498cd1. Manual follow-up pending; no publication.
 
 ## Current: libmpv and overlay controls · 2026-11-18
 

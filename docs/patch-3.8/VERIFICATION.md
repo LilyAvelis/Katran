@@ -2,6 +2,21 @@
 
 ## Owner playback acceptance and GPU/UX follow-up · 2026-11-18
 
+Installed from source **5498cd1**, one optimized UI build **93.55s**, Windows x64 /
+Rust1.95.0 / locked offline / ui + clipboard-events. Compiled source fingerprints
+matched before/after build. Primary runtime **ad534e0b6952**, SHA256
+`ad534e0b6952130c1fc44fa32bcb77703735ca1caf84f42093a828da7df4d7e8`.
+Existing pinned libmpv/helpers copied and all hashes reverified. Prior accepted
+runtime3322b2bcfddb and fresh integrity-checked schema-v13 backup retained in
+runtime/rollback-gpu-video.json. Atomic pointer changed; running app untouched.
+GPU preference remains default-off; the owner was asked to tray-exit/relaunch,
+check P/seek/layout and explicitly enable General's video GPU option. Follow-up
+native UX/real-video GPU acceptance remains pending. No push/tag/public release.
+
+Post-batch pruning: 37.97 ->33.84GiB, removed4.13GiB, zero failures. Protected
+dependency/release outputs prevent the32GiB target; installed UI/helpers verified
+unchanged. No full cache clean, profile/model/runtime deletion or extra rebuild.
+
 Lilia confirmed runtime3322b2bcfddb plays in Folder and Desktop and switches
 objects. Reported remaining defects: clipped large controls, stale-time seek
 jitter; requested P pause and optional default-off GPU acceleration.
