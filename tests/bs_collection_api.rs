@@ -332,6 +332,28 @@ fn one_action_packs_homogeneous_files_into_bull_and_deletes_hidden_shelf_members
     let result = unified(&mut api);
     let card = &result["event"];
     assert_eq!(card["source"], "file_bull_collection");
+    let target = call(&mut api, Command::CollectionRenameInfo { id: id(card) });
+    let renamed = finish(
+        &mut api,
+        Command::RenameCollection {
+            id: id(card),
+            revision: revision(&target),
+            name: "Моя коллекция".into(),
+        },
+    );
+    assert_eq!(renamed["event"]["name"], "Моя коллекция.bull");
+    assert_eq!(renamed["event"]["revision"], card["revision"]);
+    assert_eq!(
+        reply(
+            &mut api,
+            Command::RenameCollection {
+                id: id(card),
+                revision: revision(&target),
+                name: "Stale".into()
+            }
+        )["ok"],
+        false
+    );
     let page = finish(
         &mut api,
         Command::TranslationCollectionPage {
@@ -389,7 +411,7 @@ impl katran::downloads::Trash for SyntheticFolderTrash {
 
 #[cfg(windows)]
 #[test]
-fn folder_packs_verified_archive_then_recycles_and_unpacks_without_removing_archive() {
+fn folder_packs_and_unpacks_in_place_with_verified_recycle() {
     let profile = tempfile::tempdir().unwrap();
     let disk = tempfile::tempdir().unwrap();
     let a = disk.path().join("first.txt");
@@ -449,6 +471,27 @@ fn folder_packs_verified_archive_then_recycles_and_unpacks_without_removing_arch
                 .is_some_and(|name| name.ends_with(".bs"))
         })
         .unwrap();
+    let target = call(&mut api, Command::CollectionRenameInfo { id: id(selected) });
+    let before_rename = std::fs::read(&archive).unwrap();
+    let renamed = finish(
+        &mut api,
+        Command::RenameCollection {
+            id: id(selected),
+            revision: revision(&target),
+            name: "Project files".into(),
+        },
+    );
+    assert!(!archive.exists());
+    let archive = PathBuf::from(renamed["path"].as_str().unwrap());
+    assert_eq!(archive.file_name().unwrap(), "Project files.bs");
+    assert_eq!(std::fs::read(&archive).unwrap(), before_rename);
+    let page = browse(&mut api);
+    let selected = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Project files.bs")
+        .unwrap();
     let page = finish(
         &mut api,
         Command::TranslationCollectionPage {
@@ -458,19 +501,29 @@ fn folder_packs_verified_archive_then_recycles_and_unpacks_without_removing_arch
         },
     );
     assert_eq!(page["count"], 2);
+    // A new unrelated file with the original name must never be overwritten.
+    std::fs::write(&a, b"existing collision").unwrap();
     select(&mut api, &[id(selected)]);
     let extracted = unified(&mut api);
     assert_eq!(extracted["unpacked"], true);
     let destination = PathBuf::from(extracted["path"].as_str().unwrap());
     assert_eq!(
-        std::fs::read(destination.join("first.txt")).unwrap(),
+        destination.canonicalize().unwrap(),
+        disk.path().canonicalize().unwrap()
+    );
+    assert_eq!(
+        std::fs::read(destination.join("first (2).txt")).unwrap(),
         b"text fixture"
     );
     assert_eq!(
         std::fs::read(destination.join("second.bin")).unwrap(),
         [0, 4, 9]
     );
-    assert!(archive.exists());
+    assert_eq!(std::fs::read(&a).unwrap(), b"existing collision");
+    assert!(!archive.exists());
+    assert_eq!(extracted["publication_complete"], true);
+    assert_eq!(extracted["published_paths"].as_array().unwrap().len(), 2);
+    assert_eq!(extracted["sources_remaining"], 0);
 }
 
 #[cfg(windows)]
@@ -608,6 +661,10 @@ fn folder_images_archive_preserves_names_and_exact_bytes() {
     let extracted = unified(&mut api);
     let folder = PathBuf::from(extracted["path"].as_str().unwrap());
     assert_eq!(
+        folder.canonicalize().unwrap(),
+        disk.path().canonicalize().unwrap()
+    );
+    assert_eq!(
         std::fs::read(folder.join("alpha.png")).unwrap(),
         *png.get_ref()
     );
@@ -615,5 +672,65 @@ fn folder_images_archive_preserves_names_and_exact_bytes() {
         std::fs::read(folder.join("beta.jpg")).unwrap(),
         *jpeg.get_ref()
     );
-    assert!(archive.exists());
+    assert!(!archive.exists());
+    assert_eq!(extracted["sources_remaining"], 0);
+}
+
+#[cfg(windows)]
+#[test]
+fn folder_unpack_recycle_failure_keeps_archive_and_reports_published_files() {
+    let profile = tempfile::tempdir().unwrap();
+    let disk = tempfile::tempdir().unwrap();
+    let archive = disk.path().join("fixture.bs");
+    let entries = vec![
+        baloh_collection::bs::FileEntry {
+            name: "first.txt".into(),
+            bytes: b"one".to_vec(),
+        },
+        baloh_collection::bs::FileEntry {
+            name: "second.bin".into(),
+            bytes: vec![0, 1, 2],
+        },
+    ];
+    let mut output = std::fs::File::create(&archive).unwrap();
+    baloh_collection::bs::write(&mut output, &entries).unwrap();
+    drop(output);
+    let original = std::fs::read(&archive).unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    api.set_trash(Box::new(SyntheticFolderTrash {
+        fail_name: Some("fixture.bs".into()),
+        seen: Arc::new(Mutex::new(Vec::new())),
+    }));
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: disk.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        },
+    );
+    let id = id(&page["events"][0]);
+    select(&mut api, &[id]);
+    let result = unified(&mut api);
+    assert_eq!(result["unpacked"], true);
+    assert_eq!(result["publication_complete"], false);
+    assert_eq!(result["files_published"], true);
+    assert_eq!(result["archive_unchanged"], true);
+    assert_eq!(result["sources_remaining"], 1);
+    assert_eq!(std::fs::read(&archive).unwrap(), original);
+    assert_eq!(
+        std::fs::read(disk.path().join("first.txt")).unwrap(),
+        b"one"
+    );
+    assert_eq!(
+        std::fs::read(disk.path().join("second.bin")).unwrap(),
+        [0, 1, 2]
+    );
+    assert_eq!(result["original_removal"][0]["status"], "restored");
 }

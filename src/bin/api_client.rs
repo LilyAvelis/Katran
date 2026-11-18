@@ -1644,7 +1644,17 @@ impl Shelf {
                 )
             };
             self.message = format!("{label}: {count}");
-            if result["archive_verified"] == false {
+            if result["unpacked"] == true && result["files_published"] == false {
+                let restored = result["published_paths"].as_array().map_or(0, Vec::len);
+                self.message = format!(
+                    "{}: {restored}/{count}. {}",
+                    tr("Извлечено файлов", "Files extracted"),
+                    tr("Архив сохранён", "Archive kept")
+                );
+                if let Some(error) = result["publication_error"]["message"].as_str() {
+                    self.message.push_str(&format!(" · {error}"));
+                }
+            } else if result["archive_verified"] == false {
                 self.message = tr(
                     "Не удалось проверить коллекцию. Исходники остались в папке",
                     "Could not verify the collection. Originals kept",

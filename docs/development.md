@@ -59,9 +59,17 @@ snapshot cache to open one raw file. The viewer requests a Windows thumbnail
 or type icon. Folder pack checks the current context, revisions and pinned
 aliases before authorizing the worker. The worker publishes and verifies a
 lossless archive, then recycles its source files with per-item receipts.
-Folder unpack publishes a new directory. Shelf Delete removes the hidden
-member rows before retiring the card. Successful recycling now clears its
-verified completed staging data.
+Folder unpack publishes verified files directly in the current folder,
+resolves name collisions without overwriting, and recycles the archive only
+after complete publication. Shelf Delete removes the hidden member rows
+before retiring the card. Successful recycling now clears its verified
+completed staging data.
+
+`CollectionRenameInfo` captures the archive's name and content identity for
+`RenameCollection`. Managed rename updates the exported name while preserving
+the item ID and content. Folder rename uses the verified source handle and an
+exclusive destination. Ctrl+E uses the existing properties editor for pinned
+shelf items and the name-only editor for unpinned collections.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded

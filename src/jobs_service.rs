@@ -84,6 +84,8 @@ pub(crate) enum PreparedWork {
     PackImageCollection(storage::CollectionPack),
     FolderBundle { prepared: folder_bundle_service::Prepared, generation: u64 },
     FolderBundlePublished { folder: PathBuf, receipt: Value },
+    RenameShelfCollection { event: Event, tab: interaction::ShelfTab, name: String },
+    RenameFolderCollection { prepared: collection_rename::PreparedFolderRename, generation: u64 },
     LinkCollectionMetadata {
         event: Event,
         blob: Option<storage::PreparedBlob>,
@@ -1630,6 +1632,26 @@ impl Service {
                     Ok(PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index })
                 })?
             }
+            Command::RenameCollection { id, revision, name } => {
+                let event = self.collection_rename_target(id)?;
+                if Self::collection_rename_revision(&event) != revision {
+                    return Err(ApiError::new("stale_selection", "Collection name or contents changed"));
+                }
+                collection_rename::full_name(&event, &name)?;
+                let tab = self.interaction.tab;
+                let folder = (tab == interaction::ShelfTab::All)
+                    .then(|| self.work_folder.current().map(std::path::Path::to_path_buf)).flatten();
+                let generation = self.interaction.view_generation;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    if let Some(folder) = folder {
+                        let prepared = collection_rename::prepare_folder(event, &folder, &name, &cancel)?;
+                        Ok(PreparedWork::RenameFolderCollection { prepared, generation })
+                    } else {
+                        Ok(PreparedWork::RenameShelfCollection { event, tab, name })
+                    }
+                })?
+            }
             Command::RenameCollectionLink { id, revision, index, title } => {
                 let event = self.saved_collection(id, &revision)?;
                 if !collection::is_link_collection(&event) {
@@ -1831,6 +1853,35 @@ impl Service {
     fn ready_value_job_in(&mut self, _lane: Lane, value: Value) -> Result<Value> {
         self.ready_value_job(value)
     }
+    fn collection_rename_target(&self, id: i64) -> Result<Event> {
+        let event = self.get(id)?;
+        let tab = self.interaction.tab;
+        if !collection_rename::can_rename(&event) {
+            return Err(ApiError::new("invalid_collection", "Select a BULL or BS collection"));
+        }
+        if tab == interaction::ShelfTab::All {
+            if event.source != "work_folder" || event.path.parent() != self.work_folder.current() {
+                return Err(ApiError::new("stale_folder", "Select a collection from the current Folder"));
+            }
+            if self.folder_path_pinned(&event.path)? {
+                return Err(ApiError::new("skipped_pinned", "The collection has a pinned shelf reference"));
+            }
+        } else if id <= 0 || !storage::visible_collection_input(&self.db, id, tab)? {
+            return Err(ApiError::new("stale_selection", "Select a collection from this shelf"));
+        }
+        Ok(event)
+    }
+
+    fn collection_rename_revision(event: &Event) -> String {
+        format!("{}:{}", event.revision, event.name)
+    }
+
+    pub(crate) fn collection_rename_info(&self, id: i64) -> Result<Value> {
+        let event = self.collection_rename_target(id)?;
+        let name = std::path::Path::new(&event.name).file_stem().and_then(|name| name.to_str()).unwrap_or(&event.name);
+        Ok(json!({"id":id,"name":name,"revision":Self::collection_rename_revision(&event)}))
+    }
+
     fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
         let event = self.get(id)?;
         if !(collection::is_managed(&event) || bs_collection::can_view(&event) || collection_kind::external(&event)) || event.revision != revision
@@ -2378,7 +2429,7 @@ impl Service {
                             if current.path != event.path || current.revision != event.revision || media_service::stamp(&current.path)? != *stamp {
                                 return Err(ApiError::new("source_changed", "Folder file changed before publication"));
                             }
-                            if !prepared.unpacked && self.folder_path_pinned(&event.path)? {
+                            if self.folder_path_pinned(&event.path)? {
                                 return Err(ApiError::new("skipped_pinned", "A selected Folder file has a pinned shelf reference"));
                             }
                         }
@@ -2423,6 +2474,31 @@ impl Service {
                     Ok(receipt)
                 },
                 PreparedWork::FolderBundle { .. } => Err(ApiError::new("invalid_job_phase", "Folder publication must be authorized before effect")),
+                PreparedWork::RenameShelfCollection { event, tab, name } => {
+                    if self.interaction.tab != tab {
+                        return Err(ApiError::new("stale_selection", "Shelf changed before rename"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    collection_rename::rename_managed(&mut self.db, &event, tab, &name)?;
+                    self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                    Ok(json!({"collection_renamed":true,"event":self.get(event.id)?}))
+                },
+                PreparedWork::RenameFolderCollection { prepared, generation } => {
+                    let event = prepared.event();
+                    let current = self.collection_rename_target(event.id)?;
+                    if self.interaction.view_generation != generation || self.work_folder.current() != Some(prepared.folder())
+                        || current.path != event.path || current.revision != event.revision || current.name != event.name
+                    {
+                        return Err(ApiError::new("stale_folder", "Folder or collection changed before rename"));
+                    }
+                    let id = event.id;
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let path = prepared.publish()?;
+                    if path != current.path {
+                        self.interaction.replace_collection_rows(&[id], None);
+                    }
+                    Ok(json!({"collection_renamed":true,"path":path}))
+                },
                 PreparedWork::OpenBsEntry { event, stamp, plan, operation, index } => {
                     let current = self.saved_collection(event.id, &event.revision)?;
                     if current.path != event.path || media_service::stamp(&event.path)? != stamp {

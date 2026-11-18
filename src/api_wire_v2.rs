@@ -129,6 +129,8 @@ fn command(value: &mut Value) -> Result<(), String> {
         | "copy_collection_page"
         | "open_collection_link"
         | "rename_collection_link"
+        | "collection_rename_info"
+        | "rename_collection"
         | "open_bs_entry"
         | "move_pinned"
         | "select"

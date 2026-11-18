@@ -9,21 +9,23 @@ use crate::{
 use baloh_collection::bs::FileEntry;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-};
+use std::{fs::File, path::PathBuf};
 
 pub(crate) struct Prepared {
     pub(crate) folder: PathBuf,
     pub(crate) sources: Vec<(Event, media_service::Stamp)>,
-    pub(crate) output: folder_collection::PreparedOutput,
+    output: Output,
     pub(crate) kind: Kind,
     pub(crate) count: usize,
     pub(crate) merged: bool,
     pub(crate) unpacked: bool,
     archive_hash: Option<String>,
     locked_sources: Vec<LockedSource>,
+}
+
+enum Output {
+    Archive(folder_collection::PreparedOutput),
+    Extraction(folder_collection::PreparedFlatExtraction),
 }
 
 struct LockedSource {
@@ -74,41 +76,37 @@ pub(crate) fn prepare(
     };
 
     let unpacked = archives && events.len() == 1;
-    // For replacement, lock the exact verified sources before reading any of
-    // their bytes into the archive and hold those handles through recycle.
+    // Bind both packing inputs and the archive being unpacked to verified,
+    // deny-write handles before reading any bytes. Keep them through recycle.
     let mut locked_sources = Vec::new();
-    if !unpacked {
-        let root = folder.canonicalize()?;
-        for (event, stamp) in &sources {
-            cancel.check()?;
-            let hash = preview::content_hash(&event.path)?;
-            let locked = delete_selection::prepare_locked_original(&event.path, &root, &hash)?;
-            open_file::validate(event)?;
-            if media_service::stamp(&event.path)? != *stamp {
-                return Err(ApiError::new(
-                    "source_changed",
-                    "Folder file changed before packing",
-                ));
-            }
-            locked_sources.push(LockedSource {
-                event: event.clone(),
-                stamp: stamp.clone(),
-                hash,
-                locked,
-            });
+    let root = folder.canonicalize()?;
+    for (event, stamp) in &sources {
+        cancel.check()?;
+        let hash = preview::content_hash(&event.path)?;
+        let locked = delete_selection::prepare_locked_original(&event.path, &root, &hash)?;
+        open_file::validate(event)?;
+        if media_service::stamp(&event.path)? != *stamp {
+            return Err(ApiError::new(
+                "source_changed",
+                "Folder file changed before collection processing",
+            ));
         }
+        locked_sources.push(LockedSource {
+            event: event.clone(),
+            stamp: stamp.clone(),
+            hash,
+            locked,
+        });
     }
     let mut archive_hash = None;
     let (output, count) = if unpacked {
         let event = &events[0];
         let entries = entries(event, &kind, cancel)?;
         let count = entries.len();
-        let stem = Path::new(&event.name)
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Collection");
         (
-            folder_collection::prepare_extraction(&folder, stem, entries)?,
+            Output::Extraction(folder_collection::prepare_flat_extraction(
+                &folder, entries,
+            )?),
             count,
         )
     } else {
@@ -156,7 +154,11 @@ pub(crate) fn prepare(
         }
         archive_hash = Some(format!("{:x}", Sha256::digest(&bytes)));
         (
-            folder_collection::prepare(&folder, kind.extension(), &bytes)?,
+            Output::Archive(folder_collection::prepare(
+                &folder,
+                kind.extension(),
+                &bytes,
+            )?),
             count,
         )
     };
@@ -190,31 +192,49 @@ pub(crate) fn finish(prepared: Prepared, trash: &dyn Trash) -> Result<Value> {
         locked_sources,
         ..
     } = prepared;
-    let path = output.publish()?;
-    if unpacked {
-        return Ok(
-            json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
-            "unpacked":true,"kind":kind.extension(),"original_removal":[],"sources_preserved":true}),
-        );
-    }
-    let expected = archive_hash.unwrap_or_default();
-    let archive_guard = folder.canonicalize().and_then(|root| {
-        delete_selection::prepare_locked_original(&path, &root, &expected)
-            .map_err(|error| std::io::Error::other(error.message))
-    });
-    let archive_guard = match archive_guard {
-        Ok(guard) => guard,
-        Err(error) => {
-            let items: Vec<_> = locked_sources.iter().map(|source| json!({
-                "id":source.event.id,"path":source.event.path,"ok":false,"status":"retained",
-                "original_removed":false,"recovery_path":null,"error":"Archive verification failed"
-            })).collect();
-            let remaining = items.len();
-            return Ok(
-                json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
-                "unpacked":false,"kind":kind.extension(),"archive_verified":false,
-                "verification_error":error.to_string(),"original_removal":items,"sources_remaining":remaining}),
-            );
+    let (path, published, archive_guard) = match output {
+        Output::Extraction(staged) => {
+            let publication = staged.publish();
+            let complete = publication.error.is_none() && publication.paths.len() == count;
+            if !complete {
+                let error = publication.error.map(|e| json!(e)).unwrap_or_else(|| json!({"code":"incomplete_publication","message":"Not all files were published"}));
+                let items: Vec<_> = locked_sources.iter().map(|source| json!({
+                    "id":source.event.id,"path":source.event.path,"ok":false,"status":"retained",
+                    "original_removed":false,"recovery_path":null,"error":"Extraction was incomplete"
+                })).collect();
+                let remaining = items.len();
+                return Ok(
+                    json!({"folder_collection":true,"path":folder,"count":count,"merged":merged,
+                    "unpacked":true,"kind":kind.extension(),"publication_complete":false,
+                    "files_published":false,"archive_unchanged":true,"publication_error":error,"published_paths":publication.paths,
+                    "original_removal":items,"sources_remaining":remaining}),
+                );
+            }
+            (folder.clone(), Some(publication), None)
+        }
+        Output::Archive(staged) => {
+            let path = staged.publish()?;
+            let expected = archive_hash.unwrap_or_default();
+            let guard = folder.canonicalize().and_then(|root| {
+                delete_selection::prepare_locked_original(&path, &root, &expected)
+                    .map_err(|error| std::io::Error::other(error.message))
+            });
+            let guard = match guard {
+                Ok(guard) => guard,
+                Err(error) => {
+                    let items: Vec<_> = locked_sources.iter().map(|source| json!({
+                        "id":source.event.id,"path":source.event.path,"ok":false,"status":"retained",
+                        "original_removed":false,"recovery_path":null,"error":"Archive verification failed"
+                    })).collect();
+                    let remaining = items.len();
+                    return Ok(
+                        json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
+                        "unpacked":false,"kind":kind.extension(),"archive_verified":false,
+                        "verification_error":error.to_string(),"original_removal":items,"sources_remaining":remaining}),
+                    );
+                }
+            };
+            (path, None, Some(guard))
         }
     };
     let mut items = Vec::with_capacity(locked_sources.len());
@@ -255,9 +275,15 @@ pub(crate) fn finish(prepared: Prepared, trash: &dyn Trash) -> Result<Value> {
         }
     }
     drop(archive_guard);
+    let published_paths = published.as_ref().map(|result| result.paths.clone());
+    let archive_unchanged = unpacked && items.iter().all(|item| item["original_removed"] == false);
+    let publication_complete = !unpacked || remaining == 0;
+    drop(published);
     Ok(
         json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
-        "unpacked":false,"kind":kind.extension(),"archive_verified":true,
+        "unpacked":unpacked,"kind":kind.extension(),"archive_verified":true,
+        "publication_complete":publication_complete,"files_published":true,
+        "archive_unchanged":archive_unchanged,"published_paths":published_paths,
         "original_removal":items,"sources_remaining":remaining}),
     )
 }

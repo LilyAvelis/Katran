@@ -37,7 +37,9 @@ previous-window paste flow for the visible image, URL or text.
 Files and Folder use the same rebindable collection action. Compatible files
 form a BULL and mixed files form a BS. In Folder, the collection replaces the
 selected files after verification and uses the first entry as its cover.
-The originals go to the Windows Recycle Bin. Unpack writes a new subfolder.
+The originals go to the Windows Recycle Bin. Unpack restores the files
+directly in Folder and recycles the archive after verification.
+Use Ctrl+E to name BULL and BS even when the collection is unpinned.
 On the shelf, Delete removes
 the collection and its member cards. Use Unpack to get the cards back.
 Copy or drag a shelf card to transfer the entire file.

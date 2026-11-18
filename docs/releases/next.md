@@ -56,8 +56,10 @@ compatible files and BS for a mix. Raw file preview centers a thumbnail or
 Windows file icon with the name. Shelf Delete removes the selected collection
 and its hidden member cards. Folder packs replace the selected files after
 archive verification, preserve the original names and bytes inside the
-archive, and show a first-entry cover. Unpack creates a new directory and
-keeps the archive. Verified completed recycle stages are cleaned up automatically.
+archive, and show a first-entry cover. Unpack restores files directly into
+Folder and recycles the archive after verifying all outputs. Ctrl+E renames
+unpinned collection cards and archive files in Folder. Verified completed
+recycle stages are cleaned up automatically.
 
 ## Local follow-up · Google Lens
 

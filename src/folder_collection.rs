@@ -5,8 +5,41 @@ use crate::{ApiError, Result};
 use baloh_collection::bs::FileEntry;
 use std::path::{Path, PathBuf};
 
+/// All committed files are reported even when a later publication fails.
+pub(crate) struct FlatPublication {
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) error: Option<ApiError>,
+    // Keeps committed outputs write/delete-locked until the caller drops the receipt.
+    _guards: Vec<std::fs::File>,
+}
+
 #[cfg(not(windows))]
 pub(crate) struct PreparedOutput;
+#[cfg(not(windows))]
+pub(crate) struct PreparedFlatExtraction;
+#[cfg(not(windows))]
+impl PreparedFlatExtraction {
+    pub(crate) fn publish(self) -> FlatPublication {
+        FlatPublication {
+            paths: Vec::new(),
+            error: Some(ApiError::new(
+                "unsupported_platform",
+                "Folder publication requires Windows",
+            )),
+            _guards: Vec::new(),
+        }
+    }
+}
+#[cfg(not(windows))]
+pub(crate) fn prepare_flat_extraction(
+    _: &Path,
+    _: Vec<FileEntry>,
+) -> Result<PreparedFlatExtraction> {
+    Err(ApiError::new(
+        "unsupported_platform",
+        "Folder publication requires Windows",
+    ))
+}
 #[cfg(not(windows))]
 impl PreparedOutput {
     pub(crate) fn publish(self) -> Result<PathBuf> {
@@ -23,22 +56,14 @@ pub(crate) fn prepare(_: &Path, _: &str, _: &[u8]) -> Result<PreparedOutput> {
         "Folder publication requires Windows",
     ))
 }
-#[cfg(not(windows))]
-pub(crate) fn prepare_extraction(_: &Path, _: &str, _: Vec<FileEntry>) -> Result<PreparedOutput> {
-    Err(ApiError::new(
-        "unsupported_platform",
-        "Folder publication requires Windows",
-    ))
-}
 
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
     use std::{
-        collections::HashSet,
         ffi::c_void,
         fs::{self, File, OpenOptions},
-        io::{self, Write},
+        io::{self, Read, Seek, SeekFrom, Write},
         os::windows::{
             ffi::OsStrExt,
             fs::{MetadataExt, OpenOptionsExt},
@@ -331,33 +356,223 @@ mod windows_impl {
         }
     }
 
-    struct Child {
+    struct FlatItem {
         name: String,
-        id: (u32, u64),
         file: Option<File>,
+        expected_len: u64,
+        expected_hash: [u8; 32],
+    }
+
+    fn verify_flat(file: &mut File, expected_len: u64, expected_hash: &[u8; 32]) -> Result<()> {
+        use sha2::{Digest, Sha256};
+        identity(file, false)?;
+        if file.metadata()?.len() != expected_len {
+            return Err(fail("Staged file size changed"));
+        }
+        file.seek(SeekFrom::Start(0))?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+        }
+        let actual: [u8; 32] = hash.finalize().into();
+        if &actual != expected_hash {
+            return Err(fail("Staged file contents changed"));
+        }
+        Ok(())
+    }
+
+    /// Staged sibling files. A successful rename transfers ownership of only
+    /// that file; failures never roll back earlier visible publications.
+    pub(crate) struct PreparedFlatExtraction {
+        root_path: PathBuf,
+        _root: File,
+        root_id: (u32, u64),
+        items: Vec<FlatItem>,
+    }
+
+    impl PreparedFlatExtraction {
+        pub(crate) fn publish(mut self) -> FlatPublication {
+            let mut paths = Vec::with_capacity(self.items.len());
+            let mut guards = Vec::with_capacity(self.items.len());
+            for index in 0..self.items.len() {
+                let item = &mut self.items[index];
+                let verification = match item.file.as_mut() {
+                    Some(file) => verify_flat(file, item.expected_len, &item.expected_hash),
+                    None => Err(fail("Staging is unavailable")),
+                };
+                if let Err(error) = verification {
+                    return FlatPublication {
+                        paths,
+                        error: Some(error),
+                        _guards: guards,
+                    };
+                }
+                let original = self.items[index].name.clone();
+                let source = Path::new(&original);
+                let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                let extension = source.extension().and_then(|s| s.to_str());
+                let mut published = false;
+                for n in 0..10000 {
+                    if let Err(error) = verify_root(&self.root_path, self.root_id) {
+                        return FlatPublication {
+                            paths,
+                            error: Some(error),
+                            _guards: guards,
+                        };
+                    }
+                    let name = if n == 0 {
+                        original.clone()
+                    } else {
+                        output_name(stem, extension, n)
+                    };
+                    if !valid_leaf(&name) {
+                        return FlatPublication {
+                            paths,
+                            error: Some(fail("Output filename is invalid")),
+                            _guards: guards,
+                        };
+                    }
+                    let Some(file) = self.items[index].file.as_ref() else {
+                        return FlatPublication {
+                            paths,
+                            error: Some(fail("Staging is unavailable")),
+                            _guards: guards,
+                        };
+                    };
+                    if let Err(error) = identity(file, false) {
+                        return FlatPublication {
+                            paths,
+                            error: Some(error),
+                            _guards: guards,
+                        };
+                    }
+                    let destination = self.root_path.join(&name);
+                    match rename_into(file, &destination) {
+                        Ok(()) => {
+                            let mut file = self.items[index].file.take().expect("staged handle");
+                            paths.push(destination);
+                            let verified = verify_flat(
+                                &mut file,
+                                self.items[index].expected_len,
+                                &self.items[index].expected_hash,
+                            );
+                            guards.push(file);
+                            if let Err(error) = verified {
+                                return FlatPublication {
+                                    paths,
+                                    error: Some(error),
+                                    _guards: guards,
+                                };
+                            }
+                            published = true;
+                            break;
+                        }
+                        Err(error)
+                            if error.kind() == io::ErrorKind::AlreadyExists
+                                || matches!(error.raw_os_error(), Some(80 | 183))
+                                || (error.raw_os_error() == Some(5)
+                                    && fs::symlink_metadata(&destination).is_ok()) =>
+                        {
+                            continue;
+                        }
+                        Err(error) => {
+                            return FlatPublication {
+                                paths,
+                                error: Some(error.into()),
+                                _guards: guards,
+                            };
+                        }
+                    }
+                }
+                if !published {
+                    return FlatPublication {
+                        paths,
+                        error: Some(fail("Cannot find a free output name")),
+                        _guards: guards,
+                    };
+                }
+            }
+            FlatPublication {
+                paths,
+                error: None,
+                _guards: guards,
+            }
+        }
+    }
+
+    impl Drop for PreparedFlatExtraction {
+        fn drop(&mut self) {
+            for item in &mut self.items {
+                if let Some(file) = item.file.take() {
+                    delete_owned(&file);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn prepare_flat_extraction(
+        folder: &Path,
+        entries: Vec<FileEntry>,
+    ) -> Result<PreparedFlatExtraction> {
+        if entries.is_empty() || entries.len() > baloh_collection::bs::MAX_FILES {
+            return Err(fail("Invalid file count"));
+        }
+        let mut total = 0usize;
+        for entry in &entries {
+            if !valid_leaf(&entry.name) || entry.bytes.len() > baloh_collection::bs::MAX_FILE_BYTES
+            {
+                return Err(fail("Invalid extracted filename or size"));
+            }
+            total = total
+                .checked_add(entry.bytes.len())
+                .ok_or_else(|| fail("Extraction size overflow"))?;
+            if total > baloh_collection::bs::MAX_TOTAL_BYTES {
+                return Err(fail("Extraction exceeds size limit"));
+            }
+        }
+        let (root_path, root, root_id) = open_root(folder)?;
+        let mut prepared = PreparedFlatExtraction {
+            root_path,
+            _root: root,
+            root_id,
+            items: Vec::with_capacity(entries.len()),
+        };
+        for entry in entries {
+            use sha2::{Digest, Sha256};
+            let file = create_stage(&prepared._root, false)?;
+            prepared.items.push(FlatItem {
+                name: entry.name,
+                file: Some(file),
+                expected_len: entry.bytes.len() as u64,
+                expected_hash: Sha256::digest(&entry.bytes).into(),
+            });
+            let file = prepared.items.last_mut().unwrap().file.as_mut().unwrap();
+            file.write_all(&entry.bytes)?;
+            file.sync_all()?;
+        }
+        Ok(prepared)
     }
     pub(crate) struct PreparedOutput {
         root_path: PathBuf,
         _root: File,
         root_id: (u32, u64),
         stage: Option<File>,
-        children: Vec<Child>,
         base: String,
         extension: Option<String>,
     }
     impl PreparedOutput {
         pub(crate) fn publish(mut self) -> Result<PathBuf> {
             verify_root(&self.root_path, self.root_id)?;
-            // Windows refuses renaming a nonempty directory while any of its
-            // children are open, even when those handles share delete access.
-            for child in &mut self.children {
-                child.file.take();
-            }
             let stage = self
                 .stage
                 .as_ref()
                 .ok_or_else(|| fail("Staging is unavailable"))?;
-            identity(stage, self.extension.is_none())?;
+            identity(stage, false)?;
             for n in 0..10000 {
                 let name = output_name(&self.base, self.extension.as_deref(), n);
                 if !valid_leaf(&name) {
@@ -368,7 +583,6 @@ mod windows_impl {
                 match rename_into(stage, &destination) {
                     Ok(()) => {
                         self.stage.take();
-                        self.children.clear();
                         return Ok(destination);
                     }
                     Err(e)
@@ -385,17 +599,6 @@ mod windows_impl {
     }
     impl Drop for PreparedOutput {
         fn drop(&mut self) {
-            for child in &mut self.children {
-                if let Some(file) = child.file.take() {
-                    delete_owned(&file);
-                } else if let Some(stage) = self.stage.as_ref()
-                    && let Ok(file) = open_relative(stage, &child.name, false, false)
-                    && identity(&file, false).ok() == Some(child.id)
-                {
-                    delete_owned(&file);
-                }
-            }
-            self.children.clear();
             if let Some(stage) = self.stage.take() {
                 delete_owned(&stage);
             }
@@ -412,7 +615,6 @@ mod windows_impl {
             _root: root,
             root_id,
             stage: Some(stage),
-            children: Vec::new(),
             base: "Collection".into(),
             extension: Some(extension.into()),
         };
@@ -420,98 +622,51 @@ mod windows_impl {
         result.stage.as_ref().unwrap().sync_all()?;
         Ok(result)
     }
-    pub(crate) fn prepare_extraction(
-        folder: &Path,
-        archive_stem: &str,
-        entries: Vec<FileEntry>,
-    ) -> Result<PreparedOutput> {
-        if !valid_leaf(archive_stem)
-            || archive_stem.encode_utf16().count() > 190
-            || entries.is_empty()
-            || entries.len() > baloh_collection::bs::MAX_FILES
-        {
-            return Err(fail("Invalid archive name or file count"));
-        }
-        let mut total = 0usize;
-        for entry in &entries {
-            if !valid_leaf(&entry.name) || entry.bytes.len() > baloh_collection::bs::MAX_FILE_BYTES
-            {
-                return Err(fail("Invalid extracted filename or size"));
-            }
-            total = total
-                .checked_add(entry.bytes.len())
-                .ok_or_else(|| fail("Extraction size overflow"))?;
-            if total > baloh_collection::bs::MAX_TOTAL_BYTES {
-                return Err(fail("Extraction exceeds size limit"));
-            }
-        }
-        let (root_path, root, root_id) = open_root(folder)?;
-        let stage = create_stage(&root, true)?;
-        let mut result = PreparedOutput {
-            root_path,
-            _root: root,
-            root_id,
-            stage: Some(stage),
-            children: Vec::new(),
-            base: format!("{archive_stem} files"),
-            extension: None,
-        };
-        let mut used = HashSet::new();
-        for entry in entries {
-            let path = Path::new(&entry.name);
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| fail("Invalid file name"))?;
-            let ext = path.extension().and_then(|s| s.to_str());
-            let mut created = None;
-            for n in 0..10000 {
-                let name = if n == 0 {
-                    entry.name.clone()
-                } else {
-                    output_name(stem, ext, n)
-                };
-                if !valid_leaf(&name) {
-                    return Err(fail("Duplicate filename exceeds length limit"));
-                }
-                if !used.insert(name.to_lowercase()) {
-                    continue;
-                }
-                match open_relative(result.stage.as_ref().unwrap(), &name, false, true) {
-                    Ok(file) => {
-                        created = Some((name, file));
-                        break;
-                    }
-                    Err(e)
-                        if e.kind() == io::ErrorKind::AlreadyExists
-                            || matches!(e.raw_os_error(), Some(80 | 183)) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            let (name, file) = created.ok_or_else(|| fail("Cannot resolve duplicate filename"))?;
-            let id = identity(&file, false)?;
-            result.children.push(Child {
-                name,
-                id,
-                file: Some(file),
-            });
-            let file = result.children.last_mut().unwrap().file.as_mut().unwrap();
-            file.write_all(&entry.bytes)?;
-            file.sync_all()?;
-        }
-        Ok(result)
-    }
 }
 #[cfg(windows)]
-pub(crate) use windows_impl::{PreparedOutput, prepare, prepare_extraction};
+pub(crate) use windows_impl::{
+    PreparedFlatExtraction, PreparedOutput, prepare, prepare_flat_extraction,
+};
 
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn flat_extraction_preserves_archive_and_existing_files_and_holds_guards() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("archive.bs");
+        fs::write(&archive, b"archive").unwrap();
+        fs::write(root.path().join("a.txt"), b"existing").unwrap();
+        let staged = prepare_flat_extraction(
+            root.path(),
+            vec![
+                FileEntry {
+                    name: "a.txt".into(),
+                    bytes: b"first".to_vec(),
+                },
+                FileEntry {
+                    name: "a.txt".into(),
+                    bytes: b"second".to_vec(),
+                },
+            ],
+        )
+        .unwrap();
+        let receipt = staged.publish();
+        assert!(receipt.error.is_none());
+        assert_eq!(receipt.paths.len(), 2);
+        assert_eq!(receipt.paths[0].file_name().unwrap(), "a (2).txt");
+        assert_eq!(receipt.paths[1].file_name().unwrap(), "a (3).txt");
+        assert_eq!(fs::read(&receipt.paths[0]).unwrap(), b"first");
+        assert_eq!(fs::read(&receipt.paths[1]).unwrap(), b"second");
+        assert!(fs::write(&receipt.paths[0], b"changed").is_err());
+        assert_eq!(fs::read(&archive).unwrap(), b"archive");
+        assert_eq!(fs::read(root.path().join("a.txt")).unwrap(), b"existing");
+        let first = receipt.paths[0].clone();
+        drop(receipt);
+        fs::write(first, b"changed").unwrap();
+    }
 
     #[test]
     fn file_publication_keeps_existing_and_dropped_stage_is_removed() {
@@ -528,29 +683,5 @@ mod tests {
         let staged = prepare(root.path(), "bs", b"temporary").unwrap();
         drop(staged);
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
-    }
-
-    #[test]
-    fn extraction_keeps_archive_and_resolves_duplicate_names() {
-        let root = tempfile::tempdir().unwrap();
-        let original = root.path().join("archive.bs");
-        fs::write(&original, b"original").unwrap();
-        let items = vec![
-            FileEntry {
-                name: "a.txt".into(),
-                bytes: b"one".to_vec(),
-            },
-            FileEntry {
-                name: "A.txt".into(),
-                bytes: b"two".to_vec(),
-            },
-        ];
-        let folder = prepare_extraction(root.path(), "archive", items)
-            .unwrap()
-            .publish()
-            .unwrap();
-        assert_eq!(fs::read(folder.join("a.txt")).unwrap(), b"one");
-        assert_eq!(fs::read(folder.join("A (2).txt")).unwrap(), b"two");
-        assert_eq!(fs::read(original).unwrap(), b"original");
     }
 }

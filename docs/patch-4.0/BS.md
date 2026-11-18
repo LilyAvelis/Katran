@@ -36,7 +36,13 @@ A `.bs` file added to Files from disk can be viewed in Katran.
 Folder packs or merges into a verified new archive, then recycles the
 selected files. Loose files, including images, retain their names and exact
 bytes. A failed or partially completed recycle reports each affected file
-and its recovery location when available. Unpack writes a new subfolder
-and keeps the archive. Each output gets an available name.
+and its recovery location when available. Unpack restores files directly
+into Folder. It chooses a free name when a file already exists and recycles
+the archive only after every output has been verified. Partial publication
+reports the files already restored and keeps the archive.
+
+Ctrl+E renames managed BULL and BS cards without requiring a pin. The name
+travels with the exported collection. In Folder, Ctrl+E renames the archive
+on disk and preserves its suffix.
 
 Folder and Files display the first entry's thumbnail or file-type icon.

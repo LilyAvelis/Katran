@@ -88,7 +88,8 @@ ordered pages without Katran pin or tag metadata. Images, Links and Text have
 separate collection types. Delete removes the shelf card and its member
 records, while Unpack restores the original shelf cards. Folder pack and
 merge recycle the selected files after verifying the new archive. Folder
-unpack uses a separate destination and keeps the archive.
+unpack restores entries directly into the current folder and recycles the
+archive after verifying every output.
 
 Raw file BULL uses `BALOHCOL`, little-endian version 2 and the `FILE` tag.
 A byte gives the length of the ASCII family label (`images`, `video`, `audio` or

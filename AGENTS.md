@@ -8,8 +8,12 @@ Shelf pack replaces cards and unpack restores them. Delete on the shelf
 removes the collection and its hidden member records in one transaction.
 Referenced disk paths stay intact on the shelf. Folder pack or merge
 recycles selected files only after publishing and verifying a lossless
-archive. Folder unpack writes a new subfolder and keeps the archive.
+archive. Folder unpack restores entries directly into the current folder
+without replacing existing files. Recycle the archive only after all
+restored files are verified. Report partial publication and keep the archive.
 Use the first entry for collection covers. See docs/patch-4.0/BS.md.
+Ctrl+E may rename managed BULL and BS without a pin. In Folder, it
+renames the actual archive file without replacement and preserves its type.
 Rename a Links BULL entry via its revision and index. Save the name in
 the file and keep the original member's display name in sync for unpack.
 Remove only verified completed recycle stages through their owned handles.

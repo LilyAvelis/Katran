@@ -434,6 +434,14 @@ pub enum Command {
         index: usize,
         title: String,
     },
+    CollectionRenameInfo {
+        id: i64,
+    },
+    RenameCollection {
+        id: i64,
+        revision: String,
+        name: String,
+    },
     OpenBsEntry {
         id: i64,
         revision: String,

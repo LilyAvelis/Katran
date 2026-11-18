@@ -47,6 +47,7 @@ mod image_translate;
 mod image_collection;
 mod collection;
 mod collection_kind;
+mod collection_rename;
 mod folder_collection;
 mod folder_bundle_service;
 mod bs_collection;
@@ -554,6 +555,8 @@ impl Service {
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             command @ Command::RenameCollectionLink { .. } => self.begin_job(command),
+            Command::CollectionRenameInfo { id } => self.collection_rename_info(id),
+            command @ Command::RenameCollection { .. } => self.begin_job(command),
             command @ Command::CopyCollectionPage { .. } => self.begin_job(command),
             command @ Command::OpenCollectionLink { .. } => self.begin_job(command),
             command @ Command::OpenBsEntry { .. } => self.begin_job(command),
