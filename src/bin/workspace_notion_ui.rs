@@ -3,11 +3,24 @@ use super::*;
 #[path = "notion_reader_ui.rs"]
 mod reader;
 
+pub(super) fn show_reader(ui: &mut egui::Ui, blocks: &[katran::notion_reader::Block]) {
+    reader::show(ui, blocks);
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum SearchKind {
+    #[default]
+    Pages,
+    Databases,
+}
+
 #[derive(Default)]
 pub(super) struct State {
     mode: Mode,
     query: String,
     pages: Vec<katran::notion::Page>,
+    sources: Vec<katran::notion::Page>,
+    search_kind: SearchKind,
     selected: usize,
     configured: bool,
     focus: bool,
@@ -39,6 +52,51 @@ mod tests {
                 .push(path.to_string_lossy().into_owned());
             Ok(())
         }
+    }
+
+    #[test]
+    fn backslash_switches_search_and_consumes_its_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.workspace.open = true;
+        app.workspace.notion_source = true;
+        app.workspace.notion = State {
+            configured: true,
+            query: "fixture".into(),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let mut retained = true;
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::Backslash,
+                        physical_key: Some(egui::Key::Backslash),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Text("\\".into()),
+                ],
+                ..Default::default()
+            },
+            |_| {
+                app.workspace_notion_input(&ctx);
+                retained = ctx.input(|input| {
+                    input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::Text(_)))
+                });
+            },
+        )
+        .textures_delta
+        .clear();
+        assert!(app.workspace.notion.search_kind == SearchKind::Databases);
+        assert_eq!(app.workspace.notion.query, "fixture");
+        assert!(app.workspace.notion.search_due.is_some());
+        assert!(!retained);
     }
 
     #[test]
@@ -165,7 +223,8 @@ mod tests {
 
 #[derive(Clone, Copy)]
 enum Operation {
-    Search,
+    SearchPages,
+    SearchDatabases,
     Preview,
 }
 
@@ -249,6 +308,30 @@ impl Shelf {
     }
 
     pub(super) fn workspace_notion_input(&mut self, ctx: &egui::Context) {
+        if self.workspace.notion.mode == Mode::Search
+            && !self.workspace.notion.preview_open
+            && ctx.input_mut(take_neural_toggle)
+        {
+            self.workspace_cancel_notion();
+            let state = &mut self.workspace.notion;
+            state.search_kind = match state.search_kind {
+                SearchKind::Pages => SearchKind::Databases,
+                SearchKind::Databases => SearchKind::Pages,
+            };
+            state.pages.clear();
+            state.sources.clear();
+            state.selected = 0;
+            state.more = false;
+            state.error = None;
+            state.notice = None;
+            state.search_due = if state.query.trim().is_empty() {
+                None
+            } else {
+                Some(Instant::now() + Duration::from_millis(300))
+            };
+            state.focus = true;
+            ctx.request_repaint_after(Duration::from_millis(300));
+        }
         let (favorites, history, pin) = ctx.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::F),
@@ -265,7 +348,7 @@ impl Shelf {
                 },
                 ctx,
             );
-        } else if pin {
+        } else if pin && self.workspace.notion.search_kind == SearchKind::Pages {
             let state = &self.workspace.notion;
             if let Some(page) = state.pages.get(state.selected).cloned() {
                 let mode = state.mode;
@@ -315,8 +398,13 @@ impl Shelf {
     fn workspace_notion_accept(&mut self, result: &Value, operation: Operation) {
         let state = &mut self.workspace.notion;
         match operation {
-            Operation::Search => {
+            Operation::SearchPages => {
                 state.pages = serde_json::from_value(result["pages"].clone()).unwrap_or_default();
+                state.more = result["more"] == true;
+            }
+            Operation::SearchDatabases => {
+                state.sources =
+                    serde_json::from_value(result["sources"].clone()).unwrap_or_default();
                 state.more = result["more"] == true;
             }
             Operation::Preview => {
@@ -357,7 +445,14 @@ impl Shelf {
         {
             self.workspace.notion.search_due = None;
             let query = self.workspace.notion.query.clone();
-            self.workspace_notion_start(Command::SearchNotionPages { query }, Operation::Search);
+            let (command, operation) = match self.workspace.notion.search_kind {
+                SearchKind::Pages => (Command::SearchNotionPages { query }, Operation::SearchPages),
+                SearchKind::Databases => (
+                    Command::SearchNotionDatabases { query },
+                    Operation::SearchDatabases,
+                ),
+            };
+            self.workspace_notion_start(command, operation);
         }
         if self.workspace.notion.job.is_some() {
             ctx.request_repaint_after(Duration::from_millis(40));
@@ -384,7 +479,11 @@ impl Shelf {
             )
         });
         let old_selection = state.selected;
-        let count = state.pages.len();
+        let count = if state.search_kind == SearchKind::Databases && state.mode == Mode::Search {
+            state.sources.len()
+        } else {
+            state.pages.len()
+        };
         if count > 0 && (move_down || move_up) {
             ctx.memory_mut(|mem| mem.surrender_focus(query_id));
             if !editing {
@@ -411,7 +510,12 @@ impl Shelf {
                 monochrome(ui);
                 ui.set_width(width);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Найти страницу · Notion", "Find a page · Notion")).strong().size(15.0));
+                    let title = if state.search_kind == SearchKind::Databases && state.mode == Mode::Search {
+                        tr("Найти базу данных · Notion", "Find a database · Notion")
+                    } else {
+                        tr("Найти страницу · Notion", "Find a page · Notion")
+                    };
+                    ui.label(RichText::new(title).strong().size(15.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         everything = source_button(ui, true);
                     });
@@ -439,7 +543,11 @@ impl Shelf {
                         egui::TextEdit::singleline(&mut state.query)
                             .id(query_id)
                             .desired_width(f32::INFINITY)
-                            .hint_text(tr("Название страницы…", "Page title…")),
+                            .hint_text(if state.search_kind == SearchKind::Databases {
+                                tr("Название базы данных…", "Database title…")
+                            } else {
+                                tr("Название страницы…", "Page title…")
+                            }),
                     );
                     if state.focus {
                         field.request_focus();
@@ -461,7 +569,9 @@ impl Shelf {
                                 ui.push_id(&page.id, |ui| reader::show(ui, blocks));
                             }
                         } else {
-                            for (index, page) in state.pages.iter().enumerate() {
+                            let databases = state.mode == Mode::Search && state.search_kind == SearchKind::Databases;
+                            let results = if databases { &state.sources } else { &state.pages };
+                            for (index, page) in results.iter().enumerate() {
                                 let row = ui.selectable_label(state.selected == index, &page.title);
                                 if row.clicked() {
                                     state.selected = index;
@@ -477,13 +587,13 @@ impl Shelf {
                                     "Refine the title to see other matches.",
                                 ));
                             }
-                            if state.pages.is_empty()
+                            if results.is_empty()
                                 && !state.query.trim().is_empty()
                                 && state.search_due.is_none()
                                 && state.job.is_none()
                                 && state.error.is_none()
                             {
-                                ui.weak(tr("Страницы не найдены", "No pages found"));
+                                ui.weak(if databases { tr("Базы данных не найдены", "No databases found") } else { tr("Страницы не найдены", "No pages found") });
                             }
                             if state.pages.is_empty() && state.mode != Mode::Search && state.error.is_none() {
                                 ui.weak(tr("Здесь пока нет страниц", "No pages yet"));
@@ -496,10 +606,17 @@ impl Shelf {
                 if let Some(notice) = state.notice {
                     ui.weak(notice);
                 }
+                if state.mode == Mode::Search && state.search_kind == SearchKind::Databases {
+                    ui.weak(tr("Enter · открыть базу    \\ · страницы", "Enter · open database    \\ · pages"));
+                } else {
                 ui.weak(tr(
                     "Space · превью    Enter · приложить .md    Alt+Enter · открыть в Notion    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",
                     "Space · preview    Enter · attach .md    Alt+Enter · open in Notion    Ctrl+. · pin    Ctrl+F · favorites    Ctrl+H · history",
                 ));
+                if state.mode == Mode::Search && !state.preview_open {
+                    ui.weak(tr("\\ · базы данных", "\\ · databases"));
+                }
+                }
             });
         if everything {
             self.workspace_mode(Mode::Search, ctx);
@@ -509,6 +626,7 @@ impl Shelf {
             self.workspace_cancel_notion();
             let state = &mut self.workspace.notion;
             state.pages.clear();
+            state.sources.clear();
             state.selected = 0;
             state.more = false;
             state.error = None;
@@ -521,6 +639,10 @@ impl Shelf {
             }
         } else if modal.should_close() {
             self.workspace_close();
+        } else if state.mode == Mode::Search && state.search_kind == SearchKind::Databases {
+            if enter && let Some(source) = state.sources.get(state.selected).cloned() {
+                self.open_notion_database(ctx, source.id, source.title);
+            }
         } else if let Some(page) = state.pages.get(state.selected).cloned() {
             if open_in_browser {
                 if self.call(Command::OpenNotionPage { page })["opened"] == true {

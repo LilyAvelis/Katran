@@ -892,6 +892,13 @@ impl Shelf {
         if self.api.is_some() {
             self.state = self.call(Command::Interaction);
         }
+        if self.notion_database_active() {
+            if self.state["tab"] == "folder" {
+                self.notion_database_frame(root, &ctx);
+                return;
+            }
+            self.close_notion_database();
+        }
         self.emoji_ai_input(&ctx);
         self.emoji_ai_tick(&ctx);
         self.poll_preloaded_tab(&ctx);

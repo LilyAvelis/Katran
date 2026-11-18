@@ -40,4 +40,25 @@ their titles and can open the corresponding Notion URL. Unsupported markup
 appears as text. Katran does not load external icons or images in
 the reader. The Markdown attachment uses the existing export path. Katran rejects truncated
 Notion responses. The preview limit is 65,536 characters and the paste
-limit is 1 MiB of Markdown. Database browsing is outside this pilot.
+limit is 1 MiB of Markdown.
+
+## Browse a database in Folder
+
+1. Open **Ctrl+Shift+N** and press the physical **\\** key to switch from pages
+   to databases. Search by the data source title and press **Enter** to open it
+   in Folder. Another **\\** in the picker switches back to pages.
+2. Filter the database by row title, or switch between **Gallery**, **Stream**
+   and **Mini stream**. Mini stream shows the selected row's readable properties
+   and a text excerpt. An excerpt is requested for the selected row when its
+   properties supply no summary.
+3. **Space** opens the selected page in the full Katran content area. **Enter**
+   attaches the page as `.md`, **Alt+Enter** opens Notion in the browser, and
+   **Ctrl+.** pins the page in Notion favorites. Use **Ctrl+F** to view those
+   favorites.
+
+Rows load in groups of 30. Press **↓** at the last row or use **Load more**.
+The default order comes from Notion's data source API. Katran also supports
+server-side sorting by name, creation time and last-edited time. A named
+Notion view's saved filters and sorts do not apply here. File-size sorting
+and local tags are unavailable for remote pages. The same read-only
+integration needs access to the source database.

@@ -306,12 +306,321 @@ pub(crate) fn search(query: &str, check: impl Fn() -> Result<()>) -> Result<Valu
     }))
 }
 
+const DATABASE_PAGE_SIZE: usize = 30;
+const DATABASE_SEARCH_SIZE: usize = 25;
+const MAX_NOTION_CURSOR: usize = 2048;
+
+fn checked_database_query(query: &str) -> Result<&str> {
+    let query = query.trim();
+    if query.chars().count() > 256 || query.chars().any(char::is_control) {
+        return Err(ApiError::new(
+            "notion_query",
+            "Search must contain at most 256 characters",
+        ));
+    }
+    Ok(query)
+}
+fn valid_cursor(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_NOTION_CURSOR && !value.chars().any(char::is_control)
+}
+fn rich_text(value: &Value, limit: usize) -> String {
+    let mut result = String::new();
+    let mut count = 0usize;
+    if let Some(fragments) = value.as_array() {
+        for fragment in fragments {
+            if let Some(text) = fragment["plain_text"].as_str() {
+                for ch in text.chars().take(limit.saturating_sub(count)) {
+                    result.push(ch);
+                    count += 1;
+                }
+                if count >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    result
+}
+fn normalized_text(value: &Value, limit: usize) -> String {
+    value.as_str().unwrap_or("").chars().take(limit).collect()
+}
+fn database_source(value: &Value) -> Option<Value> {
+    let id = value["id"].as_str().filter(|id| page_id(id))?;
+    if value["object"] != "data_source"
+        || value["in_trash"] == true
+        || value["archived"] == true
+        || value["is_archived"] == true
+    {
+        return None;
+    }
+    let title = rich_text(&value["title"], 1024);
+    Some(json!({"id":id,"title":if title.trim().is_empty() { "Untitled" } else { &title }}))
+}
+fn search_databases_with(
+    query: &str,
+    check: &impl Fn() -> Result<()>,
+    mut send: impl FnMut(&str, Option<Value>) -> Result<Value>,
+) -> Result<Value> {
+    let query = checked_database_query(query)?;
+    let mut body = json!({"page_size":DATABASE_SEARCH_SIZE,"filter":{"property":"object","value":"data_source"}});
+    if !query.is_empty() {
+        body["query"] = json!(query);
+    }
+    check()?;
+    let response = send("v1/search", Some(body))?;
+    check()?;
+    let results = response["results"].as_array().ok_or_else(response_error)?;
+    if results.len() > DATABASE_SEARCH_SIZE {
+        return Err(response_error());
+    }
+    let sources: Vec<_> = results.iter().filter_map(database_source).collect();
+    Ok(
+        json!({"sources":sources,"more":response["has_more"] == true || response["request_status"]["type"] == "incomplete"}),
+    )
+}
+pub(crate) fn search_databases(query: &str, check: impl Fn() -> Result<()>) -> Result<Value> {
+    search_databases_with(query, &check, |path, body| request(path, body, &[], &check))
+}
+
+fn title_property(schema: &Value, source_id: &str) -> Result<String> {
+    if schema["object"] != "data_source"
+        || !schema["id"]
+            .as_str()
+            .is_some_and(|id| id.eq_ignore_ascii_case(source_id))
+    {
+        return Err(response_error());
+    }
+    let properties = schema["properties"]
+        .as_object()
+        .ok_or_else(response_error)?;
+    let mut titles = properties
+        .iter()
+        .filter(|(_, value)| value["type"] == "title");
+    let (name, _) = titles.next().ok_or_else(response_error)?;
+    if titles.next().is_some()
+        || name.is_empty()
+        || name.len() > 1024
+        || name.chars().any(char::is_control)
+    {
+        return Err(response_error());
+    }
+    Ok(name.clone())
+}
+fn property_text(property: &Value) -> Option<String> {
+    let kind = property["type"].as_str()?;
+    let text = match kind {
+        "title" | "rich_text" => rich_text(&property[kind], 1024),
+        "select" | "status" => normalized_text(&property[kind]["name"], 1024),
+        "multi_select" => property[kind]
+            .as_array()?
+            .iter()
+            .take(32)
+            .map(|entry| normalized_text(&entry["name"], 128))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", "),
+        "date" => {
+            let start = normalized_text(&property[kind]["start"], 128);
+            let end = normalized_text(&property[kind]["end"], 128);
+            if !start.is_empty() && !end.is_empty() {
+                format!("{start} – {end}")
+            } else {
+                start
+            }
+        }
+        "number" => property[kind]
+            .as_number()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        "checkbox" => property[kind]
+            .as_bool()
+            .map(|value| if value { "✓" } else { "☐" })
+            .unwrap_or("")
+            .to_owned(),
+        "url" | "email" | "phone_number" => normalized_text(&property[kind], 1024),
+        _ => return None,
+    };
+    (!text.is_empty()).then_some(text)
+}
+fn database_row(value: &Value) -> Option<Value> {
+    let id = value["id"].as_str().filter(|id| page_id(id))?;
+    if value["object"] != "page"
+        || value["in_trash"] == true
+        || value["archived"] == true
+        || value["is_archived"] == true
+    {
+        return None;
+    }
+    let props = value["properties"].as_object()?;
+    let mut title = props
+        .values()
+        .find(|prop| prop["type"] == "title")
+        .map(|prop| rich_text(&prop["title"], 1024))
+        .unwrap_or_default();
+    let mut summary = String::new();
+    let mut properties = Vec::new();
+    for (name, prop) in props.iter().take(128) {
+        let kind = prop["type"].as_str().unwrap_or("");
+        let Some(text) = property_text(prop) else {
+            continue;
+        };
+        if kind == "title" {
+            continue;
+        }
+        if kind == "rich_text" && summary.is_empty() {
+            summary = text.chars().take(512).collect();
+        }
+        if properties.len() < 32 {
+            properties
+                .push(json!({"name":name.chars().take(256).collect::<String>(),"value":text}));
+        }
+    }
+    if title.trim().is_empty() {
+        title = "Untitled".into();
+    }
+    Some(
+        json!({"id":id,"title":title,"summary":summary,"properties":properties,
+        "created_at":normalized_text(&value["created_time"],128),"edited_at":normalized_text(&value["last_edited_time"],128)}),
+    )
+}
+fn query_database_with(
+    source_id: &str,
+    query: &str,
+    cursor: Option<&str>,
+    sort: Option<&str>,
+    descending: bool,
+    check: &impl Fn() -> Result<()>,
+    mut send: impl FnMut(&str, Option<Value>) -> Result<Value>,
+) -> Result<Value> {
+    if !page_id(source_id) {
+        return Err(ApiError::new(
+            "notion_source_id",
+            "Invalid Notion data source ID",
+        ));
+    }
+    let query = checked_database_query(query)?;
+    if cursor.is_some_and(|cursor| !valid_cursor(cursor)) {
+        return Err(ApiError::new("notion_cursor", "Invalid Notion cursor"));
+    }
+    if sort.is_some_and(|sort| !matches!(sort, "edited" | "created" | "title")) {
+        return Err(ApiError::new("notion_sort", "Invalid Notion sort"));
+    }
+    let source_path = format!("v1/data_sources/{source_id}");
+    let title = if !query.is_empty() || sort == Some("title") {
+        check()?;
+        let schema = send(&source_path, None)?;
+        check()?;
+        Some(title_property(&schema, source_id)?)
+    } else {
+        None
+    };
+    let mut body = json!({"page_size":DATABASE_PAGE_SIZE});
+    if let Some(cursor) = cursor {
+        body["start_cursor"] = json!(cursor);
+    }
+    if !query.is_empty() {
+        body["filter"] =
+            json!({"property":title.as_ref().expect("title resolved"),"title":{"contains":query}});
+    }
+    if let Some(sort) = sort {
+        let direction = if descending {
+            "descending"
+        } else {
+            "ascending"
+        };
+        body["sorts"] = match sort {
+            "title" => {
+                json!([{"property":title.as_ref().expect("title resolved"),"direction":direction}])
+            }
+            "created" => json!([{"timestamp":"created_time","direction":direction}]),
+            "edited" => json!([{"timestamp":"last_edited_time","direction":direction}]),
+            _ => unreachable!(),
+        };
+    }
+    check()?;
+    let response = send(&format!("{source_path}/query"), Some(body))?;
+    check()?;
+    let results = response["results"].as_array().ok_or_else(response_error)?;
+    if results.len() > DATABASE_PAGE_SIZE {
+        return Err(response_error());
+    }
+    let rows: Vec<_> = results.iter().filter_map(database_row).collect();
+    let next = match response.get("next_cursor") {
+        Some(Value::Null) | None if response["has_more"] != true => None,
+        Some(Value::String(cursor)) if valid_cursor(cursor) && response["has_more"] == true => {
+            Some(cursor.clone())
+        }
+        _ => return Err(response_error()),
+    };
+    Ok(
+        json!({"rows":rows,"next_cursor":next,"incomplete":response["request_status"]["type"] == "incomplete"}),
+    )
+}
+pub(crate) fn query_database(
+    source_id: &str,
+    query: &str,
+    cursor: Option<&str>,
+    sort: Option<&str>,
+    descending: bool,
+    check: impl Fn() -> Result<()>,
+) -> Result<Value> {
+    query_database_with(
+        source_id,
+        query,
+        cursor,
+        sort,
+        descending,
+        &check,
+        |path, body| request(path, body, &[], &check),
+    )
+}
+
 pub(crate) fn markdown(id: &str, check: impl Fn() -> Result<()>) -> Result<String> {
     fetch_markdown(id, &[], check)
 }
 
 pub(crate) fn preview_markdown(id: &str, check: impl Fn() -> Result<()>) -> Result<String> {
     fetch_markdown(id, &["markdown_version==v2"], check)
+}
+
+pub(crate) fn page_excerpt(id: &str, check: impl Fn() -> Result<()>) -> Result<String> {
+    if !page_id(id) {
+        return Err(ApiError::new("notion_page_id", "Invalid Notion page ID"));
+    }
+    let response = request(
+        &format!("v1/blocks/{id}/children"),
+        None,
+        &["page_size==6"],
+        check,
+    )?;
+    excerpt_from_response(&response)
+}
+
+fn excerpt_from_response(response: &Value) -> Result<String> {
+    let blocks = response["results"].as_array().ok_or_else(response_error)?;
+    let text = blocks
+        .iter()
+        .take(6)
+        .filter_map(|block| {
+            let content = block.get(block["type"].as_str()?)?;
+            let line = rich_text(&content["rich_text"], 224);
+            (!line.trim().is_empty()).then_some(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(text.trim().chars().take(224).collect())
+}
+
+#[cfg(test)]
+#[test]
+fn notion_excerpt_uses_plain_text_and_limits_length() {
+    let response = json!({"results":[
+        {"type":"image","image":{"external":{"url":"https://example.com"}}},
+        {"type":"paragraph","paragraph":{"rich_text":[{"plain_text":"Раздел "},{"plain_text":"🐳".repeat(300)}]}},
+    ]});
+    let excerpt = excerpt_from_response(&response).unwrap();
+    assert!(excerpt.starts_with("Раздел 🐳"));
+    assert_eq!(excerpt.chars().count(), 224);
 }
 
 fn fetch_markdown(id: &str, query: &[&str], check: impl Fn() -> Result<()>) -> Result<String> {
@@ -615,5 +924,120 @@ mod tests {
             crate::diagnostics::summarize_command(&command),
             json!({"type":"set_notion_token"})
         );
+    }
+}
+
+#[cfg(test)]
+mod database_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    const SOURCE: &str = "11111111-1111-4111-8111-111111111111";
+    const PAGE: &str = "22222222-2222-4222-8222-222222222222";
+    fn ok() -> Result<()> {
+        Ok(())
+    }
+    #[test]
+    fn search_is_bounded_and_only_returns_data_sources() {
+        let calls = RefCell::new(Vec::new());
+        let result = search_databases_with("", &ok, |path, body| {
+            calls.borrow_mut().push((path.to_owned(), body.unwrap()));
+            Ok(json!({"results":[
+                {"object":"data_source","id":SOURCE,"title":[{"plain_text":"Новости"},{"plain_text":" 🐄"}]},
+                {"object":"page","id":PAGE},
+                {"object":"data_source","id":"bad","title":[]},
+                {"object":"data_source","id":PAGE,"in_trash":true}
+            ],"has_more":true}))
+        }).unwrap();
+        assert_eq!(result["sources"].as_array().unwrap().len(), 1);
+        assert_eq!(result["sources"][0]["title"], "Новости 🐄");
+        assert_eq!(result["more"], true);
+        assert_eq!(calls.borrow()[0].0, "v1/search");
+        assert_eq!(calls.borrow()[0].1["filter"]["value"], "data_source");
+        assert!(calls.borrow()[0].1.get("query").is_none());
+    }
+    #[test]
+    fn query_uses_schema_title_and_preserves_pagination_and_property_values() {
+        let calls = RefCell::new(Vec::new());
+        let result = query_database_with(SOURCE, "  cows  ", Some("opaque+cursor"), Some("title"), true, &ok, |path, body| {
+            calls.borrow_mut().push((path.to_owned(), body.clone()));
+            if body.is_none() {
+                return Ok(json!({"object":"data_source","id":SOURCE,"properties":{"Имя":{"type":"title","id":"title"}}}));
+            }
+            Ok(json!({"results":[{"object":"page","id":PAGE,"created_time":"2026-01-01T00:00:00Z","last_edited_time":"2026-01-02T00:00:00Z","properties":{
+                "Имя":{"type":"title","title":[{"plain_text":"Статья"}]},
+                "Описание":{"type":"rich_text","rich_text":[{"plain_text":"Кратко"}]},
+                "Статус":{"type":"status","status":{"name":"Готово"}},
+                "Теги":{"type":"multi_select","multi_select":[{"name":"A"},{"name":"B"}]},
+                "Число":{"type":"number","number":42},
+                "Да":{"type":"checkbox","checkbox":true},
+                "Сайт":{"type":"url","url":"https://example.test"},
+                "Дата":{"type":"date","date":{"start":"2026-01-01","end":"2026-01-02"}}
+            }},{"object":"data_source","id":SOURCE}],"has_more":true,"next_cursor":"next-token","request_status":{"type":"incomplete"}}))
+        }).unwrap();
+        assert_eq!(result["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(result["rows"][0]["id"], PAGE);
+        assert_eq!(result["rows"][0]["title"], "Статья");
+        assert_eq!(result["rows"][0]["summary"], "Кратко");
+        assert_eq!(result["next_cursor"], "next-token");
+        assert_eq!(result["incomplete"], true);
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 2);
+        let body = calls[1].1.as_ref().unwrap();
+        assert_eq!(body["filter"]["property"], "Имя");
+        assert_eq!(body["filter"]["title"]["contains"], "cows");
+        assert_eq!(body["sorts"][0]["property"], "Имя");
+        assert_eq!(body["sorts"][0]["direction"], "descending");
+        assert_eq!(body["start_cursor"], "opaque+cursor");
+        assert_eq!(body["page_size"], 30);
+    }
+    #[test]
+    fn default_order_does_not_fetch_schema_and_timestamp_sorts_are_remote() {
+        for (sort, expected) in [
+            (None, None),
+            (Some("edited"), Some("last_edited_time")),
+            (Some("created"), Some("created_time")),
+        ] {
+            let calls = RefCell::new(Vec::new());
+            let result = query_database_with(SOURCE, "", None, sort, false, &ok, |path, body| {
+                calls.borrow_mut().push((path.to_owned(), body.unwrap()));
+                Ok(json!({"results":[],"has_more":false,"next_cursor":null}))
+            })
+            .unwrap();
+            assert!(result["next_cursor"].is_null());
+            let calls = calls.borrow();
+            assert_eq!(calls.len(), 1);
+            if let Some(expected) = expected {
+                assert_eq!(calls[0].1["sorts"][0]["timestamp"], expected);
+            } else {
+                assert!(calls[0].1.get("sorts").is_none());
+            }
+        }
+    }
+    #[test]
+    fn reject_invalid_inputs_and_cancellation_before_external_work() {
+        let calls = Cell::new(0);
+        let cancel = || Err(ApiError::new("job_cancelled", "cancelled"));
+        let result = query_database_with(SOURCE, "", None, None, false, &cancel, |_, _| {
+            calls.set(calls.get() + 1);
+            Ok(json!({}))
+        });
+        assert_eq!(result.unwrap_err().code, "job_cancelled");
+        assert_eq!(calls.get(), 0);
+        for (id, cursor, sort) in [
+            ("bad", None, None),
+            (SOURCE, Some(""), None),
+            (SOURCE, None, Some("unknown")),
+        ] {
+            assert!(
+                query_database_with(id, "", cursor, sort, false, &ok, |_, _| panic!(
+                    "must reject before request"
+                ))
+                .is_err()
+            );
+        }
+        let result = query_database_with(SOURCE, "", None, None, false, &ok, |_, _| {
+            Ok(json!({"results":[],"has_more":true,"next_cursor":null}))
+        });
+        assert!(result.is_err());
     }
 }

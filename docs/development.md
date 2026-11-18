@@ -6,6 +6,8 @@ The Ctrl+Shift+K Notion source uses `src/notion.rs` for bounded CLI requests,
 parses the Markdown v2 preview and `src/bin/notion_reader_ui.rs` renders its
 supported blocks. `src/notion_rich.rs` projects CommonMark and Notion inline
 styles into inert native text runs. The Markdown attachment path is independent.
+`src/bin/workspace_notion_database_ui.rs` owns the Folder projection for remote
+rows. Keep page, database, and filesystem identities separate.
 See [connection setup](notion.md).
 
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)

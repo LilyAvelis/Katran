@@ -1568,12 +1568,30 @@ impl Service {
                     crate::notion::search(&query, || cancel.check()).map(PreparedWork::Value)
                 })?
             }
+            Command::SearchNotionDatabases { query } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    notion::search_databases(&query, || cancel.check()).map(PreparedWork::Value)
+                })?
+            }
+            Command::QueryNotionDatabase { source_id, query, cursor, sort, descending } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    notion::query_database(&source_id, &query, cursor.as_deref(), sort.as_deref(), descending, || cancel.check())
+                        .map(PreparedWork::Value)
+                })?
+            }
             Command::ReadNotionPage { page_id, title } => {
                 let page = notion::Page { id: page_id, title };
                 page.validate()?;
                 self.jobs.submit(Lane::Discovery, move |cancel| {
                     let markdown = notion::preview_markdown(&page.id, || cancel.check())?;
                     Ok(PreparedWork::ReadNotionPage { page, markdown })
+                })?
+            }
+            Command::ReadNotionPageExcerpt { page_id } => {
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    let excerpt = notion::page_excerpt(&page_id, || cancel.check())?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Value(json!({"excerpt": excerpt})))
                 })?
             }
             Command::CopyNotionPage { page_id, title } => {

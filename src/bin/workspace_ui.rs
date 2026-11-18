@@ -5,6 +5,8 @@ use katran::domain_jobs::JobId;
 
 #[path = "workspace_notion_ui.rs"]
 mod notion_ui;
+#[path = "workspace_notion_database_ui.rs"]
+mod notion_database_ui;
 
 /// Consume the physical switch and only its paired text event. Paste stays intact.
 fn take_neural_toggle(input: &mut egui::InputState) -> bool {
@@ -51,6 +53,7 @@ pub(super) struct State {
     pub open: bool,
     notion_source: bool,
     notion: notion_ui::State,
+    database: Option<notion_database_ui::State>,
     mode: Mode,
     query: String,
     items: Vec<PathBuf>,
@@ -224,6 +227,7 @@ impl Shelf {
         if result.is_null() {
             return false;
         }
+        self.close_notion_database();
         self.query.clear();
         self.state = result;
         self.actions = false;
@@ -360,7 +364,9 @@ impl Shelf {
         }
     }
     pub(super) fn workspace_input(&mut self, ctx: &egui::Context) {
-        self.workspace_transfer_input(ctx);
+        if self.workspace.database.is_none() {
+            self.workspace_transfer_input(ctx);
+        }
         let search = ctx.input_mut(|i| {
             i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::K)
         });
@@ -381,8 +387,7 @@ impl Shelf {
                 self.workspace_mode(Mode::Search, ctx);
             }
         }
-        if !self.workspace.open
-            && !self.modal_owns_input()
+        if (self.workspace.open || !self.modal_owns_input())
             && self.state["settings_open"] != true
             && ctx.input_mut(|i| {
                 i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::N)
@@ -781,9 +786,11 @@ mod tests {
         send_workspace_key(&mut app, &egui::Context::default(), press.clone());
         assert!(!app.workspace.open);
         app.save = false;
-        send_workspace_key(&mut app, &egui::Context::default(), press);
+        send_workspace_key(&mut app, &egui::Context::default(), press.clone());
         assert!(app.workspace.open);
         assert!(app.workspace.notion_source);
+        send_workspace_key(&mut app, &egui::Context::default(), press);
+        assert!(app.workspace.notion_source, "direct search never toggles to Everything");
     }
 
     #[test]

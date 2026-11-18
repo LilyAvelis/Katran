@@ -3,7 +3,9 @@
 **Notion** is available as a read-only mode in Ctrl+Shift+K. Switch with
 Ctrl+N or open it directly with Ctrl+Shift+N. Search pages by title, use Space
 to read callouts, tables and toggles, and attach an
-`.md` file to the previous window with Enter. [Notion setup](docs/notion.md)
+`.md` file to the previous window with Enter. In the Notion picker, backslash
+switches to database search. Open a database in Folder to filter and read its
+rows or pin a page. [Notion setup](docs/notion.md)
 
 ## Katran 4.0 · Collections, Translate and media
 

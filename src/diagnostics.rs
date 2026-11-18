@@ -232,8 +232,11 @@ impl RotatingWriter {
 pub fn summarize_command(command: &crate::Command) -> Value {
     match command {
         crate::Command::SearchNotionPages { .. } => json!({"type":"search_notion_pages"}),
+        crate::Command::SearchNotionDatabases { .. } => json!({"type":"search_notion_databases"}),
+        crate::Command::QueryNotionDatabase { .. } => json!({"type":"query_notion_database"}),
         crate::Command::SetNotionToken { .. } => json!({"type":"set_notion_token"}),
         crate::Command::ReadNotionPage { .. } => json!({"type":"read_notion_page"}),
+        crate::Command::ReadNotionPageExcerpt { .. } => json!({"type":"read_notion_page_excerpt"}),
         crate::Command::CopyNotionPage { .. } => json!({"type":"copy_notion_page"}),
         crate::Command::BeginPasteNotionPage { .. } => json!({"type":"begin_paste_notion_page"}),
         crate::Command::OpenNotionPage { .. } => json!({"type":"open_notion_page"}),

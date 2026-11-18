@@ -211,10 +211,23 @@ pub enum Command {
     SearchNotionPages {
         query: String,
     },
+    SearchNotionDatabases {
+        query: String,
+    },
+    QueryNotionDatabase {
+        source_id: String,
+        query: String,
+        cursor: Option<String>,
+        sort: Option<String>,
+        descending: bool,
+    },
     ReadNotionPage {
         page_id: String,
         #[serde(default)]
         title: String,
+    },
+    ReadNotionPageExcerpt {
+        page_id: String,
     },
     CopyNotionPage {
         page_id: String,

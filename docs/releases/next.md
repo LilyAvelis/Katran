@@ -6,8 +6,10 @@ Ctrl+Shift+K adds a read-only Notion mode alongside Everything. Ctrl+N or the
 header icon switches modes. Ctrl+Shift+N opens the Notion mode directly.
 Space reads Markdown v2 with native formatting, callouts, tables, toggles and
 Notion reference cards. Alt+Enter opens the selected page in the browser. Search titles,
-pin pages, revisit page history, and attach a Markdown file to the previous window. The official
-Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
+pin pages, revisit page history, and attach a Markdown file to the previous window.
+Physical backslash switches to database search. Enter opens the selected data
+source in Folder, where pages can be filtered, read in Mini stream and pinned.
+The official Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
 [Setup and limits](../notion.md)
 
 ## Katran 4.0 · Accepted local build

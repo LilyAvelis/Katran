@@ -11,9 +11,12 @@ owned Markdown file. Ctrl+Shift+N opens the Notion picker from the ordinary
 Katran UI. Space requests Markdown v2 on demand for the native callout,
 table and toggle reader. Preview markup is inert, including unknown tags.
 Alt+Enter opens only the canonical Notion URL derived from the selected page ID.
-Keep local page IDs and
-titles in the Notion sidecar for history and favorites. No Notion writes
-or database browsing. See [setup](docs/notion.md).
+Keep local page IDs and titles in the Notion sidecar for history and favorites.
+Physical backslash switches the picker to read-only data source search.
+Folder renders the selected source using paginated Notion rows, without
+projecting them as local filesystem Events. Filter and sort against the source
+API; Space opens a row's page and Ctrl+. pins only the page. No Notion writes.
+See [setup](docs/notion.md).
 
 ## Katran 4.0.0 public release authorization · 2026-11-18
 

@@ -989,6 +989,9 @@ impl Service {
                 Ok(serde_json::json!({"configured": notion::configured()}))
             }
             command @ (Command::SearchNotionPages { .. }
+            | Command::SearchNotionDatabases { .. }
+            | Command::QueryNotionDatabase { .. }
+            | Command::ReadNotionPageExcerpt { .. }
             | Command::ReadNotionPage { .. }
             | Command::CopyNotionPage { .. }) => self.begin_job(command),
             Command::SearchFoldersSemantic { .. } | Command::SearchFoldersSemanticPage { .. } => {
