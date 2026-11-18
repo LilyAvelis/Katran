@@ -499,7 +499,7 @@ fn slice_projection(
         ShelfTab::All => "0".to_owned(),
         ShelfTab::Screenshots => "e.source='sharex'".into(),
         ShelfTab::Downloads => "e.source='downloads'".into(),
-        ShelfTab::Text => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=0)".into(),
+        ShelfTab::Text => text_shelf_predicate().into(),
         ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
         ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
         ShelfTab::Desktop => "0".into(),
@@ -548,7 +548,7 @@ fn projection_sql(
         );
     }
     if tab == ShelfTab::Text {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_is_pod(c.content)=0)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", text_shelf_predicate()));
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Pods {
@@ -588,7 +588,7 @@ fn projection_sql(
         sql=sql.replace("AND e.legacy_source_ref=0","AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id)");
     }
     if !text_enabled && tab != ShelfTab::Pods {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM text_fragments t WHERE t.event_id=e.id)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM text_fragments t WHERE t.event_id=e.id) AND NOT {}", text_shelf_predicate()));
     }
     sql
 }
@@ -598,6 +598,10 @@ pub(crate) const TRANSLATION_MEMBERSHIP: &str =
 
 pub(crate) fn link_shelf_predicate() -> &'static str {
     "(EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND e.source='link_collection' AND lower(substr(e.name,-5))='.bull'))"
+}
+
+pub(crate) fn text_shelf_predicate() -> &'static str {
+    "(EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=0) OR (e.blob_hash IS NOT NULL AND e.source='text_collection' AND lower(substr(e.name,-5))='.bull'))"
 }
 
 /// Ordinary image collections share the Images shelf, but remain managed blobs.

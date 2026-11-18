@@ -3,7 +3,10 @@ use crate::{
     ApiError, Event, EventKind, Result, domain_jobs::Cancellation, image_collection,
     interaction::ShelfTab, link_fragments, media_service, open_file, origin::Origin, storage,
 };
-use baloh_collection::links::{self, Link};
+use baloh_collection::{
+    links::{self, Link},
+    text,
+};
 use base64::Engine;
 use std::{
     fs::File,
@@ -12,10 +15,19 @@ use std::{
 };
 
 pub(crate) const LINK_SOURCE: &str = "link_collection";
+pub(crate) const TEXT_SOURCE: &str = "text_collection";
 
 pub(crate) fn is_link_collection(event: &Event) -> bool {
+    is_typed_collection(event, LINK_SOURCE)
+}
+
+pub(crate) fn is_text_collection(event: &Event) -> bool {
+    is_typed_collection(event, TEXT_SOURCE)
+}
+
+fn is_typed_collection(event: &Event, source: &str) -> bool {
     event.storage == "cached"
-        && event.source == LINK_SOURCE
+        && event.source == source
         && Path::new(&event.name)
             .extension()
             .and_then(|ext| ext.to_str())
@@ -23,7 +35,7 @@ pub(crate) fn is_link_collection(event: &Event) -> bool {
 }
 
 pub(crate) fn is_managed(event: &Event) -> bool {
-    image_collection::is_managed(event) || is_link_collection(event)
+    image_collection::is_managed(event) || is_link_collection(event) || is_text_collection(event)
 }
 
 fn read_links(event: &Event) -> Result<Vec<Link>> {
@@ -207,4 +219,137 @@ pub(crate) fn unpack_links(
 
 pub(crate) fn packable_link(event: &Event) -> bool {
     event.kind == EventKind::LinkFragment
+}
+
+pub(crate) fn packable_text(event: &Event) -> bool {
+    event.kind == EventKind::TextFragment
+}
+
+fn read_texts(event: &Event) -> Result<Vec<String>> {
+    open_file::validate(event)?;
+    Ok(text::read(File::open(&event.path)?)?)
+}
+
+fn text_at(event: &Event, index: usize, cancel: &Cancellation) -> Result<(String, usize)> {
+    cancel.check()?;
+    let entries = read_texts(event)?;
+    cancel.check()?;
+    let count = entries.len();
+    let source = entries
+        .into_iter()
+        .nth(index)
+        .ok_or_else(|| ApiError::new("invalid_page", "Page is outside the collection"))?;
+    Ok((source, count))
+}
+
+pub(crate) fn text_entry(event: &Event, index: usize, cancel: &Cancellation) -> Result<String> {
+    Ok(text_at(event, index, cancel)?.0)
+}
+
+pub(crate) fn text_page(
+    event: &Event,
+    index: usize,
+    cancel: &Cancellation,
+) -> Result<serde_json::Value> {
+    let (source, count) = text_at(event, index, cancel)?;
+    Ok(serde_json::json!({"index":index,"count":count,"text":{"source":source}}))
+}
+
+pub(crate) fn pack_text(
+    events: Vec<Event>,
+    root: &Path,
+    quota: u64,
+    references: &[PathBuf],
+    cancel: &Cancellation,
+) -> Result<storage::CollectionPack> {
+    let mut entries = Vec::with_capacity(events.len());
+    let mut inputs = Vec::with_capacity(events.len());
+    for event in events {
+        cancel.check()?;
+        let stamp = media_service::stamp(&event.path)?;
+        let offset = entries.len();
+        if is_text_collection(&event) {
+            entries.extend(read_texts(&event)?);
+        } else {
+            entries.push(crate::text_fragments::read_text_event(&event)?);
+        }
+        if entries.len() > baloh_collection::codec::MAX_PAGES {
+            return Err(ApiError::new(
+                "collection_size_limit",
+                "BULL supports up to 32 entries",
+            ));
+        }
+        if media_service::stamp(&event.path)? != stamp {
+            return Err(ApiError::new(
+                "source_changed",
+                "Text or collection changed while reading",
+            ));
+        }
+        inputs.push(storage::CollectionInput {
+            event,
+            stamp,
+            offset,
+            count: entries.len() - offset,
+        });
+    }
+    cancel.check()?;
+    let mut portable = Vec::new();
+    text::write(&mut portable, &entries)?;
+    let blob = storage::prepare_bytes(
+        root,
+        quota,
+        storage::ByteIngest {
+            name: "Text collection.bull",
+            source: TEXT_SOURCE,
+            bytes: &portable,
+            origin: &Origin::default(),
+        },
+        references,
+    )?;
+    Ok(storage::CollectionPack {
+        inputs,
+        blob,
+        tab: ShelfTab::Text,
+        count: entries.len(),
+    })
+}
+
+pub(crate) fn unpack_text(
+    event: &Event,
+    members: &storage::CollectionMembers,
+    root: &Path,
+    quota: u64,
+    references: &[PathBuf],
+    cancel: &Cancellation,
+) -> Result<Vec<Option<storage::PreparedBlob>>> {
+    cancel.check()?;
+    let entries = read_texts(event)?;
+    if members
+        .last_key_value()
+        .is_some_and(|(&position, _)| position >= entries.len())
+    {
+        return Err(ApiError::new(
+            "invalid_collection",
+            "Saved collection membership is out of range",
+        ));
+    }
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, source)| {
+            cancel.check()?;
+            if members.contains_key(&index) {
+                return Ok(None);
+            }
+            crate::text_fragments::prepare(
+                root,
+                quota,
+                &source,
+                "text_collection_page",
+                &Origin::default(),
+                references,
+            )
+            .map(Some)
+        })
+        .collect()
 }

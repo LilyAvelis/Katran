@@ -892,6 +892,8 @@ impl Service {
             } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
+            Command::BeginPasteCollectionPage { owner_window, id, revision, index } =>
+                self.begin_paste_with_copy(owner_window, Command::CopyCollectionPage { id, revision, index }),
             Command::CompletePastePrevious { owner_window } => {
                 self.complete_paste_previous(owner_window)
             }

@@ -89,10 +89,10 @@ pub(crate) enum PreparedWork {
         sequence: u32,
         index: usize,
     },
-    CollectionLink {
+    CollectionString {
         event: Event,
         stamp: media_service::Stamp,
-        url: String,
+        text: String,
         sequence: Option<u32>,
         index: usize,
     },
@@ -793,8 +793,8 @@ impl Service {
             Command::CreateImageCollection => {
                 use interaction::ShelfTab;
                 let tab = self.interaction.tab;
-                if !matches!(tab, ShelfTab::Images | ShelfTab::Translate | ShelfTab::Links) {
-                    return Err(ApiError::new("invalid_selection", "Use the BULL command in Images, Translate or Links"));
+                if !matches!(tab, ShelfTab::Images | ShelfTab::Translate | ShelfTab::Links | ShelfTab::Text) {
+                    return Err(ApiError::new("invalid_selection", "Use the BULL command in Images, Translate, Links or Text"));
                 }
                 let ids = if self.interaction.selected.is_empty() {
                     self.interaction.cursor.as_slice()
@@ -819,21 +819,29 @@ impl Service {
                     let newest_first = !self.interaction.sort.reverse;
                     self.jobs.submit(Lane::Foreground, move |cancel| {
                         let stamp = media_service::stamp(&event.path)?;
-                        let unpack = if tab == ShelfTab::Links { collection::unpack_links } else { image_collection::unpack };
+                        let unpack = match tab {
+                            ShelfTab::Links => collection::unpack_links,
+                            ShelfTab::Text => collection::unpack_text,
+                            _ => image_collection::unpack,
+                        };
                         let pages = unpack(&event, &members, &root, quota, &references, &cancel)?;
                         Ok(PreparedWork::UnpackImageCollection { event, stamp, members, pages, newest_first, tab })
                     })?
                 } else {
-                    let packable = if tab == ShelfTab::Links { collection::packable_link } else { image_collection::is_image };
+                    let packable = match tab {
+                        ShelfTab::Links => collection::packable_link,
+                        ShelfTab::Text => collection::packable_text,
+                        _ => image_collection::is_image,
+                    };
                     if !events.iter().all(packable) && !events.iter().all(collection::is_managed) {
                         return Err(ApiError::new("invalid_selection", "Select items of one kind or BULLs of one kind"));
                     }
                     self.jobs.submit(Lane::Foreground, move |cancel| {
-                        let packed = if tab == ShelfTab::Links {
-                            collection::pack_links(events, &root, quota, &references, &cancel)?
-                        } else {
-                            image_collection::pack(events, tab == ShelfTab::Translate, &root, quota, &references, &cancel)?
-                        };
+                        let packed = match tab {
+                            ShelfTab::Links => collection::pack_links(events, &root, quota, &references, &cancel),
+                            ShelfTab::Text => collection::pack_text(events, &root, quota, &references, &cancel),
+                            _ => image_collection::pack(events, tab == ShelfTab::Translate, &root, quota, &references, &cancel),
+                        }?;
                         Ok(PreparedWork::PackImageCollection(packed))
                     })?
                 }
@@ -1518,7 +1526,13 @@ impl Service {
             Command::TranslationCollectionPage { id, revision, index } => {
                 let event = self.saved_collection(id, &revision)?;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
-                    let page = if collection::is_link_collection(&event) { collection::link_page } else { image_translation_batch::page };
+                    let page = if collection::is_link_collection(&event) {
+                        collection::link_page
+                    } else if collection::is_text_collection(&event) {
+                        collection::text_page
+                    } else {
+                        image_translation_batch::page
+                    };
                     Ok(PreparedWork::Value(page(&event, index, &cancel)?))
                 })?
             }
@@ -1527,9 +1541,10 @@ impl Service {
                 let sequence = capture::sequence_number();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let stamp = media_service::stamp(&event.path)?;
-                    if collection::is_link_collection(&event) {
-                        let url = collection::link_url(&event, index, &cancel)?;
-                        return Ok(PreparedWork::CollectionLink { event, stamp, url, sequence: Some(sequence), index });
+                    if collection::is_link_collection(&event) || collection::is_text_collection(&event) {
+                        let read = if collection::is_link_collection(&event) { collection::link_url } else { collection::text_entry };
+                        let text = read(&event, index, &cancel)?;
+                        return Ok(PreparedWork::CollectionString { event, stamp, text, sequence: Some(sequence), index });
                     }
                     let pixels = image_collection::prepare_page_copy(&event, index, &cancel)?;
                     Ok(PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index })
@@ -1542,8 +1557,8 @@ impl Service {
                 }
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let stamp = media_service::stamp(&event.path)?;
-                    let url = collection::link_url(&event, index, &cancel)?;
-                    Ok(PreparedWork::CollectionLink { event, stamp, url, sequence: None, index })
+                    let text = collection::link_url(&event, index, &cancel)?;
+                    Ok(PreparedWork::CollectionString { event, stamp, text, sequence: None, index })
                 })?
             }
             Command::PreviewPublishedTranslation { id, revision } => {
@@ -2243,18 +2258,18 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
-                PreparedWork::CollectionLink { event, stamp, url, sequence, index } => {
+                PreparedWork::CollectionString { event, stamp, text, sequence, index } => {
                     let current = self.saved_collection(event.id, &event.revision)?;
                     if current.path != event.path || media_service::stamp(&event.path)? != stamp {
-                        return Err(ApiError::new("source_changed", "Collection changed before using its link"));
+                        return Err(ApiError::new("source_changed", "Collection changed before using its entry"));
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
                     if let Some(sequence) = sequence {
-                        self.text_clipboard.lock().map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?.write_if_current(&url, sequence)?;
-                        Ok(json!({"copied_collection_page":true,"index":index}))
+                        let clipboard_sequence = self.text_clipboard.lock().map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?.write_if_current(&text, sequence)?;
+                        Ok(json!({"copied_collection_page":true,"text_copied":true,"clipboard_sequence":clipboard_sequence,"index":index}))
                     } else {
                         let launcher = self.file_launcher.lock().map_err(|_| ApiError::new("open_busy", "Could not use the default browser"))?;
-                        open_file::open_url(&url, launcher.as_ref())?;
+                        open_file::open_url(&text, launcher.as_ref())?;
                         Ok(json!({"opened_collection_link":true,"index":index}))
                     }
                 },
@@ -2264,9 +2279,9 @@ impl Service {
                         return Err(ApiError::new("source_changed", "Collection changed before copying its page"));
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
-                    copy_out::write_owned_image(&pixels, sequence)
+                    let clipboard_sequence = copy_out::write_owned_image(&pixels, sequence)
                         .map_err(|error| ApiError::new("clipboard_error", error))?;
-                    Ok(json!({"copied_collection_page":true,"index":index}))
+                    Ok(json!({"copied_collection_page":true,"copied":1,"clipboard_sequence":clipboard_sequence,"index":index}))
                 },
                 PreparedWork::PackImageCollection(packed) => {
                     for input in &packed.inputs {
@@ -2282,10 +2297,11 @@ impl Service {
                     let count = packed.count;
                     let merged = collection::is_managed(&packed.inputs[0].event);
                     let links = packed.tab == interaction::ShelfTab::Links;
+                    let text = packed.tab == interaction::ShelfTab::Text;
                     let consumed: Vec<_> = packed.inputs.iter().map(|input| input.event.id).collect();
                     let (id, cleanup_pending) = storage::commit_shelf_collection(&mut self.db, &self.root, self.quota, packed)?;
                     self.interaction.replace_collection_rows(&consumed, Some(id));
-                    Ok(json!({"event":self.get(id)?,"count":count,"image_collection":true,"link_collection":links,"merged":merged,"cleanup_pending":cleanup_pending}))
+                    Ok(json!({"event":self.get(id)?,"count":count,"image_collection":true,"link_collection":links,"text_collection":text,"merged":merged,"cleanup_pending":cleanup_pending}))
                 },
                 PreparedWork::UnpackImageCollection { event, stamp, members, pages, newest_first, tab } => {
                     self.validate_job_events(std::slice::from_ref(&event))?;
@@ -2298,7 +2314,7 @@ impl Service {
                         tab, newest_first,
                     )?;
                     self.interaction.replace_collection_rows(&[event.id], items.first().copied());
-                    Ok(json!({"count":items.len(),"items":items,"image_collection":true,"link_collection":tab == interaction::ShelfTab::Links,"unpacked":true,"cleanup_pending":cleanup_pending}))
+                    Ok(json!({"count":items.len(),"items":items,"image_collection":true,"link_collection":tab == interaction::ShelfTab::Links,"text_collection":tab == interaction::ShelfTab::Text,"unpacked":true,"cleanup_pending":cleanup_pending}))
                 },
                 PreparedWork::ImageTranslationBatch(batch) => {
                     for (event, stamp) in &batch.validated_sources {

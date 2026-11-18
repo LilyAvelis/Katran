@@ -149,6 +149,12 @@ pub enum Command {
     BeginPastePrevious {
         owner_window: u64,
     },
+    BeginPasteCollectionPage {
+        owner_window: u64,
+        id: i64,
+        revision: String,
+        index: usize,
+    },
     CompletePastePrevious {
         owner_window: u64,
     },

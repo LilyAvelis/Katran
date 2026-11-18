@@ -36,6 +36,14 @@ Clipboard path. `OpenCollectionLink` sends the validated URL to the default
 browser. `favicon_fetch` supplies bounded, best-effort metadata during explicit
 packing. Merge and viewing reuse saved metadata locally.
 
+Text BULL uses v2 `TEXT` with exact UTF-8 payloads. The normal Text shelf
+owns its cards, pins and tags. `TranslationCollectionPage` returns the
+source, and the viewer uses the existing Markdown parser and renderer.
+`BeginPasteCollectionPage` binds one ready entry and the previous-window
+lease before starting `CopyCollectionPage`. The existing completion path
+validates the lease and clipboard. Image-only publication proves the settled
+DIBV5 bytes and Katran marker after owner teardown before authorizing input.
+
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
 JPEG copy to the default browser through a short-lived loopback address.

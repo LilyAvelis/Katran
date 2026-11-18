@@ -68,7 +68,11 @@ and unpack share reversible shelf membership and pin/tag rules. Persist page
 metadata inside the file. Only explicit packing may fetch metadata for public
 HTTPS pages. Ctrl+C publishes the visible URL through the owned text Clipboard
 path; Alt+Enter opens that validated URL with the default browser. Copying from
-the shelf transfers the entire file. Text collections are outside scope.
+the shelf transfers the entire file. Text BULL uses v2 `TEXT` records and the
+same Text shelf membership. Its rendered Markdown and source are two views
+of one exact UTF-8 entry. Ctrl+C always copies the source. Enter in the BULL
+viewer binds the visible entry to the standard single-use previous-window
+paste lease. Do not post input without a verified clipboard publication.
 
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.

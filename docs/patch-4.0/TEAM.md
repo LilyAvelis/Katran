@@ -11,6 +11,9 @@ Polly integrated merge ordering, pin/tag inheritance and reversible storage.
 For Links BULL, Nemi owned the v2 codec, Vela owned metadata retrieval, Fenna
 owned the pager and input, and Polly owned shelf integration, copy/open and QA.
 
+Nemi added the Text codec, Fenna added Markdown and entry input, Vela traced
+Links latency, and Polly integrated Text storage and the previous-window lease.
+
 Polly leads the current session and owns the shared Rust command, dispatcher,
 integration, verification and installation. The Notion 4.0 card owns the run
 order. The installed baseline is `09244a0440d7` (source `5eb3f93`), with local

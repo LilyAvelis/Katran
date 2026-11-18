@@ -24,6 +24,7 @@ struct Collection {
     pending: Option<(katran::domain_jobs::JobId, usize)>,
     texture: Option<egui::TextureHandle>,
     link: Option<LinkPage>,
+    text: Option<TextPage>,
     ready_index: Option<usize>,
     copy_held: bool,
     zoom: katran::preview_view::State,
@@ -33,9 +34,15 @@ struct Collection {
 impl Collection {
     fn ready_target(&self) -> Option<(i64, String, usize)> {
         self.ready_index
-            .filter(|_| self.texture.is_some() || self.link.is_some())
+            .filter(|_| self.texture.is_some() || self.link.is_some() || self.text.is_some())
             .map(|index| (self.id, self.revision.clone(), index))
     }
+}
+
+struct TextPage {
+    source: String,
+    document: Option<katran::markdown::Document>,
+    rendered: bool,
 }
 
 struct LinkPage {
@@ -132,6 +139,26 @@ fn take_collection_copy(
     fire
 }
 
+fn take_collection_enter(events: &mut Vec<egui::Event>, focused: bool) -> bool {
+    let mut pressed = false;
+    events.retain(|event| match event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            pressed: down,
+            repeat,
+            modifiers,
+            ..
+        } if modifiers.is_none() => {
+            if focused && *down && !*repeat {
+                pressed = true;
+            }
+            false
+        }
+        _ => true,
+    });
+    pressed
+}
+
 fn collection_canvas_size(viewport: egui::Vec2) -> egui::Vec2 {
     egui::vec2((viewport.x * 0.8).max(1.0), (viewport.y * 0.7).max(1.0))
 }
@@ -176,6 +203,7 @@ impl Shelf {
             pending: None,
             texture: None,
             link: None,
+            text: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -273,6 +301,7 @@ impl Shelf {
                                                     egui::TextureOptions::LINEAR,
                                                 )
                                             });
+                                        collection.text = None;
                                         collection.link = Some(LinkPage {
                                             url: url.to_owned(),
                                             title,
@@ -282,6 +311,17 @@ impl Shelf {
                                         collection.ready_index = Some(expected);
                                         collection.zoom = katran::preview_view::State::default();
                                     }
+                                } else if let Some(source) = page["text"]["source"].as_str() {
+                                    let document = katran::markdown::parse(source).ok();
+                                    collection.text = Some(TextPage {
+                                        source: source.to_owned(),
+                                        document,
+                                        rendered: true,
+                                    });
+                                    collection.link = None;
+                                    collection.texture = None;
+                                    collection.ready_index = Some(expected);
+                                    collection.zoom = katran::preview_view::State::default();
                                 } else {
                                     match page["png"]
                                         .as_str()
@@ -295,6 +335,7 @@ impl Shelf {
                                                 egui::TextureOptions::LINEAR,
                                             ));
                                             collection.link = None;
+                                            collection.text = None;
                                             collection.ready_index = Some(expected);
                                             collection.zoom =
                                                 katran::preview_view::State::default();
@@ -336,7 +377,7 @@ impl Shelf {
                 )
             })
         };
-        if copy_requested {
+        if copy_requested && !self.overlay_ui.pending {
             let target = self
                 .upscale
                 .collection
@@ -381,7 +422,7 @@ impl Shelf {
             });
             pressed
         });
-        if open_requested {
+        if open_requested && !self.overlay_ui.pending {
             let target = self
                 .upscale
                 .collection
@@ -405,6 +446,20 @@ impl Shelf {
                     )
                     .into();
                 }
+            }
+        }
+        let paste_requested = ctx.input_mut(|input| {
+            let focused = input.focused;
+            take_collection_enter(&mut input.events, focused)
+        });
+        if paste_requested {
+            let target = self
+                .upscale
+                .collection
+                .as_ref()
+                .and_then(Collection::ready_target);
+            if let Some((id, revision, index)) = target {
+                self.paste_collection_page(ctx, id, revision, index);
             }
         }
         let close_key = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
@@ -453,7 +508,44 @@ impl Shelf {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
             let painter = ui.painter().with_clip_rect(canvas);
             painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
-            if let Some(link) = collection.link.as_ref() {
+            if let Some(text) = collection.text.as_mut() {
+                let inner = canvas.shrink(18.0);
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("collection-text-content")
+                        .max_rect(inner),
+                );
+                child.set_clip_rect(inner);
+                child.horizontal(|ui| {
+                    if ui.selectable_label(text.rendered, "Markdown").clicked() {
+                        text.rendered = true;
+                    }
+                    if ui
+                        .selectable_label(!text.rendered, tr("Исходный текст", "Source text"))
+                        .clicked()
+                    {
+                        text.rendered = false;
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt(("collection-text-scroll", collection.ready_index))
+                    .max_height((inner.height() - child.spacing().interact_size.y - 8.0).max(1.0))
+                    .auto_shrink([false, false])
+                    .show(&mut child, |ui| {
+                        ui.set_width(inner.width());
+                        if text.rendered
+                            && let Some(document) = &text.document
+                        {
+                            super::markdown_ui::show(ui, document);
+                        } else {
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(&text.source).monospace())
+                                    .selectable(true)
+                                    .wrap(),
+                            );
+                        }
+                    });
+            } else if let Some(link) = collection.link.as_ref() {
                 let inner = canvas.shrink(18.0);
                 let mut child = ui.new_child(
                     egui::UiBuilder::new()
@@ -905,6 +997,7 @@ mod tests {
             count: Some(3),
             pending: Some((katran::domain_jobs::JobId(42), 2)),
             texture: None,
+            text: None,
             link: Some(LinkPage {
                 url: "https://example.org".into(),
                 title: "title".into(),
@@ -916,6 +1009,55 @@ mod tests {
             error: String::new(),
         };
         assert_eq!(collection.ready_target(), Some((7, "rev".into(), 1)));
+    }
+
+    #[test]
+    fn text_page_target_keeps_last_ready_page() {
+        let source = "# Example
+**bold**";
+        let collection = Collection {
+            id: 11,
+            revision: "rev".into(),
+            index: 3,
+            count: Some(4),
+            pending: Some((katran::domain_jobs::JobId(9), 3)),
+            texture: None,
+            link: None,
+            text: Some(TextPage {
+                source: source.into(),
+                document: katran::markdown::parse(source).ok(),
+                rendered: true,
+            }),
+            ready_index: Some(2),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        };
+        assert_eq!(collection.ready_target(), Some((11, "rev".into(), 2)));
+        assert!(collection.text.as_ref().unwrap().document.is_some());
+    }
+
+    #[test]
+    fn collection_enter_consumes_plain_press_and_not_alt_or_repeat() {
+        let key = |repeat, modifiers| egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat,
+            modifiers,
+        };
+        let mut input = vec![
+            key(false, egui::Modifiers::NONE),
+            key(false, egui::Modifiers::ALT),
+        ];
+        assert!(take_collection_enter(&mut input, true));
+        assert_eq!(input.len(), 1);
+        let mut repeat = vec![key(true, egui::Modifiers::NONE)];
+        assert!(!take_collection_enter(&mut repeat, true));
+        assert!(repeat.is_empty());
+        let mut unfocused = vec![key(false, egui::Modifiers::NONE)];
+        assert!(!take_collection_enter(&mut unfocused, false));
+        assert!(unfocused.is_empty());
     }
 
     #[test]
@@ -954,6 +1096,7 @@ mod tests {
             pending: None,
             texture: None,
             link: None,
+            text: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -1014,6 +1157,7 @@ mod tests {
             pending: None,
             texture: Some(texture),
             link: None,
+            text: None,
             ready_index: Some(0),
             copy_held: false,
             zoom: katran::preview_view::State::default(),

@@ -284,7 +284,7 @@ pub(super) fn write(text: &str, expected: Option<u32>) -> Result<u32> {
     }
     let open = Open;
     if expected.is_some_and(|expected| unsafe { GetClipboardSequenceNumber() } != expected) {
-        return Err(ApiError::new("clipboard_changed", "Clipboard changed while preparing the URL"));
+        return Err(ApiError::new("clipboard_changed", "Clipboard changed while preparing the text"));
     }
     impl Publication for Backend {
         fn publish(&mut self) -> Result<()> {

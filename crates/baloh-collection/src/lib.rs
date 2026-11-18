@@ -5,6 +5,7 @@
 
 pub mod codec;
 pub mod links;
+pub mod text;
 
 use std::collections::BTreeMap;
 

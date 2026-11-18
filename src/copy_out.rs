@@ -671,7 +671,12 @@ fn verified_settlement(proof: SettlementProof) -> Result<u32, &'static str> {
 }
 #[cfg(any(windows, test))]
 fn accepted_formats(formats: &[u32], marker: u32, effect: Option<u32>, pixels: bool) -> bool {
-    if marker == 0 || !formats.contains(&15) || !formats.contains(&marker) {
+    accepted_payload_formats(formats, marker, effect, true, pixels)
+}
+
+#[cfg(any(windows, test))]
+fn accepted_payload_formats(formats: &[u32], marker: u32, effect: Option<u32>, files: bool, pixels: bool) -> bool {
+    if marker == 0 || (files && !formats.contains(&15)) || !formats.contains(&marker) {
         return false;
     }
     if pixels && !formats.contains(&17) {
@@ -681,7 +686,7 @@ fn accepted_formats(formats: &[u32], marker: u32, effect: Option<u32>, pixels: b
         return false;
     }
     formats.iter().all(|id| {
-        *id == 15
+        (files && *id == 15)
             || *id == marker
             || effect == Some(*id)
             || (pixels && matches!(*id, 2 | 8 | 9 | 17))
@@ -693,6 +698,16 @@ fn same_bounded_payload(expected: &[u8], observed: &[u8], allocation: usize) -> 
     allocation >= expected.len()
         && allocation <= expected.len().saturating_add(16)
         && observed == expected
+}
+
+#[cfg(test)]
+#[test]
+fn owned_image_paste_requires_pixels_and_marker_without_file_payload() {
+    let marker = 500;
+    assert!(accepted_payload_formats(&[17, 8, marker], marker, None, false, true));
+    assert!(!accepted_payload_formats(&[17, 15, marker], marker, None, false, true));
+    assert!(!accepted_payload_formats(&[8, marker], marker, None, false, true));
+    assert!(!accepted_payload_formats(&[17], marker, None, false, true));
 }
 
 #[cfg(any(windows, test))]
@@ -897,7 +912,7 @@ mod native_publication {
     /// Verify only the exact payload just published, with no delayed owner.
     /// OpenClipboard prevents other writers throughout the byte comparison.
     fn settle(
-        files: &[u8],
+        files: Option<&[u8]>,
         pixels: Option<&[u8]>,
         marker: Option<&str>,
         effect: bool,
@@ -910,8 +925,8 @@ mod native_publication {
             },
         };
         let expected_marker = marker.ok_or("marker_missing")?;
-        if files.is_empty()
-            || files.len() > 8 * 1024 * 1024
+        if (files.is_none() && pixels.is_none())
+            || files.is_some_and(|f| f.is_empty() || f.len() > 8 * 1024 * 1024)
             || pixels.is_some_and(|p| p.len() > 128_000_124)
         {
             return Err("payload_changed");
@@ -973,8 +988,11 @@ mod native_publication {
                 return Err("formats_changed");
             }
         }
-        let formats_valid =
-            accepted_formats(&formats, marker_format, effect_format, pixels.is_some());
+        let formats_valid = if files.is_some() {
+            accepted_formats(&formats, marker_format, effect_format, pixels.is_some())
+        } else {
+            accepted_payload_formats(&formats, marker_format, effect_format, false, pixels.is_some())
+        };
         if !formats_valid {
             return Err("formats_changed");
         }
@@ -1014,7 +1032,7 @@ mod native_publication {
             let unlocked = unsafe { GlobalUnlock(handle) };
             equal && (unlocked != 0 || unsafe { GetLastError() } == 0)
         }
-        let payload_valid = equal_bytes(15, files)
+        let payload_valid = files.is_none_or(|bytes| equal_bytes(15, bytes))
             && pixels.is_none_or(|bytes| equal_bytes(17, bytes))
             && effect_format.is_none_or(|id| equal_bytes(id, &1u32.to_le_bytes()));
         let after = unsafe { GetClipboardSequenceNumber() };
@@ -1075,14 +1093,16 @@ mod native_publication {
         remember_file_token(&mut tokens, token.clone());
         Ok(token)
     }
-    pub(super) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<(), String> {
+    pub(super) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<u32, String> {
         let mut backend = Backend::open(&[], Some(pixels))?;
         if backend.sequence() != expected_sequence {
             return Err("Clipboard changed while preparing the page".into());
         }
         // Publish the marker first while capture is locked out of the clipboard.
-        write_owner_marker(true)?;
-        backend.pixels()
+        let marker = write_owner_marker(true)?;
+        backend.pixels()?;
+        drop(backend);
+        Ok(settle(None, Some(pixels), Some(&marker), false).unwrap_or(0))
     }
     impl FilePublication for Backend<'_> {
         fn owner_valid(&self) -> bool {
@@ -1118,11 +1138,11 @@ mod native_publication {
             let files = self.files;
             let expected_pixels = if pixels { self.pixels } else { None };
             drop(self);
-            settle(files, expected_pixels, marker.as_deref(), effect)
+            settle(Some(files), expected_pixels, marker.as_deref(), effect)
         }
     }
 }
-pub(crate) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<(), String> {
+pub(crate) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<u32, String> {
     #[cfg(windows)]
     return native_publication::write_owned_image(pixels, expected_sequence);
     #[cfg(not(windows))]

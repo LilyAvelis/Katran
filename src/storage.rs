@@ -485,6 +485,7 @@ pub(crate) fn visible_collection_input(db: &Connection, id: i64, tab: crate::int
     let category = match tab {
         ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
         ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
+        ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
         ShelfTab::Images => format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate()),
         _ => return Ok(false),
     };
@@ -499,7 +500,7 @@ fn require_collection_input(db: &Connection, id: i64, tab: crate::interaction::S
 }
 
 fn retire_collection(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<String> {
-    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection')", [id], |row| row.get(0))?;
+    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection','text_collection')", [id], |row| row.get(0))?;
     tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     Ok(hash)
 }
@@ -569,6 +570,7 @@ pub(crate) fn commit_extracted_collection_pages(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     require_collection_input(&tx, collection_id, tab)?;
     let links = tab == crate::interaction::ShelfTab::Links;
+    let text = tab == crate::interaction::ShelfTab::Text;
     let translated = tab == crate::interaction::ShelfTab::Translate;
     if collection_members(&tx, collection_id)? != *expected_members {
         return Err(ApiError::new("stale_selection", "Collection membership changed"));
@@ -578,6 +580,8 @@ pub(crate) fn commit_extracted_collection_pages(
     for page in pages.iter().flatten() {
         let valid = if links {
             page.link && page.source == "link_collection_page"
+        } else if text {
+            page.text.is_some() && !page.link && !page.table && page.source == "text_collection_page"
         } else {
             page.source == "image_collection_page" && page.text.is_none() && page.name.ends_with(".png")
         };
@@ -604,7 +608,7 @@ pub(crate) fn commit_extracted_collection_pages(
             items.push(*expected_members.get(&index).ok_or_else(|| ApiError::new("invalid_collection", "Collection page is missing"))?);
             continue;
         };
-        let existing: Option<i64> = if links { None } else { tx.query_row(
+        let existing: Option<i64> = if links || text { None } else { tx.query_row(
             "SELECT id FROM events e WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY id LIMIT 1",
             params![page.name, page.hash], |row| row.get(0)
         ).optional()? };

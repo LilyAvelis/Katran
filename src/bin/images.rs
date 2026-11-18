@@ -104,7 +104,10 @@ pub(super) struct Images {
 }
 impl Images {
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
-        if event["source"] == "link_collection" {
+        if matches!(
+            event["source"].as_str(),
+            Some("link_collection" | "text_collection")
+        ) {
             return;
         }
         if matches!(
@@ -422,7 +425,11 @@ impl Images {
         rect: egui::Rect,
         edge: u32,
     ) {
-        if event["source"] == "link_collection" && is_bull(event) {
+        if matches!(
+            event["source"].as_str(),
+            Some("link_collection" | "text_collection")
+        ) && is_bull(event)
+        {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 6.0, Color32::from_gray(34));
             let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
@@ -578,7 +585,12 @@ pub(super) fn is_bull(event: &Value) -> bool {
     }
     if matches!(
         event["source"].as_str(),
-        Some("image_translation_collection" | "image_collection" | "link_collection")
+        Some(
+            "image_translation_collection"
+                | "image_collection"
+                | "link_collection"
+                | "text_collection"
+        )
     ) {
         return event["name"].as_str().is_some_and(extension_is_bull);
     }
@@ -628,6 +640,12 @@ mod tests {
         ));
         assert!(is_bull(
             &json!({"source": "link_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "links.bull"})
+        ));
+        assert!(is_bull(
+            &json!({"source": "text_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "texts.bull"})
+        ));
+        assert!(!is_managed_collection(
+            &json!({"source": "text_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "texts.bull"})
         ));
         assert!(!is_managed_collection(
             &json!({"source": "link_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "links.bull"})

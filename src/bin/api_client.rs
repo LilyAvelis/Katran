@@ -1509,7 +1509,16 @@ impl Shelf {
         }
         if result["image_collection"] == true {
             let count = result["count"].as_u64().unwrap_or(0);
-            self.message = if result["link_collection"] == true {
+            self.message = if result["text_collection"] == true {
+                let label = if result["unpacked"] == true {
+                    tr("Извлечено текстов", "Texts unpacked")
+                } else if result["merged"] == true {
+                    tr("Текстов в объединённом BULL", "Texts in merged BULL")
+                } else {
+                    tr("Текстов собрано в BULL", "Texts packed into BULL")
+                };
+                format!("{label}: {count}")
+            } else if result["link_collection"] == true {
                 let label = if result["unpacked"] == true {
                     tr("Извлечено ссылок", "Links unpacked")
                 } else if result["merged"] == true {
@@ -2087,7 +2096,12 @@ impl Shelf {
                 let event = self.call(Command::Get { id: event_id });
                 if matches!(
                     event["source"].as_str(),
-                    Some("image_translation_collection" | "image_collection" | "link_collection")
+                    Some(
+                        "image_translation_collection"
+                            | "image_collection"
+                            | "link_collection"
+                            | "text_collection"
+                    )
                 ) && let Some(revision) = event["revision"].as_str()
                 {
                     self.actions = false;

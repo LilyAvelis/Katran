@@ -34,7 +34,23 @@ sites within a time and size budget. An unavailable page still contributes
 its URL. Viewing and merging use the saved bytes locally. Ctrl+C copies only
 the visible URL and bypasses clipboard capture. Alt+Enter opens that URL in
 the default browser. Copy the shelf card to send the whole BULL. The external
-QuickLook adapter currently opens v1 image BULLs. Katran browses both types.
+QuickLook adapter currently opens v1 image BULLs. Katran also browses Links
+and Text collections.
+
+New Links packing waits for bounded HTTPS enrichment before publishing an
+immutable file. DNS, page loading and optional preview loading contribute to
+this wait. The shared deadline is 7 seconds. Merging existing Links BULLs
+reuses their saved metadata. In one synthetic release API measurement with two
+links, packing took 14 ms for HTTP entries (no enrichment) and 26 ms for HTTPS
+`.invalid` entries (fast DNS failure). Real-site timings were outside that run.
+
+## Text v2
+
+Text uses the v2 header with four ASCII bytes `TEXT` as its type. Each record
+starts with the little-endian 32-bit byte length and 32-byte SHA-256 digest,
+followed by 1 byte to 1 MiB of exact UTF-8 source without embedded NUL.
+Whitespace and line endings survive unchanged. Katran can render Markdown or
+show the source, and Ctrl+C copies the exact current source in either mode.
 
 ## Shared shelf behavior
 
@@ -46,7 +62,7 @@ candidate uses shelf display order only to interpret the Shift gesture.
 The gesture's direction, or Ctrl click order, determines the saved sequence.
 
 The same rebindable Ctrl+K action packs selected images, merges two or more
-selected BULLs, or unpacks one BULL on Images, Translate or Links. Pack and merge
+selected BULLs, or unpacks one BULL on Images, Translate, Links or Text. Pack and merge
 replace the selected cards with one collection. The new card appears first
 in newest-first arrival order, and its cover is the first page in the saved
 selection order. A merge concatenates the pages of the selected BULLs and
@@ -60,8 +76,12 @@ Unpacking replaces the BULL with those same cards, including after a merge.
 Changing a collection's tags affects that card. Legacy and translation
 collections can contain pages without original shelf records. Unpacking
 those pages adds PNG cards from the portable BULL. Exported BULLs contain
-ordered pages without Katran pin or tag metadata. Images and Links have
-separate collection types. Text and Folder authoring are subsequent work.
+ordered pages without Katran pin or tag metadata. Images, Links and Text have
+separate collection types. Folder authoring is subsequent work.
+
+Enter inside the viewer pastes only the currently displayed entry to the
+previous window using Katran's standard verified clipboard flow. Copy or drag
+the shelf card to transfer the collection as one file.
 
 The Windows QuickLook adapter lives in `integrations/quicklook`. Katran exports
 a named snapshot to the external viewer. Its internal page viewer can reopen

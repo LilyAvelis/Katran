@@ -383,6 +383,14 @@ impl Shelf {
         }
     }
     pub(super) fn paste_previous(&mut self, ctx: &egui::Context) {
+        self.begin_paste_ui(ctx, Command::BeginPastePrevious { owner_window: self.native_window });
+    }
+
+    pub(super) fn paste_collection_page(&mut self, ctx: &egui::Context, id: i64, revision: String, index: usize) {
+        self.begin_paste_ui(ctx, Command::BeginPasteCollectionPage { owner_window: self.native_window, id, revision, index });
+    }
+
+    fn begin_paste_ui(&mut self, ctx: &egui::Context, command: Command) {
         if self.job.is_some() || self.overlay_ui.pending {
             self.message = tr(
                 "Дождитесь завершения текущей операции",
@@ -391,9 +399,7 @@ impl Shelf {
             .into();
             return;
         }
-        let reply = self.call(Command::BeginPastePrevious {
-            owner_window: self.native_window,
-        });
+        let reply = self.call(command);
         if reply["state"] == "copying" {
             self.overlay_ui.pending = true;
             self.actions = false;

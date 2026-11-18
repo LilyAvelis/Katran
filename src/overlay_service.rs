@@ -68,6 +68,9 @@ impl Service {
         Ok(json!(receipt))
     }
     pub(crate) fn begin_paste_previous(&mut self, owner: u64) -> Result<Value> {
+        self.begin_paste_with_copy(owner, Command::CopySelectedObjects)
+    }
+    pub(crate) fn begin_paste_with_copy(&mut self, owner: u64, copy: Command) -> Result<Value> {
         if self.overlay_copy.is_some() {
             return Err(ApiError::new("paste_busy", "Вставка уже подготовлена"));
         }
@@ -78,7 +81,7 @@ impl Service {
             logger.record("paste_prepare",json!({"ok":preparation.is_ok(),"error_code":preparation.as_ref().err().map(|e|e.code.as_str())}));
         }
         let lease = preparation.map_err(overlay_error)?;
-        let result = self.begin_job(Command::CopySelectedObjects)?;
+        let result = self.begin_job(copy)?;
         let id = result["job_id"].as_u64().ok_or_else(|| {
             ApiError::new("copy_job_missing", "Не удалось подготовить копирование")
         })?;

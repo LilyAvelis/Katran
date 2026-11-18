@@ -28,6 +28,9 @@ impl katran::text_fragments::ClipboardSink for Sink {
         state.text = text.into();
         Ok(state.sequence)
     }
+    fn write_if_current(&self, text: &str, _: u32) -> katran::Result<u32> {
+        self.write(text)
+    }
 }
 struct Fake(Arc<Mutex<State>>);
 impl Host for Fake {
@@ -243,4 +246,86 @@ fn resident_toggle_hides_only_own_foreground_and_keeps_external_target() {
         call(&mut api, Command::SetWindowVisibility { visible: false })["visible"],
         false
     );
+}
+
+#[test]
+fn collection_page_paste_uses_the_captured_window_exact_content_and_verified_copy() {
+    for (kind, valid_copy, lost_foreground) in [
+        ("text_collection", true, false),
+        ("link_collection", true, false),
+        ("text_collection", false, false),
+        ("text_collection", true, true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 10_000).unwrap();
+        let state = Arc::new(Mutex::new(State {
+            zero_sequence: !valid_copy,
+            ..Default::default()
+        }));
+        api.set_text_clipboard_sink(Box::new(Sink(state.clone())));
+        api.set_overlay_host(Box::new(Fake(state.clone())));
+        let mut bytes = Vec::new();
+        let expected = if kind == "text_collection" {
+            let sources = vec![
+                "other".into(),
+                "# Текущая страница\r\n\r\n  **точно** \n".into(),
+            ];
+            baloh_collection::text::write(&mut bytes, &sources).unwrap();
+            sources[1].clone()
+        } else {
+            let entries: Vec<_> = [
+                "https://example.test/other",
+                "https://example.test/target?q=1#anchor",
+            ]
+            .into_iter()
+            .map(|url| baloh_collection::links::Link {
+                url: url.into(),
+                title: "Saved label".into(),
+                description: "Saved metadata".into(),
+                preview_png: None,
+            })
+            .collect();
+            baloh_collection::links::write(&mut bytes, &entries).unwrap();
+            entries[1].url.clone()
+        };
+        let saved = call(
+            &mut api,
+            Command::IngestBytes {
+                name: "fixture.bull".into(),
+                bytes,
+                source: kind.into(),
+            },
+        );
+        call(&mut api, Command::SummonOverlay { owner_window: 8 });
+        state.lock().unwrap().foreground = 8;
+        call(
+            &mut api,
+            Command::BeginPasteCollectionPage {
+                owner_window: 8,
+                id: saved["id"].as_i64().unwrap(),
+                revision: saved["revision"].as_str().unwrap().into(),
+                index: 1,
+            },
+        );
+        if lost_foreground {
+            state.lock().unwrap().foreground = 9;
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let r = reply(&mut api, Command::CompletePastePrevious { owner_window: 8 });
+            if r["result"]["state"] != "copying" {
+                assert_eq!(r["ok"], valid_copy && !lost_foreground, "{r}");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let state = state.lock().unwrap();
+        assert_eq!(state.sent, usize::from(valid_copy && !lost_foreground));
+        if lost_foreground {
+            assert!(state.text.is_empty());
+        } else {
+            assert_eq!(state.text, expected);
+        }
+    }
 }

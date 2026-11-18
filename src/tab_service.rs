@@ -24,6 +24,7 @@ pub(crate) struct BackgroundActions {
     video: bool,
     translate: bool,
     pack_links: bool,
+    pack_text: bool,
     unpack_bull: bool,
     merge_bull: bool,
 }
@@ -45,6 +46,9 @@ fn background_actions(
     };
     if crate::collection::packable_link(&event) {
         return BackgroundActions { pack_links: true, ..Default::default() };
+    }
+    if crate::collection::packable_text(&event) {
+        return BackgroundActions { pack_text: true, ..Default::default() };
     }
     if matches!(
         event.kind,
@@ -74,6 +78,7 @@ fn background_actions(
         unpack_bull: crate::collection::is_managed(&event),
         merge_bull: false,
         pack_links: false,
+        pack_text: false,
     }
 }
 
@@ -105,6 +110,7 @@ impl Service {
                 translate: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image)),
                 merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
                 pack_links: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
+                pack_text: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_text)),
                 ..Default::default()
             };
         }
@@ -131,6 +137,7 @@ impl Service {
                 let supported = match self.interaction.tab {
                     ShelfTab::Images | ShelfTab::Translate => background.translate,
                     ShelfTab::Links => background.pack_links,
+                    ShelfTab::Text => background.pack_text,
                     _ => return false,
                 };
                 supported || background.unpack_bull || background.merge_bull
@@ -163,6 +170,9 @@ impl Service {
             }
             if background.pack_links {
                 return if english { "Pack links into BULL" } else { "Собрать ссылки в BULL" }.into();
+            }
+            if background.pack_text {
+                return if english { "Pack texts into BULL" } else { "Собрать тексты в BULL" }.into();
             }
             return match (background.unpack_bull, english) {
                 (true, true) => "Unpack BULL",

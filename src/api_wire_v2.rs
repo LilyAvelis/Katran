@@ -81,6 +81,12 @@ fn command(value: &mut Value) -> Result<(), String> {
                 unsigned_id(value)?;
             }
         }
+        "begin_paste_collection_page" => {
+            field(object, "id")?;
+            if let Some(value) = object.get_mut("owner_window") {
+                unsigned_id(value)?;
+            }
+        }
         "toggle_resident_overlay"
         | "summon_captured_overlay"
         | "summon_tab_overlay"

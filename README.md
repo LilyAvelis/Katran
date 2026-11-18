@@ -26,6 +26,10 @@ and preview for each link when available. Ctrl+C copies the visible URL,
 Alt+Enter opens it in the default browser, and copying the shelf card passes
 the complete `.bull` file. See [BULL formats](docs/patch-4.0/BULL.md).
 
+Text BULL keeps ordered exact source entries and can render each as Markdown.
+Ctrl+C copies the current source. Enter in the BULL viewer uses Katran's
+previous-window paste flow for the visible image, URL or text.
+
 For one selected image, Ctrl+K → **Search image with Google Lens** opens
 the default browser, which submits an image copy to Google Lens.
 
