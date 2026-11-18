@@ -1997,8 +1997,8 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
-        if id == "translate_image_ja" {
-            self.start_image_translation(ctx);
+        if let Some(source) = upscale_ui::translation_source(&id) {
+            self.start_image_translation(source, ctx);
             self.actions = false;
             return;
         }

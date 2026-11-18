@@ -8,6 +8,24 @@ use std::path::PathBuf;
 pub const API_VERSION: u32 = 1;
 pub const DEFAULT_QUOTA: u64 = 2 * 1024 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageTranslationSource {
+    Japanese,
+    Chinese,
+    Korean,
+}
+
+impl ImageTranslationSource {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Japanese => "ja",
+            Self::Chinese => "zh",
+            Self::Korean => "ko",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpscaleOperation {
@@ -383,6 +401,9 @@ pub enum Command {
         operation: UpscaleOperation,
     },
     TranslateSelectedImage,
+    TranslateSelectedImageFrom {
+        source: ImageTranslationSource,
+    },
     ToggleMediaPause {
         #[serde(default)]
         session: Option<u64>,

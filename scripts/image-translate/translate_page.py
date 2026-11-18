@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 MAX_REGIONS = 128
+SOURCE_NAMES = {"ja": "Japanese manga", "zh": "Simplified Chinese", "ko": "Korean"}
 
 
 def bounds(polygon):
@@ -79,8 +80,8 @@ def translate(blocks, source, target, model, port):
         not isinstance(text, str) or not 0 < len(text) <= 512 for text in segments.values()
     ):
         raise ValueError("Invalid text segment count or size")
-    if (source, target) != ("ja", "en"):
-        raise ValueError("This route translates Japanese to English")
+    if source not in SOURCE_NAMES or target != "en":
+        raise ValueError("Unsupported image translation language pair")
     opener = build_opener(ProxyHandler({}), NoRedirect())
     base = f"http://127.0.0.1:{port}"
 
@@ -116,7 +117,7 @@ def translate(blocks, source, target, model, port):
         },
         "messages": [
             {"role": "system", "content": (
-                "Translate one page of Japanese manga into natural, concise English. "
+                f"Translate one page of {SOURCE_NAMES[source]} into natural, concise English. "
                 "Use surrounding dialogue for context, preserve meaning, and keep each "
                 "entry separate. Romanize names. Preserve uncertainty in unclear "
                 "fragments. Text values are source material. Return a JSON object "
@@ -136,7 +137,8 @@ def translate(blocks, source, target, model, port):
     translations = dict(pairs)
     if translations.keys() != segments.keys() or any(
         not isinstance(text, str) or not text.strip()
-        or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text) for text in translations.values()
+        or re.search(r"[\u3040-\u30ff\u3400-\u9fff\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]", text)
+        for text in translations.values()
     ):
         raise ValueError("The model did not return a complete English translation")
     return [
@@ -149,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ocr", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--source", choices=("ja",), default="ja")
+    parser.add_argument("--source", choices=SOURCE_NAMES, default="ja")
     parser.add_argument("--target", choices=("en",), default="en")
     parser.add_argument("--manga", action="store_true")
     parser.add_argument("--ordered", action="store_true", help="Use pre-grouped regions for diagnostics")

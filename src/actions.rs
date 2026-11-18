@@ -35,6 +35,8 @@ pub fn palette_order(id: &str) -> usize {
         "upscale_realesrgan_x2",
         "upscale_realesrgan_x4",
         "translate_image_ja",
+        "translate_image_zh",
+        "translate_image_ko",
         "transfer_copy",
         "transfer_selection",
         "add_to_katran",
@@ -75,7 +77,10 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         "upscale_remacri_x2"
         | "upscale_remacri_x4"
         | "upscale_realesrgan_x2"
-        | "upscale_realesrgan_x4" | "translate_image_ja" => "AI Commands",
+        | "upscale_realesrgan_x4"
+        | "translate_image_ja"
+        | "translate_image_zh"
+        | "translate_image_ko" => "AI Commands",
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -124,7 +129,13 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
         "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
-        "translate_image_ja" => "перевести перевод японский манга изображение translate Japanese manga OCR AI",
+        "translate_image_ja" => {
+            "перевести перевод японский манга изображение translate Japanese manga OCR AI"
+        }
+        "translate_image_zh" => {
+            "перевести перевод китайский упрощенный изображение translate Chinese simplified OCR AI"
+        }
+        "translate_image_ko" => "перевести перевод корейский изображение translate Korean OCR AI",
         "upscale_remacri_x2"
         | "upscale_remacri_x4"
         | "upscale_realesrgan_x2"
@@ -199,6 +210,8 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "desktop" => "Desktop tab",
         "translate" => "Translate tab",
         "translate_image_ja" => "Translate image from Japanese",
+        "translate_image_zh" => "Translate image from Simplified Chinese",
+        "translate_image_ko" => "Translate image from Korean",
         "sort_arrival" => "Sort by arrival",
         "sort_arrival_reverse" => "Sort by arrival · reverse",
         "sort_pinned" => "Pinned in custom order, then by arrival",
@@ -250,6 +263,22 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "translate_image_zh",
+        label: "Перевести изображение с упрощённого китайского",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
+    Definition {
+        id: "translate_image_ko",
+        label: "Перевести изображение с корейского",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
     Definition {
         id: "translate_image_ja",
         label: "Перевести изображение с японского",
@@ -1090,6 +1119,12 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
             tab: crate::interaction::ShelfTab::Translate,
         }),
         "translate_image_ja" => command(Command::TranslateSelectedImage),
+        "translate_image_zh" => command(Command::TranslateSelectedImageFrom {
+            source: crate::api::ImageTranslationSource::Chinese,
+        }),
+        "translate_image_ko" => command(Command::TranslateSelectedImageFrom {
+            source: crate::api::ImageTranslationSource::Korean,
+        }),
         "select_all" => command(Command::SelectAll),
         "transfer_selection" => command(Command::TransferSelection),
         "add_to_katran" => command(Command::AddFolderFiles { ids: selected() }),

@@ -36,21 +36,22 @@ environment already has PyTorch, Transformers and OpenCV, but no working
 OCR and inpainting translation pipeline has been verified. Select the
 translation backend and explicit optional component setup after the fixtures.
 
-Select a Japanese image and open Ctrl+K → AI Commands → Translate image
-from Japanese. The action is independently rebindable. Settings → AI →
-Image translation reports the locally detected components and the English
+Select an image and open Ctrl+K → AI Commands → Translate image from Japanese,
+Simplified Chinese or Korean. Each action is independently rebindable.
+Settings → AI → Image translation reports local availability by language and the English
 output language. Output is a separate, managed PNG in Translate. The renderer
 keeps text placements disjoint and uses readable spacing and a minimum font
-size. If it cannot safely replace a region, it preserves the original and
-adds its numbered translation to a white panel below the artwork. The panel
-can increase PNG height within the same dimension and pixel limits. The
-result reports panel entries and skips separately. Nothing is published if
-no lettering can be placed safely in either location.
+size. If it cannot safely replace a region, it can add a white card nearby
+or put the numbered translation on a white side margin. Remaining cards can
+use the lower panel. Margins may increase PNG dimensions within the same
+size limits. The result reports margin entries, panel entries and skips.
+Nothing is published if no lettering can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
 Use the dedicated Instruct variant to avoid generating reasoning tokens.
-Japanese is the only exposed recognition language for this integration.
+Source language is chosen by the command. Automatic source detection is
+outside this checkpoint.
 The translator requires full GPU placement and a complete English answer.
 The English-only rollout follows the owner's acceptance scope for this stage.
 The worker embeds the tested scripts and lazily starts both OCR workers and
@@ -68,6 +69,11 @@ executable, and `OLLAMA_MODELS` selects its model store.
 If the active profile has the model under `translate-ollama`, Katran uses
 that store first and passes its exact path to its private Ollama process.
 This avoids dependence on environment variables inherited from the launcher.
+The optional recognizers live under the same `paddlex/official_models` path
+as the detector. Use folders named `PP-OCRv5_server_rec` for Simplified
+Chinese and `korean_PP-OCRv5_mobile_rec` for Korean, each containing
+`inference.json`, `inference.pdiparams` and `inference.yml`. The model
+packages are listed in the [PaddleOCR recognition documentation](https://www.paddleocr.ai/latest/en/version3.x/module_usage/text_recognition.html).
 
 On the approved simple page, separate cold workers spent 7.6 s in Paddle
 detection and recognition, 9.6 s in Manga OCR, and 0.5 s rendering. The earlier
@@ -95,6 +101,14 @@ The full API check then measured 15.5 s for the first simple page, 1.3 s
 for the repeated simple page, and 3.9 s for the warm complex page, including
 publication. Both simple translations remained inside their bubbles.
 
+The next layout pass on the same complex input placed seven translations in
+the artwork and twelve in the side margins, with none below the page. Separate
+synthetic pages verify the Chinese and Korean command routes using horizontal
+dialogue. Dense, vertical or stylized input requires separate quality checks.
+The same session completed the complex Japanese page in 4.1 s, the first
+Chinese page in 3.1 s, and the first Korean page in 2.5 s. Both synthetic
+pages yielded two in-place translations and no skips.
+
 ## Local one-page probe
 
 The standalone probe lives in `scripts/image-translate`. Test images, model packs,
@@ -104,7 +118,9 @@ intermediate JSON and generated previews stay outside Git.
    environment. It reads the PP-OCRv5 server detector from
    `target/build/translate-probe/ocr/paddlex/official_models`. It uses oneDNN
    on CPU, falling back to the regular CPU backend if oneDNN is unavailable
-   at inference. `--prepare` explicitly permits first-time model fetching.
+   at inference. Simplified Chinese and Korean load their matching local
+   Paddle recognizers. `--prepare` explicitly permits first-time fetching
+   for the standalone Japanese detector probe.
 2. `manga_recognize.py` regroups vertical columns and rereads the cropped
    Japanese dialogue with `kha-white/manga-ocr-base` at revision
    `aa6573bd10b0d446cbf622e29c3e084914df9741`. The model pack is opened

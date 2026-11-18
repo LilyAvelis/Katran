@@ -1,6 +1,6 @@
 //! Isolated, bounded Japanese page translation preparation. No installation or downloads.
 use crate::{
-    ApiError, Result,
+    ApiError, ImageTranslationSource, Result,
     domain_jobs::Cancellation,
     translate_components::{Components, MODEL},
 };
@@ -35,6 +35,8 @@ pub(crate) struct RenderReport {
     pub(crate) rendered: u32,
     pub(crate) skipped: u32,
     pub(crate) fallback: u32,
+    pub(crate) side: u32,
+    pub(crate) left_pad: u32,
 }
 impl StagedTranslation {
     pub(crate) fn path(&self) -> &Path {
@@ -254,6 +256,7 @@ fn recognize(
     worker: &mut Option<OwnedProcess>,
     mut command: Command,
     dir: &Path,
+    request: &impl serde::Serialize,
     marker: &str,
     stage: &str,
     cancel: &Cancellation,
@@ -266,12 +269,12 @@ fn recognize(
     }
     if worker.is_none() {
         hidden(&mut command);
-        command.arg("--worker").stdin(Stdio::piped());
+        command.stdin(Stdio::piped());
         *worker = Some(OwnedProcess::spawn(command, stage)?);
     }
     let process = worker.as_mut().expect("OCR worker started");
     let result = (|| {
-        let mut request = serde_json::to_vec(dir).map_err(error)?;
+        let mut request = serde_json::to_vec(request).map_err(error)?;
         request.push(b'\n');
         if request.len() > 4096 {
             return Err(error("Translation staging path is too long"));
@@ -349,12 +352,13 @@ fn bounded_file(path: &Path, max: u64) -> Result<()> {
 }
 
 impl Session {
-    /// Prepares one local Japanese-to-English translation. Source bytes are immutable.
+    /// Prepares one local image translation. Source bytes are immutable.
     pub(crate) fn translate(
         &mut self,
         source: &[u8],
         staging_root: &Path,
         components: Components,
+        language: ImageTranslationSource,
         target: &str,
         cancel: &Cancellation,
     ) -> Result<StagedTranslation> {
@@ -363,7 +367,7 @@ impl Session {
             return Err(error("Image exceeds input size limit"));
         }
         if target != "en" {
-            return Err(error("Japanese image translation outputs English"));
+            return Err(error("Local image translation outputs English"));
         }
         let font = std::env::var_os("WINDIR")
             .map(PathBuf::from)
@@ -426,6 +430,7 @@ impl Session {
             .expect("translation runtime initialized");
         let mut cmd = Command::new(&runtime.components.paddle_python);
         cmd.arg(runtime.dir.join("ocr_page.py"))
+            .arg("--multilingual-worker")
             .env("KATRAN_PADDLE_MODELS", &runtime.components.paddle_models)
             .env("KATRAN_PROCESS_CACHE", &runtime.dir)
             .env("PYTHONNOUSERSITE", "1")
@@ -438,38 +443,48 @@ impl Session {
             &mut runtime.paddle,
             cmd,
             &staged.dir,
+            &serde_json::json!({"dir": staged.dir, "language": language.code()}),
             "paddle.done",
-            "Japanese text detection",
+            "Text detection or recognition",
             cancel,
         )?;
         bounded_file(&ocr, 1_000_000)?;
-        let mut cmd = Command::new(&runtime.components.manga_python);
-        cmd.arg(runtime.dir.join("manga_recognize.py"))
-            .env("KATRAN_MANGA_MODEL", &runtime.components.manga_model)
-            .env("HF_HOME", &runtime.dir)
-            .env("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-            .env("PYTHONNOUSERSITE", "1")
-            .env("PYTHONUTF8", "1")
-            .env("TEMP", &runtime.dir)
-            .env("TMP", &runtime.dir);
-        recognize(
-            &mut runtime.manga,
-            cmd,
-            &staged.dir,
-            "manga.done",
-            "Japanese text recognition",
-            cancel,
-        )?;
-        bounded_file(&grouped, 1_000_000)?;
+        let japanese = language == ImageTranslationSource::Japanese;
+        if japanese {
+            let model = runtime
+                .components
+                .manga_model
+                .as_ref()
+                .ok_or_else(|| error("Manga OCR model is missing"))?;
+            let mut cmd = Command::new(&runtime.components.manga_python);
+            cmd.arg(runtime.dir.join("manga_recognize.py"))
+                .arg("--worker")
+                .env("KATRAN_MANGA_MODEL", model)
+                .env("HF_HOME", &runtime.dir)
+                .env("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+                .env("PYTHONNOUSERSITE", "1")
+                .env("PYTHONUTF8", "1")
+                .env("TEMP", &runtime.dir)
+                .env("TMP", &runtime.dir);
+            recognize(
+                &mut runtime.manga,
+                cmd,
+                &staged.dir,
+                &staged.dir,
+                "manga.done",
+                "Japanese text recognition",
+                cancel,
+            )?;
+            bounded_file(&grouped, 1_000_000)?;
+        }
         let port = runtime.translation_port(cancel)?;
         let mut cmd = Command::new(&runtime.components.manga_python);
         cmd.arg(runtime.dir.join("translate_page.py"))
-            .arg(&grouped)
+            .arg(if japanese { &grouped } else { &ocr })
             .arg(&translation)
             .args([
-                "--ordered",
                 "--source",
-                "ja",
+                language.code(),
                 "--target",
                 target,
                 "--model",
@@ -478,6 +493,9 @@ impl Session {
                 &port.to_string(),
             ])
             .env("PYTHONNOUSERSITE", "1");
+        if japanese {
+            cmd.arg("--ordered");
+        }
         run(cmd, cancel, "Local translation", Duration::from_secs(240))?;
         bounded_file(&translation, 1_000_000)?;
         let mut cmd = Command::new(&runtime.components.manga_python);
@@ -500,6 +518,7 @@ impl Session {
             serde_json::from_slice(&fs::read(report_path)?).map_err(error)?;
         if report.rendered == 0
             || report.fallback > report.rendered
+            || report.side > report.fallback
             || report.rendered.saturating_add(report.skipped) > 128
         {
             return Err(error("Invalid translation rendering report"));
@@ -512,9 +531,12 @@ impl Session {
         let (output_width, output_height) = reader
             .into_dimensions()
             .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
-        if output_width != width
+        if output_width < width
             || output_height < height
-            || (output_height > height) != (report.fallback > 0)
+            || (output_width > width) != (report.side > 0)
+            || report.left_pad > output_width.saturating_sub(width)
+            || (output_height > height) != (report.fallback > report.side)
+            || output_width > 8192
             || output_height > 8192
             || u64::from(output_width) * u64::from(output_height) > MAX_PIXELS
         {
@@ -527,6 +549,7 @@ impl Session {
         if output.width() != output_width || output.height() != output_height {
             return Err(error("Translated PNG dimensions changed"));
         }
+        staged.width = output_width;
         staged.height = output_height;
         Ok(staged)
     }

@@ -1,5 +1,5 @@
 use katran::{
-    Command, Request, Service,
+    Command, ImageTranslationSource, Request, Service,
     domain_jobs::JobId,
     interaction::{SelectionMode, ShelfTab},
     settings::{Language, Settings, TranslationTarget},
@@ -62,7 +62,7 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let metadata = call(&mut service, Command::AiComponentsStatus);
     assert_eq!(metadata["image_translate"]["ready"], true, "{metadata}");
     let staging = profile.path().join("translate-work");
-    let first = translate_page(&mut service, &input);
+    let first = translate_page(&mut service, &input, ImageTranslationSource::Japanese);
     assert_eq!(first["skipped_blocks"], 0);
     assert_eq!(first["fallback_blocks"], 0);
     let session_dirs = || {
@@ -74,15 +74,37 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let session = session_dirs();
     assert_eq!(session.len(), 1);
 
-    let warm = translate_page(&mut service, &input);
+    let warm = translate_page(&mut service, &input, ImageTranslationSource::Japanese);
     assert_eq!(warm["skipped_blocks"], 0);
     assert_eq!(session_dirs(), session);
     let mut results = vec![first, warm];
     if let Some(complex) = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE") {
-        let result = translate_page(&mut service, &complex);
-        assert!(result["fallback_blocks"].as_u64().unwrap() > 0);
+        let result = translate_page(&mut service, &complex, ImageTranslationSource::Japanese);
+        assert!(result["side_blocks"].as_u64().unwrap() > 0);
         assert_eq!(result["skipped_blocks"], 0);
         results.push(result);
+    }
+    for (language, fixture) in [
+        (
+            ImageTranslationSource::Chinese,
+            "KATRAN_TRANSLATE_TEST_CHINESE_IMAGE",
+        ),
+        (
+            ImageTranslationSource::Korean,
+            "KATRAN_TRANSLATE_TEST_KOREAN_IMAGE",
+        ),
+    ] {
+        if let Some(fixture) = std::env::var_os(fixture) {
+            assert_eq!(
+                metadata["image_translate"]["sources"][language.code()]["ready"],
+                true
+            );
+            let result = translate_page(&mut service, &fixture, language);
+            assert_eq!(result["rendered_blocks"], 2);
+            assert_eq!(result["skipped_blocks"], 0);
+            assert_eq!(session_dirs(), session);
+            results.push(result);
+        }
     }
     for (tab, expected) in [(ShelfTab::Images, false), (ShelfTab::Translate, true)] {
         call(&mut service, Command::SetTab { tab });
@@ -160,7 +182,11 @@ fn browse(service: &mut Service) -> Value {
     )
 }
 
-fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
+fn translate_page(
+    service: &mut Service,
+    input: &std::ffi::OsStr,
+    language: ImageTranslationSource,
+) -> Value {
     let source_dir = tempfile::tempdir().unwrap();
     let source = source_dir.path().join("original.png");
     std::fs::copy(input, &source).unwrap();
@@ -180,21 +206,17 @@ fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
             mode: SelectionMode::Replace,
         },
     );
+    let action = format!("translate_image_{}", language.code());
     let actions = call(service, Command::Actions);
     assert!(
         actions
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["id"] == "translate_image_ja")
+            .any(|item| item["id"] == action)
     );
     let started_at = Instant::now();
-    let started = call(
-        service,
-        Command::RunAction {
-            id: "translate_image_ja".into(),
-        },
-    );
+    let started = call(service, Command::RunAction { id: action });
     let job_id = JobId(started["job_id"].as_u64().unwrap());
     let deadline = Instant::now() + Duration::from_secs(300);
     let result = loop {
@@ -206,7 +228,7 @@ fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert_eq!(result["source_language"], "ja");
+    assert_eq!(result["source_language"], language.code());
     assert_eq!(result["target_language"], "en");
     assert_eq!(result["event"]["kind"], "managed_image");
     assert!(result["rendered_blocks"].as_u64().unwrap() > 0);
@@ -218,18 +240,24 @@ fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
     assert_eq!(image.format(), Some(image::ImageFormat::Png));
     let (width, height) = image.into_dimensions().unwrap();
     let (source_width, source_height) = image::image_dimensions(&source).unwrap();
-    assert_eq!(width, source_width);
+    assert!(width >= source_width);
     assert_eq!(result["width"], width);
     assert_eq!(result["height"], height);
     let fallback = result["fallback_blocks"].as_u64().unwrap();
+    let side = result["side_blocks"].as_u64().unwrap();
+    let left = result["source_left"].as_u64().unwrap();
+    assert!(left <= u64::from(width - source_width));
+    assert_eq!(width > source_width, side > 0);
     assert!(height >= source_height);
-    assert_eq!(height > source_height, fallback > 0);
+    assert_eq!(height > source_height, fallback > side);
     assert_eq!(std::fs::read(&source).unwrap(), original);
     eprintln!(
-        "Translate in {:?}: {} rendered, {} in the panel, {} skipped",
+        "{} in {:?}: {} rendered, {} outside the original canvas ({} in margins), {} skipped",
+        language.code(),
         started_at.elapsed(),
         result["rendered_blocks"],
         result["fallback_blocks"],
+        result["side_blocks"],
         result["skipped_blocks"]
     );
     result

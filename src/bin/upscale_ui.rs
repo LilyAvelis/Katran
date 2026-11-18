@@ -29,6 +29,16 @@ fn label(operation: katran::UpscaleOperation) -> &'static str {
     }
 }
 
+pub(super) fn translation_source(id: &str) -> Option<katran::api::ImageTranslationSource> {
+    use katran::api::ImageTranslationSource::*;
+    match id {
+        "translate_image_ja" => Some(Japanese),
+        "translate_image_zh" => Some(Chinese),
+        "translate_image_ko" => Some(Korean),
+        _ => None,
+    }
+}
+
 impl Shelf {
     pub(super) fn start_upscale(
         &mut self,
@@ -43,16 +53,36 @@ impl Shelf {
         );
     }
 
-    pub(super) fn start_image_translation(&mut self, ctx: &egui::Context) {
-        self.start_image_job(
-            Command::TranslateSelectedImage,
-            tr(
-                "Перевод изображения с японского",
-                "Image translation from Japanese",
+    pub(super) fn start_image_translation(
+        &mut self,
+        source: katran::api::ImageTranslationSource,
+        ctx: &egui::Context,
+    ) {
+        use katran::api::ImageTranslationSource::*;
+        let (command, label) = match source {
+            Japanese => (
+                Command::TranslateSelectedImage,
+                tr(
+                    "Перевод изображения с японского",
+                    "Image translation from Japanese",
+                ),
             ),
-            ImageJob::Translate,
-            ctx,
-        );
+            Chinese => (
+                Command::TranslateSelectedImageFrom { source },
+                tr(
+                    "Перевод изображения с упрощённого китайского",
+                    "Image translation from Simplified Chinese",
+                ),
+            ),
+            Korean => (
+                Command::TranslateSelectedImageFrom { source },
+                tr(
+                    "Перевод изображения с корейского",
+                    "Image translation from Korean",
+                ),
+            ),
+        };
+        self.start_image_job(command, label, ImageJob::Translate, ctx);
     }
 
     fn start_image_job(
@@ -100,14 +130,27 @@ impl Shelf {
                             if let Some(count) =
                                 result["fallback_blocks"].as_u64().filter(|n| *n > 0)
                             {
-                                status.push_str(&format!(
-                                    " {} {}",
-                                    count,
-                                    tr(
-                                        "обл. переведено под страницей.",
-                                        "region(s) translated below the page."
-                                    ),
-                                ));
+                                let side = result["side_blocks"].as_u64().unwrap_or(0);
+                                if side > 0 {
+                                    status.push_str(&format!(
+                                        " {} {}",
+                                        side,
+                                        tr(
+                                            "обл. переведено на полях.",
+                                            "region(s) translated in the margins."
+                                        ),
+                                    ));
+                                }
+                                if count > side {
+                                    status.push_str(&format!(
+                                        " {} {}",
+                                        count - side,
+                                        tr(
+                                            "обл. переведено под страницей.",
+                                            "region(s) translated below the page."
+                                        ),
+                                    ));
+                                }
                             }
                             if let Some(count) =
                                 result["skipped_blocks"].as_u64().filter(|n| *n > 0)
@@ -200,6 +243,14 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::actions::upscale_operation;
+    #[test]
+    fn translation_actions_keep_sources_separate() {
+        use katran::api::ImageTranslationSource::*;
+        assert_eq!(translation_source("translate_image_ja"), Some(Japanese));
+        assert_eq!(translation_source("translate_image_zh"), Some(Chinese));
+        assert_eq!(translation_source("translate_image_ko"), Some(Korean));
+        assert_eq!(translation_source("translate_image"), None);
+    }
     #[test]
     fn four_actions_map_to_distinct_operations() {
         let names = [

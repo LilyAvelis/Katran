@@ -86,6 +86,7 @@ pub(crate) enum PreparedWork {
         stamp: media_service::Stamp,
         blob: storage::PreparedBlob,
         target: settings::Language,
+        source: ImageTranslationSource,
         dimensions: [u32; 2],
         report: image_translate::RenderReport,
     },
@@ -694,7 +695,11 @@ impl Service {
             };
         }
         let id = match command {
-            Command::TranslateSelectedImage => {
+            command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => {
+                let source_language = match command {
+                    Command::TranslateSelectedImageFrom { source } => source,
+                    _ => ImageTranslationSource::Japanese,
+                };
                 let event = self.selected_background_image()?;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -705,7 +710,8 @@ impl Service {
                     use std::io::Read;
                     const MAX_SOURCE: u64 = 32 * 1024 * 1024;
                     cancel.check()?;
-                    let components = translate_components::resolve(&root, translate_components::MODEL)?;
+                    let components = translate_components::discover(&root, translate_components::MODEL)?
+                        .resolve(source_language)?;
                     let stamp = media_service::stamp(&event.path)?;
                     let path = wallpaper_engine::validate(&root, &event)?;
                     let mut source = Vec::new();
@@ -725,7 +731,7 @@ impl Service {
                     let rendered = session
                         .lock()
                         .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?
-                        .translate(&source, &staging, components, language, &cancel)?;
+                        .translate(&source, &staging, components, source_language, language, &cancel)?;
                     let bytes = std::fs::read(rendered.path())?;
                     let name = format!("translation-{language}.png");
                     let blob = storage::prepare_bytes(
@@ -734,7 +740,7 @@ impl Service {
                         &references,
                     )?;
                     cancel.check()?;
-                    Ok(PreparedWork::ImageTranslation { event, stamp, blob, target,
+                    Ok(PreparedWork::ImageTranslation { event, stamp, blob, target, source: source_language,
                         dimensions: [rendered.width, rendered.height],
                         report: rendered.report,
                     })
@@ -2041,7 +2047,7 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
-                PreparedWork::ImageTranslation { event, stamp, blob, target, dimensions: [width,height], report } => {
+                PreparedWork::ImageTranslation { event, stamp, blob, target, source, dimensions: [width,height], report } => {
                     let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection","Image is no longer available"))?;
                     if current.revision != event.revision || current.path != event.path || current.kind != event.kind
                         || media_service::stamp(&event.path)? != stamp {
@@ -2049,9 +2055,10 @@ impl Service {
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
                     let id = storage::commit_translated_png(&mut self.db, &self.root, self.quota, blob)?;
-                    Ok(json!({"event": self.get(id)?, "source_language": "ja", "target_language": target,
+                    Ok(json!({"event": self.get(id)?, "source_language": source.code(), "target_language": target,
                         "width": width, "height": height, "rendered_blocks": report.rendered,
-                        "skipped_blocks": report.skipped, "fallback_blocks": report.fallback}))
+                        "skipped_blocks": report.skipped, "fallback_blocks": report.fallback,
+                        "side_blocks": report.side, "source_left": report.left_pad}))
                 },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {

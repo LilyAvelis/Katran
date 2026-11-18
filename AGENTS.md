@@ -22,8 +22,9 @@ translation membership. Keep generic ordered collections in the independent
 `baloh-collection` crate. Russian/English are the primary translation
 languages; OCR should also cover Japanese, Korean and Chinese. Keep .bull
 serialization and QuickLook after the one-page and batch translation gates.
-The local one-page command recognizes Japanese and outputs English with
-Qwen3 4B Instruct on the GPU. Reject incomplete output and partial GPU placement.
+The local one-page commands recognize Japanese, Simplified Chinese and Korean
+and output English with Qwen3 4B Instruct on the GPU. Reject incomplete output
+and partial GPU placement.
 It publishes a separate PNG and Translate membership together. Invoke only
 detected local components, without implicit model downloads.
 Published translations appear exclusively in Translate, including tag sort
@@ -31,9 +32,10 @@ and read-only tab snapshots. Keep the OCR workers and private Ollama resident
 for the Service lifetime; release their owned process trees on exit. Report
 skipped regions when the renderer can only safely letter part of a page.
 Submit all recognized blocks of a single page in one Qwen request with stable
-IDs. Use Paddle for detection only and Manga OCR for reading. Keep placements
-disjoint and letter unsafe blocks in a white panel below the original canvas
-when it fits the output limits.
+IDs. Japanese uses Paddle detection and Manga OCR. Chinese and Korean use
+their respective Paddle recognition weights. Keep placements disjoint with
+white cards near the source regions or along the page sides. Use the lower
+panel if side placements do not fit the output limits.
 
 ## Ready text preview retention · 2026-11-18
 

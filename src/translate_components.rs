@@ -7,7 +7,7 @@
 //! ComfyUI Python uses `KATRAN_COMFYUI_ROOT` (see upscale_components), and
 //! `KATRAN_OLLAMA_EXE` can name an existing Ollama executable. `OLLAMA_MODELS`
 //! selects Ollama's model store. File presence is not an inference test.
-use crate::{ApiError, Result};
+use crate::{ApiError, ImageTranslationSource, Result};
 use std::{
     fs,
     io::Read,
@@ -19,6 +19,8 @@ pub struct Status {
     pub paddle_models: Option<PathBuf>,
     pub manga_python: Option<PathBuf>,
     pub manga_model: Option<PathBuf>,
+    pub chinese_model: bool,
+    pub korean_model: bool,
     pub ollama_exe: Option<PathBuf>,
     pub ollama_models: Option<PathBuf>,
 }
@@ -27,7 +29,7 @@ pub struct Components {
     pub paddle_python: PathBuf,
     pub paddle_models: PathBuf,
     pub manga_python: PathBuf,
-    pub manga_model: PathBuf,
+    pub manga_model: Option<PathBuf>,
     pub ollama_exe: PathBuf,
     pub ollama_models: PathBuf,
 }
@@ -193,6 +195,8 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
     );
     Ok(Status {
         paddle_python: file(&python).then_some(python),
+        chinese_model: complete(&models.join("PP-OCRv5_server_rec"), &weights),
+        korean_model: complete(&models.join("korean_PP-OCRv5_mobile_rec"), &weights),
         paddle_models: paddle_ok.then_some(models),
         manga_python: crate::upscale_components::resolve_python(),
         manga_model: manga_ok.then_some(manga),
@@ -201,29 +205,42 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
     })
 }
 /// Resolve all files for a local page job; no component is installed implicitly.
-pub fn resolve(profile: &Path, ollama_tag: &str) -> Result<Components> {
-    let status = discover(profile, ollama_tag)?;
-    let missing = |message| ApiError::new("translate_component_missing", message);
-    Ok(Components {
-        paddle_python: status
-            .paddle_python
+impl Status {
+    pub(crate) fn resolve(&self, source: ImageTranslationSource) -> Result<Components> {
+        let missing = |message| ApiError::new("translate_component_missing", message);
+        match source {
+            ImageTranslationSource::Japanese if self.manga_model.is_none() => {
+                return Err(missing("Manga OCR model is missing"));
+            }
+            ImageTranslationSource::Chinese if !self.chinese_model => {
+                return Err(missing("Chinese OCR model PP-OCRv5_server_rec is missing"));
+            }
+            ImageTranslationSource::Korean if !self.korean_model => {
+                return Err(missing(
+                    "Korean OCR model korean_PP-OCRv5_mobile_rec is missing",
+                ));
+            }
+            _ => {}
+        }
+        Ok(Components {
+        paddle_python: self
+            .paddle_python.clone()
             .ok_or_else(|| missing("Paddle OCR Python is missing"))?,
-        paddle_models: status
-            .paddle_models
+        paddle_models: self
+            .paddle_models.clone()
             .ok_or_else(|| missing("Paddle OCR models are missing"))?,
-        manga_python: status
-            .manga_python
+        manga_python: self
+            .manga_python.clone()
             .ok_or_else(|| missing("ComfyUI Python is missing"))?,
-        manga_model: status
-            .manga_model
-            .ok_or_else(|| missing("Manga OCR model is missing"))?,
-        ollama_exe: status
-            .ollama_exe
+        manga_model: self.manga_model.clone(),
+        ollama_exe: self
+            .ollama_exe.clone()
             .ok_or_else(|| missing("Ollama executable is missing"))?,
-        ollama_models: status.ollama_models.ok_or_else(|| {
-            ApiError::new("translate_component_missing", format!("Ollama model {ollama_tag} was not found in the Katran model store or the configured Ollama store"))
+        ollama_models: self.ollama_models.clone().ok_or_else(|| {
+            ApiError::new("translate_component_missing", format!("Ollama model {MODEL} was not found in the Katran model store or the configured Ollama store"))
         })?,
     })
+    }
 }
 #[cfg(test)]
 mod tests {

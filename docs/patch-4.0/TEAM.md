@@ -93,3 +93,8 @@ Translate without modifying input. Settings round-trip verified the Russian
 override. Targeted headless palette and Settings checks passed. The primary
 launcher selects `909c59a69df4`; the v14 backup and prior runtime remain
 available. Owner Windows acceptance and complex pages remain open.
+
+For the multilingual and lettering follow-up, the existing sessions were
+reused. Vela owned raster placement and side margins, Nemi owned the Paddle
+worker, and Fenna owned command discovery, shortcuts and Settings. Polly
+owned the API and runtime integration, model placement and end-to-end checks.

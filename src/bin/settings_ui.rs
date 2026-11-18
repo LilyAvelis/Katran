@@ -189,7 +189,7 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
         }
         5 => "tags метки теги tag",
         6 => {
-            "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese ocr язык language"
+            "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese китайский chinese корейский korean ocr язык language"
         }
         _ => "",
     };
@@ -601,22 +601,29 @@ impl State {
             ui,
             super::i18n::tr("Перевод изображений", "Image translation"),
             |ui| {
-                ui.label(super::i18n::tr(
-                    "Распознавание текста: японский",
-                    "Text recognition: Japanese",
-                ));
                 if let Some(status) = translate.as_ref() {
-                    let availability = if status["ready"] == true {
-                        super::i18n::tr("Компоненты найдены", "Components found")
-                    } else {
-                        super::i18n::tr("Недоступно", "Unavailable")
-                    };
-                    ui.label(format!(
-                        "{}: {availability}",
-                        super::i18n::tr("Состояние", "Status")
-                    ));
                     if let Some(model) = status["model"].as_str() {
                         ui.label(format!("{}: {model}", super::i18n::tr("Модель", "Model")));
+                    }
+                    for (code, language) in [
+                        ("ja", super::i18n::tr("Японский", "Japanese")),
+                        (
+                            "zh",
+                            super::i18n::tr("Китайский (упрощённый)", "Simplified Chinese"),
+                        ),
+                        ("ko", super::i18n::tr("Корейский", "Korean")),
+                    ] {
+                        let source = &status["sources"][code];
+                        let availability = match source["ready"].as_bool() {
+                            Some(true) => super::i18n::tr("Компоненты найдены", "Components found"),
+                            Some(false) => super::i18n::tr("Недоступно", "Unavailable"),
+                            None => super::i18n::tr("Статус недоступен", "Status unavailable"),
+                        };
+                        ui.label(format!("{language}: {availability}"));
+                        if let Some(message) = source["message"].as_str().filter(|s| !s.is_empty())
+                        {
+                            ui.weak(message);
+                        }
                     }
                     if let Some(error) = status["error"]
                         .as_str()

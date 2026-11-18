@@ -540,7 +540,7 @@ impl Service {
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
-            command @ Command::TranslateSelectedImage => self.begin_job(command),
+            command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,
@@ -560,12 +560,23 @@ impl Service {
                     "runtime_found": upscale_components::resolve_python().is_some(),
                     "models": models,
                 });
-                let translation = translate_components::resolve(&self.root, translate_components::MODEL);
+                let translation = translate_components::discover(&self.root, translate_components::MODEL);
+                let mut sources = serde_json::Map::new();
+                for source in [ImageTranslationSource::Japanese, ImageTranslationSource::Chinese, ImageTranslationSource::Korean] {
+                    let availability = match &translation {
+                        Ok(status) => status.resolve(source).err().map(|error| error.message),
+                        Err(error) => Some(error.message.clone()),
+                    };
+                    sources.insert(source.code().into(), serde_json::json!({
+                        "ready": availability.is_none(), "message": availability,
+                    }));
+                }
                 status["image_translate"] = serde_json::json!({
-                    "ready": translation.is_ok(),
+                    "ready": sources["ja"]["ready"],
                     "model": translate_components::MODEL,
-                    "recognizes": ["ja"],
-                    "error": translation.err().map(|error| error.message),
+                    "recognizes": ["ja", "zh", "ko"],
+                    "error": sources["ja"]["message"],
+                    "sources": sources,
                 });
                 Ok(status)
             }
