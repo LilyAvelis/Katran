@@ -1,5 +1,10 @@
 # Developer and agent entry point
 
+ExtractVideoAudio is a background command independent of the playback
+session. `audio_extract.rs` probes and converts with the existing FFmpeg
+runtime; `jobs_service.rs` captures a revision-bound selection and fences
+publication against cancellation. See [audio extraction](patch-4.0/AUDIO-EXTRACTION.md).
+
 TextPreview separates ready content identity from async request lifetime.
 A filter/generation transition still invalidates pending requests; an unchanged
 successful preview can remain visible after exact identity/namespace validation.

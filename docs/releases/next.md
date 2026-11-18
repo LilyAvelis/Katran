@@ -1,5 +1,11 @@
 # Development log through 3.7.1
 
+## Katran 4.0 · Local audio extraction
+
+Stage 1 extracts a selected audio track to a distinct AAC/M4A file with
+cancellation before publication. See the [audio contract and
+verification](../patch-4.0/AUDIO-EXTRACTION.md).
+
 ## Local follow-up after v3.8.0 · 2026-11-18
 
 [Video with audio](../video-preview.md) adds playback in Space and Mini stream,

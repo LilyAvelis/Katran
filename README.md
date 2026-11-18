@@ -1,5 +1,8 @@
 # Katran
 
+Local 4.0 work adds Ctrl+K → Video → Extract audio. Select a track and save a
+separate AAC/M4A file without changing the video. See [audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md).
+
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate
 from async request generations; retain it only for matching item/revision/source

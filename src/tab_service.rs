@@ -90,7 +90,7 @@ impl Service {
 
     pub(crate) fn action_available(&self, id: &str, background: BackgroundActions) -> bool {
         match id {
-            "video_pause" | "capture_video_frame" => background.video,
+            "video_pause" | "capture_video_frame" | "extract_video_audio" => background.video,
             "folder_favorites" | "folder_history" | "folder_standard" => {
                 self.interaction.tab == ShelfTab::All
             }

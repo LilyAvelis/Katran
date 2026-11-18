@@ -3,6 +3,7 @@ mod action_icons;
 mod action_row;
 mod api_client;
 mod app_identity;
+mod audio_extract_ui;
 mod category_divider;
 #[cfg(feature = "clipboard-events")]
 mod clipboard_events_ui;
@@ -371,6 +372,7 @@ struct Shelf {
     folder_page_job: Option<FolderPageJob>,
     pending_folder_select_all: bool,
     capture_job: Option<katran::domain_jobs::JobId>,
+    audio_extract: audio_extract_ui::State,
     preview_warmup: Option<katran::domain_jobs::JobId>,
     pending_preview: Option<(String, Value)>,
     pending_drops: Vec<PathBuf>,
@@ -700,6 +702,7 @@ impl Shelf {
             || self.pods_ui.category_open
             || self.shortcut_editor.is_some()
             || self.actions
+            || self.audio_extract.open
             || self.open_apps.open
             || self.workspace.open
             || self.info.is_open()
@@ -1095,6 +1098,7 @@ impl Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
+        self.audio_extract_ui(&ctx);
         if let Some(receiver) = self.files_picker.as_ref() {
             match receiver.try_recv() {
                 Ok(Ok(Some(paths))) => {
@@ -2412,6 +2416,7 @@ fn main() -> eframe::Result {
         folder_page_job: None,
         pending_folder_select_all: false,
         capture_job: None,
+        audio_extract: audio_extract_ui::State::default(),
         preview_warmup,
         pending_preview: None,
         pending_drops: Vec::new(),
@@ -2837,6 +2842,7 @@ mod tests {
             folder_page_job: None,
             pending_folder_select_all: false,
             capture_job: None,
+            audio_extract: audio_extract_ui::State::default(),
             preview_warmup: None,
             pending_preview: None,
             pending_drops: Vec::new(),

@@ -1,6 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 mod ai_component_bundle;
 pub mod ai_components;
+mod audio_extract;
 pub mod capture;
 pub mod capture_events;
 mod catalogue_query;
@@ -530,6 +531,7 @@ impl Service {
             Command::ControlMedia { session, action } => self.control_media(session, action),
             Command::MediaState => self.media_state(),
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
+            command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,

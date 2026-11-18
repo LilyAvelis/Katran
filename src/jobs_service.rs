@@ -81,6 +81,13 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    AudioExtraction {
+        event: Event,
+        stamp: media_service::Stamp,
+        staged: audio_extract::StagedAudio,
+        destination: PathBuf,
+        audio_track: u32,
+    },
     MediaCapture {
         lease: media_service::CaptureLease,
         prepared: media_capture::PreparedCapture,
@@ -636,6 +643,28 @@ impl Service {
             };
         }
         let id = match command {
+            Command::ExtractVideoAudio { audio_track } => {
+                let event = self.selected_background_video()?;
+                let root = self.root.clone();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let stamp = media_service::stamp(&event.path)?;
+                    let path = wallpaper_engine::validate(&root, &event)?;
+                    let (destination, staging) = audio_extract::directories(&root)?;
+                    let staged = audio_extract::extract(&path, &staging, audio_track, &cancel)?;
+                    if media_service::stamp(&path)? != stamp {
+                        return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
+                    }
+                    cancel.check()?;
+                    Ok(PreparedWork::AudioExtraction {
+                        event,
+                        stamp,
+                        staged,
+                        destination,
+                        audio_track: audio_track.unwrap_or(0),
+                    })
+                })?
+            }
             Command::CaptureMediaFrame { session } => return self.capture_media_frame(session),
             Command::OpenMedia { id, revision } => {
                 let (event, identity, epoch, desktop_digest) =
@@ -1810,6 +1839,21 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::AudioExtraction { event, stamp, staged, destination, audio_track } => {
+                    let current = self.get(event.id).map_err(|_| {
+                        ApiError::new("stale_selection", "Video is no longer available")
+                    })?;
+                    if current.revision != event.revision
+                        || current.path != event.path
+                        || current.kind != event.kind
+                        || media_service::stamp(&event.path)? != stamp
+                    {
+                        return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let path = staged.publish(&destination)?;
+                    Ok(json!({"path": path, "audio_track": audio_track}))
+                },
                 PreparedWork::MediaCapture{..}=>Err(ApiError::new("invalid_job_phase", "Media capture requires continuation")),
                 PreparedWork::MediaCaptureCopy{result,clipboard_sequence,prepared}=>Ok(self.publish_media_capture(result,prepared,clipboard_sequence)),
                 PreparedWork::Media(prepared)=>{self.jobs.authorize_claimed_effect(ready)?;self.commit_media(prepared)},

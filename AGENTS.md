@@ -1,5 +1,14 @@
 # Katran development rules
 
+## Katran 4.0 · Sequential run · 2026-11-18
+
+Follow the Notion 4.0 run order and the [actual team map](docs/patch-4.0/TEAM.md).
+Stage 1 extracts one selected track with the existing FFmpeg runtime through
+ExtractVideoAudio. It is independent of the video player session. Keep source
+revision checks, separate staged output and the cancellation fence before
+publication. See [the audio contract](docs/patch-4.0/AUDIO-EXTRACTION.md).
+Later stages follow in order, with BULL and QuickLook last. This run is local.
+
 ## Ready text preview retention · 2026-11-18
 
 Owner authorized closing the residual Links blink after accepting the Mini stream

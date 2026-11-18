@@ -1997,6 +1997,12 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "extract_video_audio" {
+            self.open_audio_extract();
+            self.actions = false;
+            ctx.request_repaint();
+            return;
+        }
         if id == "video_pause" {
             self.call(Command::RunAction { id });
             self.actions = false;

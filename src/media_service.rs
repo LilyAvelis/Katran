@@ -10,11 +10,11 @@ use std::{
 };
 
 #[derive(Clone, PartialEq, Eq)]
-struct Stamp {
+pub(crate) struct Stamp {
     len: u64,
     modified: SystemTime,
 }
-fn stamp(path: &Path) -> Result<Stamp> {
+pub(crate) fn stamp(path: &Path) -> Result<Stamp> {
     let metadata = std::fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
         return Err(ApiError::new(

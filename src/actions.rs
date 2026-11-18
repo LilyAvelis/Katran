@@ -29,6 +29,7 @@ pub fn palette_order(id: &str) -> usize {
         "delete",
         "video_pause",
         "capture_video_frame",
+        "extract_video_audio",
         "transfer_copy",
         "transfer_selection",
         "add_to_katran",
@@ -65,7 +66,7 @@ pub fn palette_order(id: &str) -> usize {
 
 pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
     match id {
-        "video_pause" | "capture_video_frame" => "Видео",
+        "video_pause" | "capture_video_frame" | "extract_video_audio" => "Видео",
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -113,6 +114,7 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
+        "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
         "video_pause" | "capture_video_frame" => {
             "видео кадр пауза продолжить буфер images video frame pause resume snapshot clipboard"
         }
@@ -155,6 +157,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     match id {
         "video_pause" => "Pause / Resume video",
         "capture_video_frame" => "Extract current frame",
+        "extract_video_audio" => "Extract audio",
         "pinned_move_up" => "Move pinned item earlier",
         "pinned_move_down" => "Move pinned item later",
         "select_all" => "Select all",
@@ -231,6 +234,14 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "extract_video_audio",
+        label: "Извлечь аудио",
+        default_binding: "",
+        rebindable: true,
+        group: "Видео",
+        in_palette: true,
+    },
     Definition {
         id: "video_pause",
         label: "Пауза / Продолжить видео",
@@ -1101,6 +1112,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "transfer_copy" => command(Command::CopySelection),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),
+        "extract_video_audio" => {
+            Dispatch::Intent(serde_json::json!({"intent":"extract_video_audio"}))
+        }
         "video_pause" => command(Command::ToggleMediaPause { session: None }),
         "capture_video_frame" => command(Command::CaptureMediaFrame { session: None }),
         "use_as_video_background" => command(Command::UseSelectedVideoAsBackground),

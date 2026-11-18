@@ -350,6 +350,10 @@ pub enum Command {
         #[serde(default)]
         session: Option<u64>,
     },
+    ExtractVideoAudio {
+        #[serde(default)]
+        audio_track: Option<u32>,
+    },
     ToggleMediaPause {
         #[serde(default)]
         session: Option<u64>,
