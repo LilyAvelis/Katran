@@ -22,11 +22,18 @@ pub struct NativeLauncher;
 
 pub(crate) fn execute_link(event: &Event, launcher: &dyn Launcher) -> Result<Value> {
     let url = crate::link_fragments::read_event(event)?;
-    launcher.authorize()?;
-    launcher.launch(Path::new(&url), Operation::Open)?;
+    open_url(&url, launcher)?;
     Ok(
         json!({"id":event.id,"revision":event.revision,"operation":"open","requested":true,"link":true}),
     )
+}
+
+pub(crate) fn open_url(url: &str, launcher: &dyn Launcher) -> Result<()> {
+    if crate::link_fragments::recognize(url).is_none() {
+        return Err(ApiError::new("invalid_link", "Expected a valid HTTP(S) URL"));
+    }
+    launcher.authorize()?;
+    launcher.launch(Path::new(url), Operation::Open)
 }
 
 /// The caller resolves the event from the catalogue and checks any selection revision.

@@ -29,6 +29,13 @@ The first PNG is verified and cached as the cover through `PreviewImage`.
 then publishes pixels through the owned clipboard path. It neither writes a
 shelf row nor ingests its own clipboard publication.
 
+The same collection jobs support the Links shelf with typed BULL v2 and reuse
+v15 membership and pin/tag state. `TranslationCollectionPage` returns one
+link record. `CopyCollectionPage` publishes its URL through the owned text
+Clipboard path. `OpenCollectionLink` sends the validated URL to the default
+browser. `favicon_fetch` supplies bounded, best-effort metadata during explicit
+packing. Merge and viewing reuse saved metadata locally.
+
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
 JPEG copy to the default browser through a short-lived loopback address.

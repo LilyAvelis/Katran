@@ -8,6 +8,9 @@ The replacement follow-up keeps these owners. Fenna handled first-page cards
 and their previews. Nemi handled catalogue v15 and hidden-member queries.
 Polly integrated merge ordering, pin/tag inheritance and reversible storage.
 
+For Links BULL, Nemi owned the v2 codec, Vela owned metadata retrieval, Fenna
+owned the pager and input, and Polly owned shelf integration, copy/open and QA.
+
 Polly leads the current session and owns the shared Rust command, dispatcher,
 integration, verification and installation. The Notion 4.0 card owns the run
 order. The installed baseline is `09244a0440d7` (source `5eb3f93`), with local

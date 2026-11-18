@@ -504,7 +504,7 @@ fn slice_projection(
         ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
         ShelfTab::Desktop => "0".into(),
         ShelfTab::Translate => translated_image_predicate(),
-        ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
+        ShelfTab::Links => link_shelf_predicate().into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Images => format!("{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",image_shelf_predicate()),
     };
@@ -574,11 +574,11 @@ fn projection_sql(
         );
     }
     if tab == ShelfTab::Links {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", link_shelf_predicate()));
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if !links_enabled {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND NOT {}", link_shelf_predicate()));
     }
     if tab == ShelfTab::Tables {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id)");
@@ -595,6 +595,10 @@ fn projection_sql(
 
 pub(crate) const TRANSLATION_MEMBERSHIP: &str =
     "EXISTS(SELECT 1 FROM translated_images t WHERE t.event_id=e.id)";
+
+pub(crate) fn link_shelf_predicate() -> &'static str {
+    "(EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND e.source='link_collection' AND lower(substr(e.name,-5))='.bull'))"
+}
 
 /// Ordinary image collections share the Images shelf, but remain managed blobs.
 pub(crate) fn image_shelf_predicate() -> String {

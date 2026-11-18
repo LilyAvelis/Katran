@@ -459,43 +459,59 @@ fn commit_blob(
 
 pub(crate) type CollectionMembers = std::collections::BTreeMap<usize, i64>;
 
+pub(crate) struct CollectionPack {
+    pub(crate) inputs: Vec<CollectionInput>,
+    pub(crate) blob: PreparedBlob,
+    pub(crate) tab: crate::interaction::ShelfTab,
+    pub(crate) count: usize,
+}
+
+pub(crate) struct CollectionInput {
+    pub(crate) event: Event,
+    pub(crate) stamp: crate::media_service::Stamp,
+    pub(crate) offset: usize,
+    pub(crate) count: usize,
+}
+
 pub(crate) fn collection_members(db: &Connection, id: i64) -> Result<CollectionMembers> {
     let mut statement = db.prepare("SELECT position,member_id FROM bull_members WHERE collection_id=?1")?;
     Ok(statement.query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 
-pub(crate) fn visible_collection_input(db: &Connection, id: i64, translated: bool) -> Result<bool> {
+pub(crate) fn visible_collection_input(db: &Connection, id: i64, tab: crate::interaction::ShelfTab) -> Result<bool> {
     let membership = crate::catalogue_query::TRANSLATION_MEMBERSHIP;
-    let category = if translated {
-        crate::catalogue_query::translated_image_predicate()
-    } else {
-        format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate())
+    use crate::interaction::ShelfTab;
+    let category = match tab {
+        ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
+        ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
+        ShelfTab::Images => format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate()),
+        _ => return Ok(false),
     };
     Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM events e WHERE e.id=?1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id))"), [id], |row| row.get(0))?)
 }
 
-fn require_collection_input(db: &Connection, id: i64, translated: bool) -> Result<()> {
-    if !visible_collection_input(db, id, translated)? {
-        return Err(ApiError::new("stale_selection", "Select visible cards from the same Images or Translate shelf"));
+fn require_collection_input(db: &Connection, id: i64, tab: crate::interaction::ShelfTab) -> Result<()> {
+    if !visible_collection_input(db, id, tab)? {
+        return Err(ApiError::new("stale_selection", "Select visible cards from the same shelf"));
     }
     Ok(())
 }
 
 fn retire_collection(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<String> {
-    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection')", [id], |row| row.get(0))?;
+    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection')", [id], |row| row.get(0))?;
     tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     Ok(hash)
 }
 
-pub(crate) fn commit_shelf_image_collection(
+pub(crate) fn commit_shelf_collection(
     db: &mut Connection,
     root: &Path,
     quota: u64,
-    packed: crate::image_collection::Packed,
+    packed: CollectionPack,
 ) -> Result<(i64, Vec<String>)> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let scope = if packed.translated { "translate" } else { "images" };
+    let scope = crate::tag_service::scope(packed.tab)?;
     let first = packed.inputs[0].event.id;
     let slot = |id| crate::tag_slots::visible_slot(&tx, scope, id)
         .map_err(|error| ApiError::new("storage_error", error));
@@ -505,8 +521,8 @@ pub(crate) fn commit_shelf_image_collection(
     let mut same_tags = true;
     for input in &packed.inputs {
         let id = input.event.id;
-        require_collection_input(&tx, id, packed.translated)?;
-        if crate::image_collection::is_managed(&input.event) && tx.query_row(
+        require_collection_input(&tx, id, packed.tab)?;
+        if crate::collection::is_managed(&input.event) && tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM bull_members WHERE collection_id=?1 AND position>=?2)",
             params![id, input.count], |row| row.get::<_, bool>(0),
         )? {
@@ -516,7 +532,7 @@ pub(crate) fn commit_shelf_image_collection(
         same_tags &= slot(id)? == first_slot
             && crate::pinned::tags(&tx, id)? == first_tags;
     }
-    let id = commit_blob_in(&tx, root, quota, packed.blob, packed.translated)?;
+    let id = commit_blob_in(&tx, root, quota, packed.blob, packed.tab == crate::interaction::ShelfTab::Translate)?;
     if pinned {
         tx.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)", [id])?;
         tx.execute("UPDATE katran_pinned_order SET position=(SELECT MIN(position)-1 FROM katran_pinned_order) WHERE event_id=?1", [id])?;
@@ -529,7 +545,7 @@ pub(crate) fn commit_shelf_image_collection(
     }
     let mut obsolete = HashSet::new();
     for input in packed.inputs {
-        if crate::image_collection::is_managed(&input.event) {
+        if crate::collection::is_managed(&input.event) {
             tx.execute("UPDATE bull_members SET collection_id=?1,position=position+?2 WHERE collection_id=?3", params![id, input.offset, input.event.id])?;
             obsolete.insert(retire_collection(&tx, input.event.id)?);
         } else {
@@ -547,19 +563,26 @@ pub(crate) fn commit_extracted_collection_pages(
     collection_id: i64,
     expected_members: &CollectionMembers,
     pages: Vec<Option<PreparedBlob>>,
-    translated: bool,
+    tab: crate::interaction::ShelfTab,
     newest_first: bool,
 ) -> Result<(Vec<i64>, Vec<String>)> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    require_collection_input(&tx, collection_id, translated)?;
+    require_collection_input(&tx, collection_id, tab)?;
+    let links = tab == crate::interaction::ShelfTab::Links;
+    let translated = tab == crate::interaction::ShelfTab::Translate;
     if collection_members(&tx, collection_id)? != *expected_members {
         return Err(ApiError::new("stale_selection", "Collection membership changed"));
     }
     let mut additions = std::collections::HashSet::new();
     let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| row.get(0))?;
     for page in pages.iter().flatten() {
-        if page.source != "image_collection_page" || page.text.is_some() || !page.name.ends_with(".png") {
-            return Err(ApiError::new("invalid_collection", "Expected an extracted PNG page"));
+        let valid = if links {
+            page.link && page.source == "link_collection_page"
+        } else {
+            page.source == "image_collection_page" && page.text.is_none() && page.name.ends_with(".png")
+        };
+        if !valid {
+            return Err(ApiError::new("invalid_collection", "Unexpected extracted collection entry"));
         }
         if additions.insert(page.hash.as_str()) && !tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)", [&page.hash], |row| row.get::<_, bool>(0)
@@ -581,10 +604,10 @@ pub(crate) fn commit_extracted_collection_pages(
             items.push(*expected_members.get(&index).ok_or_else(|| ApiError::new("invalid_collection", "Collection page is missing"))?);
             continue;
         };
-        let existing: Option<i64> = tx.query_row(
+        let existing: Option<i64> = if links { None } else { tx.query_row(
             "SELECT id FROM events e WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY id LIMIT 1",
             params![page.name, page.hash], |row| row.get(0)
-        ).optional()?;
+        ).optional()? };
         items.push(match existing {
             Some(id) => id,
             None => commit_blob_in(&tx, root, quota, page, translated)?,

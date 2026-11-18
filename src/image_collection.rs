@@ -86,20 +86,6 @@ pub(crate) fn prepare_page_copy(
     ))
 }
 
-pub(crate) struct Packed {
-    pub(crate) inputs: Vec<PackInput>,
-    pub(crate) blob: storage::PreparedBlob,
-    pub(crate) translated: bool,
-    pub(crate) count: usize,
-}
-
-pub(crate) struct PackInput {
-    pub(crate) event: Event,
-    pub(crate) stamp: media_service::Stamp,
-    pub(crate) offset: usize,
-    pub(crate) count: usize,
-}
-
 pub(crate) fn pack(
     events: Vec<Event>,
     translated: bool,
@@ -107,7 +93,7 @@ pub(crate) fn pack(
     quota: u64,
     references: &[PathBuf],
     cancel: &Cancellation,
-) -> Result<Packed> {
+) -> Result<storage::CollectionPack> {
     use baloh_collection::codec::{MAX_PAGE_BYTES, MAX_TOTAL_BYTES};
     let mut pages = Vec::with_capacity(events.len());
     let mut inputs = Vec::with_capacity(events.len());
@@ -184,7 +170,7 @@ pub(crate) fn pack(
                 ));
             }
         }
-        inputs.push(PackInput {
+        inputs.push(storage::CollectionInput {
             event,
             stamp,
             offset,
@@ -210,10 +196,10 @@ pub(crate) fn pack(
         },
         references,
     )?;
-    Ok(Packed {
+    Ok(storage::CollectionPack {
         inputs,
         blob,
-        translated,
+        tab: if translated { crate::interaction::ShelfTab::Translate } else { crate::interaction::ShelfTab::Images },
         count: pages.len(),
     })
 }

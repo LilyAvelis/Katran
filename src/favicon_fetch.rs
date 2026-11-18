@@ -398,9 +398,279 @@ pub fn fetch(input: &str) -> Result<Option<Vec<u8>>, Error> {
     Ok(None)
 }
 
+/// Optional, explicitly requested preview of one public HTTPS page.
+pub(crate) struct LinkMetadata {
+    pub title: String,
+    pub description: String,
+    pub preview_png: Option<Vec<u8>>,
+}
+
+const LINK_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+const LINK_IMAGE_ALLOC: u64 = 16 * 1024 * 1024;
+const LINK_IMAGE_EDGE: u32 = 2048;
+
+fn link_url(input: &str) -> Option<Url> {
+    if input.len() > 2048
+        || input
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+    {
+        return None;
+    }
+    let mut url = Url::parse(input).ok()?;
+    if url.scheme() != "https" || !input.get(5..).is_some_and(|tail| tail.starts_with("://")) {
+        return None;
+    }
+    // Reuse the stricter host/credential/default-port policy without changing
+    // the page path or query. This rejects literals and local suffixes too.
+    favicon_url(input).ok()?;
+    url.set_fragment(None);
+    Some(url)
+}
+
+fn link_remaining(deadline: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|d| !d.is_zero())
+}
+
+// Separate from favicon's legacy timeout behavior: every request and redirect
+// consumes the same caller-provided deadline, including DNS and response reads.
+fn link_download(url: &Url, limit: usize, deadline: Instant) -> Option<(Url, Vec<u8>)> {
+    let mut current = link_url(url.as_str())?;
+    for redirect in 0..=3 {
+        let host = current.host_str()?.to_owned();
+        let addresses =
+            resolve(&host, link_remaining(deadline)?.min(Duration::from_secs(3))).ok()?;
+        let remaining = link_remaining(deadline)?;
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(&host, &addresses)
+            .timeout(remaining)
+            .build()
+            .ok()?;
+        let response = client.get(current.clone()).send().ok()?;
+        if response.status().is_redirection() {
+            if redirect == 3 {
+                return None;
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)?
+                .to_str()
+                .ok()?;
+            let next = current.join(location).ok()?;
+            current = link_url(next.as_str())?;
+            continue;
+        }
+        if !response.status().is_success()
+            || response.content_length().is_some_and(|n| n > limit as u64)
+        {
+            return None;
+        }
+        let bytes = read_bounded_limit(response, limit).ok()?;
+        link_remaining(deadline)?;
+        return Some((current, bytes));
+    }
+    None
+}
+
+fn metadata_text(input: &str, limit: usize) -> String {
+    let mut result = String::new();
+    let mut needs_space = false;
+    for ch in input.chars() {
+        if ch.is_whitespace() || ch.is_control() {
+            needs_space = !result.is_empty();
+        } else {
+            if needs_space && result.chars().count() < limit {
+                result.push(' ');
+            }
+            needs_space = false;
+            if result.chars().count() >= limit {
+                break;
+            }
+            result.push(ch);
+        }
+    }
+    result
+}
+
+fn parse_link_page(html: &str, base: &Url) -> (String, String, Option<Url>) {
+    let document = Html::parse_document(html);
+    let meta = Selector::parse("meta[content]").expect("static selector");
+    let title_selector = Selector::parse("title").expect("static selector");
+    let mut og_title = None;
+    let mut og_description = None;
+    let mut description = None;
+    let mut image = None;
+    for node in document.select(&meta) {
+        let attrs = node.value();
+        let key = attrs
+            .attr("property")
+            .or_else(|| attrs.attr("name"))
+            .unwrap_or("");
+        let content = attrs.attr("content").unwrap_or("").trim();
+        if content.is_empty() {
+            continue;
+        }
+        if key.eq_ignore_ascii_case("og:title") && og_title.is_none() {
+            og_title = Some(metadata_text(content, 200));
+        } else if key.eq_ignore_ascii_case("og:description") && og_description.is_none() {
+            og_description = Some(metadata_text(content, 500));
+        } else if key.eq_ignore_ascii_case("description") && description.is_none() {
+            description = Some(metadata_text(content, 500));
+        } else if (key.eq_ignore_ascii_case("og:image") || key.eq_ignore_ascii_case("og:image:url"))
+            && image.is_none()
+        {
+            image = base
+                .join(content)
+                .ok()
+                .and_then(|url| link_url(url.as_str()));
+        }
+    }
+    let fallback_title = document
+        .select(&title_selector)
+        .next()
+        .map(|node| metadata_text(&node.text().collect::<Vec<_>>().join(" "), 200))
+        .unwrap_or_default();
+    (
+        og_title.filter(|s| !s.is_empty()).unwrap_or(fallback_title),
+        og_description
+            .filter(|s| !s.is_empty())
+            .or(description)
+            .unwrap_or_default(),
+        image,
+    )
+}
+
+fn link_preview_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() > LINK_IMAGE_BYTES {
+        return None;
+    }
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    // Restrict to non-animated formats; APNG is excluded separately below.
+    if !matches!(
+        reader.format(),
+        Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Bmp)
+    ) {
+        return None;
+    }
+    if reader.format() == Some(ImageFormat::Png) {
+        let mut pos = 8usize;
+        while pos.checked_add(12)? <= bytes.len() {
+            let len = u32::from_be_bytes(bytes.get(pos..pos + 4)?.try_into().ok()?) as usize;
+            let end = pos.checked_add(12)?.checked_add(len)?;
+            if end > bytes.len() {
+                return None;
+            }
+            if bytes.get(pos + 4..pos + 8)? == b"acTL" {
+                return None;
+            }
+            if bytes.get(pos + 4..pos + 8)? == b"IEND" {
+                break;
+            }
+            pos = end;
+        }
+    }
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(LINK_IMAGE_EDGE);
+    limits.max_image_height = Some(LINK_IMAGE_EDGE);
+    limits.max_alloc = Some(LINK_IMAGE_ALLOC);
+    reader.limits(limits);
+    let image = reader.decode().ok()?.thumbnail(640, 640);
+    let mut output = Cursor::new(Vec::new());
+    image.write_to(&mut output, ImageFormat::Png).ok()?;
+    (output.get_ref().len() < LINK_IMAGE_BYTES).then(|| output.into_inner())
+}
+
+pub(crate) fn link_metadata(input: &str, deadline: Instant) -> Option<LinkMetadata> {
+    let url = link_url(input)?;
+    let (base, html) = link_download(&url, MAX_HTML_BYTES, deadline)?;
+    let (title, description, image) = parse_link_page(&String::from_utf8_lossy(&html), &base);
+    let preview_png = image.and_then(|url| {
+        let (_, bytes) = link_download(&url, LINK_IMAGE_BYTES, deadline)?;
+        link_remaining(deadline)?;
+        let png = link_preview_png(&bytes)?;
+        link_remaining(deadline)?;
+        Some(png)
+    });
+    if title.is_empty() && description.is_empty() && preview_png.is_none() {
+        return None;
+    }
+    Some(LinkMetadata {
+        title,
+        description,
+        preview_png,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn link_policy_requires_public_https_and_discards_fragment() {
+        assert_eq!(
+            link_url("https://Example.com/a?q=1#private")
+                .unwrap()
+                .as_str(),
+            "https://example.com/a?q=1"
+        );
+        for invalid in [
+            "http://example.com/",
+            "https://user:pass@example.com/",
+            "https://127.0.0.1/",
+            "https://foo.localhost./",
+            "https://host.internal/",
+            "https://example.com:8443/",
+            "https://example.com/a b",
+            "https://example.com/\\bad",
+        ] {
+            assert!(link_url(invalid).is_none(), "{invalid}");
+        }
+        assert!(
+            link_remaining(Instant::now().checked_sub(Duration::from_secs(1)).unwrap()).is_none()
+        );
+    }
+    #[test]
+    fn link_metadata_extracts_safe_html_and_keeps_text_when_image_is_unsafe() {
+        let base = Url::parse("https://example.com/post/index").unwrap();
+        let html = r#"<title>Fallback title</title><meta name="description" content="Fallback &amp; detail"><meta property="og:title" content="  Better   title "><meta property="og:description" content="Hello &#x4e16;&#x754c;"><meta property="og:image" content="../cover.png#fragment">"#;
+        let (title, description, image) = parse_link_page(html, &base);
+        assert_eq!(title, "Better title");
+        assert_eq!(description, "Hello 世界");
+        assert_eq!(image.unwrap().as_str(), "https://example.com/cover.png");
+        let (title, description, image) = parse_link_page(
+            r#"<title> Page </title><meta name="description" content=" Useful "><meta property="og:image" content="https://127.0.0.1/a">"#,
+            &base,
+        );
+        assert_eq!((title.as_str(), description.as_str()), ("Page", "Useful"));
+        assert!(image.is_none());
+        assert!(metadata_text(&"x".repeat(5000), 200).chars().count() <= 200);
+    }
+    #[test]
+    fn link_preview_rejects_animated_oversize_and_bounds_output() {
+        let mut original = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1200, 600)
+            .write_to(&mut original, ImageFormat::Png)
+            .unwrap();
+        let png = original.into_inner();
+        let output = link_preview_png(&png).unwrap();
+        let decoded = image::load_from_memory(&output).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (640, 320));
+        assert!(output.len() < LINK_IMAGE_BYTES);
+        let mut animated = png.clone();
+        animated.splice(8..8, [0, 0, 0, 0, b'a', b'c', b'T', b'L', 0, 0, 0, 0]);
+        assert!(link_preview_png(&animated).is_none());
+        assert!(link_preview_png(&vec![0; LINK_IMAGE_BYTES + 1]).is_none());
+        let mut large = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(LINK_IMAGE_EDGE + 1, 1)
+            .write_to(&mut large, ImageFormat::Png)
+            .unwrap();
+        assert!(link_preview_png(&large.into_inner()).is_none());
+    }
     #[test]
     fn discovers_declared_site_icon_without_reusing_link_path() {
         let origin = Url::parse("https://app.notion.com/").unwrap();

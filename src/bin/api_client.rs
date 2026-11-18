@@ -1495,19 +1495,39 @@ impl Shelf {
             };
             return;
         }
+        if result["opened_collection_link"] == true {
+            self.message = tr(
+                "Ссылка открывается в браузере",
+                "Opening link in your browser",
+            )
+            .into();
+            return;
+        }
         if result["copied_collection_page"] == true {
             self.message = tr("Страница скопирована", "Page copied").into();
             return;
         }
         if result["image_collection"] == true {
             let count = result["count"].as_u64().unwrap_or(0);
-            self.message = if result["unpacked"] == true {
+            self.message = if result["link_collection"] == true {
+                let label = if result["unpacked"] == true {
+                    tr("Извлечено ссылок", "Links unpacked")
+                } else if result["merged"] == true {
+                    tr("Ссылок в объединённом BULL", "Links in merged BULL")
+                } else {
+                    tr("Ссылок собрано в BULL", "Links packed into BULL")
+                };
+                format!("{label}: {count}")
+            } else if result["unpacked"] == true {
                 format!(
                     "{}: {count}",
                     tr("Извлечено изображений", "Images unpacked")
                 )
             } else if result["merged"] == true {
-                format!("{}: {count}", tr("Страниц в объединённом BULL", "Pages in merged BULL"))
+                format!(
+                    "{}: {count}",
+                    tr("Страниц в объединённом BULL", "Pages in merged BULL")
+                )
             } else {
                 format!(
                     "{}: {count}",
@@ -2067,7 +2087,7 @@ impl Shelf {
                 let event = self.call(Command::Get { id: event_id });
                 if matches!(
                     event["source"].as_str(),
-                    Some("image_translation_collection" | "image_collection")
+                    Some("image_translation_collection" | "image_collection" | "link_collection")
                 ) && let Some(revision) = event["revision"].as_str()
                 {
                     self.actions = false;

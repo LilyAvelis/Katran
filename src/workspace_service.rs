@@ -93,9 +93,7 @@ impl Service {
             ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
             ShelfTab::Desktop => "0".into(),
             ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
-            ShelfTab::Links => {
-                "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into()
-            }
+            ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
             ShelfTab::Tables => {
                 "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into()
             }

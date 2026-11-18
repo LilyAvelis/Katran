@@ -45,6 +45,7 @@ mod jobs_service;
 mod image_upscale;
 mod image_translate;
 mod image_collection;
+mod collection;
 mod image_translation_batch;
 mod upscale_components;
 mod translate_components;
@@ -548,6 +549,7 @@ impl Service {
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             command @ Command::CopyCollectionPage { .. } => self.begin_job(command),
+            command @ Command::OpenCollectionLink { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,

@@ -104,6 +104,9 @@ pub(super) struct Images {
 }
 impl Images {
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
+        if event["source"] == "link_collection" {
+            return;
+        }
         if matches!(
             event["kind"].as_str(),
             Some("text_fragment" | "link_fragment" | "table_fragment")
@@ -359,9 +362,7 @@ impl Images {
         }
         let (lock, _) = &*self.queue;
         let mut state = lock.lock().unwrap();
-        state
-            .pending
-            .retain(|(key, ..)| self.active.contains(key));
+        state.pending.retain(|(key, ..)| self.active.contains(key));
         // Requests removed before execution must be eligible if the user returns.
         self.requested.retain(|key| self.active.contains(key));
     }
@@ -421,6 +422,16 @@ impl Images {
         rect: egui::Rect,
         edge: u32,
     ) {
+        if event["source"] == "link_collection" && is_bull(event) {
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 6.0, Color32::from_gray(34));
+            let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
+            paint_bull_badge(
+                ui,
+                egui::Rect::from_min_size(rect.right_bottom() - size, size),
+            );
+            return;
+        }
         let cover_rect =
             if is_managed_collection(event) && rect.width() >= 48.0 && rect.height() >= 48.0 {
                 let frame = rect.shrink2(egui::vec2(7.0, 6.0));
@@ -567,7 +578,7 @@ pub(super) fn is_bull(event: &Value) -> bool {
     }
     if matches!(
         event["source"].as_str(),
-        Some("image_translation_collection" | "image_collection")
+        Some("image_translation_collection" | "image_collection" | "link_collection")
     ) {
         return event["name"].as_str().is_some_and(extension_is_bull);
     }
@@ -614,6 +625,12 @@ mod tests {
         ));
         assert!(is_bull(
             &json!({"source": "image_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "album.bull"})
+        ));
+        assert!(is_bull(
+            &json!({"source": "link_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "links.bull"})
+        ));
+        assert!(!is_managed_collection(
+            &json!({"source": "link_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "links.bull"})
         ));
         assert!(!is_bull(
             &json!({"source": "image_collection", "path": "C:/profile/blobs/0123456789abcdef", "name": "album.bull.png"})

@@ -4,6 +4,7 @@
 //! the payload and key types. Storage and interchange belong to the caller.
 
 pub mod codec;
+pub mod links;
 
 use std::collections::BTreeMap;
 

@@ -33,6 +33,12 @@ previous builds require the pre-v15 backup for rollback.
 Ctrl+C in the BULL viewer copies the single displayed page at its stored
 resolution. It stays out of clipboard capture and the Images shelf.
 
+Links uses portable BULL v2 for ordered URLs with saved titles, descriptions
+and optional previews. The same shelf action packs, merges and unpacks.
+Ctrl+C copies the visible URL and Alt+Enter opens it in the default browser.
+The current Windows QuickLook adapter supports image BULL v1. Katran's own
+viewer handles Links BULL v2.
+
 ## Local follow-up · Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one

@@ -37,7 +37,7 @@ fn check_size(size: usize, total: &mut usize) -> io::Result<()> {
     }
     Ok(())
 }
-fn png_valid(bytes: &[u8]) -> bool {
+pub(crate) fn png_valid(bytes: &[u8]) -> bool {
     if !bytes.starts_with(PNG) {
         return false;
     }

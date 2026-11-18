@@ -23,6 +23,7 @@ pub(crate) struct BackgroundActions {
     image: bool,
     video: bool,
     translate: bool,
+    pack_links: bool,
     unpack_bull: bool,
     merge_bull: bool,
 }
@@ -42,6 +43,9 @@ fn background_actions(
     let Some(event) = id.and_then(|id| resolve(id).ok()) else {
         return BackgroundActions::default();
     };
+    if crate::collection::packable_link(&event) {
+        return BackgroundActions { pack_links: true, ..Default::default() };
+    }
     if matches!(
         event.kind,
         crate::EventKind::TextFragment
@@ -67,8 +71,9 @@ fn background_actions(
         image,
         video,
         translate: image,
-        unpack_bull: crate::image_collection::is_managed(&event),
+        unpack_bull: crate::collection::is_managed(&event),
         merge_bull: false,
+        pack_links: false,
     }
 }
 
@@ -98,7 +103,8 @@ impl Service {
             let events = selected.iter().map(|id| self.get(*id)).collect::<Result<Vec<_>>>();
             return BackgroundActions {
                 translate: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image)),
-                merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_managed)),
+                merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
+                pack_links: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
                 ..Default::default()
             };
         }
@@ -122,8 +128,12 @@ impl Service {
             }
             "search_image_google_lens" => background.image,
             "create_image_collection" => {
-                matches!(self.interaction.tab, ShelfTab::Images | ShelfTab::Translate)
-                    && (background.translate || background.unpack_bull || background.merge_bull)
+                let supported = match self.interaction.tab {
+                    ShelfTab::Images | ShelfTab::Translate => background.translate,
+                    ShelfTab::Links => background.pack_links,
+                    _ => return false,
+                };
+                supported || background.unpack_bull || background.merge_bull
             }
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
@@ -150,6 +160,9 @@ impl Service {
         if id == "create_image_collection" {
             if background.merge_bull {
                 return if english { "Merge BULL collections" } else { "Объединить BULL" }.into();
+            }
+            if background.pack_links {
+                return if english { "Pack links into BULL" } else { "Собрать ссылки в BULL" }.into();
             }
             return match (background.unpack_bull, english) {
                 (true, true) => "Unpack BULL",

@@ -416,6 +416,11 @@ pub enum Command {
         revision: String,
         index: usize,
     },
+    OpenCollectionLink {
+        id: i64,
+        revision: String,
+        index: usize,
+    },
     ToggleMediaPause {
         #[serde(default)]
         session: Option<u64>,

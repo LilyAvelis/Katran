@@ -325,7 +325,9 @@ impl Shelf {
                 );
                 self.images.paint_at(ui, event, rect, 512);
                 ui.weak(
-                    if matches!(
+                    if event["source"] == "link_collection" && super::images::is_bull(event) {
+                        tr("Коллекция ссылок", "Link collection")
+                    } else if matches!(
                         event["source"].as_str(),
                         Some("image_translation_collection" | "image_collection")
                     ) && super::images::is_bull(event)

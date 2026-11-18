@@ -63,6 +63,13 @@ image for its thumbnail. Older binaries require the pre-v15 backup.
 Ctrl+C in the BULL viewer targets only the visible ready page. Publish its
 full stored pixels with an ownership marker; no capture or shelf mutation.
 
+Links BULL uses typed v2 `LINK` records, while image BULL stays v1. Pack, merge
+and unpack share reversible shelf membership and pin/tag rules. Persist page
+metadata inside the file. Only explicit packing may fetch metadata for public
+HTTPS pages. Ctrl+C publishes the visible URL through the owned text Clipboard
+path; Alt+Enter opens that validated URL with the default browser. Copying from
+the shelf transfers the entire file. Text collections are outside scope.
+
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.
 Use a one-shot loopback handoff to the default Windows browser so its

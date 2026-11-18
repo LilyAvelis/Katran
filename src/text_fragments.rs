@@ -18,6 +18,12 @@ static NEXT_NAME: AtomicU64 = AtomicU64::new(0);
 /// Explicit user-requested publication; tests can provide a synthetic sink.
 pub trait ClipboardSink: Send {
     fn write(&self, text: &str) -> Result<u32>;
+    fn write_if_current(&self, text: &str, expected: u32) -> Result<u32> {
+        if crate::capture::sequence_number() != expected {
+            return Err(ApiError::new("clipboard_changed", "Clipboard changed while preparing the URL"));
+        }
+        self.write(text)
+    }
 }
 pub struct NativeClipboard;
 #[path = "text_clipboard.rs"]
@@ -36,7 +42,10 @@ pub(crate) fn verified_text_paste_sequence(expected: u32) -> Option<u32> {
 }
 impl ClipboardSink for NativeClipboard {
     fn write(&self, text: &str) -> Result<u32> {
-        text_clipboard::write(text)
+        text_clipboard::write(text, None)
+    }
+    fn write_if_current(&self, text: &str, expected: u32) -> Result<u32> {
+        text_clipboard::write(text, Some(expected))
     }
 }
 

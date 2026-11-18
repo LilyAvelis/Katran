@@ -87,7 +87,7 @@ fn publish_locked(mut backend: impl Publication) -> Result<u32> {
 }
 
 #[cfg(not(windows))]
-pub(super) fn write(_: &str) -> Result<u32> {
+pub(super) fn write(_: &str, _: Option<u32>) -> Result<u32> {
     Err(ApiError::new(
         "unsupported_platform",
         "Windows clipboard adapter required",
@@ -95,7 +95,7 @@ pub(super) fn write(_: &str) -> Result<u32> {
 }
 
 #[cfg(windows)]
-pub(super) fn write(text: &str) -> Result<u32> {
+pub(super) fn write(text: &str, expected: Option<u32>) -> Result<u32> {
     use std::{
         sync::atomic::{AtomicU64, Ordering},
         time::{Duration, Instant},
@@ -282,6 +282,10 @@ pub(super) fn write(text: &str) -> Result<u32> {
         _open: Open,
         _window: Window,
     }
+    let open = Open;
+    if expected.is_some_and(|expected| unsafe { GetClipboardSequenceNumber() } != expected) {
+        return Err(ApiError::new("clipboard_changed", "Clipboard changed while preparing the URL"));
+    }
     impl Publication for Backend {
         fn publish(&mut self) -> Result<()> {
             unsafe { EmptyClipboard() }.map_err(error)?;
@@ -310,7 +314,7 @@ pub(super) fn write(text: &str) -> Result<u32> {
         marker,
         marker_format,
         token,
-        _open: Open,
+        _open: open,
         _window: window,
     })?;
     if sequence != 0 {

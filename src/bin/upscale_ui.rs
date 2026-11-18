@@ -23,10 +23,25 @@ struct Collection {
     count: Option<usize>,
     pending: Option<(katran::domain_jobs::JobId, usize)>,
     texture: Option<egui::TextureHandle>,
+    link: Option<LinkPage>,
     ready_index: Option<usize>,
     copy_held: bool,
     zoom: katran::preview_view::State,
     error: String,
+}
+
+impl Collection {
+    fn ready_target(&self) -> Option<(i64, String, usize)> {
+        self.ready_index
+            .filter(|_| self.texture.is_some() || self.link.is_some())
+            .map(|index| (self.id, self.revision.clone(), index))
+    }
+}
+
+struct LinkPage {
+    url: String,
+    title: String,
+    description: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -160,6 +175,7 @@ impl Shelf {
             count: None,
             pending: None,
             texture: None,
+            link: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -224,21 +240,67 @@ impl Shelf {
                                 && count.is_some_and(|n| n > expected && n <= 32)
                             {
                                 collection.count = count;
-                                match page["png"]
-                                    .as_str()
-                                    .ok_or_else(|| "Missing page image".to_owned())
-                                    .and_then(decode_collection_page)
-                                {
-                                    Ok(image) => {
-                                        collection.texture = Some(ctx.load_texture(
-                                            "translated-collection-page",
-                                            image,
-                                            egui::TextureOptions::LINEAR,
-                                        ));
+                                if let Some(link) = page["link"].as_object() {
+                                    let url = link.get("url").and_then(Value::as_str).unwrap_or("");
+                                    if url.is_empty() || url.len() > 16384 {
+                                        collection.error =
+                                            tr("Некорректная ссылка", "Invalid link").into();
+                                    } else {
+                                        let title = link
+                                            .get("title")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                            .chars()
+                                            .take(4096)
+                                            .collect();
+                                        let description = link
+                                            .get("description")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                            .chars()
+                                            .take(16384)
+                                            .collect();
+                                        let texture = link
+                                            .get("preview_png")
+                                            .and_then(Value::as_str)
+                                            .and_then(|encoded| {
+                                                decode_collection_page(encoded).ok()
+                                            })
+                                            .map(|image| {
+                                                ctx.load_texture(
+                                                    "collection-link-preview",
+                                                    image,
+                                                    egui::TextureOptions::LINEAR,
+                                                )
+                                            });
+                                        collection.link = Some(LinkPage {
+                                            url: url.to_owned(),
+                                            title,
+                                            description,
+                                        });
+                                        collection.texture = texture;
                                         collection.ready_index = Some(expected);
                                         collection.zoom = katran::preview_view::State::default();
                                     }
-                                    Err(error) => collection.error = error,
+                                } else {
+                                    match page["png"]
+                                        .as_str()
+                                        .ok_or_else(|| "Missing page image".to_owned())
+                                        .and_then(decode_collection_page)
+                                    {
+                                        Ok(image) => {
+                                            collection.texture = Some(ctx.load_texture(
+                                                "translated-collection-page",
+                                                image,
+                                                egui::TextureOptions::LINEAR,
+                                            ));
+                                            collection.link = None;
+                                            collection.ready_index = Some(expected);
+                                            collection.zoom =
+                                                katran::preview_view::State::default();
+                                        }
+                                        Err(error) => collection.error = error,
+                                    }
                                 }
                             } else {
                                 collection.error =
@@ -275,14 +337,60 @@ impl Shelf {
             })
         };
         if copy_requested {
-            let target = self.upscale.collection.as_ref().and_then(|c| {
-                c.ready_index
-                    .filter(|_| c.texture.is_some())
-                    .map(|index| (c.id, c.revision.clone(), index))
-            });
+            let target = self
+                .upscale
+                .collection
+                .as_ref()
+                .and_then(Collection::ready_target);
             if let Some((id, revision, index)) = target {
                 if !self.start_job(
                     Command::CopyCollectionPage {
+                        id,
+                        revision,
+                        index,
+                    },
+                    false,
+                    ctx.clone(),
+                ) && self.job.is_some()
+                {
+                    self.message = tr(
+                        "Дождитесь завершения текущей операции",
+                        "Wait for the current operation to finish",
+                    )
+                    .into();
+                }
+            }
+        }
+        let open_requested = ctx.input_mut(|input| {
+            let focused = input.focused;
+            let mut pressed = false;
+            input.events.retain(|event| match event {
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: down,
+                    repeat,
+                    modifiers,
+                    ..
+                } if modifiers.alt && !modifiers.ctrl && !modifiers.shift => {
+                    if focused && *down && !*repeat {
+                        pressed = true;
+                    }
+                    false
+                }
+                _ => true,
+            });
+            pressed
+        });
+        if open_requested {
+            let target = self
+                .upscale
+                .collection
+                .as_ref()
+                .filter(|c| c.link.is_some())
+                .and_then(Collection::ready_target);
+            if let Some((id, revision, index)) = target {
+                if !self.start_job(
+                    Command::OpenCollectionLink {
                         id,
                         revision,
                         index,
@@ -311,7 +419,7 @@ impl Shelf {
         let canvas_size = collection_canvas_size(ctx.content_rect().size());
         let modal = egui::Modal::new(egui::Id::new("translated-collection")).show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
-            ui.heading(tr("Перевод страниц", "Translated pages"));
+            ui.heading(tr("Коллекция", "Collection"));
             ui.horizontal(|ui| {
                 previous |= ui
                     .add_enabled(
@@ -345,7 +453,43 @@ impl Shelf {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
             let painter = ui.painter().with_clip_rect(canvas);
             painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
-            if let Some(texture) = collection.texture.as_ref() {
+            if let Some(link) = collection.link.as_ref() {
+                let inner = canvas.shrink(18.0);
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("collection-link-content")
+                        .max_rect(inner),
+                );
+                child.set_clip_rect(inner);
+                egui::ScrollArea::vertical()
+                    .id_salt(("collection-link-scroll", collection.ready_index))
+                    .max_height(inner.height())
+                    .auto_shrink([false, false])
+                    .show(&mut child, |ui| {
+                        ui.set_width(inner.width());
+                        if let Some(texture) = collection.texture.as_ref() {
+                            let original = texture.size_vec2();
+                            let scale = (inner.width() / original.x)
+                                .min(180.0 / original.y)
+                                .min(1.0);
+                            ui.add(egui::Image::new((texture.id(), original * scale)));
+                            ui.add_space(10.0);
+                        }
+                        if !link.title.is_empty() {
+                            ui.heading(&link.title);
+                        }
+                        if let Ok(url) = url::Url::parse(&link.url)
+                            && let Some(host) = url.host_str()
+                        {
+                            ui.weak(host);
+                        }
+                        ui.add(egui::Label::new(&link.url).selectable(true).wrap());
+                        if !link.description.is_empty() {
+                            ui.add_space(10.0);
+                            ui.add(egui::Label::new(&link.description).selectable(true).wrap());
+                        }
+                    });
+            } else if let Some(texture) = collection.texture.as_ref() {
                 let original = texture.size_vec2();
                 let fit_scale = (canvas.width() / original.x).min(canvas.height() / original.y);
                 let fitted = original * fit_scale;
@@ -753,6 +897,28 @@ mod tests {
     use super::*;
     use katran::actions::upscale_operation;
     #[test]
+    fn link_target_uses_visible_page_while_next_is_pending() {
+        let collection = Collection {
+            id: 7,
+            revision: "rev".into(),
+            index: 2,
+            count: Some(3),
+            pending: Some((katran::domain_jobs::JobId(42), 2)),
+            texture: None,
+            link: Some(LinkPage {
+                url: "https://example.org".into(),
+                title: "title".into(),
+                description: "description".into(),
+            }),
+            ready_index: Some(1),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        };
+        assert_eq!(collection.ready_target(), Some((7, "rev".into(), 1)));
+    }
+
+    #[test]
     fn collection_copy_consumes_dual_events_and_ignores_repeat() {
         let event = |pressed, repeat| egui::Event::Key {
             key: egui::Key::C,
@@ -787,6 +953,7 @@ mod tests {
             count: Some(2),
             pending: None,
             texture: None,
+            link: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -846,6 +1013,7 @@ mod tests {
             count: Some(2),
             pending: None,
             texture: Some(texture),
+            link: None,
             ready_index: Some(0),
             copy_held: false,
             zoom: katran::preview_view::State::default(),

@@ -604,6 +604,8 @@ impl Shelf {
                                     }
                                     if pods && compact {
                                         self.pods_ui.paint(ui, event, rect.shrink(6.0));
+                                    } else if links && compact && event["source"] == "link_collection" {
+                                        self.images.paint_at(ui, event, rect.shrink(6.0), 320);
                                     } else if links && compact {
                                         self.link_cards.paint(ui, event, rect.shrink(6.0));
                                     } else if gallery {
@@ -709,7 +711,7 @@ impl Shelf {
                                         );
                                         if self.state["tab"] == "pods" {
                                             self.pods_ui.paint(ui, event, image);
-                                        } else if links {
+                                        } else if links && event["source"] != "link_collection" {
                                             let icon = egui::Rect::from_min_size(
                                                 image.min,
                                                 Vec2::splat(image.height()),
@@ -731,7 +733,11 @@ impl Shelf {
                                             serde_json::from_value(event["origin"].clone())
                                                 .unwrap_or_default();
                                         let lines = [
-                                            if links {
+                                            if event["source"] == "link_collection" {
+                                                event["properties"]["display_name"].as_str()
+                                                    .unwrap_or(tr("Коллекция ссылок", "Link collection"))
+                                                    .to_owned()
+                                            } else if links {
                                                 event["properties"]["display_name"]
                                                     .as_str()
                                                     .filter(|name| !name.trim().is_empty())
