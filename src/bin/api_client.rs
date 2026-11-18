@@ -2196,6 +2196,7 @@ impl Shelf {
                     | "tab_previous"
                     | "tab_next"
                     | "images"
+                    | "translate"
                     | "screenshots"
                     | "downloads"
                     | "text"

@@ -1,5 +1,10 @@
 # Developer and agent entry point
 
+Translate uses the normal catalogue shelf with an internal membership relation
+and an independent tag scope, introduced by schema v14. The in-memory ordered
+collection belongs to `crates/baloh-collection`. See
+[the Translate foundation](patch-4.0/TRANSLATE.md).
+
 Static image upscale runs in its own job lane. `upscale_components.rs`
 discovers local weights and the existing portable runtime. `image_upscale.rs`
 stages a bounded worker; the dispatcher commits a separate managed image

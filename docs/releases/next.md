@@ -1,5 +1,13 @@
 # Development log through 3.7.1
 
+## Katran 4.0 · Translate foundation
+
+The local Translate tab is restricted to internally published managed image
+results. The independent Rust collection preserves page order. This change
+introduces catalogue schema v14. Rollback to a v13 binary requires the
+pre-migration profile backup. The image translation provider is still pending.
+See [Translate](../patch-4.0/TRANSLATE.md).
+
 ## Katran 4.0 · Local static image upscale
 
 AI Commands adds four independently rebindable commands for exact ×2 and ×4

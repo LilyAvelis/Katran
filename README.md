@@ -3,8 +3,12 @@
 Ctrl+K → AI Commands offers four independent image-upscale actions using
 existing local ComfyUI weights. See [static image upscale](docs/patch-4.0/IMAGE-UPSCALE.md).
 
-Local 4.0 work adds Ctrl+K → Video → Extract audio. Select a track and save a
-separate AAC/M4A file without changing the video. See [audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md).
+Local 4.0 work adds Ctrl+K → Video → Extract audio. Katran saves the selected
+track as a separate AAC/M4A file, adds it to Files, and copies it as a file.
+See [audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md).
+
+The local Translate shelf is reserved for completed image translations.
+See [the Translate foundation](docs/patch-4.0/TRANSLATE.md).
 
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate

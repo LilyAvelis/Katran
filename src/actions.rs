@@ -195,6 +195,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "pods" => "Pods tab",
         "files" => "Files tab",
         "desktop" => "Desktop tab",
+        "translate" => "Translate tab",
         "sort_arrival" => "Sort by arrival",
         "sort_arrival_reverse" => "Sort by arrival · reverse",
         "sort_pinned" => "Pinned in custom order, then by arrival",
@@ -436,6 +437,14 @@ pub const DEFS: &[Definition] = &[
         default_binding: "Shift Tab",
         rebindable: true,
         group: "Передача",
+        in_palette: true,
+    },
+    Definition {
+        id: "translate",
+        label: "Таб: Translate",
+        default_binding: "",
+        rebindable: true,
+        group: "Навигация",
         in_palette: true,
     },
     Definition {
@@ -1065,6 +1074,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         }),
         "desktop" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Desktop,
+        }),
+        "translate" => command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Translate,
         }),
         "select_all" => command(Command::SelectAll),
         "transfer_selection" => command(Command::TransferSelection),

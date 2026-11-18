@@ -28,6 +28,39 @@ fn friendly_path(path: &str) -> String {
     }
 }
 
+fn success_status(result: &Value) -> String {
+    let clipboard = &result["clipboard"];
+    let mut status = if clipboard["ok"] == true {
+        tr(
+            "Аудио сохранено в Files и скопировано как файл",
+            "Audio saved in Files and copied as a file",
+        )
+        .to_owned()
+    } else {
+        let error = clipboard["error"]["message"]
+            .as_str()
+            .or_else(|| clipboard["error"].as_str())
+            .unwrap_or(tr(
+                "состояние буфера неизвестно",
+                "clipboard status unknown",
+            ));
+        format!(
+            "{}: {error}",
+            tr(
+                "Аудио сохранено в Files, но не скопировано",
+                "Audio saved in Files, but not copied"
+            )
+        )
+    };
+    if let Some(warnings) = clipboard["warnings"].as_array() {
+        for warning in warnings.iter().filter_map(Value::as_str) {
+            status.push_str(" · ");
+            status.push_str(warning);
+        }
+    }
+    status
+}
+
 impl Shelf {
     fn audio_context(&mut self) -> Value {
         let state = self.call(Command::Interaction);
@@ -75,7 +108,10 @@ impl Shelf {
                     self.audio_extract.job = None;
                     self.audio_extract.path =
                         friendly_path(response["result"]["path"].as_str().unwrap_or(""));
-                    self.audio_extract.status = tr("Аудио сохранено", "Audio saved").into();
+                    self.audio_extract.status = success_status(&response["result"]);
+                    if self.state["tab"] == "files" {
+                        self.refresh();
+                    }
                 }
                 Some("cancelled") => {
                     self.audio_extract.job = None;
@@ -170,6 +206,18 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_audio_reports_clipboard_failure_and_warnings() {
+        let failed = success_status(
+            &json!({"clipboard":{"ok":false,"error":{"message":"synthetic failure"},"warnings":["synthetic warning"]}}),
+        );
+        assert!(failed.contains("Files"));
+        assert!(failed.contains("synthetic failure"));
+        assert!(failed.contains("synthetic warning"));
+        let copied = success_status(&json!({"clipboard":{"ok":true,"warnings":[]}}));
+        assert!(copied.contains("Files"));
+        assert!(!copied.contains("synthetic failure"));
+    }
     #[test]
     fn user_track_number_maps_to_zero_based_api() {
         assert_eq!(track_index(1), Some(0));

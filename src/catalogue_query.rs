@@ -147,6 +147,7 @@ fn query_sorted_slice_inner(
             | ShelfTab::Tables
             | ShelfTab::Pods
             | ShelfTab::Files
+            | ShelfTab::Translate
     );
     let source = match tab {
         ShelfTab::Screenshots => "sharex",
@@ -445,6 +446,7 @@ pub(crate) fn query_features(
             | ShelfTab::Tables
             | ShelfTab::Pods
             | ShelfTab::Files
+            | ShelfTab::Translate
     );
     let source = match tab {
         ShelfTab::Screenshots => "sharex",
@@ -498,6 +500,7 @@ fn slice_projection(
         ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
         ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
         ShelfTab::Desktop => "0".into(),
+        ShelfTab::Translate => translated_image_predicate(),
         ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Images => format!("{} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
@@ -532,7 +535,7 @@ fn projection_sql(
     tables_enabled: bool,
 ) -> String {
     let mut sql = sql();
-    if !images_enabled {
+    if !images_enabled && tab != ShelfTab::Translate {
         sql = sql.replace(
             "AND e.legacy_source_ref=0",
             &format!(
@@ -555,6 +558,13 @@ fn projection_sql(
     } else {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)");
     }
+    if tab == ShelfTab::Translate {
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND {}", translated_image_predicate()),
+        );
+        sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    }
     if tab == ShelfTab::Links {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
@@ -573,6 +583,13 @@ fn projection_sql(
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM text_fragments t WHERE t.event_id=e.id)");
     }
     sql
+}
+
+pub(crate) fn translated_image_predicate() -> String {
+    format!(
+        "e.blob_hash IS NOT NULL AND {} AND EXISTS(SELECT 1 FROM translated_images t WHERE t.event_id=e.id)",
+        crate::file_types::sql_image_predicate()
+    )
 }
 
 // Keep ORDER BY on the compound statement: wrapping this UNION in a SELECT
@@ -700,6 +717,26 @@ mod tests {
             .into_iter()
             .map(|e| e.id)
             .collect()
+    }
+    #[test]
+    fn translate_shows_only_published_managed_images() {
+        let (_dir, mut service) = fixture();
+        let source = ordinary(&service.db, "plain.png", "image_translation");
+        let result = crate::storage::ingest_bytes(
+            &mut service.db,
+            &service.root,
+            service.quota,
+            crate::storage::ByteIngest {
+                name: "result.png",
+                source: "fixture",
+                bytes: b"synthetic managed image",
+                origin: &crate::origin::Origin::default(),
+            },
+        ).unwrap();
+        assert!(ids(&service.db, ShelfTab::Translate, "", 10, None).is_empty());
+        service.db.execute("INSERT INTO translated_images VALUES (?1), (?2)", [source, result]).unwrap();
+        assert_eq!(ids(&service.db, ShelfTab::Translate, "", 10, None), vec![result]);
+        assert!(ids(&service.db, ShelfTab::Translate, "unmatched", 10, None).is_empty());
     }
     #[test]
     fn membership_is_current_projection_not_provenance_or_path_and_never_stats_live_paths() {

@@ -17,6 +17,12 @@ AI operations belong in Ctrl+K → AI Commands. Give each model and fixed
 operation its own independently rebindable command that starts directly.
 For ×2 and ×4, multiply both output dimensions by exactly that factor.
 
+The Translate shelf accepts only managed image results with internal
+translation membership. Keep generic ordered collections in the independent
+`baloh-collection` crate. Russian/English are the primary translation
+languages; OCR should also cover Japanese, Korean and Chinese. Keep .bull
+serialization and QuickLook after the one-page and batch translation gates.
+
 ## Ready text preview retention · 2026-11-18
 
 Owner authorized closing the residual Links blink after accepting the Mini stream

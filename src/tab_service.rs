@@ -14,6 +14,7 @@ pub fn label(tab: ShelfTab) -> &'static str {
         ShelfTab::Pods => "Pods",
         ShelfTab::Files => "Files",
         ShelfTab::Desktop => "Desktop",
+        ShelfTab::Translate => "Translate",
     }
 }
 
@@ -113,6 +114,7 @@ impl Service {
             "pods" => self.settings.tab_enabled(ShelfTab::Pods),
             "files" => self.settings.tab_enabled(ShelfTab::Files),
             "desktop" => self.settings.tab_enabled(ShelfTab::Desktop),
+            "translate" => self.settings.tab_enabled(ShelfTab::Translate),
             _ => true,
         }
     }

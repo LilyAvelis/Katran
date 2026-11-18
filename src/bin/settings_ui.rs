@@ -240,6 +240,7 @@ fn localized_tab_label(label: &str) -> &str {
         "Pods" => super::i18n::tr("Символы", "Pods"),
         "Files" => super::i18n::tr("Файлы", "Files"),
         "Desktop" => super::i18n::tr("Рабочий стол", "Desktop"),
+        "Translate" => "Translate",
         other => other,
     }
 }
@@ -257,6 +258,7 @@ pub(super) fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'stati
         ShelfTab::Pods => super::i18n::tr("Символы", "Pods"),
         ShelfTab::Files => super::i18n::tr("Файлы", "Files"),
         ShelfTab::Desktop => super::i18n::tr("Рабочий стол", "Desktop"),
+        ShelfTab::Translate => "Translate",
     }
 }
 

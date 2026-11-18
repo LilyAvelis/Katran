@@ -32,6 +32,7 @@ pub(crate) fn scope(tab: crate::interaction::ShelfTab) -> Result<&'static str> {
         Pods => "pods",
         Files => "files",
         Desktop => "desktop",
+        Translate => "translate",
     })
 }
 

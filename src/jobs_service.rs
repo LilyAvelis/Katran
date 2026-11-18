@@ -94,7 +94,10 @@ pub(crate) enum PreparedWork {
         staged: audio_extract::StagedAudio,
         destination: PathBuf,
         audio_track: u32,
+        clipboard_sequence: u32,
     },
+    AudioReference { result: Value, clipboard_sequence: u32, prepared: Result<files_pointer::Pointer> },
+    AudioCopy { result: Value, clipboard_sequence: u32, prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String> },
     MediaCapture {
         lease: media_service::CaptureLease,
         prepared: media_capture::PreparedCapture,
@@ -244,6 +247,39 @@ pub(crate) fn prepare_reference(
     })
 }
 impl Service {
+    fn commit_owned_audio_pointer(&mut self, pointer: files_pointer::Pointer, output: &std::path::Path) -> Result<Value> {
+        let profile = self.root.canonicalize()?;
+        let root = profile.join("audio-extractions").canonicalize()?;
+        if root.parent() != Some(profile.as_path()) {
+            return Err(ApiError::new("source_changed", "Audio storage path changed"));
+        }
+        let path = std::fs::canonicalize(output)?;
+        let directory = path.parent().ok_or_else(|| ApiError::new("source_changed", "Invalid audio output"))?;
+        if path != pointer.path || directory.parent() != Some(root.as_path())
+            || !directory.file_name().is_some_and(|n| n.to_string_lossy().starts_with("audio-"))
+            || path.file_name().is_none_or(|n| n != "audio.m4a") {
+            return Err(ApiError::new("source_changed", "Audio output path changed"));
+        }
+        let meta = std::fs::symlink_metadata(&path)?;
+        if !meta.file_type().is_file() || meta.len() != pointer.size || meta.modified()? != pointer.modified {
+            return Err(ApiError::new("source_changed", "Audio output changed before registration"));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if meta.file_attributes() & 0x400 != 0 {
+                return Err(ApiError::new("source_changed", "Audio output became a reparse point"));
+            }
+        }
+        let path = path.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode audio path"))?;
+        let origin = serde_json::to_string(&Origin::default()).map_err(|e| ApiError::new("invalid_argument", e))?;
+        let id = files_store::insert_or_reuse(&mut self.db, &files_store::PreparedFile {
+            path, path_key: path, name: "audio.m4a", size: pointer.size,
+            reference_hash: &pointer.content_hash, modified_at_ms: sorting::modified_ms(pointer.modified),
+            detected_at_ms: now_ms(), origin_json: &origin,
+        })?;
+        Ok(json!(self.get(id)?))
+    }
     fn begin_folder_semantic(
         &mut self,
         query: String,
@@ -694,6 +730,7 @@ impl Service {
             Command::ExtractVideoAudio { audio_track } => {
                 let event = self.selected_background_video()?;
                 let root = self.root.clone();
+                let clipboard_sequence = capture::sequence_number();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
                     let stamp = media_service::stamp(&event.path)?;
@@ -710,6 +747,7 @@ impl Service {
                         staged,
                         destination,
                         audio_track: audio_track.unwrap_or(0),
+                        clipboard_sequence,
                     })
                 })?
             }
@@ -1494,6 +1532,68 @@ impl Service {
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
         for (ready, result) in self.jobs.take_ready(8) {
             let result = match result {
+                Ok(PreparedWork::AudioExtraction {event, stamp, staged, destination, audio_track, clipboard_sequence}) => {
+                    let saved = (|| -> Result<Value> {
+                        let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection", "Video is no longer available"))?;
+                        if current.revision != event.revision || current.path != event.path || current.kind != event.kind || media_service::stamp(&event.path)? != stamp {
+                            return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
+                        }
+                        self.jobs.authorize_claimed_effect(ready)?;
+                        let path = staged.publish(&destination)?;
+                        Ok(json!({"path":path,"audio_track":audio_track}))
+                    })();
+                    let saved = match saved { Ok(saved) => saved, Err(error) => { self.jobs.finish(ready, Err(error))?; continue; } };
+                    let fallback = saved.clone();
+                    let path = PathBuf::from(saved["path"].as_str().expect("published path"));
+                    if let Err(error) = self.jobs.continue_claimed(ready, move |_| {
+                        let prepared = files_pointer::prepare_pointer(&path).map_err(ApiError::from);
+                        Ok(PreparedWork::AudioReference { result: saved, clipboard_sequence, prepared })
+                    }) {
+                        let mut saved = fallback;
+                        saved["files"] = json!({"ok":false,"error":error.message});
+                        saved["clipboard"] = json!({"ok":false,"error":"Audio was saved but could not be registered in Files"});
+                        self.jobs.finish(ready, Ok(saved))?;
+                    }
+                    continue;
+                }
+                Ok(PreparedWork::AudioReference { mut result, clipboard_sequence, prepared }) => {
+                    let registration = prepared.and_then(|pointer| {
+                        let path = PathBuf::from(result["path"].as_str().expect("published path"));
+                        self.commit_owned_audio_pointer(pointer, &path)
+                    });
+                    let event = match registration {
+                        Ok(event) => event,
+                        Err(error) => {
+                            result["files"] = json!({"ok":false,"error":error.message});
+                            result["clipboard"] = json!({"ok":false,"error":"Audio was saved but could not be registered in Files"});
+                            self.jobs.finish(ready, Ok(result))?;
+                            continue;
+                        }
+                    };
+                    result["files"] = json!({"ok":true,"event":event.clone()});
+                    result["event"] = event.clone();
+                    let parsed = serde_json::from_value::<Event>(event);
+                    let references = self.reference_paths();
+                    let root = self.root.clone();
+                    let quota = self.quota;
+                    let fallback = result.clone();
+                    if let Err(error) = self.jobs.continue_claimed(ready, move |_| {
+                        let prepared = (|| {
+                            let event = parsed.map_err(|e| e.to_string())?;
+                            let references = references.map_err(|e| e.message)?;
+                            let mut plan = copy_out::prepare_with_budget(&root, &[event], quota)?;
+                            plan.protect_references(&references)?;
+                            let sink = copy_out::PreparedNativeClipboard::prepare(&plan.paths);
+                            Ok((plan, sink))
+                        })();
+                        Ok(PreparedWork::AudioCopy { result, clipboard_sequence, prepared })
+                    }) {
+                        let mut result = fallback;
+                        result["clipboard"] = json!({"ok":false,"error":error.message});
+                        self.jobs.finish(ready, Ok(result))?;
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::MediaCapture { lease, prepared }) => {
                     let clipboard_sequence = lease.clipboard_sequence;
                     let saved = self
@@ -1904,20 +2004,26 @@ impl Service {
                     Ok(json!({"event": self.get(id)?, "input_width": input_width, "input_height": input_height,
                         "width": width, "height": height, "operation": operation}))
                 },
-                PreparedWork::AudioExtraction { event, stamp, staged, destination, audio_track } => {
-                    let current = self.get(event.id).map_err(|_| {
-                        ApiError::new("stale_selection", "Video is no longer available")
-                    })?;
-                    if current.revision != event.revision
-                        || current.path != event.path
-                        || current.kind != event.kind
-                        || media_service::stamp(&event.path)? != stamp
-                    {
-                        return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
-                    }
-                    self.jobs.authorize_claimed_effect(ready)?;
-                    let path = staged.publish(&destination)?;
-                    Ok(json!({"path": path, "audio_track": audio_track}))
+                PreparedWork::AudioExtraction {..} | PreparedWork::AudioReference {..} => Err(ApiError::new("invalid_job_phase", "Audio extraction requires continuation")),
+                PreparedWork::AudioCopy {mut result, clipboard_sequence, prepared} => {
+                    let event = serde_json::from_value::<Event>(result["event"].clone()).map_err(|e| e.to_string());
+                    let publication = if capture::sequence_number() != clipboard_sequence {
+                        Err("Clipboard changed since extraction was requested".to_owned())
+                    } else {
+                        event.and_then(|event| self.validate_job_events(&[event]).map_err(|e| e.message))
+                            .and_then(|()| prepared.and_then(|(plan, mut sink)| self.commit_media_copy_plan(&plan, &mut sink)))
+                    };
+                    result["clipboard"] = match publication {
+                        Ok(receipt) => {
+                            let ok = receipt.failures.is_empty() && receipt.count == 1;
+                            if ok {
+                                if let Some(id) = result["event"]["id"].as_i64() { self.record_selection_publication(receipt.sequence, &[id]); }
+                            } else { self.record_clipboard_publication(receipt.sequence); }
+                            json!({"ok":ok,"count":receipt.count,"failures":receipt.failures,"warnings":receipt.warnings,"sequence":receipt.sequence,"publication":receipt.publication})
+                        }
+                        Err(error) => json!({"ok":false,"error":error}),
+                    };
+                    Ok(result)
                 },
                 PreparedWork::MediaCapture{..}=>Err(ApiError::new("invalid_job_phase", "Media capture requires continuation")),
                 PreparedWork::MediaCaptureCopy{result,clipboard_sequence,prepared}=>Ok(self.publish_media_capture(result,prepared,clipboard_sequence)),

@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 13;
+pub(crate) const VERSION: i64 = 14;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -183,6 +183,71 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         INSERT INTO desktop_scoped_assignments SELECT asset_id,slot_number FROM desktop_pins WHERE slot_number IS NOT NULL;
         PRAGMA user_version=13;")?;
     }
+    if version < 14 {
+        tx.execute_batch(
+            "CREATE TABLE translated_images(
+                event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE
+             );
+             INSERT INTO tag_scoped_slots
+                SELECT 'translate',number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_slots;
+             PRAGMA user_version=14;",
+        )?;
+    }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translate_migrates_v13_and_keeps_a_verified_rollback() {
+        let profile = tempfile::tempdir().unwrap();
+        drop(crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap());
+        let database = profile.path().join("index.sqlite3");
+        let legacy = Connection::open(&database).unwrap();
+        legacy
+            .execute_batch(
+                "DROP TABLE translated_images;
+             DELETE FROM tag_scoped_slots WHERE scope='translate';
+             PRAGMA user_version=13;",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let reopened = crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
+        let count: i64 = reopened
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM tag_scoped_slots WHERE scope='translate'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 9);
+        let backup = std::fs::read_dir(profile.path().join("backups"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("index-before-v14")
+            })
+            .unwrap();
+        let backup = Connection::open(backup).unwrap();
+        assert_eq!(
+            backup
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            13
+        );
+        assert_eq!(
+            backup
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
 }

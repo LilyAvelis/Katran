@@ -104,12 +104,11 @@ impl Service {
     ) {
         self.media.capture_clipboard = Some(sink);
     }
-    pub(crate) fn publish_media_capture(
+    pub(crate) fn commit_media_copy_plan(
         &mut self,
-        mut result: serde_json::Value,
-        prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String>,
-        clipboard_sequence: u32,
-    ) -> serde_json::Value {
+        plan: &copy_out::Plan,
+        native: &mut copy_out::PreparedNativeClipboard,
+    ) -> std::result::Result<copy_out::CopyReceipt, String> {
         struct SinkRef<'a>(&'a mut (dyn copy_out::ClipboardSink + Send));
         impl copy_out::ClipboardSink for SinkRef<'_> {
             fn write(
@@ -125,16 +124,23 @@ impl Service {
                 self.0.write_with_facts(paths)
             }
         }
+        if let Some(sink) = self.media.capture_clipboard.as_deref_mut() {
+            copy_out::commit(plan, &mut SinkRef(sink))
+        } else {
+            copy_out::commit(plan, native)
+        }
+    }
+
+    pub(crate) fn publish_media_capture(
+        &mut self,
+        mut result: serde_json::Value,
+        prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String>,
+        clipboard_sequence: u32,
+    ) -> serde_json::Value {
         let publication = if capture::sequence_number() != clipboard_sequence {
             Err("Clipboard changed since capture was requested".to_owned())
         } else {
-            prepared.and_then(|(plan, mut native)| {
-                if let Some(sink) = self.media.capture_clipboard.as_deref_mut() {
-                    copy_out::commit(&plan, &mut SinkRef(sink))
-                } else {
-                    copy_out::commit(&plan, &mut native)
-                }
-            })
+            prepared.and_then(|(plan, mut native)| self.commit_media_copy_plan(&plan, &mut native))
         };
         result["clipboard"] = match publication {
             Ok(receipt) => {

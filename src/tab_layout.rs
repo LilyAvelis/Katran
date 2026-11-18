@@ -12,6 +12,7 @@ pub fn default_order() -> Vec<ShelfTab> {
         ShelfTab::Pods,
         ShelfTab::Files,
         ShelfTab::Desktop,
+        ShelfTab::Translate,
     ]
 }
 
@@ -36,6 +37,9 @@ pub fn deserialize_order<'de, D: serde::Deserializer<'de>>(
     }
     if !order.contains(&ShelfTab::Desktop) {
         order.push(ShelfTab::Desktop);
+    }
+    if !order.contains(&ShelfTab::Translate) {
+        order.push(ShelfTab::Translate);
     }
     Ok(order)
 }
@@ -68,15 +72,13 @@ pub fn reorder(order: &mut Vec<ShelfTab>, tab: ShelfTab, index: usize) -> Result
     Ok(())
 }
 
-/// Resolve physical shortcut positions: zero is All, one through nine are numbered tabs.
+/// Resolve tab positions: zero is Folder. Physical digit bindings remain limited to 1–9.
 pub fn tab_at(order: &[ShelfTab], position: u8) -> api::Result<ShelfTab> {
     validate_order(order).map_err(|message| api::ApiError::new("invalid_tab_order", message))?;
     if position == 0 {
         return Ok(ShelfTab::All);
     }
-    if position <= 9
-        && let Some(tab) = order.get(usize::from(position - 1))
-    {
+    if let Some(tab) = order.get(usize::from(position - 1)) {
         return Ok(*tab);
     }
     Err(api::ApiError::new(
@@ -103,9 +105,7 @@ pub fn tab_at_visible(order: &[ShelfTab], position: u8) -> api::Result<ShelfTab>
     if position == 0 {
         return Ok(ShelfTab::All);
     }
-    if position <= 9
-        && let Some(tab) = order.get(usize::from(position - 1))
-    {
+    if let Some(tab) = order.get(usize::from(position - 1)) {
         return Ok(*tab);
     }
     Err(api::ApiError::new(

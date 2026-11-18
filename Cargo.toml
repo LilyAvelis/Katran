@@ -14,7 +14,7 @@ path = "src/bin/launcher.rs"
 required-features = ["ui"]
 
 [workspace]
-members = ["crates/avilon-actions", "crates/avilon-egui", "crates/avilon-media", "crates/avilon-windows"]
+members = ["crates/avilon-actions", "crates/avilon-egui", "crates/avilon-media", "crates/avilon-windows", "crates/baloh-collection"]
 resolver = "3"
 
 [dependencies]

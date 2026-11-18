@@ -64,3 +64,9 @@ override. The API fixture verified each action against real weights, exact PNG
 dimensions, unchanged source and cancellation before publication. Three
 discovery and four headless UI/palette checks passed. Native Windows interaction
 and visual quality on the owner's images remain open.
+
+The owner confirmed Upscale in Windows and approved the audio Files/clipboard
+follow-up. Translate starts with a distinct shelf and a reusable Rust
+collection. Russian and English are primary. OCR must also recognize
+Japanese, Korean and Chinese. The first functional provider will be verified
+on a single page before batching. See [Translate](TRANSLATE.md).

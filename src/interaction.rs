@@ -15,6 +15,7 @@ pub enum ShelfTab {
     Pods,
     Files,
     Desktop,
+    Translate,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]

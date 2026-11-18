@@ -1,4 +1,5 @@
 use katran::{Command, Request, Service, domain_jobs::JobId, interaction::SelectionMode};
+use katran::{copy_out::ClipboardSink, interaction::ShelfTab};
 use serde_json::Value;
 use std::{
     fs,
@@ -14,6 +15,24 @@ fn request(api: &mut Service, command: Command) -> Value {
         command,
     }))
     .unwrap()
+}
+
+struct FileClipboard(bool);
+
+impl ClipboardSink for FileClipboard {
+    fn write(&mut self, paths: &[std::path::PathBuf]) -> Result<(u32, Vec<String>), String> {
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths[0].extension().and_then(|part| part.to_str()),
+            Some("m4a")
+        );
+        assert!(paths[0].is_file());
+        if self.0 {
+            Ok((0, Vec::new()))
+        } else {
+            Err("synthetic clipboard unavailable".into())
+        }
+    }
 }
 fn call(api: &mut Service, command: Command) -> Value {
     let response = request(api, command);
@@ -230,9 +249,13 @@ fn selected_audio_ordinal_and_failure_paths() {
     fixture(&source, true);
     let original = fs::read(&source).unwrap();
     let mut api = Service::open(profile.path(), 100_000_000).unwrap();
+    api.set_media_capture_clipboard_sink(Box::new(FileClipboard(true)));
     select(&mut api, folder.path(), &source);
     let first = run(&mut api, None);
     assert_eq!(first["state"], "succeeded", "{first}");
+    assert_eq!(first["result"]["files"]["ok"], true);
+    assert_eq!(first["result"]["clipboard"]["ok"], true);
+    assert_eq!(first["result"]["event"]["kind"], "file_reference");
     assert_eq!(first["result"]["audio_track"], 0);
     let first_path = Path::new(first["result"]["path"].as_str().unwrap());
     let output_dir = profile.path().join("audio-extractions");
@@ -258,8 +281,11 @@ fn selected_audio_ordinal_and_failure_paths() {
         "second track: {frequency} Hz"
     );
     let second_bytes = fs::read(second_path).unwrap();
+    api.set_media_capture_clipboard_sink(Box::new(FileClipboard(false)));
     let repeat = run(&mut api, Some(1));
     assert_eq!(repeat["state"], "succeeded", "{repeat}");
+    assert_eq!(repeat["result"]["files"]["ok"], true);
+    assert_eq!(repeat["result"]["clipboard"]["ok"], false);
     assert_eq!(repeat["result"]["audio_track"], 1);
     let repeat_path = Path::new(repeat["result"]["path"].as_str().unwrap());
     assert_output_path(repeat_path, &output_dir);
@@ -274,6 +300,21 @@ fn selected_audio_ordinal_and_failure_paths() {
     assert_eq!(m4a_files(&output_dir).len(), before.len());
     assert_eq!(fs::read(first_path).unwrap(), first_bytes);
     assert_eq!(fs::read(&source).unwrap(), original);
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Files,
+        },
+    );
+    let files = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        },
+    );
+    assert_eq!(files["events"].as_array().unwrap().len(), 3);
 }
 
 #[test]

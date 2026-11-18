@@ -370,6 +370,9 @@ impl Shelf {
                             }
                         }
                     }
+                } else if self.state["tab"] == "translate" && visible.is_empty() {
+                    self.images.clear_preview_geometry();
+                    ui.label(tr("Здесь появятся готовые переводы изображений.", "Completed image translations will appear here."));
                 } else if self.state["view"] == "details" {
                     self.details_view(ui, ctx, visible);
                 } else {

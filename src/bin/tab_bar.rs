@@ -5,6 +5,14 @@ use serde_json::Value;
 
 use avilon_egui::tabs::{Indicator, Pill};
 
+fn numbered_tab_label(index: usize, label: &str) -> String {
+    if index < 9 {
+        format!("{} {label}", index + 1)
+    } else {
+        label.to_owned()
+    }
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     order: &[ShelfTab],
@@ -53,10 +61,11 @@ pub fn show(
                             ShelfTab::Pods => ("Pods", "pods"),
                             ShelfTab::Files => ("Files", "files"),
                             ShelfTab::Desktop => ("Desktop", "desktop"),
+                            ShelfTab::Translate => ("Translate", "translate"),
                         };
                         let response = ui.add_enabled(
                             enabled,
-                            egui::Button::new(format!("{} {label}", index + 1))
+                            egui::Button::new(numbered_tab_label(index, label))
                                 .fill(egui::Color32::TRANSPARENT)
                                 .sense(egui::Sense::click_and_drag()),
                         );
@@ -260,8 +269,9 @@ fn show_glass(
                         ShelfTab::Pods => ("Pods", "pods"),
                         ShelfTab::Files => ("Files", "files"),
                         ShelfTab::Desktop => ("Desktop", "desktop"),
+                        ShelfTab::Translate => ("Translate", "translate"),
                     };
-                    let label = format!("{} {label}", index + 1);
+                    let label = numbered_tab_label(index, label);
                     let label_width = ui
                         .painter()
                         .layout_no_wrap(

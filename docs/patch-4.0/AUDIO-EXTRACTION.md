@@ -8,6 +8,10 @@ extensions are MP4, M4V, MOV, MKV and WebM.
 
 Results are saved below `audio-extractions` in the active data profile. Each
 successful job creates its own directory and returns the complete file path.
+Katran registers the file through its ordinary Files pointer catalogue, then
+copies it as a file. If copying fails or the clipboard changes while extraction
+runs, Files still contains the result and the dialog reports partial success.
+Removing the Files pointer does not delete the audio file.
 Setup normally uses `%LOCALAPPDATA%\Katran\data`; Portable uses its adjacent
 `katran-data` profile. A custom launcher can select a different data profile.
 The operation uses the existing FFmpeg/FFprobe runtime. Prepare missing
@@ -15,7 +19,8 @@ components in Settings → Themes → Video background.
 
 The Rust command `ExtractVideoAudio { audio_track }` captures the single
 selection when submitted. A missing ordinal selects zero; explicit ordinals
-are zero-based among audio streams. The job result is `{ path, audio_track }`.
+are zero-based among audio streams. The result includes `path`, `audio_track`,
+the Files pointer receipt, and an independent clipboard receipt.
 Cancellation before publication leaves no final file. Invalid track, no audio,
 and media processing failure are separate job errors. The worker checks the
 source revision and stages the file privately. The dispatcher checks the same
