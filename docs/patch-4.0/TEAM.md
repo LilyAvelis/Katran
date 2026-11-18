@@ -24,3 +24,10 @@ must converge across existing installations). Image upscale remains ★★★★
 pending identification of the exact workflow, translation ★★★★★ until
 language/page acceptance, and BULL/QuickLook ★★★★★★ because it adds a
 standalone format and an external reader. No later-stage implementation began.
+
+Stage 1 checkpoint `c3f2072` is on local main. The worker, independent API
+fixtures, and UI wiring are complete. Polly verified 3 worker tests, 3 API
+tests with FFmpeg 9.0.2, and 3 headless UI/palette tests. One optimized build
+was staged as `8221aa080f1d`. The previous runtime and a consistent v13 backup
+are recorded in the local rollback receipt. Owner Windows acceptance remains
+open. Stage 2 is next.
