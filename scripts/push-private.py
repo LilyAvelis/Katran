@@ -15,6 +15,14 @@ if arguments.tag and not re.fullmatch(r"v\d+\.\d+\.\d+", arguments.tag):
     parser.error("Expected a stable release tag such as v2.0.0")
 
 root = Path(__file__).resolve().parent.parent
+ref = "refs/tags/" + arguments.tag if arguments.tag else "HEAD"
+check = subprocess.run(
+    [sys.executable, str(root / "scripts" / "check-notion-secrets.py"), "--ref", ref],
+    cwd=root,
+)
+if check.returncode:
+    sys.exit(check.returncode)
+
 token = os.environ.get("GITHUB_TOKEN", "")
 if not token:
     env_file = root / ".env.local"

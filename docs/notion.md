@@ -12,6 +12,9 @@ still has an older PATH.
 3. In Katran, open **Settings → Integrations → Notion**, enter the integration's
    token and save it. Katran keeps it in Windows Credential Manager for the
    current Windows user. Disconnect removes that local credential.
+   The repository's standard GitHub push script scans the outgoing ref's
+   history for Notion-shaped tokens before attempting any upload. The
+   scanner reports only its result, without token values.
 4. From the app that should receive the text, summon Katran with its overlay
    hotkey. Press **Ctrl+Shift+N** in Katran to go straight to Notion, or use
    **Ctrl+N** or the round **N** icon inside **Ctrl+Shift+K**. Type a page
