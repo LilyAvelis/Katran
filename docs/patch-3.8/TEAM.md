@@ -6,7 +6,8 @@ Owner reported step-only panel/time flicker in runtime4acbfb44eca9; other new
 keys worked. /root/fenna (gpt-6.1-terra/high) owns the sole UI source change:
 paused-mode panel/transport stability and confirmed-position display. Frozen;
 targeted UI15/15 passed. /root owns equivalent test-API compatibility correction,
-lint/docs/local checkpoint/build/primary installation. Native/API/GPU unchanged;
+lint/docs/local checkpoint/build/primary installation complete: source6fcc9f3,
+runtime5c01f6c1060f, owner follow-up pending. Native/API/GPU unchanged;
 reuse their passing gates. No team expansion or publication.
 
 ## Current: video seek/frame keys · 2026-11-18

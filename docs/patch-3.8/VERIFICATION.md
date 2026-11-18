@@ -2,6 +2,18 @@
 
 ## Frame-step panel/time stability · 2026-11-18
 
+Installed source6fcc9f3, one optimized UI build28.88s, Windows x64/Rust1.95.0/
+locked offline/ui+clipboard-events, matching before/after source fingerprints.
+Primary runtime **5c01f6c1060f**, SHA256
+`5c01f6c1060f341aee2db940cd0c487bc18f1c026d35814879009e28b33ae8d4`.
+All copied helper/runtime hashes verified. Prior runtime4acbfb44eca9 and fresh
+integrity-checked schema-v13 backup retained in runtime/rollback-frame-ui-stable.json.
+Atomic pointer changed; running app untouched. Owner asked to tray-exit/relaunch
+and check Alt-hold panel/time stability; manual acceptance pending. No public
+push/tag/release or changes to schema/settings/backend/runtime components.
+Post-batch prune34.40→34.06GiB, removed0.34GiB, zero failures, installed runtime
+reverified. Protected dependencies/release outputs remain above32GiB budget.
+
 Owner reported new keys work in4acbfb44eca9 except panel/timeline flicker during
 Alt stepping. Native frame-step transitions Playing/Paused were reaching ordinary
 autohide and transport-label layout; intermediate time-pos reached the slider.
@@ -16,7 +28,7 @@ frame advancement and normal autohide after release/completion. Initial test-onl
 egui remove_temp<Rect> API mismatch corrected to remove<Rect>. Raw evidence:
 target/build/media-step-stable-ui.log. Locked offline Clippy all-targets/UI/
 -D warnings passed3.18s (media-step-stable-clippy.log). Build and owner acceptance
-pending; native/API/GPU checks reused because those inputs did not change.
+recorded above; native/API/GPU checks reused because those inputs did not change.
 
 ## Accepted GPU/UX and video key follow-up · 2026-11-18
 
