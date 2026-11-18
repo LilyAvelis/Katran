@@ -16,8 +16,8 @@ On the approved complex Japanese page, a warm translation fell from 21.6 s
 to 3.7 s, about 5.8× faster. See [Translate and performance](docs/patch-4.0/TRANSLATE.md)
 and [the BULL format](docs/patch-4.0/BULL.md).
 
-For one selected image, Ctrl+K → **Search image with Google Lens** sends an
-image copy to Google and opens the results in the default browser.
+For one selected image, Ctrl+K → **Search image with Google Lens** opens
+the default browser, which submits an image copy to Google Lens.
 
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate

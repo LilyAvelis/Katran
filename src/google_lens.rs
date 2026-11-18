@@ -1,18 +1,20 @@
-//! Explicit, bounded image search. Browser receives only a verified result URL.
+//! One-shot loopback handoff for a Google Lens upload in the default browser.
 use crate::{ApiError, Event, Result, domain_jobs::Cancellation};
+use base64::Engine;
 use image::ImageDecoder;
-use reqwest::{blocking::Client, header::LOCATION, redirect::Policy};
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
-    io::{Cursor, Read},
-    time::Duration,
+    io::{Cursor, Read, Write},
+    net::{TcpListener, TcpStream},
+    time::{Duration, Instant},
 };
 use url::Url;
 
 const ENDPOINT: &str = "https://lens.google.com/v3/upload";
 const MAX_INPUT: u64 = 32 * 1024 * 1024;
 const MAX_EDGE: u32 = 2048;
+const HANDOFF: &str = include_str!("google_lens_handoff.html");
 
 fn error(message: impl ToString) -> ApiError {
     ApiError::new("google_lens_error", message)
@@ -20,12 +22,12 @@ fn error(message: impl ToString) -> ApiError {
 
 fn read_selected(event: &Event) -> Result<Vec<u8>> {
     let stamp = crate::media_service::stamp(&event.path)?;
-    let mut file = File::open(&event.path)?;
+    let file = File::open(&event.path)?;
     if file.metadata()?.len() > MAX_INPUT {
         return Err(error("Google Lens accepts a source image up to 32 MiB"));
     }
     let mut bytes = Vec::new();
-    file.by_ref().take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_INPUT {
         return Err(error("Google Lens accepts a source image up to 32 MiB"));
     }
@@ -83,50 +85,7 @@ fn upload_image(input: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     Ok((jpeg, width, height))
 }
 
-fn result_url(endpoint: &Url, location: &str) -> Result<Url> {
-    let url = endpoint
-        .join(location)
-        .map_err(|_| error("Google Lens returned an invalid result address"))?;
-    if url.scheme() != "https"
-        || !matches!(url.host_str(), Some("www.google.com" | "lens.google.com"))
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.path() != "/search"
-        || url.query().is_none_or(str::is_empty)
-        || url.fragment().is_some()
-        || url.as_str().len() > 24_000
-    {
-        return Err(error(
-            "Google Lens did not return a supported search result",
-        ));
-    }
-    Ok(url)
-}
-
-fn multipart(jpeg: &[u8]) -> Result<(String, Vec<u8>)> {
-    let hash = format!("{:x}", Sha256::digest(jpeg));
-    let mut boundary = format!("katran-{}", &hash[..32]);
-    while jpeg
-        .windows(boundary.len())
-        .any(|window| window == boundary.as_bytes())
-    {
-        if boundary.len() >= 70 {
-            return Err(error("Could not encode the Google Lens request"));
-        }
-        boundary.push('x');
-    }
-    let mut body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"encoded_image\"; filename=\"image.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n"
-    ).into_bytes();
-    body.extend_from_slice(jpeg);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    Ok((format!("multipart/form-data; boundary={boundary}"), body))
-}
-
-pub(crate) fn search(event: &Event, language: &str, cancel: &Cancellation) -> Result<Url> {
-    cancel.check()?;
-    let (jpeg, width, height) = upload_image(&read_selected(event)?)?;
+fn upload_page(jpeg: &[u8], width: u32, height: u32, language: &str) -> String {
     let mut endpoint = Url::parse(ENDPOINT).expect("valid Lens upload endpoint");
     endpoint
         .query_pairs_mut()
@@ -138,31 +97,91 @@ pub(crate) fn search(event: &Event, language: &str, cancel: &Cancellation) -> Re
         ])
         .append_pair("vpw", &width.to_string())
         .append_pair("vph", &height.to_string());
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .timeout(Duration::from_secs(25))
-        .build()
-        .map_err(|_| error("Could not create a connection to Google Lens"))?;
-    let (content_type, body) = multipart(&jpeg)?;
-    cancel.begin_effect()?;
-    let response = client
-        .post(endpoint.clone())
-        .header("content-type", content_type)
-        .body(body)
-        .send()
-        .map_err(|_| error("Could not reach Google Lens"))?;
-    if !matches!(response.status().as_u16(), 302 | 303) {
-        return Err(error(format!(
-            "Google Lens did not accept the image (HTTP {})",
-            response.status().as_u16()
-        )));
+    HANDOFF
+        .replace("{{ENDPOINT}}", &endpoint.as_str().replace('&', "&amp;"))
+        .replace(
+            "{{JPEG}}",
+            &base64::engine::general_purpose::STANDARD.encode(jpeg),
+        )
+}
+
+fn is_handoff_request(stream: &mut TcpStream, route: &str, host: &str) -> std::io::Result<bool> {
+    let mut headers = [0u8; 8192];
+    let mut used = 0;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    stream.set_read_timeout(Some(Duration::from_millis(250)))?;
+    while used < headers.len() && Instant::now() < deadline {
+        let count = stream.read(&mut headers[used..])?;
+        if count == 0 {
+            break;
+        }
+        used += count;
+        if headers[..used].windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let Ok(request) = std::str::from_utf8(&headers[..used]) else {
+                return Ok(false);
+            };
+            let mut lines = request.lines();
+            let mut request_line = lines.next().unwrap_or_default().split_ascii_whitespace();
+            return Ok(request_line.next() == Some("GET")
+                && request_line.next() == Some(route)
+                && matches!(request_line.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+                && lines.take_while(|line| !line.is_empty()).any(|line| {
+                    line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case("host") && value.trim() == host
+                    })
+                }));
+        }
     }
-    let location = response
-        .headers()
-        .get(LOCATION)
-        .and_then(|header| header.to_str().ok())
-        .ok_or_else(|| error("Google Lens returned no search result address"))?;
-    result_url(&endpoint, location)
+    Ok(false)
+}
+
+pub(crate) fn search(
+    event: &Event,
+    language: &str,
+    open: impl FnOnce(&str) -> Result<()>,
+    cancel: &Cancellation,
+) -> Result<()> {
+    cancel.check()?;
+    let (jpeg, width, height) = upload_image(&read_selected(event)?)?;
+    let page = upload_page(&jpeg, width, height, language);
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let host = listener.local_addr()?.to_string();
+    let mut nonce = [0u8; 24];
+    getrandom::fill(&mut nonce).map_err(|_| error("Could not create a private Lens handoff"))?;
+    let route = format!(
+        "/{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(nonce)
+    );
+    cancel.begin_effect()?;
+    open(&format!("http://{host}{route}"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(12);
+    while Instant::now() < deadline {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false)?;
+                if !is_handoff_request(&mut stream, &route, &host).unwrap_or(false) {
+                    continue;
+                }
+                stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; form-action https://lens.google.com https://www.google.com https://consent.google.com; base-uri 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
+                    page.len(),
+                )?;
+                stream.write_all(page.as_bytes())?;
+                return Ok(());
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(error(
+        "The browser did not receive the image for Google Lens",
+    ))
 }
 
 #[cfg(test)]
@@ -170,20 +189,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_accepts_https_google_search_redirects() {
-        let endpoint = Url::parse(ENDPOINT).unwrap();
-        assert!(result_url(&endpoint, "https://www.google.com/search?vsrid=synthetic").is_ok());
-        assert!(result_url(&endpoint, "/search?p=synthetic").is_ok());
-        for target in [
-            "https://www.google.com.evil.test/search?p=x",
-            "https://www.google.com:444/search?p=x",
-            "http://www.google.com/search?p=x",
-            "https://name@www.google.com/search?p=x",
-            "https://www.google.com/url?next=https://evil.test",
-            "https://www.google.com/search",
-        ] {
-            assert!(result_url(&endpoint, target).is_err(), "{target}");
-        }
+    fn browser_form_posts_the_image_to_google_in_the_same_navigation() {
+        let page = upload_page(b"image payload", 640, 440, "en");
+        assert!(page.contains("https://lens.google.com/v3/upload?"));
+        assert!(page.contains("method=\"post\" enctype=\"multipart/form-data\""));
+        assert!(page.contains("name=\"encoded_image\""));
+        assert!(page.contains("aW1hZ2UgcGF5bG9hZA=="));
+        assert!(page.contains(".submit()"));
     }
 
     #[test]
@@ -200,12 +212,6 @@ mod tests {
                 .get_pixel(0, 0)
                 .0,
             [255; 3]
-        );
-        let (content_type, body) = multipart(&jpeg).unwrap();
-        assert!(content_type.starts_with("multipart/form-data; boundary="));
-        assert!(
-            String::from_utf8_lossy(&body)
-                .contains("name=\"encoded_image\"; filename=\"image.jpg\"")
         );
         assert!(upload_image(b"not an image").is_err());
     }

@@ -15,7 +15,8 @@ or in the closest available page margin. Matching colored numbers link the
 source regions to margin cards. Single-page output opens in QuickLook;
 multiple selected pages share one collection and a built-in page viewer.
 The viewer keeps its page frame stable and supports the same anchored zoom
-as image preview. BULL cards show a BK badge. Image translation settings
+as image preview. Page turns retain the previous image without a loading
+label. BULL cards show a BK badge. Image translation settings
 offer a numbered-only layout.
 Lilia accepted the local experience on 2026-11-18. On the approved complex
 Japanese page, warm end-to-end translation went from 21.6 s to 3.7 s.
@@ -27,10 +28,11 @@ See [Translate](../patch-4.0/TRANSLATE.md).
 ## Local follow-up · Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one
-selected image. It sends a re-encoded image to Google's Lens upload endpoint
-and opens the returned search in the default Windows browser. It runs only
-on explicit action, sends a generic filename without embedded metadata, and
-leaves the source file and clipboard unchanged. The current endpoint follows
+selected image. The default Windows browser receives a one-shot local
+handoff, then sends the image and follows the result in one browser session.
+This corrects the initial split between an app-side upload and a browser
+navigation, for which the owner reported an empty result. The upload uses a
+generic filename and no embedded metadata. The current endpoint follows
 [Chromium's Lens upload form](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/resources/new_tab_page/lens_form.ts).
 The endpoint is a web integration and may change independently of Katran.
 

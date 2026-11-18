@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Opening Google Lens</title>
+<form id="upload" method="post" enctype="multipart/form-data" action="{{ENDPOINT}}">
+    <input id="image" type="file" name="encoded_image" hidden>
+</form>
+<p id="status">Opening Google Lens…</p>
+<script>
+try {
+    const bytes = Uint8Array.from(atob("{{JPEG}}"), char => char.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], "image.jpg", {type: "image/jpeg"}));
+    document.getElementById("image").files = transfer.files;
+    document.getElementById("upload").submit();
+} catch {
+    document.getElementById("status").textContent = "This browser could not submit the image to Google Lens.";
+}
+</script>

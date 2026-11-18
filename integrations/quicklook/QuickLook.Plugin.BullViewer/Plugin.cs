@@ -83,7 +83,8 @@ namespace QuickLook.Plugin.BullViewer
             var current = document;
             if (closed || current == null || index < 0 || index >= current.Count) return;
             int token = ++generation;
-            previous.IsEnabled = next.IsEnabled = false; status.Text = "Loading page…"; context.IsBusy = true;
+            previous.IsEnabled = next.IsEnabled = false;
+            if (page < 0) { status.Text = "Loading page…"; context.IsBusy = true; }
             try
             {
                 BitmapImage bitmap = await Task.Run(() => {

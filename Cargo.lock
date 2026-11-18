@@ -1616,6 +1616,7 @@ dependencies = [
  "egui-lucide",
  "egui_extras",
  "embed-resource",
+ "getrandom 0.4.3",
  "glow",
  "image",
  "libloading",

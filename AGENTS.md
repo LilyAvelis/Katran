@@ -52,10 +52,10 @@ ready texture with its own index until the requested page is ready. Wheel
 zoom anchors at the pointer, and Ctrl+wheel anchors at the viewport center.
 
 After local Translate acceptance, Lilia authorized a separate Google Lens
-action. Upload a normalized snapshot only when the user invokes the action
-for one selected image. Keep the Google response and its result address
-out of logs and receipts. Open a validated HTTPS search result through the
-default Windows browser.
+action. Prepare a normalized snapshot for one explicitly selected image.
+Use a one-shot loopback handoff to the default Windows browser so its
+session submits the image and follows Google's result navigation. Keep
+the image, handoff token and Google results out of logs and receipts.
 
 ## Ready text preview retention · 2026-11-18
 

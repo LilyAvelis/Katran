@@ -19,10 +19,10 @@ geometry. See [Translate](patch-4.0/TRANSLATE.md) and
 [the local BULL contract](patch-4.0/BULL.md).
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
-On explicit invocation it verifies one selected image, sends a bounded
-JPEG copy, and opens only a validated Google Search redirect through the
-existing Windows Shell launcher. The job receipt acknowledges the browser
-handoff.
+On explicit invocation it verifies one selected image and passes a bounded
+JPEG copy to the default browser through a short-lived loopback address.
+The browser submits the form and follows Google's redirect in that session.
+The job receipt acknowledges delivery of the browser handoff.
 
 Static image upscale runs in its own job lane. `upscale_components.rs`
 discovers local weights and the existing portable runtime. `image_upscale.rs`

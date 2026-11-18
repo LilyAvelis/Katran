@@ -1497,8 +1497,8 @@ impl Shelf {
         }
         if result["google_lens_requested"] == true {
             self.message = tr(
-                "Результаты Google Lens открываются в браузере",
-                "Opening Google Lens results in your browser",
+                "Google Lens открывается в браузере",
+                "Opening Google Lens in your browser",
             )
             .into();
             return;

@@ -28,8 +28,7 @@ fn action_requires_one_image() {
 }
 
 #[test]
-#[ignore = "explicitly sends a generated image to Google Lens"]
-fn live_synthetic_search_hands_result_to_default_browser_boundary() {
+fn hands_the_selected_image_to_a_one_shot_browser_page() {
     use std::{
         io::Cursor,
         path::{Path, PathBuf},
@@ -103,7 +102,50 @@ fn live_synthetic_search_hands_result_to_default_browser_boundary() {
         },
     );
     let job_id = JobId(started["job_id"].as_u64().unwrap());
-    let deadline = Instant::now() + Duration::from_secs(35);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let url = loop {
+        if let Some(path) = opens.lock().unwrap().first() {
+            break url::Url::parse(path.to_str().unwrap()).unwrap();
+        }
+        let status = call(&mut api, Command::PollJob { job_id });
+        assert!(
+            matches!(status["state"].as_str(), Some("queued" | "running")),
+            "{status}"
+        );
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    assert_eq!(url.host_str(), Some("127.0.0.1"));
+    let browser = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    assert!(
+        browser
+            .get(url.join("/wrong-token").unwrap())
+            .send()
+            .is_err()
+    );
+    let response = browser.get(url.clone()).send().unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let page = response.text().unwrap();
+    assert!(page.contains("https://lens.google.com/v3/upload?"));
+    let encoded = page
+        .split_once("atob(\"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0;
+    use base64::Engine as _;
+    let image = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap();
+    let rgb = image::load_from_memory(&image).unwrap().to_rgb8();
+    assert_eq!(rgb.dimensions(), (640, 440));
+    assert_ne!(rgb.get_pixel(320, 220), rgb.get_pixel(0, 0));
     loop {
         let status = call(&mut api, Command::PollJob { job_id });
         match status["state"].as_str() {
@@ -118,10 +160,5 @@ fn live_synthetic_search_hands_result_to_default_browser_boundary() {
     }
     let opens = opens.lock().unwrap();
     assert_eq!(opens.len(), 1);
-    let url = url::Url::parse(opens[0].to_str().unwrap()).unwrap();
-    assert!(matches!(
-        url.host_str(),
-        Some("www.google.com" | "lens.google.com")
-    ));
-    assert_eq!(url.path(), "/search");
+    assert!(browser.get(url).send().is_err());
 }

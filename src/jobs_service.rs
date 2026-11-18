@@ -775,10 +775,11 @@ impl Service {
                     settings::Language::Russian => "ru",
                 };
                 self.jobs.submit(Lane::Foreground, move |cancel| {
-                    let url = google_lens::search(&event, language, &cancel)?;
-                    launcher.lock()
-                        .map_err(|_| ApiError::new("open_busy", "Could not use the default browser"))?
-                        .launch(std::path::Path::new(url.as_str()), open_file::Operation::Open)?;
+                    google_lens::search(&event, language, |url| {
+                        launcher.lock()
+                            .map_err(|_| ApiError::new("open_busy", "Could not use the default browser"))?
+                            .launch(std::path::Path::new(url), open_file::Operation::Open)
+                    }, &cancel)?;
                     Ok(PreparedWork::Value(json!({"google_lens_requested":true})))
                 })?
             }

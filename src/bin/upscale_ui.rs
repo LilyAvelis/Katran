@@ -330,21 +330,12 @@ impl Shelf {
                     }
                 }
             }
-            if collection.pending.is_some() || !collection.error.is_empty() {
-                let text = if collection.pending.is_some() {
-                    format!(
-                        "{} {}…",
-                        tr("Загрузка страницы", "Loading page"),
-                        collection.index + 1
-                    )
-                } else {
-                    collection.error.clone()
-                };
+            if !collection.error.is_empty() {
                 let anchor = canvas.left_top() + egui::vec2(12.0, 12.0);
                 painter.text(
                     anchor,
                     egui::Align2::LEFT_TOP,
-                    text,
+                    &collection.error,
                     egui::FontId::proportional(15.0),
                     egui::Color32::LIGHT_RED,
                 );

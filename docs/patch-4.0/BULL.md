@@ -29,7 +29,8 @@ a named snapshot to the external viewer. Its internal page viewer can reopen
 the same collection without an external app.
 Katran marks collection cards with a BK badge. When paging, the preview
 retains the last ready page in a fixed viewport until the requested page
-arrives. Wheel zoom anchors at the pointer, Ctrl+wheel at the center, and
+arrives. Page changes do not flash a loading label over the ready image.
+Wheel zoom anchors at the pointer, Ctrl+wheel at the center, and
 dragging pans the enlarged page. A successfully loaded new page starts fitted.
 The external QuickLook viewer also uses a clipped viewport, retains the last
 ready page and supports anchored zoom. Its updated plugin was built and
