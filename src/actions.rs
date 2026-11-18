@@ -25,6 +25,7 @@ pub fn palette_order(id: &str) -> usize {
         "open_with",
         "quicklook",
         "reveal",
+        "search_image_google_lens",
         "save",
         "delete",
         "video_pause",
@@ -81,8 +82,17 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "translate_image_ja"
         | "translate_image_zh"
         | "translate_image_ko" => "AI Commands",
-        "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
-        | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
+        "paste_previous"
+        | "copy"
+        | "copy_text"
+        | "preview"
+        | "open"
+        | "open_with"
+        | "quicklook"
+        | "reveal"
+        | "search_image_google_lens"
+        | "save"
+        | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
         "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view"
         | "refresh" => "Навигация и выделение",
@@ -129,6 +139,9 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
         "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
+        "search_image_google_lens" => {
+            "google lens поиск изображение картинка фото search image reverse visual"
+        }
         "translate_image_ja" => {
             "перевести перевод японский манга изображение translate Japanese manga OCR AI"
         }
@@ -209,6 +222,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "files" => "Files tab",
         "desktop" => "Desktop tab",
         "translate" => "Translate tab",
+        "search_image_google_lens" => "Search image with Google Lens",
         "translate_image_ja" => "Translate image from Japanese",
         "translate_image_zh" => "Translate image from Simplified Chinese",
         "translate_image_ko" => "Translate image from Korean",
@@ -263,6 +277,14 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "search_image_google_lens",
+        label: "Найти изображение в Google Lens",
+        default_binding: "",
+        rebindable: true,
+        group: "Выбранное",
+        in_palette: true,
+    },
     Definition {
         id: "translate_image_zh",
         label: "Перевести изображение с упрощённого китайского",
@@ -1226,6 +1248,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "capture" => command(Command::SetCaptureEnabled { enabled: !capture }),
         "refresh" => command(Command::List { limit: 1000 }),
         "transfer_copy" => command(Command::CopySelection),
+        "search_image_google_lens" => command(Command::SearchSelectedImageWithGoogleLens),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),
         "extract_video_audio" => {

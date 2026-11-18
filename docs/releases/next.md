@@ -1,6 +1,6 @@
 # Development log through 3.7.1
 
-## Katran 4.0 · Translate foundation
+## Katran 4.0 · Accepted local Translate and BULL
 
 The local Translate tab is restricted to internally published managed image
 results. The independent Rust collection preserves page order. This change
@@ -17,7 +17,22 @@ multiple selected pages share one collection and a built-in page viewer.
 The viewer keeps its page frame stable and supports the same anchored zoom
 as image preview. BULL cards show a BK badge. Image translation settings
 offer a numbered-only layout.
+Lilia accepted the local experience on 2026-11-18. On the approved complex
+Japanese page, warm end-to-end translation went from 21.6 s to 3.7 s.
+Paddle's first pass fell from 15.1 s to 0.6 s by removing its redundant
+recognition pass and enabling oneDNN for detection. See the separate
+warm/cold and renderer measurements in the Translate contract.
 See [Translate](../patch-4.0/TRANSLATE.md).
+
+## Local follow-up · Google Lens
+
+Ctrl+K offers a rebindable **Search image with Google Lens** action for one
+selected image. It sends a re-encoded image to Google's Lens upload endpoint
+and opens the returned search in the default Windows browser. It runs only
+on explicit action, sends a generic filename without embedded metadata, and
+leaves the source file and clipboard unchanged. The current endpoint follows
+[Chromium's Lens upload form](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/resources/new_tab_page/lens_form.ts).
+The endpoint is a web integration and may change independently of Katran.
 
 ## Katran 4.0 · Local static image upscale
 

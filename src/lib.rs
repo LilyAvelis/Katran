@@ -39,6 +39,7 @@ pub mod folder_semantic;
 pub mod folder_transfer;
 pub mod folder_watch;
 mod foreground_windows;
+mod google_lens;
 pub mod interaction;
 mod jobs_service;
 mod image_upscale;
@@ -541,6 +542,7 @@ impl Service {
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
+            command @ Command::SearchSelectedImageWithGoogleLens => self.begin_job(command),
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),

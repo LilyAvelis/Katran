@@ -7,8 +7,17 @@ Local 4.0 work adds Ctrl+K → Video → Extract audio. Katran saves the selecte
 track as a separate AAC/M4A file, adds it to Files, and copies it as a file.
 See [audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md).
 
-The local Translate shelf is reserved for completed image translations.
-See [the Translate foundation](docs/patch-4.0/TRANSLATE.md).
+Local Katran 4.0 translates selected Japanese, Simplified Chinese and Korean
+images to English from Ctrl+K → AI Commands. Single images and ordered BULL
+batches appear in Translate. Settings → AI → Image translation can keep
+the original lettering and place translations on matching numbered cards.
+The BULL viewer supports paging and zoom in Katran and QuickLook.
+On the approved complex Japanese page, a warm translation fell from 21.6 s
+to 3.7 s, about 5.8× faster. See [Translate and performance](docs/patch-4.0/TRANSLATE.md)
+and [the BULL format](docs/patch-4.0/BULL.md).
+
+For one selected image, Ctrl+K → **Search image with Google Lens** sends an
+image copy to Google and opens the results in the default browser.
 
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate

@@ -1,4 +1,9 @@
-# Translate foundation
+# Translate and BULL in Katran 4.0
+
+Lilia accepted the local Translate and BULL experience after trying batch
+translation, numbered references and the updated viewer. The accepted
+launcher runtime was `c6114a60454a`, source `422b708`. The benchmark below
+uses the supplied pages and includes publication to Translate.
 
 Translate is a dedicated shelf view for managed images explicitly published
 as translation results. Catalogue v14 adds the result link and a separate tag

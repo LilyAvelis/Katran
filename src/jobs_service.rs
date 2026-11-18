@@ -767,6 +767,21 @@ impl Service {
                     })
                 })?
             }
+            Command::SearchSelectedImageWithGoogleLens => {
+                let event = self.selected_background_image()?;
+                let launcher = self.file_launcher.clone();
+                let language = match self.settings.language {
+                    settings::Language::English => "en",
+                    settings::Language::Russian => "ru",
+                };
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let url = google_lens::search(&event, language, &cancel)?;
+                    launcher.lock()
+                        .map_err(|_| ApiError::new("open_busy", "Could not use the default browser"))?
+                        .launch(std::path::Path::new(url.as_str()), open_file::Operation::Open)?;
+                    Ok(PreparedWork::Value(json!({"google_lens_requested":true})))
+                })?
+            }
             Command::UpscaleSelectedImage { operation } => {
                 let event = self.selected_background_image()?;
                 let root = self.root.clone();

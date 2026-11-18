@@ -51,6 +51,12 @@ Keep the collection viewport stable while a page is pending. Retain the last
 ready texture with its own index until the requested page is ready. Wheel
 zoom anchors at the pointer, and Ctrl+wheel anchors at the viewport center.
 
+After local Translate acceptance, Lilia authorized a separate Google Lens
+action. Upload a normalized snapshot only when the user invokes the action
+for one selected image. Keep the Google response and its result address
+out of logs and receipts. Open a validated HTTPS search result through the
+default Windows browser.
+
 ## Ready text preview retention · 2026-11-18
 
 Owner authorized closing the residual Links blink after accepting the Mini stream

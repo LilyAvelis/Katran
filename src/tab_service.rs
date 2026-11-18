@@ -61,7 +61,11 @@ fn background_actions(
         && ["mp4", "m4v", "mov", "mkv", "webm"]
             .iter()
             .any(|candidate| extension.eq_ignore_ascii_case(candidate));
-    BackgroundActions { image, video, translate: image }
+    BackgroundActions {
+        image,
+        video,
+        translate: image,
+    }
 }
 
 impl Service {
@@ -89,8 +93,10 @@ impl Service {
         if (2..=crate::image_translation_batch::MAX_PAGES).contains(&selected.len()) {
             return BackgroundActions {
                 translate: selected.iter().all(|id| {
-                    self.get(*id).is_ok_and(|event| event.kind == crate::EventKind::ManagedImage
-                        || crate::file_types::is_native_image(&event.path))
+                    self.get(*id).is_ok_and(|event| {
+                        event.kind == crate::EventKind::ManagedImage
+                            || crate::file_types::is_native_image(&event.path)
+                    })
                 }),
                 ..Default::default()
             };
@@ -110,7 +116,10 @@ impl Service {
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
             | "upscale_realesrgan_x4" => background.image,
-            "translate_image_ja" | "translate_image_zh" | "translate_image_ko" => background.translate,
+            "translate_image_ja" | "translate_image_zh" | "translate_image_ko" => {
+                background.translate
+            }
+            "search_image_google_lens" => background.image,
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,

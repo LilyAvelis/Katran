@@ -1495,6 +1495,14 @@ impl Shelf {
             };
             return;
         }
+        if result["google_lens_requested"] == true {
+            self.message = tr(
+                "Результаты Google Lens открываются в браузере",
+                "Opening Google Lens results in your browser",
+            )
+            .into();
+            return;
+        }
         if result["backend"] == "quicklook" {
             self.action_result(result.clone());
             self.state = self.call(Command::Interaction);
@@ -1997,6 +2005,27 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "search_image_google_lens" {
+            if self.start_job(
+                Command::SearchSelectedImageWithGoogleLens,
+                false,
+                ctx.clone(),
+            ) {
+                self.actions = false;
+                self.message = tr(
+                    "Поиск изображения в Google Lens…",
+                    "Searching image with Google Lens…",
+                )
+                .into();
+            } else if self.job.is_some() {
+                self.message = tr(
+                    "Дождитесь завершения текущей операции",
+                    "Wait for the current operation to finish",
+                )
+                .into();
+            }
+            return;
+        }
         if id == "preview" && self.state["preview"].is_null() {
             let interaction = self.call(Command::Interaction);
             if let Some(event_id) = interaction["cursor"].as_i64() {
