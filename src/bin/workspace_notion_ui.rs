@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "notion_reader_ui.rs"]
+mod reader;
+
 #[derive(Default)]
 pub(super) struct State {
     mode: Mode,
@@ -10,7 +13,7 @@ pub(super) struct State {
     focus: bool,
     more: bool,
     preview_open: bool,
-    preview: Option<katran::markdown::Document>,
+    preview: Option<Vec<katran::notion_reader::Block>>,
     error: Option<String>,
     notice: Option<&'static str>,
     search_due: Option<Instant>,
@@ -175,7 +178,7 @@ impl Shelf {
             }
             Operation::Preview => {
                 let markdown = result["markdown"].as_str().unwrap_or_default();
-                match katran::markdown::parse(markdown) {
+                match katran::notion_reader::parse(markdown) {
                     Ok(doc) => state.preview = Some(doc),
                     Err(message) => state.error = Some(message.into()),
                 }
@@ -306,8 +309,10 @@ impl Shelf {
                             if let Some(page) = state.pages.get(state.selected) {
                                 ui.heading(&page.title);
                             }
-                            if let Some(doc) = &state.preview {
-                                crate::markdown_ui::show_on(ui, doc, Color32::from_gray(48));
+                            if let (Some(blocks), Some(page)) =
+                                (&state.preview, state.pages.get(state.selected))
+                            {
+                                ui.push_id(&page.id, |ui| reader::show(ui, blocks));
                             }
                         } else {
                             for (index, page) in state.pages.iter().enumerate() {

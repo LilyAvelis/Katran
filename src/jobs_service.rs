@@ -1572,7 +1572,7 @@ impl Service {
                 let page = notion::Page { id: page_id, title };
                 page.validate()?;
                 self.jobs.submit(Lane::Discovery, move |cancel| {
-                    let markdown = notion::markdown(&page.id, || cancel.check())?;
+                    let markdown = notion::preview_markdown(&page.id, || cancel.check())?;
                     Ok(PreparedWork::ReadNotionPage { page, markdown })
                 })?
             }

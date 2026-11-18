@@ -66,6 +66,7 @@ pub mod open_file;
 pub mod origin;
 mod paste_service;
 pub mod notion;
+pub mod notion_reader;
 pub mod pinned;
 mod pinned_open;
 pub mod pinned_order;

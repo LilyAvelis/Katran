@@ -284,7 +284,7 @@ pub(crate) fn search(query: &str, check: impl Fn() -> Result<()>) -> Result<Valu
         "page_size": 25,
         "filter": {"property": "object", "value": "page"}
     });
-    let response = request("v1/search", Some(body), check)?;
+    let response = request("v1/search", Some(body), &[], check)?;
     let results = response["results"].as_array().ok_or_else(response_error)?;
     let pages: Vec<_> = results
         .iter()
@@ -299,10 +299,18 @@ pub(crate) fn search(query: &str, check: impl Fn() -> Result<()>) -> Result<Valu
 }
 
 pub(crate) fn markdown(id: &str, check: impl Fn() -> Result<()>) -> Result<String> {
+    fetch_markdown(id, &[], check)
+}
+
+pub(crate) fn preview_markdown(id: &str, check: impl Fn() -> Result<()>) -> Result<String> {
+    fetch_markdown(id, &["markdown_version==v2"], check)
+}
+
+fn fetch_markdown(id: &str, query: &[&str], check: impl Fn() -> Result<()>) -> Result<String> {
     if !page_id(id) {
         return Err(ApiError::new("notion_page_id", "Invalid Notion page ID"));
     }
-    let response = request(&format!("v1/pages/{id}/markdown"), None, check)?;
+    let response = request(&format!("v1/pages/{id}/markdown"), None, query, check)?;
     read_markdown(&response)
 }
 
@@ -406,7 +414,12 @@ fn cli_executable() -> Option<std::path::PathBuf> {
     Some("ntn".into())
 }
 
-fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> Result<Value> {
+fn request(
+    path: &str,
+    body: Option<Value>,
+    query: &[&str],
+    check: impl Fn() -> Result<()>,
+) -> Result<Value> {
     check()?;
     let token = credentials::read()?.ok_or_else(|| {
         ApiError::new("notion_config", "Connect Notion in Settings → Integrations")
@@ -432,6 +445,7 @@ fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> R
     } else {
         command.args(["-X", "GET"]).stdin(Stdio::null());
     }
+    command.args(query);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

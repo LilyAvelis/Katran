@@ -7,8 +7,11 @@ from Folder paths and use only title search and page Markdown through the
 official ntn CLI. Store the dedicated read-only connection token in Windows
 Credential Manager. Keep credentials, titles, queries and page contents out of
 diagnostics. Enter follows the existing overlay lease and publishes a single
-owned Markdown file. Keep local page IDs and titles in the Notion sidecar for
-history and favorites. No Notion writes or database browsing. See [setup](docs/notion.md).
+owned Markdown file. Ctrl+Shift+N opens the Notion picker from the ordinary
+Katran UI. Space requests Markdown v2 on demand for the native callout,
+table and toggle reader. Preview markup is inert. Keep local page IDs and
+titles in the Notion sidecar for history and favorites. No Notion writes
+or database browsing. See [setup](docs/notion.md).
 
 ## Katran 4.0.0 public release authorization · 2026-11-18
 

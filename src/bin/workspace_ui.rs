@@ -381,6 +381,16 @@ impl Shelf {
                 self.workspace_mode(Mode::Search, ctx);
             }
         }
+        if !self.workspace.open
+            && !self.modal_owns_input()
+            && self.state["settings_open"] != true
+            && ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::N)
+            })
+        {
+            self.workspace.open = true;
+            self.workspace_open_notion(ctx);
+        }
         if self.workspace.open
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::N))
         {
@@ -755,6 +765,26 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_notion_shortcut_opens_picker_and_respects_modal_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let press = egui::Event::Key {
+            key: egui::Key::N,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+        };
+        app.save = true;
+        send_workspace_key(&mut app, &egui::Context::default(), press.clone());
+        assert!(!app.workspace.open);
+        app.save = false;
+        send_workspace_key(&mut app, &egui::Context::default(), press);
+        assert!(app.workspace.open);
+        assert!(app.workspace.notion_source);
+    }
 
     #[test]
     fn neural_query_waits_for_enter_and_last_down_appends_ten() {
