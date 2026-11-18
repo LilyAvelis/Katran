@@ -45,6 +45,7 @@ impl Backend for Fake {
             width: 0,
             height: 0,
             error: None,
+            acceleration: None,
         })
     }
     fn frame(&mut self, _: u64) -> Result<Option<Frame>> {

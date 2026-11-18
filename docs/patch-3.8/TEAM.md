@@ -1,5 +1,17 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Current: P, seek/layout polish and optional GPU · 2026-11-18
+
+Existing sessions reused; no expansion:
+- /root/fenna · gpt-6.1-terra/high: media_preview_ui.rs, dynamic overlay/seek
+  confirmation/toggle method; frozen for final UI gate.
+- /root/mira · gpt-6.1-terra/high: media_playback_mpv.rs and GPU WGL helper;
+  native gates3/3 plus corrected orientation/GPU gate2/2 passed, frozen.
+- /root/nemi · gpt-6.1-terra/high: settings.rs/settings_ui.rs/settings tests;
+  default-off field and targeted fresh-settings save, frozen.
+- /root · lead: input ownership/P, shared policy/service/Cargo/status integration,
+  API tests, final lint/docs/build/primary install. Manual follow-up pending.
+
 ## Current: libmpv and overlay controls · 2026-11-18
 
 Owner confirmed the first candidate plays in Desktop but fails in Folder and

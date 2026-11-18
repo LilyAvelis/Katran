@@ -9,6 +9,13 @@ and reuses one texture. See [contract and limits](video-preview.md), including
 the client-poll watchdog, pinned runtime setup and CPU-rendering limits.
 Space autoplays once per target; Mini waits for Play; controls overlay the canvas.
 Video-only, no migration.
+Optional GPU mode uses a private WGL surface in media_playback_mpv_gpu.rs and
+libmpv OpenGL rendering followed by bounded RGBA readback. Requested acceleration
+is persisted separately from observed renderer/decoder/fallback status. Default
+is CPU. Changing the setting closes existing sessions and invalidates prepared
+opens. P input is owned by the active video surface before shelf search; modals
+and text fields keep input. UI seek keeps its desired position until native
+observation rather than treating an asynchronous command ACK as completion.
 
 Build/test outputs belong in `target/build`. Read the [storage budget](devops.md)
 before cleanup: `maintain-build-cache.ps1` plans by default, `-Apply` uses guarded

@@ -1,5 +1,37 @@
 # Katran 3.8 verification handoff
 
+## Owner playback acceptance and GPU/UX follow-up · 2026-11-18
+
+Lilia confirmed runtime3322b2bcfddb plays in Folder and Desktop and switches
+objects. Reported remaining defects: clipped large controls, stale-time seek
+jitter; requested P pause and optional default-off GPU acceleration.
+
+Native GPU gates: 3/3 (CPU default, real GPU, forced GPU-init CPU fallback),
+37.59s compile / 15.59s tests. Actual synthetic MP4/MKV reported renderer=gpu,
+decoder=nvdec. Forced fallback produced real CPU frames and a reason. All muted.
+An orientation fixture found inverted GPU output; changed flip_y to0. The
+targeted corrected orientation+GPU-controls gate passed2/2 (5.73s compile /
+10.77s tests): red top/blue bottom/alpha255 on both CPU and GPU, and observed
+NVDEC with MP4/MKV controls/stop. CPU/fallback gates retained for unchanged paths.
+Logs: media-mpv-gpu-native.log and media-mpv-gpu-orientation-fixed.log. The
+earlier media-mpv-gpu-orientation.log intentionally retains the discovered failure.
+
+GPU mode uses a never-shown worker-owned WGL context and GL FBO with bounded
+CPU RGBA readback. This proves the path on this machine, not lower CPU load,
+performance on other machines, audible output or immunity to driver faults.
+Settings/requested mode and observed renderer/decoder are separate facts.
+
+UI/API evidence: full UI gate passed279/280, finding the real large-control clip;
+after the layout correction the focused player suite passed11/11, including
+actual widget bounds, pending-seek stale ACK/polls and pause commands. Unchanged
+UI cases retain their passing evidence, including P/modal/search ownership and
+targeted settings saves. Final API/policy/settings/wire gate passed18/18; toggling
+GPU invalidates the old token and settings persist across reopen. Final Clippy
+all-targets with UI and -D warnings passed. Only equivalent lint cleanups followed
+the native gates; no decoding/rendering behavior was changed afterward.
+Logs: media-gpu-ux-api-ui.log (discovered clip), media-gpu-ux-ui-final.log,
+media-gpu-ux-api-final.log and media-gpu-ux-clippy.log.
+
 ## Replacement: libmpv and overlay UI · 2026-11-18
 
 Installed from source `7c708a3`, one optimized UI build **91.88s**, Windows x64 /

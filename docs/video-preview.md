@@ -19,6 +19,12 @@ when showing the same item. A late prepare result cannot reopen an abandoned
 session after leaving and returning. Metadata-only tag/pin changes keep the same
 content session. Ordinary image/Text/Pods interactions retain their routes.
 
+The owner confirmed playback/navigation in Folder and Desktop. Follow-up UI
+corrections size the overlay from actual widgets with a bottom inset for large
+controls. Seek holds the requested position until observed confirmation or a
+bounded timeout/error. Physical P pauses/resumes only on a video surface; text
+editing and modals retain input, and autorepeat does not toggle.
+
 ## Domain and native boundary
 
 `media_playback.rs` owns one session, monotonic tokens, validated controls and
@@ -32,12 +38,23 @@ metadata rather than rehashing a large video on every frame.
 
 `media_playback_mpv.rs` replaces the first Windows Media Foundation candidate
 with libmpv, informed by Afio's existing Rust/egui integration. libmpv itself is
-C code. It owns decoding, playback timing and audio. The current bridge uses
-libmpv software rendering into bounded RGBA (up to 1280x720, about 30fps), then
-updates an egui texture. Unlike Afio's OpenGL bridge, this copies CPU frames.
-Software conversion/scaling is single-threaded and can be slow for large videos;
-no GPU-rendering, HDR or measured performance improvement is claimed. The
-upstream render header explicitly documents these software-renderer limitations.
+C code. It owns decoding, playback timing and audio. The default bridge uses
+software rendering into bounded RGBA (up to 1280x720, about 30fps). Conversion/
+scaling is single-threaded and can be slow for large videos. Settings → General
+offers optional video GPU acceleration, **off by default**. A private, never-shown
+WGL context on the worker renders through libmpv OpenGL into an FBO, then reads
+bounded RGBA back into the existing texture path. Hardware decoding is requested
+with auto-safe; actual hwdec-current can still report CPU. This is not zero-copy,
+a full-resolution/HDR promise or a performance benchmark.
+
+MediaState exposes optional Snapshot.acceleration: requested_gpu, actual
+renderer (cpu/gpu), observed decoder and fallback_reason. The player shows actual
+mode with the controls. GPU initialization failure falls back to software before
+loading the file and reports the reason. Mid-playback GL failure stops with an
+error; seamless recovery or immunity to a hung/crashing driver is not promised.
+The user can disable the option. Changing it invalidates sessions/pending opens;
+the next open selects the configured backend. Injected test backends stay owned
+by the test.
 
 The owner saw the first candidate work in Desktop but fail in Folder with
 Media Engine code4 / HRESULT0x80070003. Synthetic Cyrillic names reproduced

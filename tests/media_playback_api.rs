@@ -34,6 +34,7 @@ impl Backend for Fake {
             width: 1,
             height: 1,
             error: None,
+            acceleration: None,
         })
     }
     fn frame(&mut self, _: u64) -> katran::Result<Option<Frame>> {
@@ -257,6 +258,28 @@ fn metadata_edits_keep_session_but_visibility_and_settings_close_it() {
         },
     );
     assert_eq!(ok(&mut service, Command::MediaState)["token"], token);
+    let mut settings: katran::settings::Settings =
+        serde_json::from_value(ok(&mut service, Command::GetSettings)).unwrap();
+    settings.video_gpu_acceleration = true;
+    ok(&mut service, Command::SetSettings { settings });
+    assert_eq!(ok(&mut service, Command::MediaState), Value::Null);
+    assert_eq!(
+        call(
+            &mut service,
+            Command::ControlMedia {
+                session: token,
+                action: Action::Play
+            }
+        )["ok"],
+        false
+    );
+    ok(
+        &mut service,
+        Command::OpenMedia {
+            id,
+            revision: revision.clone(),
+        },
+    );
     ok(&mut service, Command::ShowSettings);
     assert_eq!(ok(&mut service, Command::MediaState), Value::Null);
     ok(&mut service, Command::CloseSettings);
@@ -266,7 +289,7 @@ fn metadata_edits_keep_session_but_visibility_and_settings_close_it() {
         Command::SetWindowVisibility { visible: false },
     );
     assert_eq!(ok(&mut service, Command::MediaState), Value::Null);
-    assert_eq!(counts.lock().unwrap().closes, 2);
+    assert_eq!(counts.lock().unwrap().closes, 3);
 }
 #[test]
 fn folder_unicode_video_uses_browsed_source_and_closes_on_folder_change() {

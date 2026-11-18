@@ -1,8 +1,10 @@
-//! libmpv software-rendered playback. Rendering is CPU based and bounded;
+//! libmpv playback, optionally using an offscreen GPU renderer with CPU readback.
 //! libmpv owns audio. No native resources are created until `open`.
+#[path = "media_playback_mpv_gpu.rs"]
+mod gpu;
 use crate::{
     ApiError, Result,
-    media_playback::{Action, Backend, Frame, PlaybackState, Snapshot, Source},
+    media_playback::{Acceleration, Action, Backend, Frame, PlaybackState, Snapshot, Source},
 };
 use libloading::{
     Library,
@@ -167,6 +169,7 @@ fn empty() -> Snapshot {
         width: 0,
         height: 0,
         error: None,
+        acceleration: None,
     }
 }
 struct Shared {
@@ -184,6 +187,22 @@ pub struct MpvBackend {
     tx: Option<SyncSender<Command>>,
     shared: Option<Arc<Mutex<Shared>>>,
     cancel: Option<Arc<AtomicBool>>,
+    requested_gpu: bool,
+    #[cfg(test)]
+    force_gpu_failure: bool,
+}
+impl MpvBackend {
+    pub fn with_gpu(requested_gpu: bool) -> Self {
+        let mut backend = Self::default();
+        backend.requested_gpu = requested_gpu;
+        backend
+    }
+    #[cfg(test)]
+    fn with_forced_fallback() -> Self {
+        let mut backend = Self::with_gpu(true);
+        backend.force_gpu_failure = true;
+        backend
+    }
 }
 
 fn library_path() -> Result<PathBuf> {
@@ -243,9 +262,16 @@ impl Backend for MpvBackend {
         let (tx, rx) = mpsc::sync_channel(8);
         let data = Arc::clone(&shared);
         let stop = Arc::clone(&cancel);
+        #[cfg(test)]
+        let force_gpu_failure = self.force_gpu_failure;
+        #[cfg(not(test))]
+        let force_gpu_failure = false;
         let worker = thread::Builder::new()
             .name("katran-mpv".into())
-            .spawn(move || run(dll, path, rx, data, stop))
+            .spawn({
+                let requested_gpu = self.requested_gpu;
+                move || run(dll, path, rx, data, stop, requested_gpu, force_gpu_failure)
+            })
             .map_err(|e| err("media_unavailable", e))?;
         self.worker = Some(worker);
         self.tx = Some(tx);
@@ -331,6 +357,7 @@ struct Core {
     handle: Handle,
     render: Handle,
     notify: Box<AtomicBool>,
+    gpu: Option<gpu::Gpu>,
 }
 impl Drop for Core {
     fn drop(&mut self) {
@@ -365,8 +392,18 @@ fn run(
     rx: Receiver<Command>,
     shared: Arc<Mutex<Shared>>,
     cancel: Arc<AtomicBool>,
+    requested_gpu: bool,
+    force_gpu_failure: bool,
 ) {
-    let result = worker(dll, path, rx, &shared, &cancel);
+    let result = worker(
+        dll,
+        path,
+        rx,
+        &shared,
+        &cancel,
+        requested_gpu,
+        force_gpu_failure,
+    );
     if let Ok(mut s) = shared.lock() {
         s.frame = None;
         match result {
@@ -387,6 +424,8 @@ fn worker(
     rx: Receiver<Command>,
     shared: &Mutex<Shared>,
     cancel: &AtomicBool,
+    requested_gpu: bool,
+    force_gpu_failure: bool,
 ) -> std::result::Result<(), String> {
     unsafe {
         let api = Api::load(&dll)?;
@@ -399,6 +438,7 @@ fn worker(
             handle,
             render: std::ptr::null_mut(),
             notify: Box::new(AtomicBool::new(false)),
+            gpu: None,
         };
         for (key, value) in [
             ("vo", "libmpv"),
@@ -424,6 +464,10 @@ fn worker(
                 .check((core.api.option)(handle, k.as_ptr(), v.as_ptr()))
                 .map_err(|e| format!("Video engine option {key}: {e}"))?;
         }
+        let hwdec = if requested_gpu { c"auto-safe" } else { c"no" };
+        core.api
+            .check((core.api.option)(handle, c"hwdec".as_ptr(), hwdec.as_ptr()))
+            .map_err(|e| format!("Video decoding option: {e}"))?;
         core.api
             .check((core.api.initialize)(handle))
             .map_err(|e| format!("Video engine initialization: {e}"))?;
@@ -436,25 +480,78 @@ fn worker(
             (6, "video-params/h", 4),
             (7, "audio-params/samplerate", 4),
             (8, "eof-reached", 3),
+            (9, "hwdec-current", 1),
         ] {
             let name = CString::new(name).unwrap();
             core.api
                 .check((core.api.observe)(handle, id, name.as_ptr(), format))?;
         }
-        let mut params = [
-            Param {
-                kind: 1,
-                data: c"sw".as_ptr().cast_mut().cast(),
-            },
-            Param::end(),
-        ];
-        core.api
-            .check((core.api.render_create)(
-                &mut core.render,
-                handle,
-                params.as_mut_ptr(),
-            ))
-            .map_err(|e| format!("Software video renderer: {e}"))?;
+        let mut fallback_reason = None;
+        if requested_gpu {
+            match if force_gpu_failure {
+                Err("GPU initialization deliberately unavailable in test".to_owned())
+            } else {
+                gpu::Gpu::new()
+            } {
+                Ok(gpu) => {
+                    let mut init = gpu::Gpu::init();
+                    let mut params = [
+                        Param {
+                            kind: 1,
+                            data: c"opengl".as_ptr().cast_mut().cast(),
+                        },
+                        Param::new(2, &mut init),
+                        Param::end(),
+                    ];
+                    let result = core.api.check((core.api.render_create)(
+                        &mut core.render,
+                        handle,
+                        params.as_mut_ptr(),
+                    ));
+                    match result {
+                        Ok(()) => core.gpu = Some(gpu),
+                        Err(e) => {
+                            if !core.render.is_null() {
+                                (core.api.render_free)(core.render);
+                                core.render = std::ptr::null_mut();
+                            }
+                            fallback_reason = Some(format!("OpenGL video renderer: {e}"));
+                            drop(gpu);
+                        }
+                    }
+                }
+                Err(e) => fallback_reason = Some(e),
+            }
+        }
+        if core.gpu.is_none() {
+            let mut params = [
+                Param {
+                    kind: 1,
+                    data: c"sw".as_ptr().cast_mut().cast(),
+                },
+                Param::end(),
+            ];
+            core.api
+                .check((core.api.render_create)(
+                    &mut core.render,
+                    handle,
+                    params.as_mut_ptr(),
+                ))
+                .map_err(|e| format!("Software video renderer: {e}"))?;
+            if requested_gpu {
+                issue(&core.api, handle, &["set", "hwdec", "no"])?;
+            }
+        }
+        shared
+            .lock()
+            .map_err(|_| "Playback state unavailable")?
+            .snapshot
+            .acceleration = Some(Acceleration {
+            requested_gpu,
+            renderer: if core.gpu.is_some() { "gpu" } else { "cpu" }.into(),
+            decoder: if core.gpu.is_some() { "unknown" } else { "no" }.into(),
+            fallback_reason,
+        });
         (core.api.render_callback)(
             core.render,
             Some(render_notify),
@@ -556,6 +653,11 @@ fn worker(
                         if event.userdata == 7 {
                             s.snapshot.has_audio = false;
                         }
+                        if event.userdata == 9
+                            && let Some(a) = s.snapshot.acceleration.as_mut()
+                        {
+                            a.decoder = "no".into();
+                        }
                         continue;
                     }
                     match (event.userdata, p.format) {
@@ -585,6 +687,14 @@ fn worker(
                         }
                         (7, 4) => s.snapshot.has_audio = *p.data.cast::<i64>() > 0,
                         (8, 3) => ended = *p.data.cast::<c_int>() != 0,
+                        (9, 1) => {
+                            let text = *p.data.cast::<*const c_char>();
+                            if !text.is_null()
+                                && let Some(a) = s.snapshot.acceleration.as_mut()
+                            {
+                                a.decoder = CStr::from_ptr(text).to_string_lossy().into_owned();
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -613,6 +723,33 @@ fn worker(
             let scale = (1280.0 / w as f64).min(720.0 / h as f64).min(1.0);
             let w = ((w as f64 * scale) as u32).max(1);
             let h = ((h as f64 * scale) as u32).max(1);
+            if let Some(gpu) = core.gpu.as_mut() {
+                let mut fbo = gpu.prepare(w, h)?;
+                // read_pixels starts at the bottom GL row; mpv's unflipped FBO
+                // places the source top row there for our top-down RGBA buffer.
+                let mut flip = 0i32;
+                let mut block = 0i32;
+                let mut params = [
+                    Param::new(3, &mut fbo),
+                    Param::new(4, &mut flip),
+                    Param::new(12, &mut block),
+                    Param::end(),
+                ];
+                core.api
+                    .check((core.api.render)(core.render, params.as_mut_ptr()))
+                    .map_err(|e| format!("GPU video frame render: {e}"))?;
+                let rgba = gpu.read(w, h)?;
+                serial = serial.saturating_add(1);
+                if let Ok(mut s) = shared.lock() {
+                    s.frame = Some(Frame {
+                        serial,
+                        width: w,
+                        height: h,
+                        rgba,
+                    });
+                }
+                continue;
+            }
             let stride = ((w as usize * 4) + 63) & !63;
             let len = stride * h as usize;
             let mut buffer = vec![0u8; len + 63];
@@ -667,12 +804,88 @@ mod tests {
     #[ignore = "requires pinned KATRAN_MPV_DLL and synthetic target fixtures"]
     fn synthetic_mpv_muted_unicode() {
         let source = std::env::var_os("KATRAN_MEDIA_SYNTHETIC_MP4").expect("set synthetic fixture");
-        exercise(PathBuf::from(source), true);
+        exercise(PathBuf::from(source), true, false, false);
         if let Some(mkv) = std::env::var_os("KATRAN_MEDIA_SYNTHETIC_MKV") {
-            exercise(PathBuf::from(mkv), false)
+            exercise(PathBuf::from(mkv), false, false, false)
         }
     }
-    fn exercise(source: PathBuf, watchdog: bool) {
+    #[test]
+    #[ignore = "requires a real GPU and pinned synthetic fixtures"]
+    fn synthetic_mpv_gpu_muted_unicode() {
+        let source = std::env::var_os("KATRAN_MEDIA_SYNTHETIC_MP4").expect("set synthetic fixture");
+        exercise(PathBuf::from(source), true, true, false);
+        if let Some(mkv) = std::env::var_os("KATRAN_MEDIA_SYNTHETIC_MKV") {
+            exercise(PathBuf::from(mkv), false, true, false)
+        }
+    }
+    #[test]
+    #[ignore = "requires pinned synthetic fixture"]
+    fn synthetic_mpv_forced_gpu_fallback() {
+        let source = std::env::var_os("KATRAN_MEDIA_SYNTHETIC_MP4").expect("set synthetic fixture");
+        exercise(PathBuf::from(source), false, true, true);
+    }
+    #[test]
+    #[ignore = "requires oriented synthetic fixture and a real GPU"]
+    fn synthetic_mpv_gpu_orientation() {
+        let source = PathBuf::from(
+            std::env::var_os("KATRAN_MEDIA_ORIENTATION_MP4").expect("orientation fixture"),
+        );
+        let target = std::fs::canonicalize("target").unwrap();
+        let source = std::fs::canonicalize(source).unwrap();
+        assert!(source.starts_with(&target));
+        let temp = tempfile::tempdir_in(&target).unwrap();
+        let path = temp.path().join("Ориентация.mp4");
+        std::fs::copy(source, &path).unwrap();
+        for use_gpu in [false, true] {
+            let mut backend = MpvBackend::with_gpu(use_gpu);
+            backend.open(Source { path: path.clone() }).unwrap();
+            backend.control(Action::SetVolume { volume: 0.0 }).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                let s = backend.snapshot().unwrap();
+                assert_ne!(s.state, PlaybackState::Error, "{:?}", s.error);
+                if s.duration_ms.is_some() && s.width > 0 {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "metadata timeout: {s:?}");
+                thread::sleep(Duration::from_millis(25));
+            }
+            backend.control(Action::Play).unwrap();
+            let frame = loop {
+                let s = backend.snapshot().unwrap();
+                assert_ne!(s.state, PlaybackState::Error, "{:?}", s.error);
+                if let Some(frame) = backend.frame(0).unwrap()
+                    && frame.rgba.chunks_exact(4).any(|p| p[0] > 100 || p[2] > 100)
+                {
+                    let a = s.acceleration.unwrap();
+                    assert_eq!(
+                        a.renderer,
+                        if use_gpu { "gpu" } else { "cpu" },
+                        "{:?}",
+                        a.fallback_reason
+                    );
+                    break frame;
+                }
+                assert!(Instant::now() < deadline, "frame timeout");
+                thread::sleep(Duration::from_millis(25));
+            };
+            let sample = |y: usize| {
+                let offset = (y * frame.width as usize + frame.width as usize / 2) * 4;
+                &frame.rgba[offset..offset + 4]
+            };
+            let top = sample(frame.height as usize / 4);
+            let bottom = sample(frame.height as usize * 3 / 4);
+            assert!(
+                top[0] as i16 > top[2] as i16 + 100
+                    && bottom[2] as i16 > bottom[0] as i16 + 100
+                    && top[3] == 255
+                    && bottom[3] == 255,
+                "GPU={use_gpu} top={top:?} bottom={bottom:?}"
+            );
+            backend.close();
+        }
+    }
+    fn exercise(source: PathBuf, watchdog: bool, requested_gpu: bool, force_fallback: bool) {
         let target = std::fs::canonicalize("target").unwrap();
         let source = std::fs::canonicalize(source).unwrap();
         assert!(source.starts_with(&target));
@@ -680,7 +893,11 @@ mod tests {
         let suffix = source.extension().unwrap().to_str().unwrap();
         let path = tmp.path().join(format!("Кириллица видео.{suffix}"));
         std::fs::copy(source, path.clone()).unwrap();
-        let mut backend = MpvBackend::default();
+        let mut backend = if force_fallback {
+            MpvBackend::with_forced_fallback()
+        } else {
+            MpvBackend::with_gpu(requested_gpu)
+        };
         backend.open(Source { path: path.clone() }).unwrap();
         backend.control(Action::SetVolume { volume: 0.0 }).unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -708,6 +925,22 @@ mod tests {
                     .chunks_exact(4)
                     .any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0)
             {
+                let a = s.acceleration.as_ref().expect("acceleration status");
+                assert_eq!(a.requested_gpu, requested_gpu);
+                assert_eq!(
+                    a.renderer,
+                    if requested_gpu && !force_fallback {
+                        "gpu"
+                    } else {
+                        "cpu"
+                    },
+                    "fallback: {:?}",
+                    a.fallback_reason
+                );
+                if force_fallback {
+                    assert!(a.fallback_reason.is_some());
+                }
+                eprintln!("synthetic renderer={}, decoder={}", a.renderer, a.decoder);
                 assert!(f.width <= 1280 && f.height <= 720);
                 assert_eq!(f.rgba.len(), f.width as usize * f.height as usize * 4);
                 break;

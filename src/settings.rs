@@ -78,6 +78,9 @@ pub struct Settings {
     /// Optional local Folder AI acceleration. Missing means CPU.
     #[serde(skip_serializing_if = "is_false")]
     pub folder_ai_gpu: bool,
+    /// Request GPU video decoding/rendering; unsupported systems use CPU.
+    #[serde(skip_serializing_if = "is_false")]
+    pub video_gpu_acceleration: bool,
     /// Opt-in network retrieval of site favicons for Links cards.
     pub link_favicons_online: bool,
 }
@@ -124,6 +127,7 @@ impl Settings {
             search_keyboard_only: false,
             link_favicons_online: false,
             folder_ai_gpu: false,
+            video_gpu_acceleration: false,
         };
         settings.materialize_tab_preferences();
         for tab in [ShelfTab::Text, ShelfTab::Links] {

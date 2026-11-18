@@ -1607,6 +1607,7 @@ dependencies = [
  "egui-lucide",
  "egui_extras",
  "embed-resource",
+ "glow",
  "image",
  "libloading",
  "raw-window-handle",

@@ -10,7 +10,13 @@ commit belong to the dispatcher. Switching object/surface, closing, hiding or
 Settings closes playback; metadata-only tag/pin updates preserve it. Space now
 autoplays once per target; Mini stream waits for Play. Controls overlay the canvas
 and hide during idle playback. libmpv is separately pinned/verified; the current
-bridge uses bounded CPU RGBA frames, not Afio's GPU rendering path.
+default bridge uses bounded CPU RGBA frames, not Afio's GPU rendering path.
+Owner confirmed Folder/Desktop playback in runtime3322b2bcfddb. The follow-up adds
+P pause/resume, confirmed-seek UI retention and large-control layout corrections.
+Optional Settings.video_gpu_acceleration defaults off; WGL/libmpv OpenGL rendering
+and observed hwdec-current are reported separately. Initialization failure falls
+back to CPU with a reason; runtime driver failure stops with an explicit error.
+Bounded RGBA readback remains: do not claim zero-copy or benchmarked acceleration.
 Read [the contract](docs/video-preview.md) before changing playback or preview
 routing. No schema change or new GitHub publication is authorized for this work.
 

@@ -38,6 +38,14 @@ pub enum PlaybackState {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Acceleration {
+    pub requested_gpu: bool,
+    pub renderer: String,
+    pub decoder: String,
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub state: PlaybackState,
     pub duration_ms: Option<u64>,
@@ -47,6 +55,8 @@ pub struct Snapshot {
     pub width: u32,
     pub height: u32,
     pub error: Option<String>,
+    #[serde(default)]
+    pub acceleration: Option<Acceleration>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {

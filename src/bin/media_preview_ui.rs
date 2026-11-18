@@ -45,6 +45,11 @@ pub(super) fn target(event: &Value, state: &Value, full: bool) -> Option<Target>
     })
 }
 
+struct PendingSeek {
+    position: u64,
+    issued: Instant,
+}
+
 struct Pending {
     id: JobId,
     target: Target,
@@ -65,6 +70,7 @@ pub(super) struct State {
     error: Option<String>,
     chosen_volume: Option<f64>,
     seek_position: Option<u64>,
+    pending_seek: Option<PendingSeek>,
     auto_start: bool,
     last_activity: Option<Instant>,
     controls_focused: bool,
@@ -102,6 +108,7 @@ impl State {
             self.texture = None;
             self.serial = 0;
             self.seek_position = None;
+            self.pending_seek = None;
         }
         if self.stopping {
             self.stop(call);
@@ -195,6 +202,7 @@ impl State {
             return;
         }
         self.snapshot = state["result"]["snapshot"].clone();
+        self.observe_seek();
         if let Some(error) = self.snapshot["error"].as_str() {
             self.error = Some(error.to_owned());
         }
@@ -256,6 +264,8 @@ impl State {
 
     /// Cancel unfinished preparation before polling it; retain unconfirmed stops.
     pub(super) fn stop(&mut self, call: &mut dyn FnMut(Command) -> Value) {
+        self.seek_position = None;
+        self.pending_seek = None;
         if let Some(pending) = self.pending.as_mut() {
             pending.cancelled = true;
             if !pending.cancel_sent {
@@ -321,6 +331,10 @@ impl State {
         let Some(token) = self.session else {
             return false;
         };
+        let requested_seek = match &action {
+            Action::Seek { position_ms } => Some(*position_ms),
+            _ => None,
+        };
         let requested_volume = match &action {
             Action::SetVolume { volume } => Some(*volume),
             _ => None,
@@ -336,6 +350,12 @@ impl State {
             } else if result["result"]["token"].as_u64() == Some(token) {
                 self.snapshot = result["result"]["snapshot"].clone();
                 self.error = None;
+                if let Some(position) = requested_seek {
+                    self.pending_seek = Some(PendingSeek {
+                        position,
+                        issued: Instant::now(),
+                    });
+                }
                 if let Some(volume) = requested_volume {
                     self.chosen_volume = Some(volume);
                 }
@@ -344,10 +364,57 @@ impl State {
                 return false;
             }
         } else {
+            if requested_seek.is_some() {
+                self.pending_seek = None;
+                self.seek_position = None;
+            }
             self.error = Some(Self::message(&result));
             return false;
         }
         self.next_poll = None;
+        true
+    }
+
+    fn observe_seek(&mut self) {
+        let Some(pending) = &self.pending_seek else {
+            return;
+        };
+        let elapsed = pending.issued.elapsed();
+        let observed = self.snapshot["position_ms"].as_u64().unwrap_or(0);
+        let playing = self.snapshot["state"] == "playing";
+        let max_progress = if playing {
+            elapsed.as_millis().min(u64::MAX as u128) as u64
+        } else {
+            0
+        };
+        let lower = pending.position.saturating_sub(250);
+        let upper = pending
+            .position
+            .saturating_add(max_progress)
+            .saturating_add(250);
+        if (lower..=upper).contains(&observed) {
+            self.pending_seek = None;
+        } else if elapsed >= Duration::from_secs(4) {
+            self.pending_seek = None;
+            self.error =
+                Some(tr("Не удалось подтвердить перемотку", "Could not confirm seek").into());
+        }
+    }
+
+    pub(super) fn toggle_pause(&mut self, call: &mut dyn FnMut(Command) -> Value) -> bool {
+        if self.session.is_none() || self.stopping || self.pending.is_some() {
+            return false;
+        }
+        if self.snapshot["state"] == "ended" && !self.control(Action::Seek { position_ms: 0 }, call)
+        {
+            return true;
+        }
+        let action = if self.snapshot["state"] == "playing" {
+            Action::Pause
+        } else {
+            Action::Play
+        };
+        self.control(action, call);
         true
     }
 
@@ -447,13 +514,77 @@ impl State {
         if !visible {
             return;
         }
+        if let Some(acceleration) = self.snapshot["acceleration"].as_object() {
+            let gpu = acceleration.get("renderer").and_then(Value::as_str) == Some("gpu");
+            let requested =
+                acceleration.get("requested_gpu").and_then(Value::as_bool) == Some(true);
+            let label = if gpu {
+                "GPU"
+            } else if requested {
+                "CPU · fallback"
+            } else {
+                "CPU"
+            };
+            let decoder = acceleration
+                .get("decoder")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let reason = acceleration
+                .get("fallback_reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(
+                    canvas.min + egui::vec2(10.0, 8.0),
+                    canvas.max,
+                )),
+                |ui| {
+                    egui::Frame::new()
+                        .fill(Color32::from_black_alpha(170))
+                        .inner_margin(4)
+                        .show(ui, |ui| {
+                            ui.small(label).on_hover_text(format!(
+                                "{}: {decoder}\n{reason}",
+                                tr("Декодер", "Decoder")
+                            ));
+                        });
+                },
+            );
+        }
         if self.snapshot["state"] == "playing" && !busy && self.error.is_none() {
             ui.ctx().request_repaint_after(Duration::from_secs(2));
         }
-        let panel_height = canvas.height().min(70.0);
+        let inset = 8.0_f32.min(canvas.height() * 0.05);
+        let button_font = egui::TextStyle::Button.resolve(ui.style());
+        let button_text_height = ui.fonts_mut(|fonts| fonts.row_height(&button_font));
+        let row_height = ui
+            .spacing()
+            .interact_size
+            .y
+            .max(button_text_height + 2.0 * ui.spacing().button_padding.y)
+            .max(18.0);
+        let timeline_height = if self.session.is_some()
+            && self.snapshot["duration_ms"].as_u64().is_some_and(|d| d > 0)
+        {
+            ui.spacing().interact_size.y.max(16.0) + ui.spacing().item_spacing.y
+        } else {
+            0.0
+        };
+        let error_height = if self.error.is_some() {
+            ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y
+        } else {
+            0.0
+        };
+        // Slider creates an inner horizontal UI, whose row can extend beyond the
+        // allocated response at larger interaction sizes. Reserve that extent.
+        let nested_row_reserve = ui.spacing().interact_size.y * 0.5;
+        let panel_height =
+            (12.0 + timeline_height + row_height + error_height + nested_row_reserve)
+                .min((canvas.height() - inset).max(0.0));
+        let bottom = canvas.bottom() - inset;
         let panel = egui::Rect::from_min_max(
-            egui::pos2(canvas.left(), canvas.bottom() - panel_height),
-            canvas.max,
+            egui::pos2(canvas.left(), bottom - panel_height),
+            egui::pos2(canvas.right(), bottom),
         );
         #[cfg(test)]
         ui.ctx().data_mut(|data| {
@@ -472,11 +603,15 @@ impl State {
                 let mut position = self.snapshot["position_ms"].as_u64().unwrap_or(0);
                 let duration = self.snapshot["duration_ms"].as_u64().unwrap_or(0);
                 if self.session.is_some() && duration > 0 {
-                    position = self.seek_position.unwrap_or(position).min(duration);
+                    position = self
+                        .seek_position
+                        .or_else(|| self.pending_seek.as_ref().map(|seek| seek.position))
+                        .unwrap_or(position)
+                        .min(duration);
                     let width = ui.available_width().max(1.0);
                     ui.spacing_mut().slider_width = width;
                     let response = ui.add_sized(
-                        [width, 16.0],
+                        [width, ui.spacing().interact_size.y.max(16.0)],
                         egui::Slider::new(&mut position, 0..=duration).show_value(false),
                     );
                     #[cfg(test)]
@@ -536,7 +671,7 @@ impl State {
                 }
                 row_width = row_width.min(ui.available_width()).max(1.0);
                 let (allocated, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+                    egui::vec2(ui.available_width(), row_height),
                     egui::Sense::hover(),
                 );
                 let row = egui::Rect::from_center_size(
@@ -570,18 +705,14 @@ impl State {
                             } else {
                                 tr("Воспроизвести", "Play")
                             });
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("media-button"), button.rect)
+                            });
                             group_rect = group_rect.union(button.rect);
                             focused |= button.has_focus();
                             if button.clicked() {
-                                if self.snapshot["state"] == "ended"
-                                    && !self.control(Action::Seek { position_ms: 0 }, call)
-                                {
-                                    return;
-                                }
-                                self.control(
-                                    if playing { Action::Pause } else { Action::Play },
-                                    call,
-                                );
+                                self.toggle_pause(call);
                             }
                         }
                         if busy {
@@ -607,6 +738,10 @@ impl State {
                                 egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false),
                             );
                             let response = response.on_hover_text(tr("Громкость", "Volume"));
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("media-volume"), response.rect)
+                            });
                             group_rect = group_rect.union(response.rect);
                             focused |= response.has_focus();
                             if response.changed() {
@@ -674,6 +809,35 @@ fn decode_frame(value: &Value, previous: u64) -> Option<(u64, egui::ColorImage)>
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn pause_toggle_uses_acknowledged_media_session() {
+        let mut state = State {
+            session: Some(8),
+            snapshot: json!({"state":"playing"}),
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut call = |command| match command {
+            Command::ControlMedia {
+                session: 8,
+                action: Action::Pause,
+            } => {
+                actions.push("pause");
+                ok(session(8, "paused"))
+            }
+            Command::ControlMedia {
+                session: 8,
+                action: Action::Play,
+            } => {
+                actions.push("play");
+                ok(session(8, "playing"))
+            }
+            _ => panic!("Unexpected pause command"),
+        };
+        assert!(state.toggle_pause(&mut call));
+        assert!(state.toggle_pause(&mut call));
+        assert_eq!(actions, ["pause", "play"]);
+    }
 
     fn t(context: &str) -> Target {
         Target {
@@ -687,6 +851,103 @@ mod tests {
     }
     fn ok(value: Value) -> Value {
         json!({"ok":true,"result":value})
+    }
+
+    #[test]
+    fn seek_remains_visible_through_stale_ack_and_polls_then_confirms_or_fails() {
+        let mut state = State {
+            session: Some(7),
+            snapshot: session(7, "playing")["snapshot"].clone(),
+            ..Default::default()
+        };
+        state.snapshot["position_ms"] = json!(1000);
+        let mut call = |command| match command {
+            Command::ControlMedia {
+                action: Action::Seek { .. },
+                ..
+            } => ok(session(7, "playing")),
+            _ => ok(Value::Null),
+        };
+        assert!(state.control(Action::Seek { position_ms: 4000 }, &mut call));
+        assert_eq!(state.pending_seek.as_ref().unwrap().position, 4000);
+        state.snapshot["position_ms"] = json!(1000);
+        state.observe_seek();
+        assert!(state.pending_seek.is_some());
+        // A second seek replaces the first, including a backwards seek.
+        assert!(state.control(Action::Seek { position_ms: 500 }, &mut call));
+        state.snapshot["position_ms"] = json!(4000);
+        state.observe_seek();
+        assert_eq!(state.pending_seek.as_ref().unwrap().position, 500);
+        state.snapshot["position_ms"] = json!(550);
+        state.observe_seek();
+        assert!(state.pending_seek.is_none());
+        assert!(state.control(Action::Seek { position_ms: 4900 }, &mut call));
+        state.snapshot["position_ms"] = json!(5000);
+        state.snapshot["state"] = json!("ended");
+        state.observe_seek();
+        assert!(state.pending_seek.is_none());
+        let mut failure = |_| json!({"ok":false,"error":{"code":"seek_failed","message":"failed"}});
+        assert!(!state.control(Action::Seek { position_ms: 3000 }, &mut failure));
+        assert!(state.pending_seek.is_none() && state.error.is_some());
+        state.pending_seek = Some(PendingSeek {
+            position: 4000,
+            issued: Instant::now() - Duration::from_secs(5),
+        });
+        state.observe_seek();
+        assert!(state.pending_seek.is_none() && state.error.is_some());
+        state.pending_seek = Some(PendingSeek {
+            position: 4900,
+            issued: Instant::now(),
+        });
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.sync(ui.ctx(), Some(t("changed")), &mut call)
+        });
+        out.textures_delta.clear();
+        assert!(state.pending_seek.is_none());
+    }
+
+    #[test]
+    fn large_controls_fit_inside_video_canvas() {
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| {
+            style.spacing.interact_size.y = 45.0;
+            style.spacing.button_padding.y = 10.0;
+        });
+        let target = t(r#"["images",null,"details"]"#);
+        let mut state = State {
+            target: Some(target.clone()),
+            session: Some(7),
+            snapshot: session(7, "paused")["snapshot"].clone(),
+            next_poll: Some(Instant::now() + Duration::from_secs(60)),
+            ..Default::default()
+        };
+        let mut call = |_| ok(Value::Null);
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| state.show(ui, &target, &mut call),
+            );
+            out.textures_delta.clear();
+        }
+        ctx.data(|data| {
+            let canvas: egui::Rect = data.get_temp(egui::Id::new("media-canvas")).unwrap();
+            let panel: egui::Rect = data.get_temp(egui::Id::new("media-panel")).unwrap();
+            for id in ["media-seek", "media-button", "media-volume"] {
+                let rect: egui::Rect = data.get_temp(egui::Id::new(id)).unwrap();
+                assert!(
+                    panel.contains_rect(rect) && canvas.contains_rect(rect),
+                    "{id}: {rect:?}, panel {panel:?}"
+                );
+            }
+            assert!(panel.bottom() < canvas.bottom());
+        });
     }
 
     #[test]

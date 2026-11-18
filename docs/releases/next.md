@@ -10,6 +10,12 @@ libmpv runtime replaces it, retaining domain policy and bounded CPU-frame output
 This work has no schema migration and does not alter the immutable v3.8.0 tag.
 See the verification handoff for automated evidence and owner acceptance status.
 
+Owner confirmed Folder/Desktop playback. Subsequent local polish adds P pause,
+large-control positioning and stable asynchronous seek UI. Optional General
+GPU video acceleration defaults off, exposes actual renderer/decoder status and
+falls back to CPU when GPU initialization fails. The GL path still reads bounded
+RGBA through CPU memory; no zero-copy or measured speedup is claimed.
+
 Local 2026-11-18 follow-up: [Tags sorting](../patch-3.8/TAG-SORT.md) is comma then
 Slash, current tag order with untagged last; custom pinned order remains separate.
 [Image refresh correction](../patch-3.8/TAG-EDITOR-UX.md) now also covers rename,

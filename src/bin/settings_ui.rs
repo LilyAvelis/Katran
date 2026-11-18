@@ -463,6 +463,7 @@ fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.theme = current.theme.clone();
     draft.desktop_wallpaper_id = current.desktop_wallpaper_id.clone();
     draft.sort = current.sort;
+    draft.video_gpu_acceleration = current.video_gpu_acceleration;
 }
 fn save_general_settings(api: &mut Service, draft: &Settings) -> Result<(Settings, bool), String> {
     let response = call(api, Command::GetSettings);
@@ -490,6 +491,20 @@ fn save_general_settings(api: &mut Service, draft: &Settings) -> Result<(Setting
         }
     }
     Ok((settings, resize_changed))
+}
+fn save_video_gpu_preference(api: &mut Service, requested: bool) -> Result<bool, String> {
+    let response = call(api, Command::GetSettings);
+    let mut current: Settings = serde_json::from_value(response["result"].clone())
+        .map_err(|_| "Could not read settings".to_owned())?;
+    current.video_gpu_acceleration = requested;
+    let result = call(api, Command::SetSettings { settings: current });
+    if result["ok"] != true {
+        return Err(result["error"]["message"]
+            .as_str()
+            .unwrap_or("Save failed")
+            .to_owned());
+    }
+    Ok(requested)
 }
 fn apply_theme(
     api: &mut Service,
@@ -1131,7 +1146,8 @@ impl State {
         let mut explicit_save = false;
         let mut refresh_sharex = false;
         let mut path_editing = false;
-        let draft_before = self
+        let mut video_gpu_intent = None;
+        let mut draft_before = self
             .draft
             .as_ref()
             .and_then(|draft| serde_json::to_value(draft).ok());
@@ -1210,6 +1226,7 @@ impl State {
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
          SettingsRow::show(ui,super::i18n::tr("Изменение размера окна", "Window resizing"),super::i18n::tr("Можно менять размер главного окна мышью. Применяется автоматически.", "Allow resizing the main window with the mouse. Applies automatically."),|ui|{ui.checkbox(&mut draft.window_resizable,super::i18n::tr("Разрешить изменение размера", "Allow resizing"));});
+         SettingsRow::show(ui,super::i18n::tr("Ускорение видео на GPU", "GPU acceleration for video"),super::i18n::tr("При отсутствии поддержки видео воспроизводится на CPU.", "Falls back to CPU when unsupported."),|ui|{if ui.checkbox(&mut draft.video_gpu_acceleration,super::i18n::tr("Использовать GPU", "Use GPU")).changed(){video_gpu_intent=Some(draft.video_gpu_acceleration);}});
          SettingsRow::show(ui,super::i18n::tr("Захват при запуске", "Capture on startup"),super::i18n::tr("По умолчанию включён. Текущий захват переключается через Actions.", "On by default. Toggle the current capture from Actions."),|ui|{ui.checkbox(&mut draft.capture_on_start,super::i18n::tr("Включать", "Enable"));});
          SettingsRow::show(ui,super::i18n::tr("Подсказка сортировки", "Sort hint"),super::i18n::tr("Показывать выбранный порядок на две секунды.", "Show the selected sort order for two seconds."),|ui|{ui.checkbox(&mut draft.sort_notifications,super::i18n::tr("Показывать", "Show"));});
          SettingsRow::show(ui,super::i18n::tr("Поиск на полке", "Shelf search"),super::i18n::tr("Обычно поле доступно мышью и через Ctrl+T. При ограничении мышь перемещает окно, а ввод включает Ctrl+T.", "Usually, use the search field with the mouse or Ctrl+T. In keyboard-only mode, the mouse moves the window and Ctrl+T opens search."),|ui|{ui.checkbox(&mut draft.search_keyboard_only,super::i18n::tr("Только через Ctrl+T", "Ctrl+T only"));});
@@ -1504,6 +1521,35 @@ impl State {
     });
    });
   });
+        if let Some(requested) = video_gpu_intent {
+            match save_video_gpu_preference(api, requested) {
+                Ok(value) => {
+                    if let Some(draft) = self.draft.as_mut() {
+                        draft.video_gpu_acceleration = value;
+                    }
+                    if let Some(object) = draft_before
+                        .as_mut()
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        if value {
+                            object.insert(
+                                "video_gpu_acceleration".into(),
+                                serde_json::Value::Bool(true),
+                            );
+                        } else {
+                            object.remove("video_gpu_acceleration");
+                        }
+                    }
+                    self.error.clear();
+                }
+                Err(error) => {
+                    if let Some(draft) = self.draft.as_mut() {
+                        draft.video_gpu_acceleration = !requested;
+                    }
+                    self.error = error;
+                }
+            }
+        }
         if let Some(theme) = theme_intent {
             let previous = call(api, Command::Themes)["result"]["current"]["glass"]
                 .as_bool()
@@ -2076,6 +2122,27 @@ mod tests {
             false
         );
     }
+    #[test]
+    fn video_gpu_save_preserves_newer_tab_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = Service::open(root.path(), 1_000_000).unwrap();
+        let mut draft: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        draft.video_gpu_acceleration = true;
+        call(
+            &mut api,
+            Command::SetTabEnabled {
+                tab: ShelfTab::Text,
+                enabled: true,
+            },
+        );
+        save_video_gpu_preference(&mut api, draft.video_gpu_acceleration).unwrap();
+        save_general_settings(&mut api, &Settings::default()).unwrap();
+        let current = call(&mut api, Command::GetSettings);
+        assert_eq!(current["result"]["video_gpu_acceleration"], true);
+        assert_eq!(current["result"]["text_enabled"], true);
+    }
+
     #[test]
     fn general_draft_preserves_newer_tab_changes() {
         let mut draft = Settings {

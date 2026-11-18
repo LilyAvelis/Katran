@@ -39,6 +39,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         search_keyboard_only: true,
         link_favicons_online: true,
         folder_ai_gpu: false,
+        video_gpu_acceleration: false,
         sharex_folder: None,
         downloads_folder: None,
         downloads_enabled: true,
@@ -110,5 +111,33 @@ fn capture_defaults_on_and_explicit_pause_preference_survives() {
     assert_eq!(
         call(&mut api, Command::GetSettings)["result"]["capture_on_start"],
         false
+    );
+}
+
+#[test]
+fn video_gpu_defaults_off_and_persists_through_settings_api() {
+    let old: Settings = serde_json::from_str("{}").unwrap();
+    assert!(!old.video_gpu_acceleration);
+    assert!(
+        serde_json::to_value(&old)
+            .unwrap()
+            .get("video_gpu_acceleration")
+            .is_none()
+    );
+    let root = tempfile::tempdir().unwrap();
+    let mut service = Service::open(root.path(), 100).unwrap();
+    let mut settings: Settings =
+        serde_json::from_value(call(&mut service, Command::GetSettings)["result"].clone()).unwrap();
+    assert!(!settings.video_gpu_acceleration);
+    settings.video_gpu_acceleration = true;
+    assert_eq!(
+        call(&mut service, Command::SetSettings { settings })["ok"],
+        true
+    );
+    drop(service);
+    let mut service = Service::open(root.path(), 100).unwrap();
+    assert_eq!(
+        call(&mut service, Command::GetSettings)["result"]["video_gpu_acceleration"],
+        true
     );
 }

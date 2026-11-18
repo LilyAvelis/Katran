@@ -5,6 +5,9 @@ and Mini stream, with Play/Pause, seeking and volume overlaid on the video.
 Space starts playback immediately; Mini stream waits for Play. Closing or changing
 the viewed object stops playback. Uses a separately installed pinned libmpv
 runtime; this local addition is separate from the v3.8.0 release tag.
+P pauses/resumes a video; confirmed seek prevents a stale-position jump. Controls
+fit large UI sizes. Settings → General offers optional GPU video acceleration,
+off by default, with actual renderer/decoder status and CPU initialization fallback.
 
 **Katran 3.8.0** adds: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings, drag reordering of complete tags

@@ -50,6 +50,7 @@ pub(crate) struct MediaState {
     lease: Option<(PathBuf, Stamp)>,
     context: Option<(i64, String)>,
     epoch: u64,
+    configured_gpu: Option<bool>,
 }
 impl MediaState {
     pub(crate) fn new(read_only: bool) -> Self {
@@ -69,6 +70,11 @@ impl MediaState {
             lease: None,
             context: None,
             epoch: 0,
+            configured_gpu: if cfg!(windows) && !read_only {
+                Some(false)
+            } else {
+                None
+            },
         }
     }
     fn invalidate(&mut self) {
@@ -87,6 +93,7 @@ impl Service {
         }
         self.media.invalidate();
         self.media.player = media_playback::Player::new(backend);
+        self.media.configured_gpu = None;
         Ok(())
     }
     fn media_context(&self) -> Option<(i64, String)> {
@@ -106,8 +113,13 @@ impl Service {
         };
         Some((
             id,
-            serde_json::to_string(&(self.interaction.tab, &self.interaction.folder_path, mode))
-                .ok()?,
+            serde_json::to_string(&(
+                self.interaction.tab,
+                &self.interaction.folder_path,
+                mode,
+                self.settings.video_gpu_acceleration,
+            ))
+            .ok()?,
         ))
     }
     pub(crate) fn reconcile_media(&mut self) {
@@ -205,6 +217,17 @@ impl Service {
                 "source_changed",
                 "Media source changed while loading",
             ));
+        }
+        #[cfg(windows)]
+        if let Some(current) = self.media.configured_gpu
+            && current != self.settings.video_gpu_acceleration
+        {
+            self.media.player = media_playback::Player::new(Box::new(
+                crate::media_playback_mpv::MpvBackend::with_gpu(
+                    self.settings.video_gpu_acceleration,
+                ),
+            ));
+            self.media.configured_gpu = Some(self.settings.video_gpu_acceleration);
         }
         let session = self.media.player.open(
             prepared.identity,
