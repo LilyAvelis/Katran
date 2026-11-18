@@ -24,10 +24,12 @@ impl Shelf {
             return;
         }
         let catalogue = self.call(Command::Actions);
+        let in_bull = self.upscale.collection_can_fullscreen();
         let actions: Vec<_> = catalogue
             .as_array()
             .into_iter()
             .flatten()
+            .filter(|action| in_bull || action["id"] != "collection_fullscreen")
             .filter(|a| action_matches(a, &self.action_query))
             .cloned()
             .collect();
@@ -70,8 +72,11 @@ impl Shelf {
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
         let mut picked = None;
         // Use the actual trigger rectangle, independent of footer height and DPI.
-        let trigger =
-            ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect")));
+        let trigger = (!in_bull)
+            .then(|| {
+                ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect")))
+            })
+            .flatten();
         let anchor = trigger
             .map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
             .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));

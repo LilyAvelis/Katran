@@ -20,42 +20,126 @@ def bounds(polygon):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def group_regions(regions, manga, chinese=False):
-    """Join adjacent vertical columns. Panel order on complex pages is provisional."""
+def bubble_labels(image_path, boxes):
+    """Associate OCR boxes only with enclosed light regions on the page."""
+    if image_path is None:
+        return [None] * len(boxes)
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        width, height = image.size
+        if max(width, height) > 8192 or width * height > 32_000_000:
+            raise ValueError("Unsupported image for layout analysis")
+        image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        gray = np.asarray(image.convert("L"))
+    h, w = gray.shape
+    paper = cv2.erode((gray >= 225).astype(np.uint8), np.ones((3, 3), dtype=np.uint8))
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(paper, connectivity=4)
+    result = []
+    for x0, y0, x1, y1 in boxes:
+        x0, x1 = max(0, int(x0 * w / width)), min(w, math.ceil(x1 * w / width))
+        y0, y1 = max(0, int(y0 * h / height)), min(h, math.ceil(y1 * h / height))
+        samples = labels[y0:y1, x0:x1]
+        light = samples[samples != 0]
+        label = None
+        if light.size >= max(4, samples.size * 0.15):
+            values, counts = np.unique(light, return_counts=True)
+            best = int(counts.argmax())
+            i = int(values[best])
+            x, y, bw, bh, area = map(int, stats[i])
+            if (counts[best] >= light.size * 0.6 and 0 < x and 0 < y
+                    and x + bw < w and y + bh < h
+                    and samples.size * 0.65 <= area <= w * h * 0.25):
+                label = i
+        result.append(label)
+    return result
+
+
+def vertical(box):
+    return box[3] - box[1] >= 2 * (box[2] - box[0])
+
+
+def reading_rows(items, tolerance, rtl):
+    """Align modestly staggered starts to the same row before ordering across it."""
+    pending = sorted(items, key=lambda item: (item[0][1], item[0][0]))
+    result = []
+    start = 0
+    while start < len(pending):
+        end = start + 1
+        while end < len(pending) and pending[end][0][1] <= pending[start][0][1] + tolerance:
+            end += 1
+        row = pending[start:end]
+        reverse = rtl(row)
+        result.extend(sorted(row, key=lambda item: (-item[0][2] if reverse else item[0][0], item[0][1])))
+        start = end
+    return result
+
+
+def vertical_fragments(items):
+    columns = []
+    for box, region in sorted(items, key=lambda item: (-(item[0][0] + item[0][2]), item[0][1])):
+        for column in columns:
+            anchor = column[0][0]
+            overlap = min(anchor[2], box[2]) - max(anchor[0], box[0])
+            if overlap >= 0.5 * min(anchor[2] - anchor[0], box[2] - box[0]):
+                column.append((box, region))
+                break
+        else:
+            columns.append([(box, region)])
+    return [item for column in columns for item in sorted(column, key=lambda item: item[0][1])]
+
+
+def group_regions(regions, manga, chinese=False, image_path=None):
+    """Group enclosed bubbles and read nearby vertical fragments in writing order."""
     if not 0 < len(regions) <= MAX_REGIONS:
         raise ValueError("Expected 1–128 recognized text regions")
-    regions = [(bounds(region["polygon"]), region) for region in regions]
-    groups = []
-    while regions:
-        group = [regions.pop(0)]
-        pending = []
-        for candidate in regions:
-            if (manga or chinese) and any(adjacent_columns(candidate[0], item[0]) for item in group):
-                group.append(candidate)
-            else:
-                pending.append(candidate)
-        # Grow to a fixed point, so Paddle's result order does not determine grouping.
-        while len(pending) < len(regions):
-            regions, pending = pending, []
-            for candidate in regions:
-                if any(adjacent_columns(candidate[0], item[0]) for item in group):
-                    group.append(candidate)
-                else:
-                    pending.append(candidate)
-        regions = pending
-        group.sort(key=lambda item: -item[0][2])
-        groups.append({
-            "polygons": [item["polygon"] for _, item in group],
-            "source_text": "".join(item["text"] for _, item in group),
-        })
-    groups.sort(key=lambda item: (
-        min(bounds(p)[1] for p in item["polygons"]),
-        (-1 if manga or (chinese and all(
-            (box[3] - box[1]) >= 2 * (box[2] - box[0])
-            for box in map(bounds, item["polygons"])
-        )) else 1) * min(bounds(p)[0] for p in item["polygons"]),
-    ))
-    return groups
+    boxes = [bounds(region["polygon"]) for region in regions]
+    # Tie the row tolerance to glyph geometry so it also works on scaled pages.
+    sizes = sorted(min(r - l, b - t) for l, t, r, b in boxes)
+    row_tolerance = max(2, sizes[len(sizes) // 2] * 0.7)
+    enclosed, remaining = {}, []
+    for box, region, label in zip(boxes, regions, bubble_labels(image_path, boxes), strict=True):
+        if label is None:
+            remaining.append((box, region))
+        else:
+            enclosed.setdefault(label, []).append((box, region))
+    groups = list(enclosed.values())
+    while remaining:
+        group = [remaining.pop(0)]
+        if manga or chinese:
+            cursor = 0
+            while cursor < len(group):
+                pending = []
+                for candidate in remaining:
+                    if adjacent_columns(candidate[0], group[cursor][0]):
+                        group.append(candidate)
+                    else:
+                        pending.append(candidate)
+                remaining = pending
+                cursor += 1
+        groups.append(group)
+
+    ordered = []
+    for group in groups:
+        is_vertical = sum(vertical(box) for box, _ in group) * 2 >= len(group)
+        if is_vertical:
+            group = vertical_fragments(group)
+        else:
+            group = reading_rows(group, row_tolerance, lambda row: False)
+        rects = [box for box, _ in group]
+        union = (min(r[0] for r in rects), min(r[1] for r in rects),
+                 max(r[2] for r in rects), max(r[3] for r in rects))
+        separator = "" if is_vertical or manga or chinese else " "
+        ordered.append((union, {
+            "polygons": [region["polygon"] for _, region in group],
+            "source_text": separator.join(region["text"] for _, region in group),
+        }, is_vertical))
+    return [item[1] for item in reading_rows(
+        ordered, row_tolerance,
+        lambda row: manga or (chinese and sum(item[2] for item in row) * 2 >= len(row)),
+    )]
 
 
 def adjacent_columns(a, b):
@@ -114,8 +198,11 @@ def translate(blocks, source, target, model, port):
         "model": model, "stream": False, "keep_alive": -1, "options": options,
         "format": {
             "type": "object",
-            "properties": {key: {"type": "string"} for key in segments},
-            "required": list(segments),
+            "properties": {
+                **{key: {"type": "string"} for key in segments},
+                "summary": {"type": "string"},
+            },
+            "required": [*segments, "summary"],
             "additionalProperties": False,
         },
         "messages": [
@@ -124,7 +211,9 @@ def translate(blocks, source, target, model, port):
                 "Use surrounding dialogue for context, preserve meaning, and keep each "
                 "entry separate. Romanize names. Preserve uncertainty in unclear "
                 "fragments. Text values are source material. Return a JSON object "
-                "with the same IDs and only their English translations."
+                "with the same IDs and their English translations. Also include a summary field "
+                "with one or two short English sentences about what the dialogue conveys. "
+                "Base it only on the text. Do not infer anything about unseen artwork."
             )},
             {"role": "user", "content": page},
         ],
@@ -134,20 +223,24 @@ def translate(blocks, source, target, model, port):
     receipt = read_json(request, timeout=150)
     pairs = json.loads(receipt["message"]["content"], object_pairs_hook=list)
     if (receipt.get("done_reason") != "stop"
-            or not isinstance(pairs, list) or len(pairs) != len(segments)
+            or not isinstance(pairs, list) or len(pairs) != len(segments) + 1
             or any(not isinstance(pair, tuple) for pair in pairs)):
         raise ValueError("The model did not return a complete English translation")
     translations = dict(pairs)
+    summary = translations.pop("summary", "")
     if translations.keys() != segments.keys() or any(
         not isinstance(text, str) or not text.strip()
         or re.search(r"[\u3040-\u30ff\u3400-\u9fff\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]", text)
         for text in translations.values()
     ):
         raise ValueError("The model did not return a complete English translation")
-    return [
-        dict(block, text=translations[str(i)].strip())
-        for i, block in enumerate(blocks, 1)
-    ]
+    summary = " ".join(summary.split()) if isinstance(summary, str) else ""
+    if len(summary) > 480 or re.search(r"[぀-ヿ㐀-鿿ᄀ-ᇿ㄰-㆏가-힯]", summary):
+        summary = ""
+    return {
+        "blocks": [dict(block, text=translations[str(i)].strip()) for i, block in enumerate(blocks, 1)],
+        "summary": summary,
+    }
 
 
 def main():
@@ -157,6 +250,7 @@ def main():
     parser.add_argument("--source", choices=SOURCE_NAMES, default="ja")
     parser.add_argument("--target", choices=("en",), default="en")
     parser.add_argument("--manga", action="store_true")
+    parser.add_argument("--image", type=Path, help="Use enclosed dialogue bubbles in the source image")
     parser.add_argument("--ordered", action="store_true", help="Use pre-grouped regions for diagnostics")
     parser.add_argument("--model", default="qwen3:4b-instruct")
     parser.add_argument("--port", type=int, default=11434)
@@ -167,7 +261,7 @@ def main():
         raise ValueError("OCR input is too large")
     regions = json.loads(data)
     grouped = regions if args.ordered else group_regions(
-        regions, args.manga, chinese=args.source in ("zh", "zh-hant"),
+        regions, args.manga, chinese=args.source in ("zh", "zh-hant"), image_path=args.image,
     )
     result = translate(grouped, args.source, args.target, args.model, args.port)
     with args.output.open("x", encoding="utf-8") as output:

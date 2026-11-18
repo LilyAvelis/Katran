@@ -2256,6 +2256,18 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "collection_fullscreen" {
+            if self.upscale.collection_can_fullscreen()
+                && self.call(Command::RunAction { id })["intent"] == "toggle_collection_fullscreen"
+            {
+                self.actions = false;
+                if let Some(focus) = ctx.memory(|memory| memory.focused()) {
+                    ctx.memory_mut(|memory| memory.surrender_focus(focus));
+                }
+                self.toggle_collection_fullscreen(ctx);
+            }
+            return;
+        }
         if id == "create_image_collection" {
             if self.start_job(Command::CreateImageCollection, false, ctx.clone()) {
                 self.actions = false;

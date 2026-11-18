@@ -272,6 +272,7 @@ fn transform(
                     outcome["skipped_blocks"] = json!(report.skipped);
                     outcome["fallback_blocks"] = json!(report.fallback);
                     outcome["side_blocks"] = json!(report.side);
+                    outcome["summary_rendered"] = json!(report.summary_rendered);
                 }
                 receipt.push(outcome);
                 included.push(page.png);
@@ -448,6 +449,7 @@ mod tests {
                         fallback: 1,
                         side: 1,
                         left_pad: 0,
+                        summary_rendered: true,
                     };
                     skipped = 0;
                     Ok(RenderedPage {
@@ -469,9 +471,9 @@ mod tests {
             prepared.receipt["pages"],
             json!([
                 {"index":0,"ok":true,"page":0,"rendered_blocks":2,"skipped_blocks":3,
-                    "fallback_blocks":1,"side_blocks":1},
+                    "fallback_blocks":1,"side_blocks":1,"summary_rendered":true},
                 {"index":1,"ok":true,"page":1,"rendered_blocks":2,"skipped_blocks":0,
-                    "fallback_blocks":1,"side_blocks":1}
+                    "fallback_blocks":1,"side_blocks":1,"summary_rendered":true}
             ])
         );
     }

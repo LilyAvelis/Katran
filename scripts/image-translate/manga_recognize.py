@@ -37,7 +37,7 @@ def load_model():
 def recognize(image_path, ocr_path, output_path, processor, model, device, vocab):
     if ocr_path.stat().st_size > 1_000_000:
         raise ValueError("OCR input too large")
-    groups = group_regions(json.loads(ocr_path.read_text(encoding="utf-8")), True)
+    groups = group_regions(json.loads(ocr_path.read_text(encoding="utf-8")), True, image_path=image_path)
     image = Image.open(image_path)
     if getattr(image, "n_frames", 1) != 1 or max(image.size) > 8192 or image.width * image.height > 32_000_000:
         raise ValueError("Unsupported image")

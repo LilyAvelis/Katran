@@ -126,6 +126,10 @@ retains the last ready page in a fixed viewport until the requested page
 arrives. Page changes do not flash a loading label over the ready image.
 Wheel zoom anchors at the pointer, Ctrl+wheel at the center, and
 dragging pans the enlarged page. A successfully loaded new page starts fitted.
+While a BULL is open, F11 or **Toggle collection fullscreen** in Ctrl+K
+switches the viewer to borderless fullscreen on its current monitor.
+Zooming hides the title and page controls in fullscreen. Returning to fit
+brings them back. F11 or Escape leaves fullscreen, and Space closes the viewer.
 The external QuickLook viewer also uses a clipped viewport, retains the last
 ready page and supports anchored zoom. Its updated plugin was built and
 checked with the bounded parser fixtures and WPF image decoding.

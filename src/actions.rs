@@ -52,6 +52,7 @@ pub fn palette_order(id: &str) -> usize {
         "gallery",
         "list",
         "details",
+        "collection_fullscreen",
         "density_less",
         "density_more",
         "pinned_move_up",
@@ -100,7 +101,12 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
         "shelf_search" | "search_with_ai" | "select_all" | "tab_toggle" | "toggle_pinned_view"
         | "refresh" => "Навигация и выделение",
-        "gallery" | "list" | "details" | "density_less" | "density_more" => "Отображение",
+        "gallery"
+        | "list"
+        | "details"
+        | "collection_fullscreen"
+        | "density_less"
+        | "density_more" => "Отображение",
         "pinned_move_up" | "pinned_move_down" => "Закреплённые",
         "use_as_background"
         | "use_as_desktop_wallpaper"
@@ -143,6 +149,9 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
         "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
+        "collection_fullscreen" => {
+            "полный экран полноэкранный коллекция bull fullscreen full screen"
+        }
         "create_image_collection" => {
             "собрать разобрать коллекция изображения картинки bull pack unpack collection images"
         }
@@ -156,7 +165,9 @@ pub fn palette_terms(id: &str) -> &'static str {
         "translate_image_zh" => {
             "перевести перевод китайский упрощенный изображение translate Chinese simplified OCR AI"
         }
-        "translate_image_zh_hant" => "перевести перевод китайский традиционный 繁體中文 traditional chinese zh-hant OCR AI",
+        "translate_image_zh_hant" => {
+            "перевести перевод китайский традиционный 繁體中文 traditional chinese zh-hant OCR AI"
+        }
         "translate_image_ko" => "перевести перевод корейский изображение translate Korean OCR AI",
         "upscale_remacri_x2"
         | "upscale_remacri_x4"
@@ -233,6 +244,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "translate" => "Translate tab",
         "create_image_collection" => "Pack / unpack BULL",
         "create_bs_collection" => "Pack / unpack BS",
+        "collection_fullscreen" => "Toggle collection fullscreen",
         "search_image_google_lens" => "Search image with Google Lens",
         "translate_image_ja" => "Translate image from Japanese",
         "translate_image_zh" => "Translate image from Simplified Chinese",
@@ -289,6 +301,14 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "collection_fullscreen",
+        label: "Полноэкранный просмотр коллекции",
+        default_binding: "F11",
+        rebindable: true,
+        group: "Отображение",
+        in_palette: true,
+    },
     Definition {
         id: "create_image_collection",
         label: "Собрать / разобрать BULL",
@@ -1147,6 +1167,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
                 crate::pinned_order::Direction::Down
             },
         }),
+        "collection_fullscreen" => {
+            Dispatch::Intent(serde_json::json!({"intent":"toggle_collection_fullscreen"}))
+        }
         "toggle_pinned_view" => command(Command::TogglePinnedView),
         "shelf_search" => Dispatch::Intent(serde_json::json!({"intent":"toggle_shelf_search"})),
         "folder_favorites" if state.tab == crate::interaction::ShelfTab::All => {
@@ -1298,4 +1321,25 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "commands" => Dispatch::Intent(serde_json::json!({"intent":"show_commands"})),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod collection_fullscreen_tests {
+    use super::*;
+    #[test]
+    fn fullscreen_action_resolves_to_ui_intent_and_uses_f11() {
+        let definition = DEFS
+            .iter()
+            .find(|d| d.id == "collection_fullscreen")
+            .unwrap();
+        assert_eq!(definition.default_binding, "F11");
+        assert!(definition.rebindable && definition.in_palette);
+        assert_eq!(crate::shortcuts::normalize("F11").unwrap(), "F11");
+        match resolve("collection_fullscreen", &Interaction::default(), false) {
+            Some(Dispatch::Intent(value)) => {
+                assert_eq!(value["intent"], "toggle_collection_fullscreen")
+            }
+            _ => panic!("expected collection fullscreen intent"),
+        }
+    }
 }

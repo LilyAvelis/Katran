@@ -20,6 +20,7 @@ pub(super) struct State {
 }
 impl Shelf {
     pub(super) fn quit_application(&mut self, ctx: &egui::Context) {
+        self.exit_collection_fullscreen(ctx);
         self.stop_media_preview();
         self.overlay_ui.quitting = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -38,6 +39,7 @@ impl Shelf {
     }
     pub(super) fn apply_window_visibility(&mut self, ctx: &egui::Context, visible: bool) {
         self.video_visible = visible;
+        let leaving_fullscreen = !visible && self.exit_collection_fullscreen(ctx);
         if !visible {
             self.stop_media_preview();
             self.tag_menu.close(ctx);
@@ -48,6 +50,7 @@ impl Shelf {
         )
         .unwrap_or_default();
         if !visible
+            && !leaving_fullscreen
             && self.overlay_ui.animation.start_hide_with(
                 self.native_window,
                 &theme.animation_hide_style,
@@ -142,6 +145,7 @@ impl Shelf {
     pub(super) fn overlay_escape(&mut self, ctx: &egui::Context) {
         if self.overlay_ui.summoned
             && !self.overlay_ui.pending
+            && !self.upscale.collection_open()
             && self.state["preview"].is_null()
             && !self.actions
             && !self.open_apps.open

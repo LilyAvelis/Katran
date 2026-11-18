@@ -1245,6 +1245,7 @@ impl Shelf {
                                     | "folder_standard"
                                     | "video_pause"
                                     | "capture_video_frame"
+                                    | "collection_fullscreen"
                             )
                             && (!self.open_apps.open || s.id == "open_with")
                             && (s.id != "toggle_pinned_view"
@@ -1284,6 +1285,7 @@ impl Shelf {
                 && !self.info.is_open()
                 && !self.pinned_ui.open
                 && !self.tag_menu.open
+                && (self.actions || !self.upscale.collection_open())
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 if !self.pending_delete.is_empty() {

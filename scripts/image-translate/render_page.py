@@ -3,7 +3,8 @@
 Input JSON is an ordered list of objects with ``text`` and either ``polygon`` or
 ``polygons`` (each polygon is a list of image-space [x, y] points). An optional
 ``text_box`` [left, top, right, bottom] selects a larger safe placement rectangle;
-it is intended for diagnostics and does not expand the inpainting mask.
+it is intended for diagnostics and does not expand the inpainting mask. An object
+containing ``blocks`` and an optional ``summary`` is also accepted.
 """
 import argparse
 import json
@@ -180,7 +181,7 @@ def _panel_wrap(text, font, draw, width):
     return lines or None
 
 
-def render(source, blocks, output, font, numbered_only=False):
+def render(source, blocks, output, font, numbered_only=False, summary=None):
     original = Image.open(source).convert("RGBA")
     alpha = original.getchannel("A")
     rgb = np.asarray(original.convert("RGB"))
@@ -395,8 +396,8 @@ def render(source, blocks, output, font, numbered_only=False):
     side_indices = set()
     near_indices = {placed[2] for placed in near}
 
-    pending = sorted((i for i in range(len(records)) if i not in active and i not in near_indices),
-                     key=lambda i: records[i]["box"][1] + records[i]["box"][3])
+    # Input order is the reading-ID order, so every column remains ascending.
+    pending = [i for i in range(len(records)) if i not in active and i not in near_indices]
     for index in pending:
         record = records[index]
         text = record["text"]
@@ -498,7 +499,7 @@ def render(source, blocks, output, font, numbered_only=False):
             marker_boxes.append(box)
             break
     panel_height = 12 + sum(item[2] for item in panel_items)
-    number_for = {index: number for number, index in enumerate(sorted(marker_for), 1)}
+    number_for = {index: index + 1 for index in outside_indices}
     marker_font = ImageFont.truetype(str(font), 13)
     def draw_badge(draw, left, top, label):
         draw.rounded_rectangle((left, top, left + marker_width - 1, top + marker_height - 1), radius=7,
@@ -514,8 +515,20 @@ def render(source, blocks, output, font, numbered_only=False):
     fallback = len(panel_items) + len(side_items)
     if not active and not near and not fallback:
         raise ValueError("No text blocks could be rendered safely")
-    output_height = height + panel_height + 8 if panel_items else height
-    if side_items or panel_items:
+    base_height = height + panel_height + 8 if panel_items else height
+    # Do not sacrifice translations for a summary; report omission explicitly.
+    normalized_summary = " ".join(summary.split()) if isinstance(summary, str) else ""
+    summary_lines = None
+    summary_height = 0
+    if normalized_summary and len(normalized_summary) <= 1000:
+        lines = _panel_wrap(normalized_summary, panel_font, panel_draw, output_width - 24)
+        if lines:
+            candidate_height = 24 + (len(lines) + 1) * line_height
+            if base_height + candidate_height <= max_height:
+                summary_lines = lines
+                summary_height = candidate_height
+    output_height = base_height + summary_height
+    if side_items or panel_items or summary_lines:
         canvas = Image.new("RGBA", (output_width, output_height), "white")
         canvas.paste(result_image, (left_pad, 0))
         canvas_draw = ImageDraw.Draw(canvas)
@@ -525,12 +538,12 @@ def render(source, blocks, output, font, numbered_only=False):
             canvas_draw.rectangle((sx + 4, y, sx + side_width - 5, y + item_height - 1),
                                   outline=(185, 185, 185, 255), width=1)
             yy = y + 6
-            if index in number_for:
-                draw_badge(canvas_draw, sx + 12, yy, number_for[index])
+            draw_badge(canvas_draw, sx + 12, yy, number_for[index])
+            if index in marker_for:
                 canvas_draw.text((sx + 44, yy), '→' if side == 'left' else '←', font=panel_font, fill=(70, 70, 70, 255))
             else:
                 source_x, source_y, _, _ = records[index]["box"]
-                canvas_draw.text((sx + 12, yy), f"({source_x}, {source_y})", font=panel_font, fill=(70, 70, 70, 255))
+                canvas_draw.text((sx + 44, yy), f"({source_x}, {source_y})", font=panel_font, fill=(70, 70, 70, 255))
             yy += line_height
             for line in lines:
                 canvas_draw.text((sx + 12, yy), line, font=panel_font, fill=(0, 0, 0, 255))
@@ -539,21 +552,29 @@ def render(source, blocks, output, font, numbered_only=False):
         for index, lines, _ in panel_items:
             source_x, source_y, _, _ = records[index]["box"]
             prefix = f"#000 ({source_x}, {source_y}): "
-            if index in number_for:
-                draw_badge(canvas_draw, 12, y, number_for[index])
+            draw_badge(canvas_draw, 12, y, number_for[index])
+            if index in marker_for:
                 lines = [lines[0].removeprefix(prefix), *lines[1:]]
             else:
                 lines = [lines[0].removeprefix("#000 "), *lines[1:]]
             for line_index, line in enumerate(lines):
-                canvas_draw.text((44 if index in number_for and line_index == 0 else 12, y), line, font=panel_font, fill=(0, 0, 0, 255))
+                canvas_draw.text((44 if line_index == 0 else 12, y), line, font=panel_font, fill=(0, 0, 0, 255))
                 y += line_height
             y += 10
+        if summary_lines:
+            y = base_height + 12
+            canvas_draw.text((12, y), "Page summary", font=panel_font, fill=(40, 40, 40, 255))
+            y += line_height
+            for line in summary_lines:
+                canvas_draw.text((12, y), line, font=panel_font, fill=(0, 0, 0, 255))
+                y += line_height
         result_image = canvas
     with open(output, "xb") as target:
         result_image.save(target, format="PNG")
     return {"rendered": len(active) + len(near) + fallback,
             "skipped": len(records) - len(active) - len(near) - fallback,
-            "fallback": fallback, "side": len(side_items), "left_pad": left_pad}
+            "fallback": fallback, "side": len(side_items), "left_pad": left_pad,
+            "summary_rendered": bool(summary_lines)}
 
 
 def main():
@@ -566,8 +587,12 @@ def main():
     parser.add_argument("--numbered-only", action="store_true", help="Keep the page intact and put every translation on numbered cards")
     args = parser.parse_args()
     with open(args.blocks_json, encoding="utf-8") as stream:
-        blocks = json.load(stream)
-    report = render(args.source, blocks, args.output, args.font, numbered_only=args.numbered_only)
+        document = json.load(stream)
+    if isinstance(document, dict):
+        blocks, summary = document.get("blocks"), document.get("summary")
+    else:
+        blocks, summary = document, None
+    report = render(args.source, blocks, args.output, args.font, numbered_only=args.numbered_only, summary=summary)
     if args.report:
         with open(args.report, "x", encoding="utf-8") as receipt:
             json.dump(report, receipt)

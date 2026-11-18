@@ -47,6 +47,10 @@ rebindable. Both forms of Chinese use the installed `PP-OCRv5_server_rec`.
 Both Chinese routes use the same geometry to group adjacent vertical columns
 and read them from right to left. Horizontal lines keep their reading order.
 The commands retain separate translation prompts.
+Japanese and Chinese layouts also group OCR fragments that share a detected
+enclosed light bubble. Open or dark bubbles fall back to text geometry.
+Numbers follow the resulting reading order, and cards in each side margin
+are placed in ascending number order.
 Settings → AI → Image translation reports local availability by language and the English
 output language. Output is a separate, managed PNG in Translate. The renderer
 keeps text placements disjoint and uses readable spacing and a minimum font
@@ -62,6 +66,9 @@ to keep original lettering and put every translation in a numbered card.
 The renderer bypasses letter removal and in-bubble layout in this mode.
 The setting applies to newly submitted single-page and batch jobs. The
 hybrid layout remains the default.
+Qwen returns a short English summary from the recognized text in the same
+request as the translations. It appears below the page when the footer fits
+within the output size limits. The render receipt reports whether it fit.
 Nothing is published if no lettering can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
 The Katran UI opens a newly saved single-page PNG in QuickLook. QuickLook

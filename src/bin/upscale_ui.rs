@@ -14,6 +14,8 @@ pub(super) struct State {
     kind: ImageJob,
     collection: Option<Collection>,
     collection_title: String,
+    collection_is_bull: bool,
+    collection_fullscreen: bool,
     link_rename: Option<LinkRename>,
     progress: Option<(u64, u64)>,
     partial_translation: Option<PartialTranslation>,
@@ -195,6 +197,10 @@ pub(super) fn translation_source(id: &str) -> Option<katran::api::ImageTranslati
 impl State {
     pub(super) fn collection_open(&self) -> bool {
         self.collection.is_some()
+    }
+
+    pub(super) fn collection_can_fullscreen(&self) -> bool {
+        self.collection_open() && self.collection_is_bull
     }
 
     pub(super) fn saving_link_name(&self) -> bool {
@@ -399,6 +405,10 @@ impl Shelf {
             .to_owned();
         self.close_translation_collection(ctx);
         self.upscale.collection_title = title;
+        self.upscale.collection_is_bull = event["name"]
+            .as_str()
+            .and_then(|name| std::path::Path::new(name).extension())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("bull"));
         self.upscale.collection = Some(Collection {
             id,
             revision: revision.into(),
@@ -437,7 +447,28 @@ impl Shelf {
         self.request_translation_page(target, ctx);
     }
 
+    pub(super) fn toggle_collection_fullscreen(&mut self, ctx: &egui::Context) {
+        if self.upscale.collection_can_fullscreen() && self.upscale.link_rename.is_none() {
+            let fullscreen = !self.upscale.collection_fullscreen;
+            self.upscale.collection_fullscreen = fullscreen;
+            self.overlay_ui.animation.cancel(self.native_window);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
+            ctx.request_repaint();
+        }
+    }
+
+    pub(super) fn exit_collection_fullscreen(&mut self, ctx: &egui::Context) -> bool {
+        let was_fullscreen = std::mem::take(&mut self.upscale.collection_fullscreen);
+        if was_fullscreen {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            ctx.request_repaint();
+        }
+        was_fullscreen
+    }
+
     fn close_translation_collection(&mut self, ctx: &egui::Context) {
+        self.exit_collection_fullscreen(ctx);
+        self.upscale.collection_is_bull = false;
         ctx.set_transform_layer(collection_modal_layer(), egui::emath::TSTransform::IDENTITY);
         if self.collection_media_target().is_some() {
             self.stop_media_preview();
@@ -742,7 +773,26 @@ impl Shelf {
             return;
         }
         let editing = self.upscale.link_rename.is_some();
-        if !editing {
+        let accepts_input = !editing && !self.actions && self.shortcut_editor.is_none();
+        if accepts_input && self.upscale.collection_can_fullscreen() && ctx.input(|i| i.focused) {
+            if self.upscale.collection_fullscreen
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                self.exit_collection_fullscreen(ctx);
+            } else if let Some(shortcut) = self
+                .shortcuts
+                .iter()
+                .find(|shortcut| shortcut.id == "collection_fullscreen")
+                && let Some(action) = shortcuts_ui::take_action_with_editing(
+                    ctx,
+                    std::slice::from_ref(shortcut),
+                    false,
+                )
+            {
+                self.run(action, ctx);
+            }
+        }
+        if accepts_input {
             let copy_requested = {
                 let collection = self.upscale.collection.as_mut().unwrap();
                 ctx.input_mut(|input| {
@@ -819,11 +869,11 @@ impl Shelf {
                 }
             }
         }
-        let close_key =
-            !editing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
-        let previous_key = !editing
+        let close_key = accepts_input
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        let previous_key = accepts_input
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-        let next_key = !editing
+        let next_key = accepts_input
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
         let media_target = self
             .media_surface_visible(ctx)
@@ -837,157 +887,194 @@ impl Shelf {
         let mut close = close_key;
         let mut save_name = false;
         let mut cancel_rename = false;
-        let canvas_size = collection_canvas_size(ctx.content_rect().size());
+        let fullscreen = self.upscale.collection_fullscreen;
+        let show_chrome = !fullscreen || collection.zoom.factor <= 1.0;
         let elapsed = collection.opened_at.elapsed();
         let viewport = ctx.content_rect();
+        let canvas_size = if fullscreen {
+            viewport.size()
+        } else {
+            collection_canvas_size(viewport.size())
+        };
         let layer = collection_modal_layer();
-        let transform = collection_intro_transform(elapsed, viewport.center());
+        let transform = if fullscreen {
+            egui::emath::TSTransform::IDENTITY
+        } else {
+            collection_intro_transform(elapsed, viewport.center())
+        };
         ctx.set_transform_layer(layer, transform);
         // The dialog moves on its layer; the dimming still covers the viewport.
         let backdrop = transform.inverse() * viewport;
         egui::Painter::new(ctx.clone(), layer, backdrop).rect_filled(
             backdrop,
             0.0,
-            egui::Color32::from_black_alpha(100),
+            if fullscreen {
+                egui::Color32::from_gray(24)
+            } else {
+                egui::Color32::from_black_alpha(100)
+            },
         );
-        let entering = elapsed < COLLECTION_INTRO;
+        let entering = !fullscreen && elapsed < COLLECTION_INTRO;
         if entering {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
-        let dialog = egui::Modal::new(layer.id).backdrop_color(egui::Color32::TRANSPARENT);
+        let mut dialog = egui::Modal::new(layer.id).backdrop_color(egui::Color32::TRANSPARENT);
+        if fullscreen {
+            dialog = dialog
+                .area(
+                    egui::Area::new(layer.id)
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(viewport.min)
+                        .default_size(viewport.size())
+                        .constrain(false),
+                )
+                .frame(egui::Frame::NONE);
+        }
         let modal = dialog.show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
-            let row_height = ui.spacing().interact_size.y.max(30.0);
-            let row_size = egui::vec2(canvas_size.x, row_height);
-            let (heading, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
-            let title_rect =
-                heading.shrink2(egui::vec2(row_height.min(heading.width() * 0.25), 0.0));
-            ui.place(
-                title_rect,
-                egui::Label::new(egui::RichText::new(title).heading())
-                    .halign(egui::Align::Center)
-                    .truncate(),
-            )
-            .on_hover_text(title);
-            let close_rect = egui::Rect::from_min_max(
-                heading.right_top() - egui::vec2(row_height.min(heading.width() * 0.25), 0.0),
-                heading.right_bottom(),
-            );
-            close |= ui
-                .place(
-                    close_rect,
-                    egui::Button::new("×").frame(false).sense(if editing {
-                        egui::Sense::hover()
-                    } else {
-                        egui::Sense::click()
-                    }),
+            if show_chrome {
+                let row_height = ui.spacing().interact_size.y.max(30.0);
+                let row_size = egui::vec2(canvas_size.x, row_height);
+                let (heading, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
+                let title_rect =
+                    heading.shrink2(egui::vec2(row_height.min(heading.width() * 0.25), 0.0));
+                ui.place(
+                    title_rect,
+                    egui::Label::new(egui::RichText::new(title).heading())
+                        .halign(egui::Align::Center)
+                        .truncate(),
                 )
-                .on_hover_text(tr("Закрыть · Space", "Close · Space"))
-                .clicked()
-                && !editing;
-
-            let (pager, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
-            let counter_width = (pager.width() * 0.4).min(72.0);
-            let button_width = (pager.width() * 0.25).min(row_height);
-            let offset = (counter_width + button_width) / 2.0
-                + ui.spacing().item_spacing.x.min(pager.width() * 0.05);
-            let nav = |ui: &mut egui::Ui, x, label, hint, enabled| {
-                let rect = egui::Rect::from_center_size(
-                    pager.center() + egui::vec2(x, 0.0),
-                    egui::vec2(button_width, row_height),
+                .on_hover_text(title);
+                let close_rect = egui::Rect::from_min_max(
+                    heading.right_top() - egui::vec2(row_height.min(heading.width() * 0.25), 0.0),
+                    heading.right_bottom(),
                 );
-                ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
-                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                ))
-                .add_enabled(enabled, egui::Button::new(label))
-                .on_hover_text(hint)
-                .clicked()
-            };
-            previous |= nav(
-                ui,
-                -offset,
-                "←",
-                tr("Назад", "Previous"),
-                !editing && collection.index > 0,
-            );
-            let shown = collection
-                .ready_index
-                .map(|n| (n + 1).to_string())
-                .unwrap_or_else(|| "…".into());
-            let total = collection
-                .count
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "…".into());
-            let counter =
-                egui::Rect::from_center_size(pager.center(), egui::vec2(counter_width, row_height));
-            ui.place(
-                counter,
-                egui::Label::new(format!("{shown} / {total}")).halign(egui::Align::Center),
-            );
-            next |= nav(
-                ui,
-                offset,
-                "→",
-                tr("Далее", "Next"),
-                !editing && collection.count.is_some_and(|n| collection.index + 1 < n),
-            );
-            ui.vertical_centered(|ui| {
-                if let Some(link) = collection.link.as_ref().filter(|link| link.editable)
-                    && !editing
-                    && ui
-                        .add_enabled(
-                            collection.pending.is_none()
-                                && collection.ready_index == Some(collection.index),
-                            egui::Button::new(tr("Переименовать ссылку", "Rename link")),
-                        )
-                        .clicked()
-                {
-                    *edit = Some(LinkRename {
-                        title: link.title.clone(),
-                        focus: true,
-                        job: None,
-                        error: String::new(),
-                    });
-                }
-            });
-            if let Some(edit) = edit {
-                let idle = edit.job.is_none();
-                let can_save = idle
-                    && collection.pending.is_none()
-                    && collection.ready_index == Some(collection.index);
-                ui.horizontal(|ui| {
-                    let name = ui.add_enabled(
-                        idle,
-                        egui::TextEdit::singleline(&mut edit.title)
-                            .desired_width((canvas_size.x - 200.0).clamp(100.0, 480.0))
-                            .hint_text(tr("Имя ссылки", "Link name")),
+                close |= ui
+                    .place(
+                        close_rect,
+                        egui::Button::new("×").frame(false).sense(if editing {
+                            egui::Sense::hover()
+                        } else {
+                            egui::Sense::click()
+                        }),
+                    )
+                    .on_hover_text(tr("Закрыть · Space", "Close · Space"))
+                    .clicked()
+                    && !editing;
+
+                let (pager, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
+                let counter_width = (pager.width() * 0.4).min(72.0);
+                let button_width = (pager.width() * 0.25).min(row_height);
+                let offset = (counter_width + button_width) / 2.0
+                    + ui.spacing().item_spacing.x.min(pager.width() * 0.05);
+                let nav = |ui: &mut egui::Ui, x, label, hint, enabled| {
+                    let rect = egui::Rect::from_center_size(
+                        pager.center() + egui::vec2(x, 0.0),
+                        egui::vec2(button_width, row_height),
                     );
-                    if idle && std::mem::take(&mut edit.focus) {
-                        name.request_focus();
-                    }
-                    let enter = name.lost_focus()
-                        && ui.input(|input| {
-                            input.key_pressed(egui::Key::Enter) && input.modifiers.is_none()
+                    ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    ))
+                    .add_enabled(enabled, egui::Button::new(label))
+                    .on_hover_text(hint)
+                    .clicked()
+                };
+                previous |= nav(
+                    ui,
+                    -offset,
+                    "←",
+                    tr("Назад", "Previous"),
+                    !editing && collection.index > 0,
+                );
+                let shown = collection
+                    .ready_index
+                    .map(|n| (n + 1).to_string())
+                    .unwrap_or_else(|| "…".into());
+                let total = collection
+                    .count
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "…".into());
+                let counter = egui::Rect::from_center_size(
+                    pager.center(),
+                    egui::vec2(counter_width, row_height),
+                );
+                ui.place(
+                    counter,
+                    egui::Label::new(format!("{shown} / {total}")).halign(egui::Align::Center),
+                );
+                next |= nav(
+                    ui,
+                    offset,
+                    "→",
+                    tr("Далее", "Next"),
+                    !editing && collection.count.is_some_and(|n| collection.index + 1 < n),
+                );
+                ui.vertical_centered(|ui| {
+                    if let Some(link) = collection.link.as_ref().filter(|link| link.editable)
+                        && !editing
+                        && ui
+                            .add_enabled(
+                                collection.pending.is_none()
+                                    && collection.ready_index == Some(collection.index),
+                                egui::Button::new(tr("Переименовать ссылку", "Rename link")),
+                            )
+                            .clicked()
+                    {
+                        *edit = Some(LinkRename {
+                            title: link.title.clone(),
+                            focus: true,
+                            job: None,
+                            error: String::new(),
                         });
-                    save_name = ui
-                        .add_enabled(
-                            can_save && !edit.title.trim().is_empty(),
-                            egui::Button::new(tr("Сохранить", "Save")),
-                        )
-                        .clicked()
-                        || (can_save && enter && !edit.title.trim().is_empty());
-                    cancel_rename = ui
-                        .add_enabled(idle, egui::Button::new(tr("Отмена", "Cancel")))
-                        .clicked()
-                        || (idle
-                            && ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                            }));
+                    }
                 });
-                if !edit.error.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &edit.error);
+                if let Some(edit) = edit {
+                    let idle = edit.job.is_none();
+                    let can_save = idle
+                        && collection.pending.is_none()
+                        && collection.ready_index == Some(collection.index);
+                    ui.horizontal(|ui| {
+                        let name = ui.add_enabled(
+                            idle,
+                            egui::TextEdit::singleline(&mut edit.title)
+                                .desired_width((canvas_size.x - 200.0).clamp(100.0, 480.0))
+                                .hint_text(tr("Имя ссылки", "Link name")),
+                        );
+                        if idle && std::mem::take(&mut edit.focus) {
+                            name.request_focus();
+                        }
+                        let enter = name.lost_focus()
+                            && ui.input(|input| {
+                                input.key_pressed(egui::Key::Enter) && input.modifiers.is_none()
+                            });
+                        save_name = ui
+                            .add_enabled(
+                                can_save && !edit.title.trim().is_empty(),
+                                egui::Button::new(tr("Сохранить", "Save")),
+                            )
+                            .clicked()
+                            || (can_save && enter && !edit.title.trim().is_empty());
+                        cancel_rename = ui
+                            .add_enabled(idle, egui::Button::new(tr("Отмена", "Cancel")))
+                            .clicked()
+                            || (idle
+                                && ui.input_mut(|input| {
+                                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                                }));
+                    });
+                    if !edit.error.is_empty() {
+                        ui.colored_label(egui::Color32::LIGHT_RED, &edit.error);
+                    }
                 }
             }
+            let canvas_size = if fullscreen {
+                egui::vec2(
+                    canvas_size.x,
+                    (viewport.bottom() - ui.next_widget_position().y).max(1.0),
+                )
+            } else {
+                canvas_size
+            };
             let (canvas, response) =
                 ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
             #[cfg(test)]
@@ -1167,6 +1254,9 @@ impl Shelf {
                             size,
                         );
                     }
+                    if fullscreen && show_chrome != (collection.zoom.factor <= 1.0) {
+                        ctx.request_repaint();
+                    }
                 }
                 if response.dragged_by(egui::PointerButton::Primary)
                     || response.dragged_by(egui::PointerButton::Middle)
@@ -1243,7 +1333,7 @@ impl Shelf {
             self.submit_link_rename(ctx);
         } else if self.upscale.link_rename.is_some() {
             return;
-        } else if close || modal.should_close() {
+        } else if close || (accepts_input && !fullscreen && modal.should_close()) {
             self.close_translation_collection(ctx);
         } else if previous && current > 0 {
             self.request_translation_page(current - 1, ctx);
@@ -1323,6 +1413,7 @@ impl Shelf {
             self.upscale.open = true;
             return;
         }
+        self.close_translation_collection(ctx);
         let result = self.call(command);
         let job = result["job_id"].as_u64().map(katran::domain_jobs::JobId);
         self.upscale = State {
@@ -1331,6 +1422,8 @@ impl Shelf {
             preview_job: None,
             collection: None,
             collection_title: String::new(),
+            collection_is_bull: false,
+            collection_fullscreen: false,
             link_rename: None,
             progress: None,
             partial_translation: None,
@@ -1621,6 +1714,100 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::actions::upscale_operation;
+
+    #[test]
+    fn bull_fullscreen_is_contextual_and_hides_pager_when_zoomed() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 650.0));
+        let frame = |app: &mut Shelf, key: Option<(egui::Key, egui::Modifiers)>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events: key
+                        .into_iter()
+                        .flat_map(|(key, modifiers)| {
+                            [true, false].map(|pressed| egui::Event::Key {
+                                key,
+                                modifiers,
+                                physical_key: None,
+                                pressed,
+                                repeat: false,
+                            })
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            )
+        };
+        let sent = |output: egui::FullOutput, value| {
+            output.viewport_output.get(&egui::ViewportId::ROOT).unwrap().commands.iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Fullscreen(v) if *v == value))
+        };
+        assert!(!sent(
+            frame(&mut app, Some((egui::Key::F11, egui::Modifiers::NONE))),
+            true
+        ));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(20, 30)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let mut bytes = Vec::new();
+        baloh_collection::codec::write(&mut bytes, &[png.into_inner()]).unwrap();
+        let event = app.call(Command::IngestBytes {
+            name: "Fullscreen.bull".into(),
+            source: "image_collection".into(),
+            bytes,
+        });
+        app.open_translation_collection(&event, &ctx);
+        assert!(sent(
+            frame(&mut app, Some((egui::Key::F11, egui::Modifiers::NONE))),
+            true
+        ));
+        let canvas = || {
+            ctx.data(|data| {
+                data.get_temp::<egui::Rect>(egui::Id::new("collection-test-canvas"))
+                    .unwrap()
+            })
+        };
+        assert_eq!(canvas().width(), screen.width());
+        assert!(canvas().top() > screen.top());
+        // The asynchronous first-page response normally resets zoom. Let it
+        // settle before checking the chrome state in a subsequent frame.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.upscale.collection.as_ref().unwrap().pending.is_some() {
+            assert!(Instant::now() < deadline);
+            frame(&mut app, None);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        app.upscale.collection.as_mut().unwrap().zoom.factor = 2.0;
+        frame(&mut app, None);
+        assert_eq!(canvas(), screen);
+        app.upscale.collection.as_mut().unwrap().zoom.factor = 1.0;
+        frame(&mut app, None);
+        assert!(canvas().top() > screen.top());
+        assert!(sent(
+            frame(&mut app, Some((egui::Key::Escape, egui::Modifiers::NONE))),
+            false
+        ));
+        assert!(app.upscale.collection_open());
+
+        frame(&mut app, Some((egui::Key::K, egui::Modifiers::CTRL)));
+        assert!(app.actions);
+        app.action_query = "fullscreen".into();
+        assert!(sent(
+            frame(&mut app, Some((egui::Key::Enter, egui::Modifiers::NONE))),
+            true
+        ));
+        assert!(!app.actions);
+        assert!(sent(
+            frame(&mut app, Some((egui::Key::Space, egui::Modifiers::NONE))),
+            false
+        ));
+        assert!(!app.upscale.collection_open());
+    }
 
     #[test]
     fn collection_rename_refreshes_the_open_link_and_revision() {

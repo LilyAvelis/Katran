@@ -2710,7 +2710,8 @@ impl Service {
                     Ok(json!({"event": self.get(id)?, "source_language": source.code(), "target_language": target,
                         "width": width, "height": height, "rendered_blocks": report.rendered,
                         "skipped_blocks": report.skipped, "fallback_blocks": report.fallback,
-                        "side_blocks": report.side, "source_left": report.left_pad}))
+                        "side_blocks": report.side, "source_left": report.left_pad,
+                        "summary_rendered": report.summary_rendered}))
                 },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {

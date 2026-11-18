@@ -4,6 +4,7 @@ pub fn icon(id: &str) -> Lucide {
     match id {
         id if id.starts_with("sort_") => Lucide::ArrowUpDown,
         "quicklook" | "preview" => Lucide::Eye,
+        "collection_fullscreen" => Lucide::Fullscreen,
         "video_pause" => Lucide::Pause,
         "capture_video_frame" => Lucide::Camera,
         "extract_video_audio" => Lucide::Volume2,

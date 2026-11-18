@@ -37,6 +37,8 @@ pub(crate) struct RenderReport {
     pub(crate) fallback: u32,
     pub(crate) side: u32,
     pub(crate) left_pad: u32,
+    #[serde(default)]
+    pub(crate) summary_rendered: bool,
 }
 impl StagedTranslation {
     pub(crate) fn path(&self) -> &Path {
@@ -353,10 +355,13 @@ fn bounded_file(path: &Path, max: u64) -> Result<()> {
 
 fn check_recognized_regions(path: &Path) -> Result<()> {
     bounded_file(path, 1_000_000)?;
-    let regions: Vec<serde_json::Value> = serde_json::from_slice(&fs::read(path)?)
-        .map_err(|_| error("Invalid OCR response"))?;
+    let regions: Vec<serde_json::Value> =
+        serde_json::from_slice(&fs::read(path)?).map_err(|_| error("Invalid OCR response"))?;
     if regions.is_empty() {
-        return Err(ApiError::new("no_text_recognized", "OCR found no text on this page"));
+        return Err(ApiError::new(
+            "no_text_recognized",
+            "OCR found no text on this page",
+        ));
     }
     Ok(())
 }
@@ -506,6 +511,11 @@ impl Session {
             .env("PYTHONNOUSERSITE", "1");
         if japanese {
             cmd.arg("--ordered");
+        } else if matches!(
+            language,
+            ImageTranslationSource::Chinese | ImageTranslationSource::TraditionalChinese
+        ) {
+            cmd.arg("--image").arg(&input);
         }
         run(cmd, cancel, "Local translation", Duration::from_secs(240))?;
         bounded_file(&translation, 1_000_000)?;
@@ -549,7 +559,8 @@ impl Session {
             || output_height < height
             || (output_width > width) != (report.side > 0)
             || report.left_pad > output_width.saturating_sub(width)
-            || (output_height > height) != (report.fallback > report.side)
+            || (output_height > height)
+                != (report.fallback > report.side || report.summary_rendered)
             || output_width > 8192
             || output_height > 8192
             || u64::from(output_width) * u64::from(output_height) > MAX_PIXELS
