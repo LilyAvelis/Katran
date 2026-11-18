@@ -208,6 +208,9 @@ impl Shelf {
         self.workspace_reload(ctx);
     }
     fn workspace_action(&mut self, id: String, ctx: &egui::Context) {
+        if self.run_notion_database_action(&id, ctx) {
+            return;
+        }
         let result = self.call(Command::RunAction { id });
         let mode = match result["intent"].as_str() {
             Some("folder_favorites") => Some(Mode::Favorites),
@@ -493,7 +496,9 @@ impl Shelf {
             && !ctx.egui_wants_keyboard_input()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Period))
         {
-            if self.state["tab"] == "folder" {
+            if self.notion_database_active() {
+                self.pin_notion_database_page();
+            } else if self.state["tab"] == "folder" {
                 let result = self.call(Command::ToggleFavoriteFolder);
                 if let Some(favorite) = result["favorite"].as_bool() {
                     self.favorite_notice = Some((

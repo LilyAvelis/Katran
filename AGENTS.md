@@ -13,8 +13,9 @@ table and toggle reader. Preview markup is inert, including unknown tags.
 Alt+Enter opens only the canonical Notion URL derived from the selected page ID.
 Keep local page IDs and titles in the Notion sidecar for history and favorites.
 Physical backslash switches the picker to read-only data source search.
-Folder renders the selected source using paginated Notion rows, without
-projecting them as local filesystem Events. Filter and sort against the source
+Folder renders the selected source through its ordinary shelf, using paginated
+read-only Notion rows with reserved IDs. Keep these IDs outside filesystem
+resolution. Use the shared search, sort, and Actions controls with the source
 API; Space opens a row's page and Ctrl+. pins only the page. No Notion writes.
 See [setup](docs/notion.md).
 

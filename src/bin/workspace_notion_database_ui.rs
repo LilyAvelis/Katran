@@ -10,6 +10,8 @@ struct Property {
 
 #[derive(serde::Deserialize)]
 struct Row {
+    #[serde(skip)]
+    projection_id: i64,
     #[serde(flatten)]
     page: Page,
     summary: String,
@@ -38,15 +40,6 @@ impl Sort {
             Self::Edited => Some("edited"),
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Source => tr("Порядок Notion", "Notion order"),
-            Self::Name => tr("Название", "Name"),
-            Self::Created => tr("Дата создания", "Created"),
-            Self::Edited => tr("Дата изменения", "Last edited"),
-        }
-    }
 }
 
 pub(super) struct State {
@@ -59,7 +52,7 @@ pub(super) struct State {
     rows: Vec<Row>,
     favorites: std::collections::HashSet<String>,
     selected: usize,
-    scroll: bool,
+    dirty: bool,
     next_cursor: Option<String>,
     incomplete: bool,
     pending: Option<Instant>,
@@ -72,6 +65,7 @@ pub(super) struct State {
 
 #[derive(Default)]
 struct Preview {
+    page: i64,
     blocks: Vec<katran::notion_reader::Block>,
     job: Option<JobId>,
     error: Option<String>,
@@ -89,7 +83,7 @@ impl State {
             rows: Vec::new(),
             favorites: Default::default(),
             selected: 0,
-            scroll: false,
+            dirty: true,
             next_cursor: None,
             incomplete: false,
             pending: Some(Instant::now()),
@@ -118,10 +112,14 @@ impl State {
             .iter()
             .map(|row| row.page.id.clone())
             .collect::<std::collections::HashSet<_>>();
-        self.rows.extend(
-            rows.into_iter()
-                .filter(|row| existing.insert(row.page.id.clone())),
-        );
+        self.rows.extend(rows.into_iter().filter_map(|mut row| {
+            if !existing.insert(row.page.id.clone()) {
+                return None;
+            }
+            row.projection_id = katran::notion::next_folder_page_id();
+            Some(row)
+        }));
+        self.dirty = true;
         let cursor = result["next_cursor"].as_str().map(str::to_owned);
         if cursor.is_some() && cursor == self.next_cursor {
             self.next_cursor = None;
@@ -157,18 +155,27 @@ impl Shelf {
         self.actions = false;
         self.query.clear();
         self.loaded_query.clear();
+        self.events.clear();
+        self.next_cursor = None;
+        self.cancel_folder_page();
         self.stop_media_preview();
         self.call(Command::ClosePreview);
         ctx.request_repaint();
     }
 
     pub(crate) fn notion_database_active(&self) -> bool {
-        self.workspace.database.is_some()
+        self.workspace.database.is_some() && self.state["tab"] == "folder"
     }
 
     pub(crate) fn close_notion_database(&mut self) {
         if let Some(mut database) = self.workspace.database.take() {
             self.cancel_notion_database_jobs(&mut database);
+            self.events.retain(|event| event["source"] != "notion_page");
+            if self.state["tab"] == "folder" {
+                self.next_cursor = None;
+                self.call(Command::ClearSelection);
+                self.state = self.call(Command::SetVisible { ids: Vec::new() });
+            }
         }
     }
 
@@ -236,6 +243,7 @@ impl Shelf {
                         .unwrap_or_default()
                         .to_owned(),
                 );
+                database.dirty = true;
             }
         }
     }
@@ -280,6 +288,7 @@ impl Shelf {
             title: row.page.title.clone(),
         });
         database.preview = Some(Preview {
+            page: row.projection_id,
             job: result["job_id"].as_u64().map(JobId),
             error: result.is_null().then(|| self.message.clone()),
             ..Default::default()
@@ -332,112 +341,310 @@ impl Shelf {
         }
     }
 
-    fn notion_database_keys(
-        &mut self,
-        database: &mut State,
-        ctx: &egui::Context,
-        search_id: egui::Id,
-    ) -> bool {
-        if self.workspace.open || self.overlay_ui.pending || self.state["settings_open"] == true {
-            return false;
+    pub(crate) fn notion_database_sync(&mut self, ctx: &egui::Context) {
+        if self.workspace.database.is_none() {
+            return;
         }
-        let editing = ctx.memory(|memory| memory.has_focus(search_id));
-        let key = |mods, key| ctx.input_mut(|i| i.consume_key(mods, key));
-        if key(egui::Modifiers::NONE, egui::Key::Escape) {
-            if database.preview.is_some() {
-                self.close_notion_database_preview(database);
-            } else if editing {
-                ctx.memory_mut(|mem| mem.surrender_focus(search_id));
-            } else {
-                return true;
-            }
+        if self.state["tab"] != "folder" {
+            self.close_notion_database();
+            return;
         }
-        let down = key(egui::Modifiers::NONE, egui::Key::ArrowDown);
-        let up = key(egui::Modifiers::NONE, egui::Key::ArrowUp);
-        if (down || up) && !database.rows.is_empty() {
-            if editing {
-                ctx.memory_mut(|memory| memory.surrender_focus(search_id));
-            } else {
-                let max = database.rows.len() - 1;
-                let old = database.selected;
-                database.selected = if down {
-                    (old + 1).min(max)
-                } else {
-                    old.saturating_sub(1)
-                };
-                database.scroll |= old != database.selected;
-                if old != database.selected && database.preview.is_some() {
-                    self.start_notion_database_preview(database);
-                } else if down
-                    && old == max
-                    && database.rows_job.is_none()
-                    && database.next_cursor.is_some()
-                {
-                    self.start_notion_database_query(database, true);
-                }
-            }
-        }
-        if let Some(page) = database.selected().map(|row| row.page.clone()) {
-            if key(egui::Modifiers::CTRL, egui::Key::Period) {
-                let id = page.id.clone();
-                let result = self.call(Command::ToggleFavoriteNotionPage { page });
-                match result["favorite"].as_bool() {
-                    Some(true) => {
-                        database.favorites.insert(id);
-                    }
-                    Some(false) => {
-                        database.favorites.remove(&id);
-                    }
-                    None => database.error = Some(self.message.clone()),
-                }
-            } else if key(egui::Modifiers::ALT, egui::Key::Enter) {
-                if self.call(Command::OpenNotionPage { page })["opened"] != true {
-                    database.error = Some(self.message.clone());
-                }
-            } else if !editing && key(egui::Modifiers::NONE, egui::Key::Space) {
-                if database.preview.is_some() {
-                    self.close_notion_database_preview(database);
-                } else {
-                    self.start_notion_database_preview(database);
-                }
-            } else if !editing
-                && key(egui::Modifiers::NONE, egui::Key::Enter)
-                && !self.begin_paste_ui(
-                    ctx,
-                    Command::BeginPasteNotionPage {
-                        owner_window: self.native_window,
-                        page_id: page.id,
-                        title: page.title,
-                    },
-                )
+        let Some(mut database) = self.workspace.database.take() else {
+            return;
+        };
+        let cursor = self.state["preview"]
+            .as_i64()
+            .or_else(|| self.state["cursor"].as_i64());
+        database.selected = cursor
+            .and_then(|id| database.rows.iter().position(|row| row.projection_id == id))
+            .unwrap_or(0);
+        database.view = serde_json::from_value(self.state["view"].clone()).unwrap_or_default();
+        let preview = self.state["preview"].as_i64().filter(|id| {
+            database
+                .selected()
+                .is_some_and(|row| row.projection_id == *id)
+        });
+        if let Some(id) = preview {
+            if database
+                .preview
+                .as_ref()
+                .is_none_or(|preview| preview.page != id)
             {
-                database.error = Some(self.message.clone());
+                self.cancel_notion_database_excerpt(&mut database);
+                self.start_notion_database_preview(&mut database);
+            }
+        } else {
+            self.close_notion_database_preview(&mut database);
+        }
+        self.tick_notion_database(&mut database, ctx);
+        self.tick_notion_database_excerpt(&mut database, ctx);
+        if let Some(due) = database.pending {
+            ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
+        }
+        if std::mem::take(&mut database.dirty) {
+            self.events = database.rows.iter().map(|row| {
+                let summary = if row.summary.is_empty() {
+                    row.excerpt.as_deref().unwrap_or("")
+                } else { row.summary.as_str() };
+                let mut fields: Vec<_> = row.properties.iter()
+                    .map(|property| serde_json::json!({"name":property.name,"value":property.value})).collect();
+                for (name, value) in [(tr("Создано", "Created"), &row.created_at), (tr("Изменено", "Last edited"), &row.edited_at)] {
+                    if !value.is_empty() { fields.push(serde_json::json!({"name":name,"value":value})); }
+                }
+                serde_json::json!({
+                    "id":row.projection_id, "name":row.page.title, "kind":"text_fragment",
+                    "source":"notion_page", "text_preview":summary,
+                    "revision":row.page.id,"notion_fields":fields, "detected_at_ms":0,
+                    "properties":{"pinned":database.favorites.contains(&row.page.id)}
+                })
+            }).collect();
+            self.next_cursor = database.next_cursor.clone();
+            if database.incomplete {
+                self.message = tr(
+                    "Notion вернул часть записей",
+                    "Notion returned partial results",
+                )
+                .into();
             }
         }
-        false
+        if let Some(error) = &database.error {
+            self.message.clone_from(error);
+        }
+        self.workspace.database = Some(database);
     }
 
-    pub(crate) fn notion_database_frame(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
-        // The picker is the only overlay over the database. Its local Folder
-        // transfers stay disabled while remote pages own the main surface.
-        let picker_key = ctx.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(event,
-            egui::Event::Key { key: egui::Key::K | egui::Key::N, pressed: true, modifiers, .. }
-                if modifiers.ctrl && modifiers.shift && !modifiers.alt && !modifiers.mac_cmd)
-            })
-        });
-        if self.workspace.open || picker_key {
-            self.workspace_input(ctx);
-            self.workspace_tick(ctx);
+    pub(crate) fn refresh_notion_database(&mut self) {
+        let Some(mut database) = self.workspace.database.take() else {
+            return;
+        };
+        self.cancel_notion_database_jobs(&mut database);
+        database.query = self.query.trim().to_owned();
+        database.rows.clear();
+        database.selected = 0;
+        database.next_cursor = None;
+        database.error = None;
+        database.incomplete = false;
+        database.dirty = true;
+        database.pending = Some(Instant::now() + Duration::from_millis(250));
+        self.events.clear();
+        self.next_cursor = None;
+        self.call(Command::ClearSelection);
+        self.state = self.call(Command::SetVisible { ids: Vec::new() });
+        self.workspace.database = Some(database);
+    }
+
+    pub(crate) fn sync_notion_database_query(&mut self) {
+        if self
+            .workspace
+            .database
+            .as_ref()
+            .is_some_and(|database| database.query != self.query.trim())
+        {
+            self.refresh_notion_database();
         }
-        if !self.workspace.open && self.state["settings_open"] != true {
-            let favorite = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::F));
-            let history = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::H));
-            if favorite || history {
+    }
+
+    pub(crate) fn load_more_notion_database(&mut self) {
+        let Some(mut database) = self.workspace.database.take() else {
+            return;
+        };
+        if database.rows_job.is_none()
+            && database.pending.is_none()
+            && database.next_cursor.is_some()
+        {
+            self.start_notion_database_query(&mut database, true);
+        }
+        self.workspace.database = Some(database);
+    }
+
+    pub(crate) fn show_notion_folder_reader(&mut self, ui: &mut egui::Ui) {
+        let Some(database) = self.workspace.database.as_ref() else {
+            return;
+        };
+        let Some(row) = database
+            .rows
+            .iter()
+            .find(|row| Some(row.projection_id) == self.state["preview"].as_i64())
+        else {
+            return;
+        };
+        ui.add(egui::Label::new(egui::RichText::new(&row.page.title).heading()).wrap());
+        let Some(preview) = database
+            .preview
+            .as_ref()
+            .filter(|preview| preview.page == row.projection_id)
+        else {
+            return;
+        };
+        egui::ScrollArea::vertical()
+            .id_salt(("notion-folder-reader", row.projection_id))
+            .max_width(ui.available_width())
+            .show(ui, |ui| {
+                if let Some(error) = &preview.error {
+                    ui.colored_label(Color32::LIGHT_RED, error);
+                }
+                super::notion_ui::show_reader(ui, &preview.blocks);
+            });
+    }
+
+    pub(crate) fn notion_database_title(&self) -> Option<&str> {
+        self.workspace
+            .database
+            .as_ref()
+            .filter(|_| self.notion_database_active())
+            .map(|db| db.title.as_str())
+    }
+
+    fn current_notion_page(&self) -> Option<Page> {
+        let database = self.workspace.database.as_ref()?;
+        let id = self.state["preview"]
+            .as_i64()
+            .or_else(|| self.state["cursor"].as_i64())?;
+        database
+            .rows
+            .iter()
+            .find(|row| row.projection_id == id)
+            .map(|row| row.page.clone())
+    }
+
+    pub(super) fn pin_notion_database_page(&mut self) {
+        let Some(page) = self.current_notion_page() else {
+            return;
+        };
+        let id = page.id.clone();
+        let result = self.call(Command::ToggleFavoriteNotionPage { page });
+        if let (Some(database), Some(favorite)) = (
+            self.workspace.database.as_mut(),
+            result["favorite"].as_bool(),
+        ) {
+            if favorite {
+                database.favorites.insert(id);
+            } else {
+                database.favorites.remove(&id);
+            }
+            database.dirty = true;
+        }
+    }
+
+    pub(crate) fn notion_catalogue_action(id: &str) -> bool {
+        matches!(
+            id,
+            "shelf_search"
+                | "preview"
+                | "quicklook"
+                | "open"
+                | "copy"
+                | "paste_previous"
+                | "refresh"
+                | "gallery"
+                | "list"
+                | "details"
+                | "settings"
+                | "tabs_settings"
+                | "commands"
+                | "capture"
+                | "quit"
+                | "restart"
+                | "select_all"
+                | "density_more"
+                | "density_less"
+                | "folder_favorites"
+                | "folder_history"
+                | "folder_standard"
+                | "tab_previous"
+                | "tab_next"
+                | "tab_toggle"
+                | "all"
+                | "images"
+                | "screenshots"
+                | "downloads"
+                | "text"
+                | "links"
+                | "tables"
+                | "pods"
+                | "files"
+                | "desktop"
+                | "translate"
+                | "sort_arrival"
+                | "sort_arrival_reverse"
+                | "sort_name"
+                | "sort_name_reverse"
+                | "sort_modified"
+                | "sort_modified_reverse"
+                | "sort_notion_order"
+        ) || id.starts_with("tab_position_")
+    }
+
+    pub(crate) fn run_notion_database_action(&mut self, id: &str, ctx: &egui::Context) -> bool {
+        if !self.notion_database_active() {
+            return false;
+        }
+        if !Self::notion_catalogue_action(id) {
+            self.actions = false;
+            return true;
+        }
+        if let Some((mode, reverse)) = katran::sorting::action_sort(id) {
+            if let Some(database) = &mut self.workspace.database {
+                database.sort = match mode {
+                    katran::sorting::SortMode::Name => Sort::Name,
+                    katran::sorting::SortMode::Modified => Sort::Edited,
+                    _ => Sort::Created,
+                };
+                database.descending = if database.sort == Sort::Created {
+                    !reverse
+                } else {
+                    reverse
+                };
+            }
+            self.refresh_notion_database();
+            self.actions = false;
+            ctx.request_repaint();
+            return true;
+        }
+        match id {
+            "sort_notion_order" => {
+                if let Some(database) = &mut self.workspace.database {
+                    database.sort = Sort::Source;
+                    database.descending = false;
+                }
+                self.refresh_notion_database();
+            }
+            "preview" | "quicklook" => self.state = self.call(Command::TogglePreview),
+            "select_all" => self.state = self.call(Command::SelectAll),
+            "refresh" => self.refresh_notion_database(),
+            "open" | "copy" | "paste_previous" => {
+                if let Some(page) = self.current_notion_page() {
+                    match id {
+                        "open" => {
+                            self.call(Command::OpenNotionPage { page });
+                        }
+                        "copy" => {
+                            self.start_job(
+                                Command::CopyNotionPage {
+                                    page_id: page.id,
+                                    title: page.title,
+                                },
+                                false,
+                                ctx.clone(),
+                            );
+                        }
+                        _ => {
+                            self.begin_paste_ui(
+                                ctx,
+                                Command::BeginPasteNotionPage {
+                                    owner_window: self.native_window,
+                                    page_id: page.id,
+                                    title: page.title,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            "folder_favorites" | "folder_history" => {
                 self.workspace.open = true;
                 self.workspace_notion_mode(
-                    if favorite {
+                    if id == "folder_favorites" {
                         Mode::Favorites
                     } else {
                         Mode::History
@@ -445,152 +652,17 @@ impl Shelf {
                     ctx,
                 );
             }
-        }
-        let Some(mut database) = self.workspace.database.take() else {
-            return;
-        };
-        self.tick_notion_database(&mut database, ctx);
-        let search_id = egui::Id::new("notion-database-search");
-        let mut close = self.notion_database_keys(&mut database, ctx, search_id);
-        let mut tab_command = None;
-        let mut criteria_changed = false;
-        let mut more = false;
-        let mut toggle_preview = false;
-
-        egui::Panel::top("notion-database-header")
-            .frame(crate::action_row::popup_frame(ctx))
-            .show(root, |ui| {
-                if database.preview.is_none() {
-                    tab_command = crate::tab_bar::show_with_glass(
-                        ui,
-                        &self.tab_order,
-                        &self.state["tab"],
-                        self.api.is_some(),
-                        self.experimental_glass_tabs,
-                    );
-                }
-                ui.horizontal_wrapped(|ui| {
-                    let back = if database.preview.is_some() {
-                        tr("← К записям", "← Back to rows")
-                    } else {
-                        tr("← Folder", "← Folder")
-                    };
-                    if ui.button(back).clicked() {
-                        if database.preview.is_some() {
-                            toggle_preview = true;
-                        } else {
-                            close = true;
-                        }
-                    }
-                    let title = database
-                        .preview
-                        .as_ref()
-                        .and_then(|_| database.selected())
-                        .map_or(database.title.as_str(), |row| row.page.title.as_str());
-                    ui.add(egui::Label::new(RichText::new(title).heading()).wrap());
-                });
-                if database.preview.is_none() {
-                    criteria_changed |= ui
-                        .add(
-                            egui::TextEdit::singleline(&mut database.query)
-                                .id(search_id)
-                                .hint_text(tr("Найти запись по названию…", "Find a row by title…"))
-                                .desired_width(ui.available_width()),
-                        )
-                        .changed();
-                    ui.horizontal_wrapped(|ui| {
-                        ui.selectable_value(
-                            &mut database.view,
-                            View::Gallery,
-                            tr("Галерея", "Gallery"),
-                        );
-                        ui.selectable_value(&mut database.view, View::List, tr("Поток", "Stream"));
-                        ui.selectable_value(
-                            &mut database.view,
-                            View::Details,
-                            tr("Мини-поток", "Mini stream"),
-                        );
-                        egui::ComboBox::from_id_salt("notion-database-sort")
-                            .selected_text(database.sort.label())
-                            .show_ui(ui, |ui| {
-                                for sort in [Sort::Source, Sort::Name, Sort::Created, Sort::Edited]
-                                {
-                                    criteria_changed |= ui
-                                        .selectable_value(&mut database.sort, sort, sort.label())
-                                        .changed();
-                                }
-                            });
-                        if database.sort != Sort::Source {
-                            let direction = if database.descending { "↓" } else { "↑" };
-                            if ui
-                                .button(direction)
-                                .on_hover_text(tr(
-                                    "Изменить порядок сортировки",
-                                    "Reverse sort order",
-                                ))
-                                .clicked()
-                            {
-                                database.descending = !database.descending;
-                                criteria_changed = true;
-                            }
-                        }
-                    });
-                }
-                if let Some(error) = &database.error {
-                    ui.colored_label(Color32::LIGHT_RED, error);
-                    if database.rows_job.is_none() && ui.button(tr("Повторить", "Retry")).clicked()
-                    {
-                        more = database.next_cursor.is_some();
-                        criteria_changed |= !more;
-                    }
-                }
-            });
-        if let Some(command) = tab_command {
-            self.apply_tab_bar_command(command, ctx);
-            close |= self.state["tab"] != "folder";
-        }
-        if criteria_changed {
-            self.cancel_notion_database_jobs(&mut database);
-            database.rows.clear();
-            database.selected = 0;
-            database.next_cursor = None;
-            database.incomplete = false;
-            database.error = None;
-            let delay = Duration::from_millis(300);
-            database.pending = Some(Instant::now() + delay);
-            ctx.request_repaint_after(delay);
-        }
-        if close {
-            self.cancel_notion_database_jobs(&mut database);
-            self.refresh();
-        } else {
-            if toggle_preview {
-                self.close_notion_database_preview(&mut database);
+            "all" => {
+                self.close_notion_database();
+                self.query.clear();
+                self.loaded_query.clear();
+                self.refresh();
             }
-            self.tick_notion_database_excerpt(&mut database, ctx);
-            if let Some(preview) = &database.preview {
-                egui::ScrollArea::vertical()
-                    .id_salt(("notion-database-reader", database.selected))
-                    .max_width(root.available_width())
-                    .show(root, |ui| {
-                        if let Some(error) = &preview.error {
-                            ui.colored_label(Color32::LIGHT_RED, error);
-                        }
-                        super::notion_ui::show_reader(ui, &preview.blocks);
-                    });
-            } else {
-                let mut open_row = false;
-                more |= render_database_rows(root, &mut database, &mut open_row);
-                if open_row {
-                    self.start_notion_database_preview(&mut database);
-                }
-                if more && database.rows_job.is_none() && database.next_cursor.is_some() {
-                    self.start_notion_database_query(&mut database, true);
-                }
-            }
-            self.workspace.database = Some(database);
+            _ => return false,
         }
-        self.workspace_panel(ctx);
+        self.actions = false;
+        ctx.request_repaint();
+        true
     }
 }
 
@@ -601,215 +673,103 @@ fn job_error(reply: &Value) -> String {
         .to_owned()
 }
 
-fn render_database_rows(ui: &mut egui::Ui, database: &mut State, open_row: &mut bool) -> bool {
-    if database.rows.is_empty() {
-        if database.next_cursor.is_some() && database.rows_job.is_none() {
-            return ui.button(tr("Загрузить ещё", "Load more")).clicked();
-        }
-        if database.pending.is_none() && database.rows_job.is_none() && database.error.is_none() {
-            ui.weak(tr("Записи не найдены", "No rows found"));
-        }
-        return false;
-    }
-    if database.view != View::Details {
-        return row_list(ui, database, open_row);
-    }
-    let size = ui.available_size().max(egui::vec2(1.0, 1.0));
-    let mut more = false;
-    let height = size.y;
-    if size.x >= 480.0 {
-        let left = (size.x * 0.38).clamp(175.0, size.x - 200.0);
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(
-                egui::vec2(left, height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(left);
-                    more = row_list(ui, database, open_row);
-                },
-            );
-            ui.separator();
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    details(ui, database);
-                },
-            );
-        });
-    } else {
-        ui.allocate_ui_with_layout(
-            egui::vec2(size.x, height * 0.4),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_max_height(height * 0.4);
-                more = row_list(ui, database, open_row);
-            },
-        );
-        ui.separator();
-        details(ui, database);
-    }
-    more
-}
-
-fn row_list(ui: &mut egui::Ui, database: &mut State, open_row: &mut bool) -> bool {
-    let mut more = false;
-    let width = ui.available_width();
-    let scroll_to_selected = std::mem::take(&mut database.scroll);
-    egui::ScrollArea::vertical()
-        .id_salt("notion-database-rows")
-        .max_width(width)
-        .show(ui, |ui| {
-            let columns = if database.view == View::Gallery {
-                (width / 200.0).floor().max(1.0) as usize
-            } else {
-                1
-            };
-            let cell_width = (width / columns as f32 - 8.0).max(34.0);
-            for (offset, group) in database.rows.chunks(columns).enumerate() {
-                ui.horizontal_top(|ui| {
-                    for (column, row) in group.iter().enumerate() {
-                        let index = offset * columns + column;
-                        let title = if database.favorites.contains(&row.page.id) {
-                            format!("●  {}", row.page.title)
-                        } else {
-                            row.page.title.clone()
-                        };
-                        let gallery = database.view == View::Gallery;
-                        let height = if gallery { 74.0 } else { 35.0 };
-                        let label = if gallery && !row.summary.is_empty() {
-                            let excerpt: String = row.summary.chars().take(85).collect();
-                            format!("{title}\n{excerpt}")
-                        } else {
-                            title
-                        };
-                        let button = egui::Button::new(label).selected(database.selected == index);
-                        let response = ui.add_sized(
-                            [cell_width, height],
-                            if gallery {
-                                button.wrap()
-                            } else {
-                                button.truncate()
-                            },
-                        );
-                        if response.clicked() || response.double_clicked() {
-                            database.selected = index;
-                            *open_row |= response.double_clicked();
-                        }
-                        if scroll_to_selected && index == database.selected {
-                            response.scroll_to_me(None);
-                        }
-                    }
-                });
-            }
-            if database.next_cursor.is_some() {
-                more = ui
-                    .add_enabled(
-                        database.rows_job.is_none(),
-                        egui::Button::new(tr("Загрузить ещё", "Load more")),
-                    )
-                    .clicked();
-            }
-            if database.incomplete {
-                ui.weak(tr(
-                    "Notion вернул часть записей",
-                    "Notion returned partial results",
-                ));
-            }
-        });
-    more
-}
-
-fn details(ui: &mut egui::Ui, database: &State) {
-    let Some(row) = database.selected() else {
-        return;
-    };
-    let preview = if row.summary.is_empty() {
-        row.excerpt
-            .as_deref()
-            .filter(|text| !text.is_empty())
-            .unwrap_or(&row.page.title)
-    } else {
-        &row.summary
-    };
-    egui::ScrollArea::vertical()
-        .id_salt("notion-database-metadata")
-        .max_width(ui.available_width())
-        .show(ui, |ui| {
-            egui::Frame::new()
-                .fill(Color32::from_gray(35))
-                .inner_margin(10)
-                .corner_radius(6)
-                .show(ui, |ui| {
-                    ui.add(egui::Label::new(preview).wrap());
-                });
-            ui.separator();
-            for property in &row.properties {
-                ui.weak(&property.name);
-                ui.add(egui::Label::new(&property.value).wrap());
-            }
-            for (name, value) in [
-                (tr("Создано", "Created"), &row.created_at),
-                (tr("Изменено", "Last edited"), &row.edited_at),
-            ] {
-                if !value.is_empty() {
-                    ui.weak(name);
-                    ui.label(value);
-                }
-            }
-            ui.weak(tr(
-                "Space · читать    Ctrl+. · закрепить страницу",
-                "Space · read    Ctrl+. · pin page",
-            ));
-        });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn notion_database_folder_keeps_rows_distinct_and_pins_the_selected_page() {
+    fn notion_rows_use_native_folder_render_search_and_actions() {
         let root = tempfile::tempdir().unwrap();
         let mut app = crate::tests::test_shelf(root.path());
         let context = egui::Context::default();
+        crate::ui_fonts::install(&context);
         app.open_notion_database(
             &context,
             "12345678-0000-0000-0000-000000000001".into(),
-            "Fixture".into(),
+            "Fixture DB".into(),
         );
-        assert_eq!(app.state["tab"], "folder");
-        let mut database = app.workspace.database.take().unwrap();
+        let page = "12345678-0000-0000-0000-000000000002";
+        let database = app.workspace.database.as_mut().unwrap();
         database.pending = None;
-        let page_id = "12345678-0000-0000-0000-000000000002";
-        let payload = serde_json::json!({"rows":[{
-            "id":page_id,"title":"Fixture entry","summary":"Excerpt",
-            "properties":[{"name":"Status","value":"Ready"}],
-            "created_at":"","edited_at":""
-        }],"next_cursor":"cursor1"});
-        database.append(&payload).unwrap();
-        database.append(&payload).unwrap();
-        assert_eq!(database.rows.len(), 1);
-        assert_eq!(database.selected().unwrap().properties[0].name, "Status");
-        assert!(database.incomplete);
+        database
+            .append(&serde_json::json!({"rows":[{
+            "id":page,"title":"Fixture row","summary":"Excerpt",
+            "properties":[{"name":"Status","value":"Ready"}],"created_at":"","edited_at":""
+        }],"next_cursor":null}))
+            .unwrap();
+        let mut frame = |events| {
+            let mut out = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 650.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.render(ui),
+            );
+            out.textures_delta.clear();
+        };
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(vec![]);
+        assert!(
+            context
+                .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-search-rect")))
+                .is_some()
+        );
+        assert!(
+            context
+                .data(|data| data.get_temp::<egui::Rect>(egui::Id::new("test-footer-rect")))
+                .is_some()
+        );
+        frame(vec![key(egui::Key::T, egui::Modifiers::CTRL)]);
+        assert!(context.memory(|mem| mem.has_focus(egui::Id::new("shelf-search"))));
+        context.memory_mut(|mem| mem.surrender_focus(egui::Id::new("shelf-search")));
+        frame(vec![key(egui::Key::K, egui::Modifiers::CTRL)]);
+        assert!(app.actions);
+        assert_eq!(app.events[0]["name"], "Fixture row");
+        assert!(katran::notion::is_folder_page_id(
+            app.state["cursor"].as_i64().unwrap()
+        ));
+        let actions = app.call(Command::Actions);
+        let actions = actions.as_array().unwrap();
+        assert!(actions.iter().any(|action| action["id"] == "preview"));
+        assert!(!actions.iter().any(|action| action["id"] == "delete"));
+        let sorting = app.call(Command::SortActions);
+        let sorting = sorting.as_array().unwrap();
+        assert!(sorting.iter().any(|action| action["id"] == "sort_name"));
+        assert!(!sorting.iter().any(|action| action["id"] == "sort_size"));
+        assert!(
+            app.call(Command::Get {
+                id: app.state["cursor"].as_i64().unwrap()
+            })
+            .is_null()
+        );
+        app.pin_notion_database_page();
+        assert_eq!(
+            app.call(Command::ListSavedNotionPages { favorites: true })["pages"][0]["id"],
+            page
+        );
+        assert!(!app.events.is_empty());
+        app.actions = false;
+        context.memory_mut(|mem| mem.request_focus(egui::Id::new("shelf-search")));
         let mut output = context.run_ui(
             egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key: egui::Key::Period,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::CTRL,
-                }],
+                events: vec![egui::Event::Text("matching title".into())],
                 ..Default::default()
             },
-            |_| {
-                app.notion_database_keys(&mut database, &context, egui::Id::new("test-filter"));
-            },
+            |ui| app.render(ui),
         );
         output.textures_delta.clear();
-        let favorites = app.call(Command::ListSavedNotionPages { favorites: true });
-        assert_eq!(favorites["pages"][0]["id"], page_id);
-        assert!(database.favorites.contains(page_id));
+        let database = app.workspace.database.as_ref().unwrap();
+        assert_eq!(database.query, "matching title");
+        assert!(database.pending.is_some());
     }
 }

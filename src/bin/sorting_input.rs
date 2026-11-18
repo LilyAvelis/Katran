@@ -7,6 +7,7 @@ pub struct State {
     selected: usize,
     scroll: bool,
     unsupported_tags: bool,
+    notion: bool,
 }
 impl State {
     pub fn is_open(&self) -> bool {
@@ -29,18 +30,28 @@ impl State {
     pub fn set_tags_allowed(&mut self, allowed: bool) {
         self.unsupported_tags = !allowed;
     }
+    pub fn set_notion_context(&mut self, notion: bool) {
+        self.notion = notion;
+    }
     pub fn take(&mut self, ctx: &egui::Context, allowed: bool) -> Option<String> {
         if !allowed {
             self.close();
             return None;
         }
-        let choices: Vec<_> = katran::actions::DEFS
+        let notion = self.notion;
+        let unsupported_tags = self.unsupported_tags;
+        let accepts = |id: &str| {
+            (!unsupported_tags || id != "sort_tags")
+                && (!notion || super::Shelf::notion_catalogue_action(id))
+        };
+        let mut choices: Vec<_> = katran::actions::DEFS
             .iter()
-            .filter(|a| {
-                a.id.starts_with("sort_") && !(self.unsupported_tags && a.id == "sort_tags")
-            })
+            .filter(|a| a.id.starts_with("sort_") && accepts(a.id))
             .map(|a| a.id)
             .collect();
+        if notion {
+            choices.push("sort_notion_order");
+        }
         self.selected = self.selected.min(choices.len() - 1);
         ctx.input_mut(|input| {
             let mut action = None;
@@ -96,7 +107,7 @@ impl State {
                     }
                     if plain
                         && let Some(mode) = key_mode(physical)
-                        && !(mode == "tags" && self.unsupported_tags)
+                        && accepts(&action_id(mode, modifiers.shift || raw_shift))
                     {
                         action = Some(action_id(mode, modifiers.shift || raw_shift));
                         self.close();
@@ -120,7 +131,10 @@ impl State {
                         return false;
                     }
                     if let Some(mode) = text_mode(text)
-                        && !(mode == "tags" && self.unsupported_tags)
+                        && accepts(&action_id(
+                            mode,
+                            raw_shift || text.chars().any(char::is_uppercase),
+                        ))
                     {
                         action = Some(action_id(
                             mode,

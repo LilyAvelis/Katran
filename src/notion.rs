@@ -12,6 +12,19 @@ use std::{
 const MAX_RESPONSE: usize = 2 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(8);
 
+const FOLDER_PAGE_BASE: i64 = -(1_i64 << 61) + 1;
+const FOLDER_PAGE_LIMIT: i64 = FOLDER_PAGE_BASE + (1_i64 << 40);
+
+pub fn is_folder_page_id(id: i64) -> bool {
+    (FOLDER_PAGE_BASE..FOLDER_PAGE_LIMIT).contains(&id)
+}
+
+pub fn next_folder_page_id() -> i64 {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static NEXT: AtomicI64 = AtomicI64::new(FOLDER_PAGE_BASE);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Page {
     pub id: String,

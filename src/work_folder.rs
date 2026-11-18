@@ -142,7 +142,10 @@ impl State {
                     .next
                     .checked_sub(1)
                     .ok_or_else(|| ApiError::new("id_exhausted", "Working folder IDs exhausted"))?;
-                if crate::pods::is_emoji_id(id) || id <= crate::desktop_projection::DESKTOP_ID_MAX {
+                if crate::pods::is_emoji_id(id)
+                    || crate::notion::is_folder_page_id(id)
+                    || id <= crate::desktop_projection::DESKTOP_ID_MAX
+                {
                     return Err(ApiError::new(
                         "id_exhausted",
                         "Working folder IDs exhausted",

@@ -47,18 +47,20 @@ limit is 1 MiB of Markdown.
 1. Open **Ctrl+Shift+N** and press the physical **\\** key to switch from pages
    to databases. Search by the data source title and press **Enter** to open it
    in Folder. Another **\\** in the picker switches back to pages.
-2. Filter the database by row title, or switch between **Gallery**, **Stream**
-   and **Mini stream**. Mini stream shows the selected row's readable properties
+2. **Ctrl+T** focuses the normal shelf search and filters the database by row
+   title. Switch between **Gallery**, **Stream** and **Mini stream** through
+   the usual Folder controls. Mini stream shows the selected row's readable properties
    and a text excerpt. An excerpt is requested for the selected row when its
    properties supply no summary.
 3. **Space** opens the selected page in the full Katran content area. **Enter**
    attaches the page as `.md`, **Alt+Enter** opens Notion in the browser, and
    **Ctrl+.** pins the page in Notion favorites. Use **Ctrl+F** to view those
-   favorites.
+   favorites. **Ctrl+K** shows actions available for a Notion page. Click the
+   database name in the status bar to return to the local Folder.
 
 Rows load in groups of 30. Press **↓** at the last row or use **Load more**.
-The default order comes from Notion's data source API. Katran also supports
-server-side sorting by name, creation time and last-edited time. A named
+The default order comes from Notion's data source API. The standard sorting
+menu supports Notion order, name, creation time and last-edited time. A named
 Notion view's saved filters and sorts do not apply here. File-size sorting
 and local tags are unavailable for remote pages. The same read-only
 integration needs access to the source database.

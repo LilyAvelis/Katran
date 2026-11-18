@@ -67,6 +67,23 @@ impl Shelf {
 
     pub(super) fn info_bar(&mut self, ui: &mut egui::Ui) {
         let folder = self.state["tab"] == "folder";
+        let notion_title = self.notion_database_title().map(str::to_owned);
+        if let Some(title) = notion_title.as_deref() {
+            let response = ui.add(
+                egui::Label::new(format!("Notion · {title}"))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            );
+            if response
+                .on_hover_text(tr("Вернуться к локальной папке", "Return to local Folder"))
+                .clicked()
+            {
+                self.close_notion_database();
+                self.query.clear();
+                self.loaded_query.clear();
+                self.refresh();
+            }
+        }
         let path = self.state["folder_path"]
             .as_str()
             .map(friendly_path)
@@ -90,7 +107,9 @@ impl Shelf {
             }
         }
         // Compact IDE-style segments; detail belongs to the existing API-backed panels.
-        let context = if folder {
+        let context = if let Some(title) = notion_title.as_deref() {
+            format!("Notion · {title}")
+        } else if folder {
             format!("Folder · {path}")
         } else if self.state["pinned_only"] == true {
             tr("Закреплённые", "Pinned").into()
@@ -111,7 +130,8 @@ impl Shelf {
                 tr("Восстановление файлов", "File recovery").into(),
             ),
         ] {
-            if page == Page::Sort || (!folder && page == Page::Recovery) {
+            if page == Page::Sort || ((!folder || notion_title.is_some()) && page == Page::Recovery)
+            {
                 continue;
             }
             if crate::ui_style::status_icon(ui, icon, &tooltip).clicked() {

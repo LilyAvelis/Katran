@@ -1542,6 +1542,7 @@ impl Service {
             Command::TogglePreview => {
                 if self.interaction.preview.is_none()
                     && let Some(id) = self.interaction.cursor
+                    && !notion::is_folder_page_id(id)
                 {
                     let event = self.get(id)?;
                     if !file_types::has_internal_preview(&event) {
@@ -1899,7 +1900,9 @@ impl Service {
                 Ok(serde_json::json!(self.interaction))
             }
             Command::SelectAll => {
-                if self.interaction.tab == interaction::ShelfTab::All
+                if self.interaction.visible.iter().any(|id| notion::is_folder_page_id(*id)) {
+                    self.interaction.select_all(self.interaction.visible.clone());
+                } else if self.interaction.tab == interaction::ShelfTab::All
                     && self.work_folder.current().is_none()
                 {
                     self.interaction.select_all(Vec::new());
@@ -1944,7 +1947,9 @@ impl Service {
                 Ok(serde_json::json!(self.interaction))
             }
             Command::OpenCurrent => {
-                if let Some(id) = self.interaction.cursor {
+                if let Some(id) = self.interaction.cursor
+                    && !notion::is_folder_page_id(id)
+                {
                     let event = self.get(id)?;
                     if !file_types::has_internal_preview(&event) {
                         return self.preview_external(event.id);
@@ -2161,6 +2166,9 @@ impl Service {
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
     fn get(&self, id: i64) -> Result<Event> {
+        if notion::is_folder_page_id(id) {
+            return Err(ApiError::new("notion_remote_page", "Notion pages are remote and read-only"));
+        }
         if pods::is_emoji_id(id) {
             return pods::emoji_event(id);
         }

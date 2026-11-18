@@ -144,7 +144,9 @@ impl Shelf {
                 }
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
-                        if let Some(target) = super::media_preview_ui::target(event, &self.state, true) {
+                        if event["source"] == "notion_page" {
+                            self.show_notion_folder_reader(ui);
+                        } else if let Some(target) = super::media_preview_ui::target(event, &self.state, true) {
                             if let Some(api) = self.api.as_mut() {
                                 self.media_preview.show_with_poster(ui, &target, event, &mut self.images, &mut |command| api.execute(Request { api_version: 1, request_id: "media-ui".into(), command }));
                             } else { ui.weak(tr("Видео временно недоступно", "Video temporarily unavailable")); }
@@ -626,6 +628,8 @@ impl Shelf {
                                             event["properties"]["display_name"].as_str()
                                         {
                                             name.to_owned()
+                                        } else if event["source"] == "notion_page" {
+                                            event["name"].as_str().unwrap_or("").to_owned()
                                         } else if event["kind"] == "table_fragment" {
                                             table_preview_ui::card_title(event)
                                         } else if matches!(
@@ -759,6 +763,8 @@ impl Shelf {
                                                 event["properties"]["display_name"].as_str()
                                             {
                                                 name.to_owned()
+                                            } else if event["source"] == "notion_page" {
+                                                event["name"].as_str().unwrap_or("").to_owned()
                                             } else if event["kind"] == "table_fragment" {
                                                 table_preview_ui::card_title(event)
                                             } else if matches!(
@@ -918,11 +924,11 @@ impl Shelf {
                                             mode: mode(ctx.input(|i| i.modifiers)),
                                         });
                                         if response.double_clicked() {
-                                            self.start_job(
-                                                Command::RunAction { id: "open".into() },
-                                                false,
-                                                ctx.clone(),
-                                            );
+                                            if event["source"] == "notion_page" {
+                                                self.run("open".into(), ctx);
+                                            } else {
+                                                self.start_job(Command::RunAction { id: "open".into() }, false, ctx.clone());
+                                            }
                                         }
                                     }
                                 }

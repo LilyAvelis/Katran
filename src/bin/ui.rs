@@ -892,13 +892,7 @@ impl Shelf {
         if self.api.is_some() {
             self.state = self.call(Command::Interaction);
         }
-        if self.notion_database_active() {
-            if self.state["tab"] == "folder" {
-                self.notion_database_frame(root, &ctx);
-                return;
-            }
-            self.close_notion_database();
-        }
+        self.notion_database_sync(&ctx);
         self.emoji_ai_input(&ctx);
         self.emoji_ai_tick(&ctx);
         self.poll_preloaded_tab(&ctx);
@@ -966,6 +960,8 @@ impl Shelf {
             && !(self.api.is_none() && self.busy_text_editing);
         self.sorting_input
             .set_tags_allowed(self.state["tab"] != "folder");
+        let notion_sort = self.notion_database_active();
+        self.sorting_input.set_notion_context(notion_sort);
         if let Some(action) = self.sorting_input.take(&ctx, sort_allowed) {
             self.pending_sort = Some(action);
         }
@@ -1430,6 +1426,9 @@ impl Shelf {
                     }
                     if search.changed() {
                         self.refresh();
+                        if self.notion_database_active() {
+                            ctx.request_repaint();
+                        }
                     }
                 }
                 if self.api.is_some() {
@@ -1723,7 +1722,7 @@ impl Shelf {
         ctx.data_mut(|data| {
             data.insert_temp(egui::Id::new("test-footer-rect"), _footer.response.rect)
         });
-        if self.state["tab"] == "folder" {
+        if self.state["tab"] == "folder" && !self.notion_database_active() {
             if self.state["folder_path"].is_null() {
                 self.events.clear();
                 self.next_cursor = None;

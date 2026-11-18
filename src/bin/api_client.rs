@@ -1087,6 +1087,9 @@ impl Shelf {
         }
     }
     pub(super) fn direct_transfer_input(&mut self, ctx: &egui::Context) {
+        if self.notion_database_active() {
+            return;
+        }
         if self.job.is_none()
             && self.api.is_some()
             && let Some((expected, tab, folder)) = self.pending_transfer_copies.pop_front()
@@ -1146,7 +1149,7 @@ impl Shelf {
         }
     }
     pub(super) fn start_drag(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
-        if self.native_drag.is_some() || self.job.is_some() {
+        if self.notion_database_active() || self.native_drag.is_some() || self.job.is_some() {
             return;
         }
         let items = self.snapshot_ids(ids);
@@ -1163,6 +1166,8 @@ impl Shelf {
         }
     }
     pub(super) fn call(&mut self, command: Command) -> Value {
+        let notion_catalogue = self.notion_database_active()
+            && matches!(&command, Command::Actions | Command::SortActions);
         let Some(api) = self.api.as_mut() else {
             return match command {
                 Command::Interaction | Command::SetVisible { .. } => self.state.clone(),
@@ -1180,7 +1185,30 @@ impl Shelf {
                 .unwrap_or(tr("Ошибка", "Error"))
                 .into();
         }
-        r["result"].clone()
+        let mut result = r["result"].clone();
+        if notion_catalogue && let Some(actions) = result.as_array_mut() {
+            actions.retain(|action| action["id"].as_str().is_some_and(Self::notion_catalogue_action));
+            for action in actions.iter_mut() {
+                let label = match action["id"].as_str() {
+                    Some("sort_arrival") => tr("По дате создания · новые сначала", "By creation date · newest first"),
+                    Some("sort_arrival_reverse") => tr("По дате создания · старые сначала", "By creation date · oldest first"),
+                    Some("copy") => tr("Скопировать текущую страницу как Markdown", "Copy current page as Markdown"),
+                    Some("paste_previous") => tr("Приложить текущую страницу как Markdown", "Attach current page as Markdown"),
+                    Some("open") => tr("Открыть текущую страницу в Notion", "Open current page in Notion"),
+                    Some("folder_favorites") => tr("Избранное Notion", "Notion favorites"),
+                    Some("folder_history") => tr("История Notion", "Notion history"),
+                    _ => continue,
+                };
+                action["label"] = Value::String(label.to_owned());
+            }
+            actions.push(serde_json::json!({
+                "id":"sort_notion_order",
+                "label":tr("Порядок Notion", "Notion order"),
+                "group":tr("Сортировка", "Sorting"),
+                "enabled":true
+            }));
+        }
+        result
     }
     fn risk_event(&mut self, id: i64) -> Value {
         match self
@@ -1924,7 +1952,7 @@ impl Shelf {
     fn folder_page_context(&self) -> Value {
         serde_json::json!({"tab":self.state["tab"], "path":self.state["folder_path"], "sort":self.state["sort"], "query":self.query})
     }
-    fn cancel_folder_page(&mut self) {
+    pub(super) fn cancel_folder_page(&mut self) {
         if let Some(job) = self.folder_page_job.take()
             && let Some(api) = self.api.as_mut()
         {
@@ -2050,6 +2078,10 @@ impl Shelf {
         self.pending_folder_select_all = false;
         self.preloaded_has_more = false;
         self.tab_preload.waiting = None;
+        if self.notion_database_active() {
+            self.sync_notion_database_query();
+            return;
+        }
         if self.emoji_ai.enabled
             && self.state["tab"] == "pods"
             && self.state["emoji_catalogue"] == true
@@ -2104,6 +2136,10 @@ impl Shelf {
         self.capture = self.call(Command::Status)["capture_enabled"] == true;
     }
     pub(super) fn load_more(&mut self) {
+        if self.notion_database_active() {
+            self.load_more_notion_database();
+            return;
+        }
         if self.emoji_ai.enabled {
             self.emoji_ai_load_more();
             return;
@@ -2161,6 +2197,9 @@ impl Shelf {
         self.snapshot_ids(self.selected_ids())
     }
     pub(super) fn copy_request(&mut self, ctx: &egui::Context) {
+        if self.run_notion_database_action("copy", ctx) {
+            return;
+        }
         if self.state["tab"] == "pods" && self.state["emoji_catalogue"] == true {
             if self.job.is_some() {
                 self.message = tr(
@@ -2256,6 +2295,9 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if self.run_notion_database_action(&id, ctx) {
+            return;
+        }
         if id == "collection_fullscreen" {
             if self.upscale.collection_can_fullscreen()
                 && self.call(Command::RunAction { id })["intent"] == "toggle_collection_fullscreen"

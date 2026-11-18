@@ -241,11 +241,11 @@ impl Shelf {
                                     mode: mode(ctx.input(|i| i.modifiers)),
                                 });
                                 if response.double_clicked() {
-                                    self.start_job(
-                                        Command::RunAction { id: "open".into() },
-                                        false,
-                                        ctx.clone(),
-                                    );
+                                    if event["source"] == "notion_page" {
+                                        self.run("open".into(), ctx);
+                                    } else {
+                                        self.start_job(Command::RunAction { id: "open".into() }, false, ctx.clone());
+                                    }
                                 }
                             }
                         }
@@ -281,6 +281,12 @@ impl Shelf {
             let ui = &mut preview_ui;
             if event["available"] == false {
                 ui.weak(tr("Объект недоступен", "Item unavailable"));
+            } else if event["source"] == "notion_page" {
+                egui::ScrollArea::vertical()
+                    .id_salt("notion-details-preview")
+                    .show(ui, |ui| {
+                        ui.label(event["text_preview"].as_str().unwrap_or(""));
+                    });
             } else if let Some(target) = super::media_preview_ui::target(event, &self.state, false)
             {
                 if let Some(api) = self.api.as_mut() {
@@ -374,7 +380,18 @@ impl Shelf {
                         (preview_rect, ui.id(), ui.clip_rect()),
                     )
                 });
-                self.details_metadata.show(ui, event, &state);
+                if event["source"] == "notion_page" {
+                    if let Some(fields) = event["notion_fields"].as_array() {
+                        for field in fields {
+                            if let Some(name) = field["name"].as_str() {
+                                ui.weak(name);
+                                ui.label(field["value"].as_str().unwrap_or(""));
+                            }
+                        }
+                    }
+                } else {
+                    self.details_metadata.show(ui, event, &state);
+                }
                 if let Some(tag) = tag {
                     ui.weak(tr("Тег", "Tag"));
                     ui.label(tag);
