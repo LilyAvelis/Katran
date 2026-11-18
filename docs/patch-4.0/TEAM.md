@@ -77,3 +77,10 @@ clipboard sink; they cover successful file publication and preservation of the
 Files pointer on clipboard failure. Collection, tab and v13→v14 migration
 fixtures passed. The primary profile is migrated on next launch and has a
 verified v13 rollback copy. Native Windows acceptance remains open.
+
+The first Translate probe used the owner's two Japanese samples. Vela set
+up isolated PP-OCRv5 and the offline Manga OCR second pass, Fenna implemented
+the raster cleanup/typesetting, and Polly verified reading order and local
+Ollama translation. Simple-page Russian output is reproducible without a
+manual transcript; complex grouping still mixes dialogue and other page text.
+Prototype scripts are checkpointed separately from the app build.

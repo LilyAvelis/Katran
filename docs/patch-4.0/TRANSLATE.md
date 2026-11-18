@@ -36,3 +36,43 @@ translation backend and explicit optional component setup after the fixtures.
 
 The Translate shelf can be opened before any results exist. It displays
 only accepted managed outputs once that publishing path is implemented.
+
+## Local one-page probe
+
+The prototype lives in `scripts/image-translate`; it is intentionally separate
+from the Katran tab until the page gate passes. Test images, model packs,
+intermediate JSON and generated previews stay outside Git.
+
+1. `ocr_page.py` uses PaddlePaddle 3.2.2 / PaddleOCR 3.3.3 in a separate Python
+   environment. The cached Japanese PP-OCRv5 server detector and recognizer are
+   read from `target/build/translate-probe/ocr/paddlex/official_models`.
+   `--prepare` explicitly permits first-time model fetching.
+2. `manga_recognize.py` regroups vertical columns and rereads the cropped
+   Japanese dialogue with `kha-white/manga-ocr-base` at revision
+   `aa6573bd10b0d446cbf622e29c3e084914df9741`. The model pack is opened
+   offline, with weights-only loading. It does not infer panel order.
+3. `translate_page.py` uses an already
+   downloaded model over the local Ollama interface. The test uses the installed
+   `qwen3:30b` tag, with cloud disabled and the service bound to loopback.
+   It accepts a known transcript (`--ordered`) for separating translation and
+   lettering defects from recognition errors.
+4. `render_page.py` erases detected lettering and draws the translated blocks
+   with a local font. Preview output is a separate PNG. Its text-mask heuristic
+   targets dark lettering and lighter backgrounds. It expands horizontal
+   text only inside a safely detected enclosed light region.
+
+On the approved simple Japanese page PP-OCRv5 detected five vertical columns,
+and the prototype grouped them into two dialogue regions in reading order.
+Recognition dropped characters in both regions and caused a mistranslation.
+Using a checked Japanese transcript with the same detected geometry isolated
+the downstream steps and produced a readable Russian preview. With the
+Manga OCR second pass both dialogue blocks matched the Japanese source
+on manual inspection of the simple page. The same automatically recognized
+blocks were translated to Russian by the local model and rendered directly
+into both bubbles. The lettering stayed within the contours, with some pale
+stripes remaining from background reconstruction. The larger
+multi-panel page produced 53 detections (51 nonempty) and 19 provisional groups.
+Its second pass still contains incorrect merges. Whole-page panel order,
+furigana and lettering over shaded art still require
+separate verification. The local 30B translator is a probe, not a release
+requirement.
