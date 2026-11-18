@@ -13,6 +13,10 @@ model/runtime while preserving Emoji and Folder compatibility. Identify the
 exact ComfyUI workflow, node and weights before choosing the model. Translation
 follows upscale, with BULL and QuickLook last. This run is local.
 
+AI operations belong in Ctrl+K → AI Commands. Give each model and fixed
+operation its own independently rebindable command that starts directly.
+For ×2 and ×4, multiply both output dimensions by exactly that factor.
+
 ## Ready text preview retention · 2026-11-18
 
 Owner authorized closing the residual Links blink after accepting the Mini stream

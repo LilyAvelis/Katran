@@ -55,3 +55,12 @@ Ctrl+K: Remacri ×2/×4 and Real-ESRGAN ×2/×4. No model picker or custom size
 field is required for this scope. Output is a separate managed image for
 the existing wallpaper action. Remacri ×2 uses its native ×4 model followed by
 downsampling to exactly twice the input dimensions.
+
+Polly integrated stages 2–3 at `b1e2cc1` and staged runtime `536b7a16621d`
+for the primary launcher. Nemi owned bounded local discovery, Vela owned the
+inference worker, and Fenna owned the Actions and Settings integration. The
+default local discovery found all three weights without an environment
+override. The API fixture verified each action against real weights, exact PNG
+dimensions, unchanged source and cancellation before publication. Three
+discovery and four headless UI/palette checks passed. Native Windows interaction
+and visual quality on the owner's images remain open.
