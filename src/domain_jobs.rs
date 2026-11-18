@@ -34,6 +34,7 @@ pub enum Lane {
     EmojiAi,
     Upscale,
     ImageTranslate,
+    LinkMetadata,
 }
 impl Lane {
     fn index(self) -> usize {
@@ -45,12 +46,14 @@ impl Lane {
             Self::EmojiAi => 4,
             Self::Upscale => 5,
             Self::ImageTranslate => 6,
+            Self::LinkMetadata => 7,
         }
     }
     fn capacity(self) -> usize {
         match self {
             Self::Foreground => 8,
             Self::Capture | Self::Discovery => 2,
+            Self::LinkMetadata => 4,
             Self::Update | Self::EmojiAi | Self::Upscale | Self::ImageTranslate => 1,
         }
     }
@@ -163,7 +166,7 @@ struct Entry<T> {
 pub struct DomainJobs<T: Send + 'static> {
     entries: BTreeMap<JobId, Entry<T>>,
     terminal: VecDeque<JobId>,
-    workers: [Option<Worker<T>>; 7],
+    workers: [Option<Worker<T>>; 8],
     sender: mpsc::SyncSender<(JobId, Result<T>)>,
     receiver: mpsc::Receiver<(JobId, Result<T>)>,
     next_id: u64,
@@ -366,6 +369,18 @@ impl<T: Send + 'static> DomainJobs<T> {
             output.push((id, entry.prepared.take().expect("selected result exists")));
         }
         output
+    }
+    /// Metadata changes the collection revision. Commit it only for its own
+    /// poll, so a foreground copy or open can finish first.
+    pub(crate) fn take_ready_for(&mut self, id: JobId, lane: Lane) -> Option<(JobId, Result<T>)> {
+        self.collect();
+        let entry = self.entries.get_mut(&id)?;
+        if entry.status.lane != lane {
+            return None;
+        }
+        let result = entry.prepared.take()?;
+        entry.claimed = true;
+        Some((id, result))
     }
     /// Authorize the irreversible phase on the dispatcher after freshness checks.
     /// Later settings changes cannot undo an action that crossed this fence.

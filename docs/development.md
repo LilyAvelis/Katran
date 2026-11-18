@@ -33,8 +33,12 @@ The same collection jobs support the Links shelf with typed BULL v2 and reuse
 v15 membership and pin/tag state. `TranslationCollectionPage` returns one
 link record. `CopyCollectionPage` publishes its URL through the owned text
 Clipboard path. `OpenCollectionLink` sends the validated URL to the default
-browser. `favicon_fetch` supplies bounded, best-effort metadata during explicit
-packing. Merge and viewing reuse saved metadata locally.
+browser. Packing commits the URL collection first and returns a detached
+`metadata_job_id`. Poll that job independently of the foreground workflow.
+`favicon_fetch` requests only public HTTPS HTML for missing titles/descriptions.
+The dispatcher swaps a verified blob in place only if the original Links
+event and revision still match. Exported files keep their original bytes.
+The open viewer retains its ready page while refreshing the revision.
 
 Text BULL uses v2 `TEXT` with exact UTF-8 payloads. The normal Text shelf
 owns its cards, pins and tags. `TranslationCollectionPage` returns the

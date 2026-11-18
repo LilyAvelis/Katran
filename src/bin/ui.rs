@@ -373,6 +373,8 @@ struct Shelf {
     folder_page_job: Option<FolderPageJob>,
     pending_folder_select_all: bool,
     capture_job: Option<katran::domain_jobs::JobId>,
+    link_metadata_jobs: std::collections::VecDeque<katran::domain_jobs::JobId>,
+    link_metadata_next_poll: Option<Instant>,
     audio_extract: audio_extract_ui::State,
     upscale: upscale_ui::State,
     preview_warmup: Option<katran::domain_jobs::JobId>,
@@ -2145,6 +2147,7 @@ impl eframe::App for Shelf {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.finish_job();
+        self.poll_link_metadata_jobs(ctx);
         self.finish_folder_page(ctx);
         self.preview_warmup_tick(ctx);
         if self.api.is_some() {
@@ -2421,6 +2424,8 @@ fn main() -> eframe::Result {
         folder_page_job: None,
         pending_folder_select_all: false,
         capture_job: None,
+        link_metadata_jobs: std::collections::VecDeque::new(),
+        link_metadata_next_poll: None,
         audio_extract: audio_extract_ui::State::default(),
         upscale: upscale_ui::State::default(),
         preview_warmup,
@@ -2848,6 +2853,8 @@ mod tests {
             folder_page_job: None,
             pending_folder_select_all: false,
             capture_job: None,
+            link_metadata_jobs: std::collections::VecDeque::new(),
+            link_metadata_next_poll: None,
             audio_extract: audio_extract_ui::State::default(),
             upscale: upscale_ui::State::default(),
             preview_warmup: None,

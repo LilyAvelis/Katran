@@ -14,6 +14,10 @@ owned the pager and input, and Polly owned shelf integration, copy/open and QA.
 Nemi added the Text codec, Fenna added Markdown and entry input, Vela traced
 Links latency, and Polly integrated Text storage and the previous-window lease.
 
+For the Links speed change, Vela limited enrichment to HTML, Nemi owned the
+revision-checked blob replacement, Fenna integrated detached UI polling, and
+Polly integrated the independent job lane and verification.
+
 Polly leads the current session and owns the shared Rust command, dispatcher,
 integration, verification and installation. The Notion 4.0 card owns the run
 order. The installed baseline is `09244a0440d7` (source `5eb3f93`), with local

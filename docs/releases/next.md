@@ -39,6 +39,10 @@ Ctrl+C copies the visible URL and Alt+Enter opens it in the default browser.
 The current Windows QuickLook adapter supports image BULL v1. Katran's own
 viewer handles Links BULL v2.
 
+Links BULL creation publishes the local file before network work. A background
+job fills missing titles and descriptions in the same card. It preserves saved
+previews and skips automatic preview-image requests.
+
 Text BULL saves ordered UTF-8 entries and offers Markdown and source views.
 Ctrl+C in the viewer copies the current source only. Enter on a visible BULL
 entry uses the standard previous-window paste flow for images, Links and Text.

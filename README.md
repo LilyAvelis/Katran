@@ -22,7 +22,9 @@ selected cards and takes its cover from the first page. Unpack restores the
 original cards with their pins and tags.
 
 Links uses the same BULL action. Its viewer shows a saved title, description
-and preview for each link when available. Ctrl+C copies the visible URL,
+and preview for each link when available. Links BULL appears immediately,
+then saves titles and descriptions in the background without fetching images.
+Ctrl+C copies the visible URL,
 Alt+Enter opens it in the default browser, and copying the shelf card passes
 the complete `.bull` file. See [BULL formats](docs/patch-4.0/BULL.md).
 

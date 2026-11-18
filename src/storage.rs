@@ -444,6 +444,49 @@ pub(crate) fn commit_translation_collection(
     commit_blob(db, root, quota, prepared, true)
 }
 
+/// Replace a still-visible Links collection in place. A stale request is a no-op.
+/// Bytes are prepared by the worker; no temporary catalogue event is created.
+pub(crate) fn replace_link_collection_blob(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    id: i64,
+    expected_revision: &str,
+    prepared: PreparedBlob,
+) -> Result<bool> {
+    if prepared.source != "link_collection" || !prepared.name.to_ascii_lowercase().ends_with(".bull")
+        || prepared.text.is_some() || prepared.link || prepared.table {
+        return Err(ApiError::new("invalid_collection", "Expected a prepared Links collection"));
+    }
+    let Some(expected_hash) = expected_revision.strip_prefix("blob:") else { return Ok(false); };
+    if !is_hash(expected_hash) { return Ok(false); }
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let old: Option<String> = tx.query_row(
+        "SELECT e.blob_hash FROM events e WHERE e.id=?1 AND e.blob_hash=?2 AND e.source='link_collection'
+         AND lower(substr(e.name,-5))='.bull' AND e.legacy_source_ref=0
+         AND json_extract(e.delete_policy_json,'$.kind')='shelf_only'
+         AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id)
+         AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
+        params![id, expected_hash], |row| row.get(0),
+    ).optional()?;
+    let Some(old) = old else { return Ok(false); };
+    // Same digest is already the requested state; no new publication or metadata update.
+    if old == prepared.hash { tx.commit()?; return Ok(true); }
+    let target = prepared.directory.join(&prepared.hash);
+    let encoded = target.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+    publish_blob_in(&tx, root, quota, &prepared)?;
+    let changed = tx.execute(
+        "UPDATE events SET path=?1,blob_hash=?2,size=?3 WHERE id=?4 AND blob_hash=?5
+         AND source='link_collection' AND NOT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?4)",
+        params![encoded, prepared.hash, prepared.size, id, old],
+    )?;
+    if changed != 1 { return Err(ApiError::new("source_changed", "Collection changed during replacement")); }
+    tx.commit()?;
+    // Preserve all other references; cleanup is guarded by the normal writer-locked path.
+    let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old]);
+    Ok(true)
+}
+
 fn commit_blob(
     db: &mut Connection,
     root: &Path,
@@ -632,6 +675,73 @@ fn commit_blob_in(
     prepared: PreparedBlob,
     translated: bool,
 ) -> Result<i64> {
+    let path = publish_blob_in(tx, root, quota, &prepared)?;
+    // A single durable event represents an exact Text or Link value. Resolve under the
+    // writer lock, after validating/publishing bytes, so concurrent prepared
+    // jobs cannot manufacture duplicate events. Preserve existing metadata,
+    // pin, original timestamps and content revision.
+    if let Some(content) = prepared.text.as_deref()
+        && !prepared.table
+    {
+        use rusqlite::OptionalExtension;
+        let fragments = if prepared.link {
+            "link_fragments"
+        } else {
+            "text_fragments"
+        };
+        let existing: Option<i64> = tx.query_row(
+            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
+            params![prepared.hash, content], |row| row.get(0),
+        ).optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+    }
+    let encoded = path
+        .to_str()
+        .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+    tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![crate::now_ms(),prepared.source,prepared.name,encoded,prepared.size,prepared.hash,serde_json::to_string(&prepared.origin).map_err(|error|ApiError::new("invalid_argument",error))?])?;
+    let id = tx.last_insert_rowid();
+    if translated {
+        tx.execute("INSERT INTO translated_images(event_id) VALUES(?1)", [id])?;
+    }
+    tx.execute(
+        "UPDATE events SET modified_at_ms=detected_at_ms WHERE id=?1",
+        [id],
+    )?;
+    if let Some(content) = &prepared.text {
+        let preview: String = content.chars().take(512).collect();
+        let content_table = if prepared.table {
+            "table_contents"
+        } else {
+            "text_contents"
+        };
+        tx.execute(
+            &format!("INSERT OR IGNORE INTO {content_table}(blob_hash,content) VALUES(?1,?2)"),
+            params![prepared.hash, content],
+        )?;
+        let table = if prepared.table {
+            "table_fragments"
+        } else if prepared.link {
+            "link_fragments"
+        } else {
+            "text_fragments"
+        };
+        tx.execute(
+            &format!("INSERT INTO {table}(event_id,preview) VALUES(?1,?2)"),
+            params![id, preview],
+        )?;
+    }
+    if prepared.text.is_none() {
+        crate::classification_runtime::enqueue(tx, id)?;
+    }
+    Ok(id)
+}
+
+/// Publish the verified prepared digest while holding the SQLite writer lock.
+fn publish_blob_in(
+    tx: &rusqlite::Transaction<'_>, root: &Path, quota: u64, prepared: &PreparedBlob,
+) -> Result<PathBuf> {
     if prepared.directory != directory(root)? {
         return Err(ApiError::new(
             "integrity_error",
@@ -681,70 +791,11 @@ fn commit_blob_in(
         }
     }
     prepared.interest.publish(prepared.verified_stamp.clone());
-    // A single durable event represents an exact Text or Link value. Resolve under the
-    // writer lock, after validating/publishing bytes, so concurrent prepared
-    // jobs cannot manufacture duplicate events. Preserve existing metadata,
-    // pin, original timestamps and content revision.
-    if let Some(content) = prepared.text.as_deref()
-        && !prepared.table
-    {
-        use rusqlite::OptionalExtension;
-        let fragments = if prepared.link {
-            "link_fragments"
-        } else {
-            "text_fragments"
-        };
-        let existing: Option<i64> = tx.query_row(
-            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
-            params![prepared.hash, content], |row| row.get(0),
-        ).optional()?;
-        if let Some(id) = existing {
-            return Ok(id);
-        }
-    }
-    let encoded = path
-        .to_str()
-        .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
     tx.execute(
         "INSERT OR IGNORE INTO blobs(hash,size) VALUES(?1,?2)",
         params![prepared.hash, prepared.size],
     )?;
-    tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![crate::now_ms(),prepared.source,prepared.name,encoded,prepared.size,prepared.hash,serde_json::to_string(&prepared.origin).map_err(|error|ApiError::new("invalid_argument",error))?])?;
-    let id = tx.last_insert_rowid();
-    if translated {
-        tx.execute("INSERT INTO translated_images(event_id) VALUES(?1)", [id])?;
-    }
-    tx.execute(
-        "UPDATE events SET modified_at_ms=detected_at_ms WHERE id=?1",
-        [id],
-    )?;
-    if let Some(content) = &prepared.text {
-        let preview: String = content.chars().take(512).collect();
-        let content_table = if prepared.table {
-            "table_contents"
-        } else {
-            "text_contents"
-        };
-        tx.execute(
-            &format!("INSERT OR IGNORE INTO {content_table}(blob_hash,content) VALUES(?1,?2)"),
-            params![prepared.hash, content],
-        )?;
-        let table = if prepared.table {
-            "table_fragments"
-        } else if prepared.link {
-            "link_fragments"
-        } else {
-            "text_fragments"
-        };
-        tx.execute(
-            &format!("INSERT INTO {table}(event_id,preview) VALUES(?1,?2)"),
-            params![id, preview],
-        )?;
-    }
-    if prepared.text.is_none() {
-        crate::classification_runtime::enqueue(tx, id)?;
-    }
-    Ok(id)
+    Ok(path)
 }
 
 /// Synchronous clients use the same preparation and metadata commit as jobs.
@@ -906,6 +957,10 @@ fn reference_content_hash(path: &Path) -> std::io::Result<String> {
 #[cfg(test)]
 mod prepared_tests {
     use super::*;
+    fn collection_input(bytes: &[u8]) -> ByteIngest<'_> {
+        static ORIGIN: std::sync::OnceLock<Origin> = std::sync::OnceLock::new();
+        ByteIngest { name: "links.bull", source: "link_collection", bytes, origin: ORIGIN.get_or_init(Default::default) }
+    }
     fn input(bytes: &[u8]) -> ByteIngest<'_> {
         static ORIGIN: std::sync::OnceLock<Origin> = std::sync::OnceLock::new();
         ByteIngest {
@@ -968,5 +1023,49 @@ mod prepared_tests {
             fs::read(get_event(&service.db, id).unwrap().path).unwrap(),
             b"four"
         );
+    }
+    #[test]
+    fn replace_link_collection_preserves_identity_membership_and_shared_blob() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut s = crate::Service::open(temp.path(), 1000).unwrap();
+        let id = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"old collection")).unwrap();
+        let shared = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"old collection")).unwrap();
+        let member = ingest_bytes(&mut s.db, &s.root, 1000, input(b"member")).unwrap();
+        s.db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![id, member]).unwrap();
+        s.db.execute("INSERT INTO katran_properties(event_id,pinned,display_name) VALUES(?1,1,'Custom')", [id]).unwrap();
+        s.db.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'tag','Tag')", [id]).unwrap();
+        let before = get_event(&s.db, id).unwrap();
+        let old_path = before.path.clone();
+        let staged = prepare_bytes(&s.root, 1000, collection_input(b"new collection"), &[]).unwrap();
+        assert!(replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged).unwrap());
+        let after = get_event(&s.db, id).unwrap();
+        assert_eq!(after.id, id);
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.detected_at_ms, before.detected_at_ms);
+        assert_eq!(fs::read(&after.path).unwrap(), b"new collection");
+        assert_eq!(fs::read(old_path).unwrap(), b"old collection");
+        assert_eq!(get_event(&s.db, shared).unwrap().revision, before.revision);
+        assert_eq!(collection_members(&s.db, id).unwrap().get(&0), Some(&member));
+        assert!(crate::pinned::properties(&s.db, id).unwrap().pinned);
+        assert_eq!(crate::pinned::tags(&s.db, id).unwrap().len(), 1);
+        let count: i64 = s.db.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 3);
+    }
+    #[test]
+    fn replacement_rejects_stale_and_hidden_before_publishing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut s = crate::Service::open(temp.path(), 1000).unwrap();
+        let id = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"old")).unwrap();
+        let parent = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"parent")).unwrap();
+        let before = get_event(&s.db, id).unwrap();
+        let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
+        let target = staged.directory.join(&staged.hash);
+        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, "blob:0000000000000000000000000000000000000000000000000000000000000000", staged).unwrap());
+        assert!(!target.exists());
+        s.db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![parent,id]).unwrap();
+        let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
+        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged).unwrap());
+        assert!(!target.exists());
+        assert_eq!(get_event(&s.db, id).unwrap().revision, before.revision);
     }
 }

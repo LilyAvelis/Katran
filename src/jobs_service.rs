@@ -82,6 +82,10 @@ pub(crate) struct FolderExportBatch {
 }
 pub(crate) enum PreparedWork {
     PackImageCollection(storage::CollectionPack),
+    LinkCollectionMetadata {
+        event: Event,
+        blob: Option<storage::PreparedBlob>,
+    },
     CopyCollectionPage {
         event: Event,
         stamp: media_service::Stamp,
@@ -1800,8 +1804,20 @@ impl Service {
         })?;
         Ok(json!({"job_id":id,"state":"queued"}))
     }
+    fn schedule_link_collection_metadata(&mut self, event: Event) -> Result<JobId> {
+        let root = self.root.clone();
+        let quota = self.quota;
+        let references = self.reference_paths()?;
+        self.jobs.submit(Lane::LinkMetadata, move |cancel| {
+            let blob = collection::prepare_link_metadata(&event, &root, quota, &references, &cancel)?;
+            Ok(PreparedWork::LinkCollectionMetadata { event, blob })
+        })
+    }
+
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
-        for (ready, result) in self.jobs.take_ready(8) {
+        let mut ready_jobs = self.jobs.take_ready(8);
+        ready_jobs.extend(self.jobs.take_ready_for(id, Lane::LinkMetadata));
+        for (ready, result) in ready_jobs {
             let result = match result {
                 Ok(PreparedWork::AudioExtraction {event, stamp, staged, destination, audio_track, clipboard_sequence}) => {
                     let saved = (|| -> Result<Value> {
@@ -2301,7 +2317,22 @@ impl Service {
                     let consumed: Vec<_> = packed.inputs.iter().map(|input| input.event.id).collect();
                     let (id, cleanup_pending) = storage::commit_shelf_collection(&mut self.db, &self.root, self.quota, packed)?;
                     self.interaction.replace_collection_rows(&consumed, Some(id));
-                    Ok(json!({"event":self.get(id)?,"count":count,"image_collection":true,"link_collection":links,"text_collection":text,"merged":merged,"cleanup_pending":cleanup_pending}))
+                    let event = self.get(id)?;
+                    let metadata = links.then(|| self.schedule_link_collection_metadata(event.clone()));
+                    let metadata_job_id = metadata.as_ref().and_then(|job| job.as_ref().ok()).copied();
+                    let metadata_error = metadata.as_ref().and_then(|job| job.as_ref().err()).map(|error| &error.code);
+                    Ok(json!({"event":event,"count":count,"image_collection":true,"link_collection":links,"text_collection":text,"merged":merged,"cleanup_pending":cleanup_pending,"metadata_job_id":metadata_job_id,"metadata_error":metadata_error}))
+                },
+                PreparedWork::LinkCollectionMetadata { event, blob } => {
+                    let Some(blob) = blob else {
+                        return Ok(json!({"link_metadata_updated":false}));
+                    };
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    if !storage::replace_link_collection_blob(&mut self.db, &self.root, self.quota, event.id, &event.revision, blob)? {
+                        return Ok(json!({"link_metadata_updated":false}));
+                    }
+                    self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                    Ok(json!({"link_metadata_updated":true,"event":self.get(event.id)?}))
                 },
                 PreparedWork::UnpackImageCollection { event, stamp, members, pages, newest_first, tab } => {
                     self.validate_job_events(std::slice::from_ref(&event))?;

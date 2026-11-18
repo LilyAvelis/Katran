@@ -65,8 +65,10 @@ full stored pixels with an ownership marker; no capture or shelf mutation.
 
 Links BULL uses typed v2 `LINK` records, while image BULL stays v1. Pack, merge
 and unpack share reversible shelf membership and pin/tag rules. Persist page
-metadata inside the file. Only explicit packing may fetch metadata for public
-HTTPS pages. Ctrl+C publishes the visible URL through the owned text Clipboard
+metadata inside the file. Publish selected URLs locally first, then retrieve
+title and description for public HTTPS pages on the separate metadata lane.
+Keep existing previews and make no collection preview-image requests. Apply
+an enriched blob only to the same visible event revision. Ctrl+C publishes the visible URL through the owned text Clipboard
 path; Alt+Enter opens that validated URL with the default browser. Copying from
 the shelf transfers the entire file. Text BULL uses v2 `TEXT` records and the
 same Text shelf membership. Its rendered Markdown and source are two views

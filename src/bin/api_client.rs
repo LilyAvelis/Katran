@@ -18,6 +18,30 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn link_metadata_poll_waits_for_foreground_and_paste_and_stays_quiet() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        let id = katran::domain_jobs::JobId(999999);
+        app.link_metadata_jobs.push_back(id);
+        app.message = "pack succeeded".into();
+        app.job = Some(UiJob::Domain {
+            job_id: katran::domain_jobs::JobId(999998),
+            capture: false,
+        });
+        app.poll_link_metadata_jobs(&ctx);
+        assert_eq!(app.link_metadata_jobs.front(), Some(&id));
+        app.job = None;
+        app.overlay_ui.pending = true;
+        app.poll_link_metadata_jobs(&ctx);
+        assert_eq!(app.link_metadata_jobs.front(), Some(&id));
+        app.overlay_ui.pending = false;
+        app.poll_link_metadata_jobs(&ctx);
+        assert!(app.link_metadata_jobs.is_empty());
+        assert_eq!(app.message, "pack succeeded");
+    }
+
+    #[test]
     fn frame_capture_result_preserves_video_context_and_reports_clipboard_failure() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
@@ -1384,6 +1408,56 @@ impl Shelf {
             self.start_job(Command::RunAction { id }, false, ctx.clone());
         }
     }
+    pub(super) fn poll_link_metadata_jobs(&mut self, ctx: &egui::Context) {
+        if self.link_metadata_jobs.is_empty() {
+            self.link_metadata_next_poll = None;
+            return;
+        }
+        let interval = Duration::from_millis(500);
+        ctx.request_repaint_after(interval);
+        if self.job.is_some() || self.overlay_ui.pending || self.api.is_none() {
+            return;
+        }
+        if self
+            .link_metadata_next_poll
+            .is_some_and(|deadline| Instant::now() < deadline)
+        {
+            return;
+        }
+        self.link_metadata_next_poll = Some(Instant::now() + interval);
+        let Some(job_id) = self.link_metadata_jobs.pop_front() else {
+            return;
+        };
+        // Poll directly to keep optional background failures out of the user's pack status.
+        let response = self.api.as_mut().unwrap().execute(Request {
+            api_version: 1,
+            request_id: "link-metadata-ui".into(),
+            command: Command::PollJob { job_id },
+        });
+        let status = &response["result"];
+        match status["state"].as_str() {
+            Some("queued" | "running" | "ready") if response["ok"] == true => {
+                self.link_metadata_jobs.push_back(job_id)
+            }
+            Some("succeeded")
+                if response["ok"] == true && status["result"]["link_metadata_updated"] == true =>
+            {
+                let event = &status["result"]["event"];
+                if let (Some(id), Some(revision)) =
+                    (event["id"].as_i64(), event["revision"].as_str())
+                {
+                    let message = self.message.clone();
+                    self.accept_link_collection_revision(id, revision, ctx);
+                    if self.state["tab"] == "links" {
+                        self.refresh();
+                    }
+                    self.message = message;
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn finish_capture_job(&mut self) {
         let Some(job_id) = self.capture_job else {
             return;
@@ -1508,6 +1582,15 @@ impl Shelf {
             return;
         }
         if result["image_collection"] == true {
+            if result["link_collection"] == true
+                && let Some(id) = result["metadata_job_id"].as_u64()
+            {
+                let id = katran::domain_jobs::JobId(id);
+                if !self.link_metadata_jobs.contains(&id) {
+                    self.link_metadata_jobs.push_back(id);
+                    self.link_metadata_next_poll = None;
+                }
+            }
             let count = result["count"].as_u64().unwrap_or(0);
             self.message = if result["text_collection"] == true {
                 let label = if result["unpacked"] == true {

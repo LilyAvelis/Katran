@@ -29,20 +29,21 @@ are UTF-8 with respective limits of 8 KiB, 4 KiB and 16 KiB. The preview is
 at most 2 MiB, with length zero representing an absent image. Empty title
 and description represent absent metadata. The file budget is 256 MiB.
 
-Packing selected Links attempts to save page metadata from public HTTPS
-sites within a time and size budget. An unavailable page still contributes
-its URL. Viewing and merging use the saved bytes locally. Ctrl+C copies only
+Packing selected Links writes and publishes the URLs locally. A separate job
+gets titles and descriptions for public HTTPS pages, then writes them into
+the same visible collection if its revision still matches. Saved previews
+stay in the file. Link enrichment makes no preview image requests. Viewing
+uses the saved bytes locally. Ctrl+C copies only
 the visible URL and bypasses clipboard capture. Alt+Enter opens that URL in
 the default browser. Copy the shelf card to send the whole BULL. The external
 QuickLook adapter currently opens v1 image BULLs. Katran also browses Links
 and Text collections.
 
-New Links packing waits for bounded HTTPS enrichment before publishing an
-immutable file. DNS, page loading and optional preview loading contribute to
-this wait. The shared deadline is 7 seconds. Merging existing Links BULLs
-reuses their saved metadata. In one synthetic release API measurement with two
-links, packing took 14 ms for HTTP entries (no enrichment) and 26 ms for HTTPS
-`.invalid` entries (fast DNS failure). Real-site timings were outside that run.
+The background HTML deadline is 7 seconds, independent of packing. Merge
+reuses stored metadata and may enrich entries with blank title and description.
+A copy made before enrichment remains a valid independent snapshot. A later
+copy includes the metadata applied by then. Unpack or deletion takes precedence
+over a pending replacement. Incomplete enrichment leaves the URLs usable.
 
 ## Text v2
 

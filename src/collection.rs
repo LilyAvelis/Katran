@@ -133,48 +133,95 @@ pub(crate) fn pack_links(
             count: entries.len() - offset,
         });
     }
-    if !merge && !entries.is_empty() {
-        let deadline = Instant::now() + Duration::from_secs(7);
-        let chunk_size = entries.len().div_ceil(4);
-        std::thread::scope(|scope| {
-            for chunk in entries.chunks_mut(chunk_size) {
-                scope.spawn(move || {
-                    for link in chunk {
-                        if cancel.is_cancelled() || Instant::now() >= deadline {
-                            break;
-                        }
-                        if let Some(metadata) =
-                            crate::favicon_fetch::link_metadata(&link.url, deadline)
-                        {
-                            link.title = metadata.title;
-                            link.description = metadata.description;
-                            link.preview_png = metadata.preview_png;
-                        }
-                    }
-                });
-            }
-        });
-    }
     cancel.check()?;
-    let mut portable = Vec::new();
-    links::write(&mut portable, &entries)?;
-    let blob = storage::prepare_bytes(
-        root,
-        quota,
-        storage::ByteIngest {
-            name: "Links collection.bull",
-            source: LINK_SOURCE,
-            bytes: &portable,
-            origin: &Origin::default(),
-        },
-        references,
-    )?;
+    let blob = prepare_links(&entries, "Links collection.bull", root, quota, references)?;
     Ok(storage::CollectionPack {
         inputs,
         blob,
         tab: ShelfTab::Links,
         count: entries.len(),
     })
+}
+
+fn prepare_links(
+    entries: &[Link],
+    name: &str,
+    root: &Path,
+    quota: u64,
+    references: &[PathBuf],
+) -> Result<storage::PreparedBlob> {
+    let mut portable = Vec::new();
+    links::write(&mut portable, entries)?;
+    storage::prepare_bytes(
+        root,
+        quota,
+        storage::ByteIngest {
+            name,
+            source: LINK_SOURCE,
+            bytes: &portable,
+            origin: &Origin::default(),
+        },
+        references,
+    )
+}
+
+pub(crate) fn prepare_link_metadata(
+    event: &Event,
+    root: &Path,
+    quota: u64,
+    references: &[PathBuf],
+    cancel: &Cancellation,
+) -> Result<Option<storage::PreparedBlob>> {
+    cancel.check()?;
+    let mut entries = read_links(event)?;
+    let deadline = Instant::now() + Duration::from_secs(7);
+    let changed = enrich_links(
+        &mut entries,
+        deadline,
+        cancel,
+        &crate::favicon_fetch::link_metadata,
+    );
+    cancel.check()?;
+    if !changed {
+        return Ok(None);
+    }
+    prepare_links(&entries, &event.name, root, quota, references).map(Some)
+}
+
+fn enrich_links(
+    entries: &mut [Link],
+    deadline: Instant,
+    cancel: &Cancellation,
+    fetch: &(impl Fn(&str, Instant) -> Option<crate::favicon_fetch::LinkMetadata> + Sync),
+) -> bool {
+    let pending: Vec<_> = entries
+        .iter_mut()
+        .filter(|entry| entry.title.is_empty() && entry.description.is_empty())
+        .collect();
+    if pending.is_empty() {
+        return false;
+    }
+    let mut pending = pending;
+    let changed = std::sync::atomic::AtomicBool::new(false);
+    let chunk_size = pending.len().div_ceil(4);
+    std::thread::scope(|scope| {
+        for chunk in pending.chunks_mut(chunk_size) {
+            let changed = &changed;
+            scope.spawn(move || {
+                for link in chunk {
+                    if cancel.is_cancelled() || Instant::now() >= deadline {
+                        break;
+                    }
+                    if let Some(metadata) = fetch(&link.url, deadline) {
+                        changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        link.title = metadata.title;
+                        link.description = metadata.description;
+                    }
+                }
+            });
+        }
+    });
+    changed.into_inner()
 }
 
 pub(crate) fn unpack_links(
@@ -219,6 +266,141 @@ pub(crate) fn unpack_links(
 
 pub(crate) fn packable_link(event: &Event) -> bool {
     event.kind == EventKind::LinkFragment
+}
+
+#[cfg(test)]
+#[test]
+fn link_metadata_wait_does_not_block_pack_or_read_and_commits_in_place() {
+    use crate::{
+        Command, Request, Service,
+        domain_jobs::{JobId, JobState, Lane},
+        interaction::SelectionMode,
+        jobs_service::PreparedWork,
+    };
+    use std::sync::{Mutex, mpsc};
+    let profile = tempfile::tempdir().unwrap();
+    let mut api = Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
+    let call = |api: &mut Service, command| {
+        let response = api.execute(Request {
+            api_version: 1,
+            request_id: "background-metadata-test".into(),
+            command,
+        });
+        assert_eq!(response["ok"], true, "{response}");
+        response["result"].clone()
+    };
+    let finish = |api: &mut Service, job_id| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let result = call(api, Command::PollJob { job_id });
+            match result["state"].as_str() {
+                Some("succeeded") => break result["result"].clone(),
+                Some("queued" | "running" | "ready") if Instant::now() < deadline => {}
+                _ => panic!("{result}"),
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Links,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Links,
+        },
+    );
+    let url = "http://example.test/synthetic";
+    let item = call(
+        &mut api,
+        Command::IngestLink {
+            url: url.into(),
+            source: "synthetic".into(),
+        },
+    );
+    let id = item["id"].as_i64().unwrap();
+    call(&mut api, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut api,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let (permit, gate) = mpsc::sync_channel::<Event>(1);
+    let root = api.root.clone();
+    let delayed = api
+        .jobs
+        .submit(Lane::LinkMetadata, move |cancel| {
+            let event = gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            let mut entries = read_links(&event)?;
+            let queries = Mutex::new(Vec::new());
+            assert!(enrich_links(
+                &mut entries,
+                Instant::now() + Duration::from_secs(3),
+                &cancel,
+                &|url, _| {
+                    queries.lock().unwrap().push(url.to_owned());
+                    Some(crate::favicon_fetch::LinkMetadata {
+                        title: "Title".into(),
+                        description: "Description".into(),
+                    })
+                }
+            ));
+            assert_eq!(queries.into_inner().unwrap(), [url]);
+            let blob = prepare_links(&entries, &event.name, &root, crate::DEFAULT_QUOTA, &[])?;
+            Ok(PreparedWork::LinkCollectionMetadata {
+                event,
+                blob: Some(blob),
+            })
+        })
+        .unwrap();
+    let started = call(&mut api, Command::CreateImageCollection);
+    let pack_id = JobId(started["job_id"].as_u64().unwrap());
+    let packed = finish(&mut api, pack_id);
+    let detached = JobId(packed["metadata_job_id"].as_u64().unwrap());
+    call(&mut api, Command::CancelJob { job_id: detached });
+    let event: Event = serde_json::from_value(packed["event"].clone()).unwrap();
+    let page = call(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: event.id,
+            revision: event.revision.clone(),
+            index: 0,
+        },
+    );
+    assert_eq!(
+        finish(&mut api, JobId(page["job_id"].as_u64().unwrap()))["link"]["url"],
+        url
+    );
+    assert!(read_links(&event).unwrap()[0].title.is_empty());
+
+    permit.send(event.clone()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while api.jobs.status(delayed).unwrap().state != JobState::Ready {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    finish(&mut api, pack_id);
+    assert_eq!(api.get(event.id).unwrap().revision, event.revision);
+    let receipt = finish(&mut api, delayed);
+    assert_eq!(receipt["link_metadata_updated"], true);
+    let enriched = api.get(event.id).unwrap();
+    assert_ne!(enriched.revision, event.revision);
+    let entries = read_links(&enriched).unwrap();
+    assert_eq!(
+        (
+            &entries[0].url[..],
+            &entries[0].title[..],
+            &entries[0].description[..]
+        ),
+        (url, "Title", "Description")
+    );
+    assert!(entries[0].preview_png.is_none());
 }
 
 pub(crate) fn packable_text(event: &Event) -> bool {

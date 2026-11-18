@@ -212,6 +212,24 @@ impl Shelf {
         self.request_translation_page(0, ctx);
     }
 
+    pub(super) fn accept_link_collection_revision(
+        &mut self,
+        id: i64,
+        revision: &str,
+        ctx: &egui::Context,
+    ) {
+        let Some(collection) = self.upscale.collection.as_mut() else {
+            return;
+        };
+        if collection.id != id || collection.revision == revision {
+            return;
+        }
+        collection.revision = revision.to_owned();
+        let target = collection.index;
+        // Keep the ready card visible while replacing any obsolete pending page.
+        self.request_translation_page(target, ctx);
+    }
+
     fn close_translation_collection(&mut self) {
         if let Some(collection) = self.upscale.collection.take() {
             if let Some((job_id, _)) = collection.pending {
@@ -988,6 +1006,37 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::actions::upscale_operation;
+    #[test]
+    fn metadata_revision_keeps_visible_link_and_pending_target() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.upscale.collection = Some(Collection {
+            id: 7,
+            revision: "old".into(),
+            index: 2,
+            count: Some(3),
+            pending: None,
+            texture: None,
+            link: Some(LinkPage {
+                url: "https://example.org".into(),
+                title: "old title".into(),
+                description: "".into(),
+            }),
+            text: None,
+            ready_index: Some(1),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        });
+        app.accept_link_collection_revision(7, "new", &ctx);
+        let collection = app.upscale.collection.as_ref().unwrap();
+        assert_eq!(collection.revision, "new");
+        assert_eq!(collection.index, 2);
+        assert_eq!(collection.ready_index, Some(1));
+        assert_eq!(collection.link.as_ref().unwrap().title, "old title");
+    }
+
     #[test]
     fn link_target_uses_visible_page_while_next_is_pending() {
         let collection = Collection {
