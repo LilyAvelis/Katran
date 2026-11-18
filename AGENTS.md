@@ -26,6 +26,12 @@ concise feature overview.
 
 ## Collections and Folder · local 4.0
 
+Collection-aware image batch commands use the existing ordered selection path.
+Upscale and Translate process the stored pages of an image BULL and publish
+an independent result BULL. Preserve the source archive and member rows.
+Keep one shared order, progress, cancellation and per-page error contract
+for loose multi-selection and BULL input.
+
 Keep one rebindable pack/unpack action. Loose files use image BULL for
 supported images, file BULL for a common file family, and BS for mixed files.
 Shelf pack replaces cards and unpack restores them. Delete on the shelf

@@ -22,7 +22,8 @@ pub fn label(tab: ShelfTab) -> &'static str {
 pub(crate) struct BackgroundActions {
     image: bool,
     video: bool,
-    translate: bool,
+    image_batch: bool,
+    pack_images: bool,
     pack_links: bool,
     pack_text: bool,
     unpack_bull: bool,
@@ -77,7 +78,8 @@ fn background_actions(
     BackgroundActions {
         image,
         video,
-        translate: image,
+        image_batch: image || crate::image_translation_batch::is_bull(&event),
+        pack_images: image,
         unpack_bull: crate::collection::is_managed(&event),
         merge_bull: false,
         pack_links: false,
@@ -118,8 +120,10 @@ impl Service {
         let selected = &self.interaction.selected;
         if (2..=crate::image_translation_batch::MAX_PAGES).contains(&selected.len()) {
             let events = selected.iter().map(|id| self.get(*id)).collect::<Result<Vec<_>>>();
+            let images = events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image));
             return BackgroundActions {
-                translate: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image)),
+                image_batch: images,
+                pack_images: images,
                 merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
                 pack_links: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
                 pack_text: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_text)),
@@ -142,14 +146,14 @@ impl Service {
             "upscale_remacri_x2"
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
-            | "upscale_realesrgan_x4" => background.image,
+            | "upscale_realesrgan_x4" => background.image_batch,
             "translate_image_ja" | "translate_image_zh" | "translate_image_ko" => {
-                background.translate
+                background.image_batch
             }
             "search_image_google_lens" => background.image,
             "create_image_collection" => {
                 let supported = match self.interaction.tab {
-                    ShelfTab::Images | ShelfTab::Translate => background.translate,
+                    ShelfTab::Images | ShelfTab::Translate => background.pack_images,
                     ShelfTab::Links => background.pack_links,
                     ShelfTab::Text => background.pack_text,
                     ShelfTab::Files => return background.pack_bs || background.unpack_bs || background.merge_bs

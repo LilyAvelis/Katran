@@ -25,6 +25,14 @@ and verification. See [development and agent map](../development.md).
 
 ## Session history and ownership
 
+For BULL as batch input, Fenna owned the Upscale completion UI and Polly
+owned ordered input preparation, domain routing, publication and verification.
+The local Real-ESRGAN ×2 API fixture transformed a two-page synthetic BULL,
+verified exact dimensions in stored order, checked both cards in Images,
+and compared the original archive byte-for-byte. The Folder API fixture
+verified availability for image BULL, rejected video BULL from the image
+action list, and cancelled a queued BULL translation.
+
 For unified packing, Fenna owned the viewer and action wiring, Vela owned
 Folder output publication, and Nemi investigated and fixed completed recycle
 stage retention. Polly owned type selection, command integration, shelf

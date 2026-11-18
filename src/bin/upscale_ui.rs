@@ -220,6 +220,16 @@ fn collection_intro_transform(elapsed: Duration, center: egui::Pos2) -> egui::em
     )
 }
 
+fn upscale_collection_status(result: &Value) -> String {
+    let upscaled = result["upscaled"].as_u64().unwrap_or(0);
+    let total = result["total"].as_u64().unwrap_or(0);
+    format!(
+        "{} {upscaled}/{total} · {}",
+        tr("Увеличено страниц:", "Pages upscaled:"),
+        tr("Сохранено в Images", "Saved in Images")
+    )
+}
+
 fn collection_canvas_size(viewport: egui::Vec2) -> egui::Vec2 {
     egui::vec2((viewport.x * 0.8).max(1.0), (viewport.y * 0.7).max(1.0))
 }
@@ -1325,6 +1335,9 @@ impl Shelf {
                             }
                             status
                         }
+                        ImageJob::Upscale if result["collection"] == true => {
+                            upscale_collection_status(result)
+                        }
                         ImageJob::Upscale => format!(
                             "{}: {} × {} → {} × {}. {}",
                             tr("Размер", "Size"),
@@ -1336,7 +1349,23 @@ impl Shelf {
                         ),
                     };
                     self.refresh();
-                    if matches!(self.upscale.kind, ImageJob::Translate)
+                    if matches!(self.upscale.kind, ImageJob::Upscale)
+                        && result["collection"] == true
+                    {
+                        self.upscale.open = false;
+                        self.message = self.upscale.status.clone();
+                        let event = &result["event"];
+                        if event["id"].is_i64() && event["revision"].is_string() {
+                            self.open_translation_collection(event, ctx);
+                            self.message = self.upscale.status.clone();
+                        } else {
+                            self.message.push_str(" · ");
+                            self.message.push_str(tr(
+                                "Не удалось открыть коллекцию",
+                                "Could not open collection",
+                            ));
+                        }
+                    } else if matches!(self.upscale.kind, ImageJob::Translate)
                         && result["collection"] == true
                     {
                         self.upscale.open = false;
@@ -1564,6 +1593,14 @@ mod tests {
         assert_eq!(collection.index, 2);
         assert_eq!(collection.ready_index, Some(1));
         assert_eq!(collection.link.as_ref().unwrap().title, "old title");
+    }
+
+    #[test]
+    fn upscale_collection_status_reports_count_and_destination() {
+        let result = serde_json::json!({"collection":true,"total":3,"upscaled":2});
+        let status = upscale_collection_status(&result);
+        assert!(status.contains("2/3"));
+        assert!(status.contains("Images"));
     }
 
     #[test]

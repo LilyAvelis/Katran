@@ -21,6 +21,15 @@ retains its last ready page while loading and shares the image-preview zoom
 geometry. See [Translate](patch-4.0/TRANSLATE.md) and
 [the local BULL contract](patch-4.0/BULL.md).
 
+Image batch commands share ordered input preparation and BULL publication in
+`image_translation_batch.rs`. A single image keeps the existing PNG path.
+A selected image BULL supplies its stored pages, including lossless Folder
+image BULLs. Validate its revision and file stamp before reading and before
+publication. Reuse the same progress, cancellation and per-page receipts for
+loose multi-selection. Derived BULLs are independent cards, with no ownership
+of the source cards. Translate uses translation membership and Upscale uses
+the Images collection source.
+
 `CreateImageCollection` packs selected images, flattens selected BULLs into
 one ordered collection, or unpacks a single BULL on its shelf. It reuses the
 ordered selection and v1 codec. Catalogue v15 stores ownership by page index

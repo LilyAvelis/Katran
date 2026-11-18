@@ -127,7 +127,10 @@ pub(crate) enum PreparedWork {
         tab: interaction::ShelfTab,
         preserved_sources: Vec<(Event, media_service::Stamp)>,
     },
-    ImageTranslationBatch(image_translation_batch::Prepared),
+    ImageBatch {
+        batch: image_translation_batch::Prepared,
+        translate: bool,
+    },
     ImageTranslation {
         event: Event,
         stamp: media_service::Stamp,
@@ -302,7 +305,53 @@ pub(crate) fn prepare_reference(
         origin,
     })
 }
+
+enum ImageOperationSelection {
+    Single(Event),
+    Batch(image_translation_batch::Input),
+}
+
+fn image_batch_queued(id: crate::domain_jobs::JobId, total: Option<usize>) -> Value {
+    match total {
+        Some(total) => json!({"job_id":id,"state":"queued","total":total}),
+        None => json!({"job_id":id,"state":"queued"}),
+    }
+}
+
 impl Service {
+    fn image_operation_selection(&self) -> Result<ImageOperationSelection> {
+        let ids = if self.interaction.selected.is_empty() {
+            self.interaction.cursor.as_slice()
+        } else {
+            self.interaction.selected.as_slice()
+        };
+        if !(1..=image_translation_batch::MAX_PAGES).contains(&ids.len()) {
+            return Err(ApiError::new(
+                "invalid_selection",
+                "Select up to 32 images or one image BULL",
+            ));
+        }
+        if let [id] = ids {
+            let event = self.get(*id)?;
+            if image_translation_batch::is_bull(&event) {
+                return Ok(ImageOperationSelection::Batch(image_translation_batch::Input::Bull(
+                    event,
+                )));
+            }
+            return self.selected_background_image().map(ImageOperationSelection::Single);
+        }
+        let events = ids.iter().map(|&id| self.get(id)).collect::<Result<Vec<_>>>()?;
+        if !events.iter().all(image_collection::is_image) {
+            return Err(ApiError::new(
+                "invalid_selection",
+                "Select loose images or one image BULL",
+            ));
+        }
+        Ok(ImageOperationSelection::Batch(image_translation_batch::Input::Selection(
+            events,
+        )))
+    }
+
     fn commit_owned_audio_pointer(&mut self, pointer: files_pointer::Pointer, output: &std::path::Path) -> Result<Value> {
         let profile = self.root.canonicalize()?;
         let root = profile.join("audio-extractions").canonicalize()?;
@@ -748,26 +797,26 @@ impl Service {
                     _ => ImageTranslationSource::Japanese,
                 };
                 let numbered_only = self.settings.translation_numbered_only;
-                let selection = self.selected_refs()?;
-                if selection.len() > 1 {
-                    if selection.len() > image_translation_batch::MAX_PAGES {
-                        return Err(ApiError::new("invalid_selection", "Select up to 32 pages"));
+                let input = self.image_operation_selection()?;
+                let event = match input {
+                    ImageOperationSelection::Single(event) => event,
+                    ImageOperationSelection::Batch(input) => {
+                        let root = self.root.clone();
+                        let quota = self.quota;
+                        let references = self.reference_paths()?;
+                        let session = self.image_translation.clone();
+                        let total = input.known_total();
+                        let id = self.jobs.submit(Lane::ImageTranslate, move |cancel| {
+                            let mut session = session.lock()
+                                .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?;
+                            let batch = image_translation_batch::prepare(
+                                input, &root, quota, &references, source_language, numbered_only, &mut session, &cancel,
+                            )?;
+                            Ok(PreparedWork::ImageBatch { batch, translate: true })
+                        })?;
+                        return Ok(image_batch_queued(id, total));
                     }
-                    let events = selection.iter().map(|item| self.get(item.id)).collect::<Result<Vec<_>>>()?;
-                    let root = self.root.clone();
-                    let quota = self.quota;
-                    let references = self.reference_paths()?;
-                    let session = self.image_translation.clone();
-                    let id = self.jobs.submit(Lane::ImageTranslate, move |cancel| {
-                        let mut session = session.lock()
-                            .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?;
-                        Ok(PreparedWork::ImageTranslationBatch(image_translation_batch::prepare(
-                            events, &root, quota, &references, source_language, numbered_only, &mut session, &cancel,
-                        )?))
-                    })?;
-                    return Ok(json!({"job_id":id,"state":"queued","total":selection.len()}));
-                }
-                let event = self.selected_background_image()?;
+                };
                 let root = self.root.clone();
                 let quota = self.quota;
                 let references = self.reference_paths()?;
@@ -930,10 +979,23 @@ impl Service {
                 })?
             }
             Command::UpscaleSelectedImage { operation } => {
-                let event = self.selected_background_image()?;
+                let input = self.image_operation_selection()?;
                 let root = self.root.clone();
                 let quota = self.quota;
                 let references = self.reference_paths()?;
+                let event = match input {
+                    ImageOperationSelection::Single(event) => event,
+                    ImageOperationSelection::Batch(input) => {
+                        let total = input.known_total();
+                        let id = self.jobs.submit(Lane::Upscale, move |cancel| {
+                            let batch = image_translation_batch::prepare_upscale(
+                                input, &root, quota, &references, operation, &cancel,
+                            )?;
+                            Ok(PreparedWork::ImageBatch { batch, translate: false })
+                        })?;
+                        return Ok(image_batch_queued(id, total));
+                    }
+                };
                 self.jobs.submit(Lane::Upscale, move |cancel| {
                     use std::io::Read;
                     const MAX_SOURCE: u64 = 32 * 1024 * 1024;
@@ -2617,7 +2679,7 @@ impl Service {
                     let bs = event.source == bs_collection::SOURCE;
                     Ok(json!({"count":items.len(),"items":items,"image_collection":!bs,"bs_collection":bs,"link_collection":tab == interaction::ShelfTab::Links,"text_collection":tab == interaction::ShelfTab::Text,"unpacked":true,"cleanup_pending":cleanup_pending}))
                 },
-                PreparedWork::ImageTranslationBatch(batch) => {
+                PreparedWork::ImageBatch { batch, translate } => {
                     for (event, stamp) in &batch.validated_sources {
                         let current = self.get(event.id)?;
                         if current.revision != event.revision || current.path != event.path
@@ -2627,7 +2689,11 @@ impl Service {
                         }
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
-                    let id = storage::commit_translation_collection(&mut self.db, &self.root, self.quota, batch.blob)?;
+                    let id = if translate {
+                        storage::commit_translation_collection(&mut self.db, &self.root, self.quota, batch.blob)?
+                    } else {
+                        storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, batch.blob)?
+                    };
                     let mut receipt = batch.receipt;
                     receipt["event"] = serde_json::to_value(self.get(id)?)
                         .map_err(|error| ApiError::new("collection_error", error))?;

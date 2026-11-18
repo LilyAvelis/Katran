@@ -1,9 +1,14 @@
 # Static image upscale
 
-Select one static image, including a frame previously saved from a video.
+Select a static image, including a frame previously saved from a video,
+multiple images, or one image BULL.
 Ctrl+K → AI Commands offers Remacri ×2, Remacri ×4, Real-ESRGAN ×2, and
 Real-ESRGAN ×4. Each is individually rebindable and launches directly. The
-result is a separate managed PNG in Images. The original content is unchanged.
+result is a separate managed PNG in Images for a single loose image.
+For multiple images or a BULL, the result is a new BULL in Images. Every
+page uses the same model and factor. The receipt reports successes and
+failed input indices, and the saved pages keep their input order. The
+original images and any input collection are unchanged.
 
 Each dimension is exactly multiplied by the requested factor after applying
 the input's EXIF orientation. Remacri uses `4x_foolhardy_Remacri.pth` and

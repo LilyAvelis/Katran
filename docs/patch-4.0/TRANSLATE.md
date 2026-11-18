@@ -66,9 +66,11 @@ If external preview fails, the published result stays in Translate.
 
 For a sequence of 2–32 images, use Ctrl to choose the order by clicking, or
 Shift to select from the first page to the last in either direction. The
-translation action steps through that order with progress and cancellation.
+same translation command accepts an image BULL and uses its saved page
+order. The action steps through that order with progress and cancellation.
 Once published, the collection appears as one card in Translate and opens
-in the Katran page viewer. The separate QuickLook action uses its collection
+in the Katran page viewer. The original BULL remains available, and even a
+BULL with one page produces a new BULL. The separate QuickLook action uses its collection
 viewer when installed.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.

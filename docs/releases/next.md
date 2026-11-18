@@ -44,6 +44,10 @@ resolution. It stays out of clipboard capture and the Images shelf.
 
 ### BULL and BS collections
 
+Upscale and Translate can take one image BULL or an ordered selection of
+loose images. Both produce a separate BULL for batch inputs and retain the
+source. Upscale saves to Images and Translate saves to Translate.
+
 Links uses portable BULL v2 for ordered URLs with saved titles, descriptions
 and optional previews. The same shelf action packs, merges and unpacks.
 Custom link names appear as titles and travel with newly packed collections.
