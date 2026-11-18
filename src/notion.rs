@@ -232,12 +232,97 @@ fn response_error() -> ApiError {
     ApiError::new("notion_response", "Could not read the Notion CLI response")
 }
 
+#[cfg(windows)]
+fn cli_executable() -> Option<std::path::PathBuf> {
+    use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, FOLDERID_ProgramFiles};
+
+    // Raycast and Explorer can retain the PATH they received at login.
+    let user_root =
+        windows_folder(&FOLDERID_LocalAppData).map(|path| path.join("Microsoft").join("WinGet"));
+    let machine_root = windows_folder(&FOLDERID_ProgramFiles).map(|path| path.join("WinGet"));
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    find_windows_cli(
+        std::env::split_paths(&path),
+        user_root.into_iter().chain(machine_root),
+    )
+}
+
+#[cfg(windows)]
+fn windows_folder(id: &windows::core::GUID) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Win32::{
+        System::Com::CoTaskMemFree,
+        UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath},
+    };
+    unsafe {
+        let value = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
+        let path = std::ffi::OsString::from_wide(value.as_wide()).into();
+        CoTaskMemFree(Some(value.0.cast()));
+        Some(path)
+    }
+}
+
+#[cfg(windows)]
+fn find_windows_cli(
+    path: impl IntoIterator<Item = std::path::PathBuf>,
+    winget_roots: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if let Some(executable) = path
+        .into_iter()
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("ntn.exe"))
+        .find(|path| path.is_file())
+    {
+        return Some(executable);
+    }
+    let architecture = format!("ntn-{}-pc-windows-msvc", std::env::consts::ARCH);
+    for root in winget_roots {
+        let link = root.join("Links").join("ntn.exe");
+        if link.is_file() {
+            return Some(link);
+        }
+        let Ok(packages) = std::fs::read_dir(root.join("Packages")) else {
+            continue;
+        };
+        for package in packages.flatten() {
+            if !package
+                .file_name()
+                .to_string_lossy()
+                .starts_with("Notion.ntn_")
+            {
+                continue;
+            }
+            let path = package.path();
+            for executable in [
+                path.join(&architecture).join("ntn.exe"),
+                path.join("ntn.exe"),
+            ] {
+                if executable.is_file() {
+                    return Some(executable);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn cli_executable() -> Option<std::path::PathBuf> {
+    Some("ntn".into())
+}
+
 fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> Result<Value> {
     check()?;
     let token = credentials::read()?.ok_or_else(|| {
         ApiError::new("notion_config", "Connect Notion in Settings → Integrations")
     })?;
-    let mut command = Command::new(if cfg!(windows) { "ntn.exe" } else { "ntn" });
+    let executable = cli_executable().ok_or_else(|| {
+        ApiError::new(
+            "notion_cli_missing",
+            "Notion CLI (ntn) was not found in PATH or WinGet",
+        )
+    })?;
+    let mut command = Command::new(executable);
     command
         .args(["api", path, "--notion-version", "2026-03-11"])
         .env("NOTION_API_TOKEN", token.trim())
@@ -257,10 +342,10 @@ fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> R
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    let mut child = command.spawn().map_err(|_| {
+    let mut child = command.spawn().map_err(|error| {
         ApiError::new(
-            "notion_cli",
-            "Install the official Notion CLI (ntn) and restart Katran",
+            "notion_cli_start",
+            format!("Could not start Notion CLI (ntn): {error}"),
         )
     })?;
     let result = (|| {
@@ -324,6 +409,27 @@ fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn finds_portable_winget_ntn_when_gui_path_is_stale() {
+        let root = tempfile::tempdir().unwrap();
+        let packages = root.path().join("Packages");
+        let test_executable = |package: &str| {
+            let dir = packages
+                .join(package)
+                .join(format!("ntn-{}-pc-windows-msvc", std::env::consts::ARCH));
+            std::fs::create_dir_all(&dir).unwrap();
+            let executable = dir.join("ntn.exe");
+            std::fs::write(&executable, []).unwrap();
+            executable
+        };
+        test_executable("Another.Tool_Microsoft.Winget.Source");
+        let roots = [root.path().to_owned()];
+        assert_eq!(find_windows_cli([], roots.clone()), None);
+        let executable = test_executable("Notion.ntn_Microsoft.Winget.Source");
+        assert_eq!(find_windows_cli([], roots), Some(executable));
+    }
 
     #[test]
     fn parses_only_page_results_and_titles_without_a_fixed_property_name() {

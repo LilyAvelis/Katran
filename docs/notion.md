@@ -1,7 +1,8 @@
 # Notion search in Katran
 
 Install the official Notion CLI and check that `ntn --version` works from
-Windows. Restart Katran if the CLI was added to PATH after Katran started.
+Windows. Katran also detects WinGet installations directly when its launcher
+still has an older PATH.
 
 1. Create an [internal Notion connection](https://developers.notion.com/guides/connections-and-tokens/internal-connections)
    with **Read content** enabled. Leave **Update content** and **Insert content**
