@@ -83,7 +83,6 @@ fn show_document(ui: &mut egui::Ui, document: &Document, header: bool) {
                 ui.add_space(indent);
             }
             let mut job = egui::text::LayoutJob::default();
-            job.wrap.max_width = (ui.available_width() - 8.0).max(20.0);
             for run in &line.runs {
                 let style = &run.style;
                 let size = match line.heading {
@@ -146,10 +145,10 @@ fn show_document(ui: &mut egui::Ui, document: &Document, header: bool) {
                     .inner_margin(5)
                     .corner_radius(4)
                     .show(ui, |ui| {
-                        ui.label(job);
+                        ui.add(egui::Label::new(job).wrap());
                     });
             } else {
-                ui.label(job);
+                ui.add(egui::Label::new(job).wrap());
             }
         });
     }
@@ -184,9 +183,11 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
     if columns == 0 {
         return;
     }
-    let cell_width = (ui.available_width() / columns as f32 - 10.0).clamp(128.0, 250.0);
+    let viewport_width = ui.available_width();
+    let cell_width = (viewport_width / columns as f32 - 10.0).clamp(128.0, 250.0);
     egui::ScrollArea::horizontal()
         .id_salt("notion-table")
+        .max_width(viewport_width)
         .show(ui, |ui| {
             egui::Grid::new("cells")
                 .striped(true)

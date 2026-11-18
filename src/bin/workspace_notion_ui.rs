@@ -42,6 +42,76 @@ mod tests {
     }
 
     #[test]
+    fn notion_reader_wraps_long_paragraphs_when_the_window_shrinks() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.workspace.open = true;
+        app.workspace.notion_source = true;
+        app.workspace.notion = State {
+            configured: true,
+            preview_open: true,
+            preview: Some(
+                katran::notion_reader::parse(&format!(
+                    "Reader width fixture. {}\n\n> {}",
+                    "A long paragraph should wrap. ".repeat(32),
+                    "A long quote should also wrap. ".repeat(24)
+                ))
+                .unwrap(),
+            ),
+            pages: vec![katran::notion::Page {
+                id: "12345678-0000-0000-0000-000000000000".into(),
+                title: "Fixture".into(),
+            }],
+            ..Default::default()
+        };
+        let context = egui::Context::default();
+        crate::ui_fonts::install(&context);
+        fn inspect(shape: &egui::Shape, width: f32) -> bool {
+            match shape {
+                egui::Shape::Text(text)
+                    if text.galley.job.text.contains("Reader width fixture.") =>
+                {
+                    assert!(text.galley.rows.len() > 1, "long paragraph must wrap");
+                    assert!(
+                        text.galley.rect.width() <= width,
+                        "paragraph must fit the window"
+                    );
+                    assert!(
+                        text.pos.x >= 0.0 && text.pos.x + text.galley.rect.width() <= width,
+                        "paragraph must stay in view"
+                    );
+                    true
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| inspect(shape, width)),
+                _ => false,
+            }
+        }
+        for width in [800.0, 460.0] {
+            for pass in 0..3 {
+                let mut result = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 650.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |_| app.workspace_notion_panel(&context),
+                );
+                result.textures_delta.clear();
+                if pass == 2 {
+                    assert!(
+                        result
+                            .shapes
+                            .iter()
+                            .any(|shape| inspect(&shape.shape, width))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn notion_alt_enter_opens_selected_page_from_results_and_reader() {
         let root = tempfile::tempdir().unwrap();
         let mut app = crate::tests::test_shelf(root.path());
@@ -329,8 +399,8 @@ impl Shelf {
         let mut mode_change = None;
         let mut query_changed = false;
         let id = egui::Id::new("workspace-notion-picker");
-        let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 600.0);
-        let max_height = (ctx.content_rect().height() - 205.0).clamp(75.0, 480.0);
+        let width = (ctx.content_rect().width() - 28.0).clamp(1.0, 600.0);
+        let max_height = (ctx.content_rect().height() - 205.0).clamp(1.0, 480.0);
         let modal = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24))
@@ -378,6 +448,7 @@ impl Shelf {
                     query_changed = field.changed();
                 }
                 egui::ScrollArea::vertical()
+                    .max_width(width)
                     .max_height(max_height)
                     .show(ui, |ui| {
                         if state.preview_open {

@@ -24,8 +24,12 @@ still has an older PATH.
    **Ctrl+H** shows the last 100 distinct previewed, opened or exported pages.
    Katran saves their IDs and titles locally and fetches content on demand.
 
-Search requests match page titles and return up to 25 items. Type a more
-specific title if there are additional matches. Katran does not index this
+Search requests match page titles and return up to 25 items. Notion's public
+title search is not an exhaustive inventory of the pages shared with the
+integration. To search page content or find a missing result, use Search in
+the Notion web app. [Notion API limitations](https://developers.notion.com/reference/search-optimizations-and-limitations)
+
+Katran does not index this
 content locally. It debounces title changes by 300 ms, cancels stale jobs
 and bounds each CLI request to eight seconds. The reader requests Notion
 Markdown v2 when you open it. It displays standard Markdown formatting and
