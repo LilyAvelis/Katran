@@ -30,6 +30,10 @@ pub fn palette_order(id: &str) -> usize {
         "video_pause",
         "capture_video_frame",
         "extract_video_audio",
+        "upscale_remacri_x2",
+        "upscale_remacri_x4",
+        "upscale_realesrgan_x2",
+        "upscale_realesrgan_x4",
         "transfer_copy",
         "transfer_selection",
         "add_to_katran",
@@ -67,6 +71,10 @@ pub fn palette_order(id: &str) -> usize {
 pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
     match id {
         "video_pause" | "capture_video_frame" | "extract_video_audio" => "Видео",
+        "upscale_remacri_x2"
+        | "upscale_remacri_x4"
+        | "upscale_realesrgan_x2"
+        | "upscale_realesrgan_x4" => "AI Commands",
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -115,6 +123,10 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
         "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
+        "upscale_remacri_x2"
+        | "upscale_remacri_x4"
+        | "upscale_realesrgan_x2"
+        | "upscale_realesrgan_x4" => "увеличить изображение картинку разрешение upscale image ai",
         "video_pause" | "capture_video_frame" => {
             "видео кадр пауза продолжить буфер images video frame pause resume snapshot clipboard"
         }
@@ -234,6 +246,38 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "upscale_remacri_x2",
+        label: "Remacri ×2",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
+    Definition {
+        id: "upscale_remacri_x4",
+        label: "Remacri ×4",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
+    Definition {
+        id: "upscale_realesrgan_x2",
+        label: "Real-ESRGAN ×2",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
+    Definition {
+        id: "upscale_realesrgan_x4",
+        label: "Real-ESRGAN ×4",
+        default_binding: "",
+        rebindable: true,
+        group: "AI Commands",
+        in_palette: true,
+    },
     Definition {
         id: "extract_video_audio",
         label: "Извлечь аудио",
@@ -955,7 +999,20 @@ pub enum Dispatch {
 fn command(value: Command) -> Dispatch {
     Dispatch::Command(Box::new(value))
 }
+pub fn upscale_operation(id: &str) -> Option<crate::UpscaleOperation> {
+    use crate::UpscaleOperation::*;
+    match id {
+        "upscale_remacri_x2" => Some(RemacriX2),
+        "upscale_remacri_x4" => Some(RemacriX4),
+        "upscale_realesrgan_x2" => Some(RealEsrganX2),
+        "upscale_realesrgan_x4" => Some(RealEsrganX4),
+        _ => None,
+    }
+}
 pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch> {
+    if let Some(operation) = upscale_operation(id) {
+        return Some(command(Command::UpscaleSelectedImage { operation }));
+    }
     if let Some((mode, reverse)) = crate::sorting::action_sort(id) {
         return Some(command(Command::SetSort {
             mode,

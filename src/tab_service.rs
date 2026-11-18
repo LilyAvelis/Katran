@@ -94,6 +94,10 @@ impl Service {
             "folder_favorites" | "folder_history" | "folder_standard" => {
                 self.interaction.tab == ShelfTab::All
             }
+            "upscale_remacri_x2"
+            | "upscale_remacri_x4"
+            | "upscale_realesrgan_x2"
+            | "upscale_realesrgan_x4" => background.image,
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,

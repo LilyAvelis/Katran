@@ -81,6 +81,13 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    ImageUpscale {
+        event: Event,
+        stamp: media_service::Stamp,
+        blob: storage::PreparedBlob,
+        dimensions: [u32; 4],
+        operation: UpscaleOperation,
+    },
     AudioExtraction {
         event: Event,
         stamp: media_service::Stamp,
@@ -643,6 +650,47 @@ impl Service {
             };
         }
         let id = match command {
+            Command::UpscaleSelectedImage { operation } => {
+                let event = self.selected_background_image()?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Upscale, move |cancel| {
+                    use std::io::Read;
+                    const MAX_SOURCE: u64 = 32 * 1024 * 1024;
+                    cancel.check()?;
+                    let runtime = upscale_components::resolve(&root, operation.weights())?;
+                    let stamp = media_service::stamp(&event.path)?;
+                    let path = wallpaper_engine::validate(&root, &event)?;
+                    let mut source = Vec::new();
+                    std::fs::File::open(&path)?.take(MAX_SOURCE + 1).read_to_end(&mut source)?;
+                    if source.len() as u64 > MAX_SOURCE {
+                        return Err(ApiError::new("invalid_image", "Image exceeds 32 MiB"));
+                    }
+                    if media_service::stamp(&path)? != stamp {
+                        return Err(ApiError::new("source_changed", "Image changed during preparation"));
+                    }
+                    let staging = root.join("upscale-work");
+                    std::fs::create_dir_all(&staging)?;
+                    let staged = image_upscale::upscale(
+                        &source, &staging, &runtime.python, &runtime.model,
+                        operation.factor(), &cancel,
+                    )?;
+                    let bytes = std::fs::read(staged.path())?;
+                    let name = format!("{}-{}.png", operation.weights().trim_end_matches(".pth"), operation.factor());
+                    let blob = storage::prepare_bytes(
+                        &root, quota,
+                        storage::ByteIngest { name: &name, source: "image_upscale", bytes: &bytes, origin: &Origin::default() },
+                        &references,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::ImageUpscale {
+                        event, stamp, blob,
+                        dimensions: [staged.input_width, staged.input_height, staged.width, staged.height],
+                        operation,
+                    })
+                })?
+            }
             Command::ExtractVideoAudio { audio_track } => {
                 let event = self.selected_background_video()?;
                 let root = self.root.clone();
@@ -1839,6 +1887,23 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
+                    let current = self.get(event.id).map_err(|_| {
+                        ApiError::new("stale_selection", "Image is no longer available")
+                    })?;
+                    if current.revision != event.revision
+                        || current.path != event.path
+                        || current.kind != event.kind
+                        || media_service::stamp(&event.path)? != stamp
+                    {
+                        return Err(ApiError::new("source_changed", "Image changed during upscale"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, blob)?;
+                    let [input_width, input_height, width, height] = dimensions;
+                    Ok(json!({"event": self.get(id)?, "input_width": input_width, "input_height": input_height,
+                        "width": width, "height": height, "operation": operation}))
+                },
                 PreparedWork::AudioExtraction { event, stamp, staged, destination, audio_track } => {
                     let current = self.get(event.id).map_err(|_| {
                         ApiError::new("stale_selection", "Video is no longer available")

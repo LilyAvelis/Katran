@@ -41,6 +41,8 @@ pub mod folder_watch;
 mod foreground_windows;
 pub mod interaction;
 mod jobs_service;
+mod image_upscale;
+mod upscale_components;
 pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
@@ -532,12 +534,28 @@ impl Service {
             Command::MediaState => self.media_state(),
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
+            command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,
                 after_serial,
             } => self.media_frame(session, after_serial),
-            Command::AiComponentsStatus => self.ai_components.status(&self.root),
+            Command::AiComponentsStatus => {
+                let mut status = self.ai_components.status(&self.root)?;
+                let models = [UpscaleOperation::RemacriX4, UpscaleOperation::RealEsrganX2, UpscaleOperation::RealEsrganX4]
+                    .into_iter()
+                    .map(|operation| {
+                        let filename = operation.weights();
+                        let found = upscale_components::discover(&self.root, filename)?;
+                        Ok(serde_json::json!({"filename": filename, "found": found.model.is_some()}))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                status["image_upscale"] = serde_json::json!({
+                    "runtime_found": upscale_components::resolve_python().is_some(),
+                    "models": models,
+                });
+                Ok(status)
+            }
             Command::LaunchAiComponent { component, action } => {
                 self.ai_components.launch(&self.root, component, action)
             }

@@ -1,5 +1,11 @@
 # Development log through 3.7.1
 
+## Katran 4.0 · Local static image upscale
+
+AI Commands adds four independently rebindable commands for exact ×2 and ×4
+Remacri and Real-ESRGAN output. Settings → AI reports discovered local files.
+See [the integration contract](../patch-4.0/IMAGE-UPSCALE.md).
+
 ## Katran 4.0 · Local audio extraction
 
 Stage 1 extracts a selected audio track to a distinct AAC/M4A file with

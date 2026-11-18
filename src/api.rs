@@ -8,6 +8,31 @@ use std::path::PathBuf;
 pub const API_VERSION: u32 = 1;
 pub const DEFAULT_QUOTA: u64 = 2 * 1024 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpscaleOperation {
+    RemacriX2,
+    RemacriX4,
+    RealEsrganX2,
+    RealEsrganX4,
+}
+impl UpscaleOperation {
+    pub(crate) fn factor(self) -> u32 {
+        match self {
+            Self::RemacriX2 | Self::RealEsrganX2 => 2,
+            Self::RemacriX4 | Self::RealEsrganX4 => 4,
+        }
+    }
+
+    pub(crate) fn weights(self) -> &'static str {
+        match self {
+            Self::RemacriX2 | Self::RemacriX4 => "4x_foolhardy_Remacri.pth",
+            Self::RealEsrganX2 => "RealESRGAN_x2plus.pth",
+            Self::RealEsrganX4 => "RealESRGAN_x4.pth",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -353,6 +378,9 @@ pub enum Command {
     ExtractVideoAudio {
         #[serde(default)]
         audio_track: Option<u32>,
+    },
+    UpscaleSelectedImage {
+        operation: UpscaleOperation,
     },
     ToggleMediaPause {
         #[serde(default)]

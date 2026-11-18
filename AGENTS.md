@@ -7,7 +7,11 @@ Stage 1 extracts one selected track with the existing FFmpeg runtime through
 ExtractVideoAudio. It is independent of the video player session. Keep source
 revision checks, separate staged output and the cancellation fence before
 publication. See [the audio contract](docs/patch-4.0/AUDIO-EXTRACTION.md).
-Later stages follow in order, with BULL and QuickLook last. This run is local.
+The first standalone AI feature is static image upscale, including saved frames.
+Before it, limit Settings → AI work to installing and discovering the selected
+model/runtime while preserving Emoji and Folder compatibility. Identify the
+exact ComfyUI workflow, node and weights before choosing the model. Translation
+follows upscale, with BULL and QuickLook last. This run is local.
 
 ## Ready text preview retention · 2026-11-18
 

@@ -32,6 +32,7 @@ pub enum Lane {
     Discovery,
     Update,
     EmojiAi,
+    Upscale,
 }
 impl Lane {
     fn index(self) -> usize {
@@ -41,13 +42,14 @@ impl Lane {
             Self::Discovery => 2,
             Self::Update => 3,
             Self::EmojiAi => 4,
+            Self::Upscale => 5,
         }
     }
     fn capacity(self) -> usize {
         match self {
             Self::Foreground => 8,
             Self::Capture | Self::Discovery => 2,
-            Self::Update | Self::EmojiAi => 1,
+            Self::Update | Self::EmojiAi | Self::Upscale => 1,
         }
     }
 }
@@ -138,7 +140,7 @@ struct Entry<T> {
 pub struct DomainJobs<T: Send + 'static> {
     entries: BTreeMap<JobId, Entry<T>>,
     terminal: VecDeque<JobId>,
-    workers: [Option<Worker<T>>; 5],
+    workers: [Option<Worker<T>>; 6],
     sender: mpsc::SyncSender<(JobId, Result<T>)>,
     receiver: mpsc::Receiver<(JobId, Result<T>)>,
     next_id: u64,
@@ -316,6 +318,7 @@ impl<T: Send + 'static> DomainJobs<T> {
             Lane::Discovery,
             Lane::Update,
             Lane::EmojiAi,
+            Lane::Upscale,
         ];
         let mut output = Vec::new();
         for _ in 0..max.min(MAX_COMPLETIONS_PER_POLL) {

@@ -31,3 +31,27 @@ tests with FFmpeg 9.0.2, and 3 headless UI/palette tests. One optimized build
 was staged as `8221aa080f1d`. The previous runtime and a consistent v13 backup
 are recorded in the local rollback receipt. Owner Windows acceptance remains
 open. Stage 2 is next.
+
+## Scope refinement · static image upscale first
+
+Static image upscale is the first standalone AI feature. A saved video frame
+is an ordinary image input. Translation follows later, BULL and QuickLook stay
+last, and video processing is outside this run. Limit the preceding Settings → AI
+work to installing, discovering, and validating the selected model/runtime
+through the same path, while preserving the existing Emoji and Folder features.
+
+Local ComfyUI reconnaissance found `Lily Therapy` and several V33 workflows
+referencing `UpscaleModelLoader` with `4x_foolhardy_Remacri.pth` and
+`UltimateSDUpscale`. The latter also takes a diffusion model, conditioning,
+and a VAE. The weights alone therefore do not reproduce that full pipeline.
+Other local graphs use `ImageUpscaleWithModel` with `RealESRGAN_x4.pth`.
+Both weight files exist in the configured external upscale model directory.
+The owner subsequently chose to use the available model weights directly.
+This stage runs the standalone models, so the diffusion pass from
+`UltimateSDUpscale` is outside its contract.
+
+Stage 3 defines four independent, rebindable actions under AI Commands in
+Ctrl+K: Remacri ×2/×4 and Real-ESRGAN ×2/×4. No model picker or custom size
+field is required for this scope. Output is a separate managed image for
+the existing wallpaper action. Remacri ×2 uses its native ×4 model followed by
+downsampling to exactly twice the input dimensions.

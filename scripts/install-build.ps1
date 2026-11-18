@@ -1,6 +1,7 @@
 function Get-KatranSources([string]$Root) {
     # This Python worker is embedded in the Rust binary with include_str!.
     $folderSemanticWorker = Join-Path $Root 'scripts/folder-semantic/worker.py'
+    $imageUpscaleWorker = Join-Path $Root 'scripts/image-upscale/worker.py'
     $files = @((Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Recurse -File).FullName) + @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/branding') -Recurse -File).FullName) + @('Cargo.toml','Cargo.lock','build.rs','scripts/build-working.ps1','scripts/install-build.ps1' | ForEach-Object { Join-Path $Root $_ })
     if (Test-Path -LiteralPath (Join-Path $Root 'assets/emoji-flags')) { $files += @((Get-ChildItem -LiteralPath (Join-Path $Root 'assets/emoji-flags') -Recurse -File).FullName) }
     foreach ($assetDir in @('assets/themes/lilies','assets/everything')) {
@@ -14,6 +15,7 @@ function Get-KatranSources([string]$Root) {
         $files += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object FullName)
     }
     if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
+    if (Test-Path -LiteralPath $imageUpscaleWorker) { $files += $imageUpscaleWorker }
     # Optional AI installer resources are embedded, so their bytes are build inputs.
     foreach ($inputDir in @('scripts/ai-components','scripts/emoji-ai','assets/emoji-ai/cldr')) {
         $files += @((Get-ChildItem -LiteralPath (Join-Path $Root $inputDir) -File).FullName)

@@ -588,6 +588,45 @@ impl State {
         if !self.ai_error.is_empty() {
             ui.colored_label(Color32::LIGHT_RED, &self.ai_error);
         }
+        if let Some(upscale) = self
+            .ai_components
+            .as_ref()
+            .and_then(|v| v.get("image_upscale"))
+        {
+            SettingsSection::group(
+                ui,
+                super::i18n::tr("Увеличение изображений", "Image upscaling"),
+                |ui| {
+                    let found = |value: bool| {
+                        if value {
+                            super::i18n::tr("Найден", "Found")
+                        } else {
+                            super::i18n::tr("Не найден", "Not found")
+                        }
+                    };
+                    ui.label(format!(
+                        "{}: {}",
+                        super::i18n::tr("Среда запуска", "Runtime"),
+                        found(upscale["runtime_found"] == true)
+                    ));
+                    if let Some(models) = upscale["models"].as_array() {
+                        for model in models {
+                            if let Some(filename) = model["filename"].as_str() {
+                                ui.label(format!(
+                                    "{}: {}",
+                                    filename,
+                                    found(model["found"] == true)
+                                ));
+                            }
+                        }
+                    }
+                    ui.weak(super::i18n::tr(
+                        "Наличие файлов не подтверждает успешную работу модели.",
+                        "File presence does not verify inference.",
+                    ));
+                },
+            );
+        }
         let components = self.ai_components.clone();
         let mut requested = None;
         for (component, title, description) in [

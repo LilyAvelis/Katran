@@ -1,5 +1,10 @@
 # Developer and agent entry point
 
+Static image upscale runs in its own job lane. `upscale_components.rs`
+discovers local weights and the existing portable runtime. `image_upscale.rs`
+stages a bounded worker; the dispatcher commits a separate managed image
+after source and cancellation checks. See [image upscale](patch-4.0/IMAGE-UPSCALE.md).
+
 ExtractVideoAudio is a background command independent of the playback
 session. `audio_extract.rs` probes and converts with the existing FFmpeg
 runtime; `jobs_service.rs` captures a revision-bound selection and fences

@@ -1997,6 +1997,11 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if let Some(operation) = katran::actions::upscale_operation(&id) {
+            self.start_upscale(operation, ctx);
+            self.actions = false;
+            return;
+        }
         if id == "extract_video_audio" {
             self.open_audio_extract();
             self.actions = false;

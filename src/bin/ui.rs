@@ -92,6 +92,7 @@ mod ui_fonts;
 mod ui_foundation;
 mod ui_style;
 mod updates_ui;
+mod upscale_ui;
 mod video_background_ui;
 mod window_material;
 mod workspace_ui;
@@ -373,6 +374,7 @@ struct Shelf {
     pending_folder_select_all: bool,
     capture_job: Option<katran::domain_jobs::JobId>,
     audio_extract: audio_extract_ui::State,
+    upscale: upscale_ui::State,
     preview_warmup: Option<katran::domain_jobs::JobId>,
     pending_preview: Option<(String, Value)>,
     pending_drops: Vec<PathBuf>,
@@ -703,6 +705,7 @@ impl Shelf {
             || self.shortcut_editor.is_some()
             || self.actions
             || self.audio_extract.open
+            || self.upscale.open
             || self.open_apps.open
             || self.workspace.open
             || self.info.is_open()
@@ -1099,6 +1102,7 @@ impl Shelf {
         }
         self.finish_job();
         self.audio_extract_ui(&ctx);
+        self.upscale_ui(&ctx);
         if let Some(receiver) = self.files_picker.as_ref() {
             match receiver.try_recv() {
                 Ok(Ok(Some(paths))) => {
@@ -2417,6 +2421,7 @@ fn main() -> eframe::Result {
         pending_folder_select_all: false,
         capture_job: None,
         audio_extract: audio_extract_ui::State::default(),
+        upscale: upscale_ui::State::default(),
         preview_warmup,
         pending_preview: None,
         pending_drops: Vec::new(),
@@ -2843,6 +2848,7 @@ mod tests {
             pending_folder_select_all: false,
             capture_job: None,
             audio_extract: audio_extract_ui::State::default(),
+            upscale: upscale_ui::State::default(),
             preview_warmup: None,
             pending_preview: None,
             pending_drops: Vec::new(),
