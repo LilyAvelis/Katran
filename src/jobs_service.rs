@@ -82,6 +82,13 @@ pub(crate) struct FolderExportBatch {
 }
 pub(crate) enum PreparedWork {
     PackImageCollection(image_collection::Packed),
+    CopyCollectionPage {
+        event: Event,
+        stamp: media_service::Stamp,
+        pixels: Vec<u8>,
+        sequence: u32,
+        index: usize,
+    },
     UnpackImageCollection {
         event: Event,
         stamp: media_service::Stamp,
@@ -1496,17 +1503,18 @@ impl Service {
             }
             Command::PreviewExternal { id } => return self.begin_preview_job(id),
             Command::TranslationCollectionPage { id, revision, index } => {
-                let event = self.get(id)?;
-                if !image_collection::is_managed(&event) || event.revision != revision
-                    || (event.source == "image_translation_collection" && !self.db.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
-                        [id], |row| row.get::<_, bool>(0)
-                    )?)
-                {
-                    return Err(ApiError::new("stale_selection", "Saved collection is unavailable"));
-                }
+                let event = self.saved_collection(id, &revision)?;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     Ok(PreparedWork::Value(image_translation_batch::page(&event, index, &cancel)?))
+                })?
+            }
+            Command::CopyCollectionPage { id, revision, index } => {
+                let event = self.saved_collection(id, &revision)?;
+                let sequence = capture::sequence_number();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let stamp = media_service::stamp(&event.path)?;
+                    let pixels = image_collection::prepare_page_copy(&event, index, &cancel)?;
+                    Ok(PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index })
                 })?
             }
             Command::PreviewPublishedTranslation { id, revision } => {
@@ -1667,6 +1675,19 @@ impl Service {
     fn ready_value_job_in(&mut self, _lane: Lane, value: Value) -> Result<Value> {
         self.ready_value_job(value)
     }
+    fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
+        let event = self.get(id)?;
+        if !image_collection::is_managed(&event) || event.revision != revision
+            || (event.source == "image_translation_collection" && !self.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
+                [id], |row| row.get::<_, bool>(0),
+            )?)
+        {
+            return Err(ApiError::new("stale_selection", "Saved collection is unavailable"));
+        }
+        Ok(event)
+    }
+
     fn begin_preview_job(&mut self, id: i64) -> Result<Value> {
         let event = self.get(id)?;
         if image_collection::is_managed(&event) {
@@ -2193,6 +2214,16 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index } => {
+                    let current = self.saved_collection(event.id, &event.revision)?;
+                    if current.path != event.path || media_service::stamp(&event.path)? != stamp {
+                        return Err(ApiError::new("source_changed", "Collection changed before copying its page"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    copy_out::write_owned_image(&pixels, sequence)
+                        .map_err(|error| ApiError::new("clipboard_error", error))?;
+                    Ok(json!({"copied_collection_page":true,"index":index}))
+                },
                 PreparedWork::PackImageCollection(packed) => {
                     for input in &packed.inputs {
                         let event = &input.event;

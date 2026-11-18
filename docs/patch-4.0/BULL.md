@@ -45,6 +45,9 @@ are subsequent work.
 The Windows QuickLook adapter lives in `integrations/quicklook`. Katran exports
 a named snapshot to the external viewer. Its internal page viewer can reopen
 the same collection without an external app.
+Ctrl+C in Katran's page viewer copies the single visible image at its stored
+resolution. The clipboard includes Katran's ownership marker, so capture does
+not add another card. Use Copy on the shelf card to transfer the whole BULL.
 Katran marks collection cards with a BK badge. When paging, the preview
 retains the last ready page in a fixed viewport until the requested page
 arrives. Page changes do not flash a loading label over the ready image.

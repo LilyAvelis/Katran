@@ -1495,6 +1495,10 @@ impl Shelf {
             };
             return;
         }
+        if result["copied_collection_page"] == true {
+            self.message = tr("Страница скопирована", "Page copied").into();
+            return;
+        }
         if result["image_collection"] == true {
             let count = result["count"].as_u64().unwrap_or(0);
             self.message = if result["unpacked"] == true {

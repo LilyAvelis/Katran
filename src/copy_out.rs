@@ -49,7 +49,7 @@ fn image_dib(path: &Path) -> Result<Vec<u8>, String> {
     Ok(dib(rgba.width(), rgba.height(), rgba.as_raw()))
 }
 
-fn dib(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+pub(crate) fn dib(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0u8; 124]; // BITMAPV5HEADER, top-down BGRA, explicit alpha.
     for (offset, value) in [
         (0, 124),
@@ -1056,6 +1056,34 @@ mod native_publication {
             })
         }
     }
+    fn write_owner_marker(clear: bool) -> Result<String, String> {
+        let mut tokens = FILE_OWNER_TOKENS
+            .lock()
+            .map_err(|_| "Clipboard ownership registry unavailable".to_owned())?;
+        let token = unsafe { windows::Win32::System::Com::CoCreateGuid() }
+            .map(|guid| format!("{:032x}", guid.to_u128()))
+            .map_err(|e| e.to_string())?;
+        let format = clipboard_win::raw::register_format(crate::table_clipboard::OWNER_FORMAT)
+            .ok_or("Cannot register ownership marker")?;
+        let bytes = [token.as_bytes(), &[0]].concat();
+        let result = if clear {
+            clipboard_win::raw::set(format.get(), &bytes)
+        } else {
+            clipboard_win::raw::set_without_clear(format.get(), &bytes)
+        };
+        result.map_err(|e| e.to_string())?;
+        remember_file_token(&mut tokens, token.clone());
+        Ok(token)
+    }
+    pub(super) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<(), String> {
+        let mut backend = Backend::open(&[], Some(pixels))?;
+        if backend.sequence() != expected_sequence {
+            return Err("Clipboard changed while preparing the page".into());
+        }
+        // Publish the marker first while capture is locked out of the clipboard.
+        write_owner_marker(true)?;
+        backend.pixels()
+    }
     impl FilePublication for Backend<'_> {
         fn owner_valid(&self) -> bool {
             !self.window.hwnd.0.is_null()
@@ -1076,19 +1104,7 @@ mod native_publication {
             Ok(true)
         }
         fn marker(&mut self) -> Result<Option<String>, String> {
-            let mut tokens = FILE_OWNER_TOKENS
-                .lock()
-                .map_err(|_| "Clipboard ownership registry unavailable".to_owned())?;
-            let token = unsafe { windows::Win32::System::Com::CoCreateGuid() }
-                .map(|guid| format!("{:032x}", guid.to_u128()))
-                .map_err(|e| e.to_string())?;
-            let format = clipboard_win::raw::register_format(crate::table_clipboard::OWNER_FORMAT)
-                .ok_or("Cannot register ownership marker")?;
-            let bytes = [token.as_bytes(), &[0]].concat();
-            clipboard_win::raw::set_without_clear(format.get(), &bytes)
-                .map_err(|e| e.to_string())?;
-            remember_file_token(&mut tokens, token.clone());
-            Ok(Some(token))
+            write_owner_marker(false).map(Some)
         }
         fn sequence(&self) -> u32 {
             unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
@@ -1104,6 +1120,15 @@ mod native_publication {
             drop(self);
             settle(files, expected_pixels, marker.as_deref(), effect)
         }
+    }
+}
+pub(crate) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    return native_publication::write_owned_image(pixels, expected_sequence);
+    #[cfg(not(windows))]
+    {
+        let _ = (pixels, expected_sequence);
+        Err("Native clipboard requires Windows".into())
     }
 }
 impl PreparedNativeClipboard {

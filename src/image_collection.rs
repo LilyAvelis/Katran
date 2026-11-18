@@ -65,6 +65,27 @@ pub(crate) fn cover(path: &Path) -> Result<image::DynamicImage> {
     decoded_page(&page)
 }
 
+pub(crate) fn prepare_page_copy(
+    event: &Event,
+    index: usize,
+    cancel: &Cancellation,
+) -> Result<Vec<u8>> {
+    cancel.check()?;
+    crate::open_file::validate(event)?;
+    let pages = baloh_collection::codec::read(File::open(&event.path)?)?;
+    let page = pages
+        .get(index)
+        .ok_or_else(|| ApiError::new("invalid_page", "Page is outside the collection"))?;
+    cancel.check()?;
+    let pixels = decoded_page(page)?.into_rgba8();
+    cancel.check()?;
+    Ok(crate::copy_out::dib(
+        pixels.width(),
+        pixels.height(),
+        pixels.as_raw(),
+    ))
+}
+
 pub(crate) struct Packed {
     pub(crate) inputs: Vec<PackInput>,
     pub(crate) blob: storage::PreparedBlob,
@@ -240,4 +261,70 @@ pub(crate) fn unpack(
     }
     crate::open_file::validate(event)?;
     Ok(prepared)
+}
+
+#[cfg(test)]
+#[test]
+fn collection_page_copy_prepares_only_the_requested_full_size_image() {
+    use crate::{Command, Request, Service, domain_jobs::JobId, jobs_service::PreparedWork};
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), crate::DEFAULT_QUOTA).unwrap();
+    let png = |width| {
+        let mut bytes = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(width, 3)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    };
+    let mut bull = Vec::new();
+    baloh_collection::codec::write(&mut bull, &[png(10), png(2301)]).unwrap();
+    let mut call = |command| {
+        api.execute(Request {
+            api_version: 1,
+            request_id: "collection-copy-fixture".into(),
+            command,
+        })
+    };
+    let saved = call(Command::IngestBytes {
+        name: "fixture.bull".into(),
+        bytes: bull,
+        source: SOURCE.into(),
+    });
+    let id = saved["result"]["id"].as_i64().unwrap();
+    let revision = saved["result"]["revision"].as_str().unwrap().to_owned();
+    let stale = call(Command::CopyCollectionPage {
+        id,
+        revision: "old".into(),
+        index: 1,
+    });
+    assert_eq!(stale["error"]["code"], "stale_selection");
+    let started = call(Command::CopyCollectionPage {
+        id,
+        revision,
+        index: 1,
+    });
+    let job = JobId(started["result"]["job_id"].as_u64().unwrap());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Some((ready, payload)) = api
+            .jobs
+            .take_ready(8)
+            .into_iter()
+            .find(|(ready, _)| *ready == job)
+        {
+            let PreparedWork::CopyCollectionPage { pixels, index, .. } = payload.unwrap() else {
+                panic!("Expected a single page clipboard payload");
+            };
+            assert_eq!(index, 1);
+            assert_eq!(u32::from_le_bytes(pixels[4..8].try_into().unwrap()), 2301);
+            assert_eq!(pixels.len(), 124 + 2301 * 3 * 4);
+            api.jobs.finish(ready, Ok(serde_json::Value::Null)).unwrap();
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let events = storage::query_events(&api.db, "", 10, None).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].id, id);
 }

@@ -547,6 +547,7 @@ impl Service {
             command @ Command::CreateImageCollection => self.begin_job(command),
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
+            command @ Command::CopyCollectionPage { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,

@@ -60,6 +60,8 @@ pages from the portable PNGs. Publish the replacement and membership in one
 transaction. A new collection inherits a pin from any pinned input and the
 tag only with identical selected-card assignments. Use the first ordered
 image for its thumbnail. Older binaries require the pre-v15 backup.
+Ctrl+C in the BULL viewer targets only the visible ready page. Publish its
+full stored pixels with an ownership marker; no capture or shelf mutation.
 
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.

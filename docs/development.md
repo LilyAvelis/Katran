@@ -25,6 +25,9 @@ and hides members before shelf filtering, sorting and pagination. A single
 transaction publishes the new card and its membership, or retires the BULL
 and restores members. Only pages without a source record need new PNG cards.
 The first PNG is verified and cached as the cover through `PreviewImage`.
+`CopyCollectionPage` prepares one stored page at its original resolution,
+then publishes pixels through the owned clipboard path. It neither writes a
+shelf row nor ingests its own clipboard publication.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded

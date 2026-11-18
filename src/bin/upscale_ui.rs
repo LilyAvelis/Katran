@@ -24,6 +24,7 @@ struct Collection {
     pending: Option<(katran::domain_jobs::JobId, usize)>,
     texture: Option<egui::TextureHandle>,
     ready_index: Option<usize>,
+    copy_held: bool,
     zoom: katran::preview_view::State,
     error: String,
 }
@@ -59,6 +60,61 @@ impl State {
     pub(super) fn collection_open(&self) -> bool {
         self.collection.is_some()
     }
+}
+
+// A platform can emit both Copy and Ctrl+C for one physical press. Consume
+// both, and reject key repeats while retaining Copy-only platform support.
+fn take_collection_copy(
+    events: &mut Vec<egui::Event>,
+    focused: bool,
+    key_down: bool,
+    held: &mut bool,
+) -> bool {
+    if !focused {
+        *held = false;
+    }
+    let mut copy_event = false;
+    let mut pressed = false;
+    let mut repeated = false;
+    let mut released = false;
+    events.retain(|event| match event {
+        egui::Event::Copy => {
+            copy_event = true;
+            false
+        }
+        egui::Event::Key {
+            key: egui::Key::C,
+            pressed: down,
+            repeat,
+            modifiers,
+            ..
+        } if (modifiers.ctrl && !modifiers.alt && !modifiers.shift) || (!*down && *held) => {
+            if *down {
+                if *repeat {
+                    repeated = true;
+                } else {
+                    pressed = true;
+                }
+            } else {
+                released = true;
+            }
+            false
+        }
+        _ => true,
+    });
+    if !focused {
+        return false;
+    }
+    if released {
+        *held = false;
+    }
+    let fire = !*held && (pressed || (copy_event && !repeated));
+    if pressed || key_down {
+        *held = true;
+    } else if !key_down {
+        *held = false;
+    }
+    fire
 }
 
 fn collection_canvas_size(viewport: egui::Vec2) -> egui::Vec2 {
@@ -105,6 +161,7 @@ impl Shelf {
             pending: None,
             texture: None,
             ready_index: None,
+            copy_held: false,
             zoom: katran::preview_view::State::default(),
             error: String::new(),
         });
@@ -203,6 +260,44 @@ impl Shelf {
         }
         if self.upscale.collection.is_none() {
             return;
+        }
+        let copy_requested = {
+            let collection = self.upscale.collection.as_mut().unwrap();
+            ctx.input_mut(|input| {
+                let key_down = input.key_down(egui::Key::C);
+                let focused = input.focused;
+                take_collection_copy(
+                    &mut input.events,
+                    focused,
+                    key_down,
+                    &mut collection.copy_held,
+                )
+            })
+        };
+        if copy_requested {
+            let target = self.upscale.collection.as_ref().and_then(|c| {
+                c.ready_index
+                    .filter(|_| c.texture.is_some())
+                    .map(|index| (c.id, c.revision.clone(), index))
+            });
+            if let Some((id, revision, index)) = target {
+                if !self.start_job(
+                    Command::CopyCollectionPage {
+                        id,
+                        revision,
+                        index,
+                    },
+                    false,
+                    ctx.clone(),
+                ) && self.job.is_some()
+                {
+                    self.message = tr(
+                        "Дождитесь завершения текущей операции",
+                        "Wait for the current operation to finish",
+                    )
+                    .into();
+                }
+            }
         }
         let close_key = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         let previous_key =
@@ -658,6 +753,29 @@ mod tests {
     use super::*;
     use katran::actions::upscale_operation;
     #[test]
+    fn collection_copy_consumes_dual_events_and_ignores_repeat() {
+        let event = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::C,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::CTRL,
+        };
+        let mut held = false;
+        let mut first = vec![egui::Event::Copy, event(true, false)];
+        assert!(take_collection_copy(&mut first, true, true, &mut held));
+        assert!(first.is_empty());
+        let mut repeated = vec![egui::Event::Copy, event(true, true)];
+        assert!(!take_collection_copy(&mut repeated, true, true, &mut held));
+        assert!(repeated.is_empty());
+        let mut released = vec![event(false, false)];
+        assert!(!take_collection_copy(&mut released, true, false, &mut held));
+        let mut next = vec![egui::Event::Copy];
+        assert!(take_collection_copy(&mut next, true, false, &mut held));
+        assert!(next.is_empty());
+    }
+
+    #[test]
     fn collection_canvas_and_modal_keep_size_when_page_arrives() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
@@ -670,6 +788,7 @@ mod tests {
             pending: None,
             texture: None,
             ready_index: None,
+            copy_held: false,
             zoom: katran::preview_view::State::default(),
             error: String::new(),
         });
@@ -728,6 +847,7 @@ mod tests {
             pending: None,
             texture: Some(texture),
             ready_index: Some(0),
+            copy_held: false,
             zoom: katran::preview_view::State::default(),
             error: String::new(),
         });

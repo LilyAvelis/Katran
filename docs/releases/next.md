@@ -30,6 +30,8 @@ Images or Translate. The action also unpacks a single BULL into its original
 cards. The first page is the cover. Pinned inputs give the collection a pin,
 and matching tags carry over. The local profile uses catalogue schema v15;
 previous builds require the pre-v15 backup for rollback.
+Ctrl+C in the BULL viewer copies the single displayed page at its stored
+resolution. It stays out of clipboard capture and the Images shelf.
 
 ## Local follow-up · Google Lens
 
