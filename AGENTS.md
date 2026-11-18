@@ -1,5 +1,29 @@
 # Katran development rules
 
+## Katran 4.0 · Accepted local baseline · 2026-11-18
+
+The sequential run below is closed. Start from the
+[final handoff](docs/patch-4.0/TEAM.md#final-handoff) and
+[development map](docs/development.md). The accepted local feature checkpoint
+is `c4fc0a6`, installed as Raycast runtime `23df78286fa2`. Public distribution
+requires separate authorization.
+
+The independent Rust `baloh-collection` crate owns the BULL and BS codecs.
+Keep collection operations in the existing dispatcher. Preserve selection
+order, hidden member metadata and revision checks. In the viewer, copy or
+paste one supported entry through the owned clipboard path. Transfer the
+whole collection through the shelf card. The external QuickLook adapter
+reads image BULL v1. See [BULL](docs/patch-4.0/BULL.md) and
+[BS](docs/patch-4.0/BS.md).
+
+Translate publishes one PNG or one ordered batch BULL in Translate. The
+accepted source languages are Japanese, Simplified Chinese and Korean, with
+English output. Keep local workers warm across pages and send one request
+with region IDs per page. See [Translate](docs/patch-4.0/TRANSLATE.md) for
+performance evidence and component requirements. Keep implementation and
+evidence in the repository. The Notion 4.0 card points readers here from a
+concise feature overview.
+
 ## Collections and Folder · local 4.0
 
 Keep one rebindable pack/unpack action. Loose files use image BULL for
@@ -27,7 +51,7 @@ Retain incomplete, unfamiliar and historical recovery data.
 
 ## Katran 4.0 · Sequential run · 2026-11-18
 
-Follow the Notion 4.0 run order and the [actual team map](docs/patch-4.0/TEAM.md).
+Historical run instructions and their [team map](docs/patch-4.0/TEAM.md).
 Stage 1 extracts one selected track with the existing FFmpeg runtime through
 ExtractVideoAudio. It is independent of the video player session. Keep source
 revision checks, separate staged output and the cancellation fence before

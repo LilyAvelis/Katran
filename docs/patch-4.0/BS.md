@@ -27,7 +27,7 @@ references. Delete removes the collection and its hidden member records
 without removing referenced disk files.
 
 Space opens one file at a time with a centered thumbnail or Windows file icon,
-name, type and size. Open or Alt+Enter materializes the selected entry in the bounded
+name, type and size. Alt+Enter materializes the selected entry in the bounded
 open cache for Windows. Ordinary data files use their registered application,
 other files can use the application picker, and executable or shortcut types
 are shown in Explorer. Copy or drag the shelf card to transfer the whole BS.

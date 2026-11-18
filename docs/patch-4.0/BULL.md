@@ -107,7 +107,9 @@ the same collection without an external app.
 Ctrl+C in Katran's page viewer copies the single visible image at its stored
 resolution. The clipboard includes Katran's ownership marker, so capture does
 not add another card. Use Copy on the shelf card to transfer the whole BULL.
-Katran marks collection cards with a BK badge. When paging, the preview
+Katran marks collection cards with a BK badge. The internal viewer shows the
+collection name above centered arrows and a page counter. Space or the
+top-right cross closes it. When paging, the preview
 retains the last ready page in a fixed viewport until the requested page
 arrives. Page changes do not flash a loading label over the ready image.
 Wheel zoom anchors at the pointer, Ctrl+wheel at the center, and

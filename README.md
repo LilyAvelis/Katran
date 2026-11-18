@@ -1,54 +1,44 @@
 # Katran
 
-Ctrl+K → AI Commands offers four independent image-upscale actions using
-existing local ComfyUI weights. See [static image upscale](docs/patch-4.0/IMAGE-UPSCALE.md).
+## Katran 4.0 · Collections, Translate and media
 
-Local 4.0 work adds Ctrl+K → Video → Extract audio. Katran saves the selected
-track as a separate AAC/M4A file, adds it to Files, and copies it as a file.
-See [audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md).
+**BULL** turns an ordered selection into one portable `.bull` file. Use
+Ctrl+K → **Pack / unpack collection** to group images, links, text or compatible
+files, merge same-type collections, or unpack one collection. Mixed files
+become a `.bs` through the same action. Collections replace the selection and
+use the first entry as the cover when a preview is available. In Folder,
+packing verifies the archive before sending the selected files to the Windows
+Recycle Bin. Unpacking restores files directly in Folder.
 
-Local Katran 4.0 translates selected Japanese, Simplified Chinese and Korean
-images to English from Ctrl+K → AI Commands. Single images and ordered BULL
-batches appear in Translate. Settings → AI → Image translation can keep
-the original lettering and place translations on matching numbered cards.
-The BULL viewer supports paging and zoom in Katran and QuickLook.
-On the approved complex Japanese page, a warm translation fell from 21.6 s
-to 3.7 s, about 5.8× faster. See [Translate and performance](docs/patch-4.0/TRANSLATE.md)
-and [the BULL format](docs/patch-4.0/BULL.md).
+Open a collection with Space and page through it with the arrows. Images
+zoom, videos play in Katran, links show saved metadata and Text can render
+Markdown. Ctrl+C copies the visible image, URL or original text. Enter
+pastes that entry to the previous window. Alt+Enter opens the current link or
+file when available. Copy or drag the collection card to transfer the whole
+file. Ctrl+E renames a collection even when it is unpinned. Use Unpack to restore
+hidden shelf members. Delete removes them along with the collection.
+The external Windows QuickLook plugin supports image BULL v1.
+[BULL guide and format](docs/patch-4.0/BULL.md) · [BS and Folder](docs/patch-4.0/BS.md)
 
-On Images and Translate, the same rebindable Ctrl+K action packs images,
-merges selected BULLs, or unpacks one BULL. The collection replaces the
-selected cards and takes its cover from the first page. Unpack restores the
-original cards with their pins and tags.
+**Translate** turns selected Japanese, Simplified Chinese and Korean images
+into English. The commands are independently bindable under Ctrl+K → AI
+Commands. A single PNG opens in QuickLook and is saved to Translate. A batch
+of 2–32 pages becomes one BULL in selection order. In Settings → AI → Image
+translation, choose numbered annotations to preserve the original lettering
+and read the translations on matching cards. On the tested complex Japanese
+page, a warm end-to-end run fell from **21.6 s to 3.7 s** (about **5.8×**).
+[Translate setup and measurements](docs/patch-4.0/TRANSLATE.md)
 
-Links uses the same BULL action. Names you give your links become the titles
-inside the collection. Descriptions and previews appear when available.
-Choose **Rename link** in the viewer to save a new name in the BULL file.
-Links BULL appears immediately,
-then saves titles and descriptions in the background without fetching images.
-Ctrl+C copies the visible URL,
-Alt+Enter opens it in the default browser, and copying the shelf card passes
-the complete `.bull` file. See [BULL formats](docs/patch-4.0/BULL.md).
+**Media and image tools** include exact ×2 and ×4 upscale with Remacri or
+Real-ESRGAN, audio extraction to a separate M4A added to Files and copied to
+the clipboard, and Google Lens search for a selected image in the default
+browser. [Upscale](docs/patch-4.0/IMAGE-UPSCALE.md) ·
+[Audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md) ·
+[Google Lens](docs/releases/next.md#google-lens)
 
-Text BULL keeps ordered exact source entries and can render each as Markdown.
-Ctrl+C copies the current source. Enter in the BULL viewer uses Katran's
-previous-window paste flow for the visible image, URL or text.
-
-Files and Folder use the same rebindable collection action. Compatible files
-form a BULL and mixed files form a BS. In Folder, the collection replaces the
-selected files after verification and uses the first entry as its cover.
-The originals go to the Windows Recycle Bin. Unpack restores the files
-directly in Folder and recycles the archive after verification.
-Use Ctrl+E to name BULL and BS even when the collection is unpinned.
-Videos inside BULL and BS play in Katran's built-in viewer with its usual
-timeline, volume and playback controls.
-On the shelf, Delete removes
-the collection and its member cards. Use Unpack to get the cards back.
-Copy or drag a shelf card to transfer the entire file.
-See [BS and file collections](docs/patch-4.0/BS.md).
-
-For one selected image, Ctrl+K → **Search image with Google Lens** opens
-the default browser, which submits an image copy to Google Lens.
+4.0 is the accepted local feature set. See the
+[local release notes](docs/releases/next.md#katran-40--accepted-local-build)
+for the verified build and distribution status.
 
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate

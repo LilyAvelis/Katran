@@ -1,6 +1,15 @@
-# Development log through 3.7.1
+# Local release notes and development log
 
-## Katran 4.0 · Accepted local Translate and BULL
+## Katran 4.0 · Accepted local build
+
+Lilia closed the 4.0 feature run after checking the local workflow. The final
+feature checkpoint is `c4fc0a6` and the verified Raycast runtime is
+`23df78286fa2`. The executable still reports package version `3.8.0`. Public
+4.0 packaging, tagging and publication are separate from this local checkpoint.
+Use the [engineering handoff](../patch-4.0/TEAM.md#final-handoff) for acceptance
+details and rollback.
+
+### Translate
 
 The local Translate tab is restricted to internally published managed image
 results. The independent Rust collection preserves page order. This change
@@ -33,6 +42,8 @@ previous builds require the pre-v15 backup for rollback.
 Ctrl+C in the BULL viewer copies the single displayed page at its stored
 resolution. It stays out of clipboard capture and the Images shelf.
 
+### BULL and BS collections
+
 Links uses portable BULL v2 for ordered URLs with saved titles, descriptions
 and optional previews. The same shelf action packs, merges and unpacks.
 Custom link names appear as titles and travel with newly packed collections.
@@ -64,12 +75,15 @@ recycle stages are cleaned up automatically.
 Video entries in BULL and BS play with the usual Katran video controls.
 Page turns and closing the viewer stop playback and release the temporary
 video file.
-The collection viewer opens with a short entrance animation. Video page
-turns keep the previous frame visible while the next page prepares.
+The viewer centers the collection name and uses arrow buttons around its page
+counter. Space or the top-right cross closes it. Alt+Enter opens the current
+entry where supported. The first page prepares during the 300 ms entrance and
+video starts afterward. Video page turns keep the previous frame visible
+while the next page prepares.
 Versioned Raycast builds find the shared video player installed by the
 local setup script.
 
-## Local follow-up · Google Lens
+### Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one
 selected image. The default Windows browser receives a one-shot local
@@ -80,16 +94,17 @@ generic filename and no embedded metadata. The current endpoint follows
 [Chromium's Lens upload form](https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/browser/resources/new_tab_page/lens_form.ts).
 The endpoint is a web integration and may change independently of Katran.
 
-## Katran 4.0 · Local static image upscale
+### Static image upscale
 
 AI Commands adds four independently rebindable commands for exact ×2 and ×4
 Remacri and Real-ESRGAN output. Settings → AI reports discovered local files.
 See [the integration contract](../patch-4.0/IMAGE-UPSCALE.md).
 
-## Katran 4.0 · Local audio extraction
+### Audio extraction
 
 Stage 1 extracts a selected audio track to a distinct AAC/M4A file with
-cancellation before publication. See the [audio contract and
+cancellation before publication. The result appears in Files and is copied
+to the clipboard as a file. See the [audio contract and
 verification](../patch-4.0/AUDIO-EXTRACTION.md).
 
 ## Local follow-up after v3.8.0 · 2026-11-18

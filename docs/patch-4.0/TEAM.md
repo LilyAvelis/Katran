@@ -1,5 +1,30 @@
 # Katran 4.0 run · 2026-11-18
 
+## Final handoff
+
+Lilia closed the local 4.0 run after confirming Translate and batch order,
+numbered references, image upscale, Lens, collection workflows and video
+playback inside the same BULL that had failed before. She confirmed the prior
+clip stops on a page turn. The final viewer polish at `c4fc0a6` names the
+collection, centers the pager and opens the player after the entrance.
+Its 27 targeted headless tests passed. The last animation timing awaits a
+Windows check. Audio extraction and Files/clipboard publication have
+synthetic API checks. See [local release notes](../releases/next.md#katran-40--accepted-local-build).
+
+The last verified primary Raycast runtime is `23df78286fa2`. Its manifest
+binds the executable to its inputs and records package version `3.8.0`.
+The retained `4bda0a94ca40` runtime is the immediate rollback option for the
+viewer polish. A rollback across catalogue v15 must also restore the matching
+pre-migration profile backup. Public 4.0 distribution has its own authorization
+and verification. See [development and agent map](../development.md).
+
+- Collections, typed payloads, and Folder safety. [BULL](BULL.md) · [BS](BS.md)
+- Warm/cold timings, OCR, one Qwen request per page, and batch receipts. [Translate](TRANSLATE.md)
+- Model discovery, exact scaling and audio publication. [Image upscale](IMAGE-UPSCALE.md) · [Audio extraction](AUDIO-EXTRACTION.md)
+- Windows QuickLook adapter scope and setup. [Image BULL plugin](../../integrations/quicklook/QuickLook.Plugin.BullViewer/README.md)
+
+## Session history and ownership
+
 For unified packing, Fenna owned the viewer and action wiring, Vela owned
 Folder output publication, and Nemi investigated and fixed completed recycle
 stage retention. Polly owned type selection, command integration, shelf

@@ -1,5 +1,8 @@
 # Developer and agent entry point
 
+For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)
+and [local release notes](releases/next.md#katran-40--accepted-local-build).
+
 Translate uses the normal catalogue shelf with an internal membership relation
 and an independent tag scope, introduced by schema v14. The in-memory ordered
 collection belongs to `crates/baloh-collection`. `TranslateSelectedImage`
@@ -75,6 +78,9 @@ shelf items and the name-only editor for unpinned collections.
 Its worker verifies the container and stages the selected video. The existing
 media dispatcher commits the same libmpv player with a visit-bound lease,
 which keeps the snapshot alive until the player closes.
+The collection viewer starts page preparation as soon as it opens.
+Its shared player starts after the 300 ms entrance. Page turns retain the
+ready visual while the next page is pending and close the prior media session.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
