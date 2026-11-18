@@ -70,3 +70,10 @@ follow-up. Translate starts with a distinct shelf and a reusable Rust
 collection. Russian and English are primary. OCR must also recognize
 Japanese, Korean and Chinese. The first functional provider will be verified
 on a single page before batching. See [Translate](TRANSLATE.md).
+
+The audio Files/clipboard follow-up and Translate foundation are in
+`f55b9cc`, staged as `6fed2bc35739`. Audio API fixtures use a synthetic
+clipboard sink; they cover successful file publication and preservation of the
+Files pointer on clipboard failure. Collection, tab and v13→v14 migration
+fixtures passed. The primary profile is migrated on next launch and has a
+verified v13 rollback copy. Native Windows acceptance remains open.
