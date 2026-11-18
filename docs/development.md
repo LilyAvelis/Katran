@@ -15,6 +15,8 @@ and the existing page favorites.
 The database page reader stores appearance in its own preferences row via
 GetNotionReaderPreferences and SetNotionReaderPreferences. Text scale stays
 local to the reader and independent of its column width.
+Inline emoji reserve a single glyph position per Unicode sequence and reuse
+the Pods color raster cache and its configured local font.
 See [connection setup](notion.md).
 
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)

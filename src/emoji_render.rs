@@ -10,6 +10,21 @@ const MAX_UNITS: usize = 128;
 const MAX_WIDTH: u32 = 1024;
 const MAX_HEIGHT: u32 = 256;
 
+/// Recognizes the same Unicode emoji sequences as the Pods catalogue.
+pub fn is_emoji_sequence(text: &str) -> bool {
+    use std::{collections::HashSet, sync::OnceLock};
+    static EMOJI: OnceLock<HashSet<&str>> = OnceLock::new();
+    !text.is_ascii()
+        && EMOJI
+            .get_or_init(|| {
+                crate::pod_metadata::emoji_entries()
+                    .iter()
+                    .map(|entry| entry.text.as_str())
+                    .collect()
+            })
+            .contains(text)
+}
+
 pub fn render(text: &str, size: f32) -> Result<Rendered, String> {
     render_with_font(text, size, None)
 }

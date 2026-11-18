@@ -7,9 +7,12 @@ pub(super) fn show_reader_scaled(
     ui: &mut egui::Ui,
     blocks: &[katran::notion_reader::Block],
     scale: f32,
+    emoji: &mut crate::pods_ui::State,
 ) {
-    reader::show_scaled(ui, blocks, scale);
+    reader::show_scaled(ui, blocks, scale, emoji);
 }
+
+pub(super) use reader::label as reader_label;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum SearchKind {
@@ -696,7 +699,8 @@ impl Shelf {
                     .show(ui, |ui| {
                         if state.preview_open {
                             if let Some(item) = results.get(state.selected) {
-                                ui.heading(&item.page.title);
+                                let font = egui::TextStyle::Heading.resolve(ui.style());
+                                reader::label(ui, &mut self.pods_ui, &item.page.title, font);
                             }
                             if let (Some(blocks), Some(page)) =
                                 (&state.preview, results.get(state.selected))
@@ -704,7 +708,9 @@ impl Shelf {
                                 if blocks.is_empty() {
                                     ui.weak(tr("Страница пуста", "Page is empty"));
                                 } else {
-                                    ui.push_id(&page.page.id, |ui| reader::show(ui, blocks));
+                                    self.pods_ui.begin_frame();
+                                    ui.push_id(&page.page.id, |ui| reader::show_scaled(ui, blocks, 1.0, &mut self.pods_ui));
+                                    self.pods_ui.end_frame();
                                 }
                             }
                         } else {

@@ -513,6 +513,7 @@ impl Shelf {
         let column = egui::Rect::from_center_size(area.center(), egui::vec2(width, height));
         paint_reader_background(ui, column, prefs);
         let scale = f32::from(prefs.text_percent) / 100.0;
+        self.pods_ui.begin_frame();
         ui.vertical_centered(|ui| {
             ui.allocate_ui_with_layout(
                 egui::vec2(width, height),
@@ -520,9 +521,11 @@ impl Shelf {
                 |ui| {
                     ui.set_width(width);
                     ui.set_max_width(width);
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(&row.page.title).size(19.0 * scale))
-                            .wrap(),
+                    super::notion_ui::reader_label(
+                        ui,
+                        &mut self.pods_ui,
+                        &row.page.title,
+                        egui::FontId::proportional(19.0 * scale),
                     );
                     let Some(preview) = database
                         .preview
@@ -551,12 +554,18 @@ impl Shelf {
                                     .size(15.0 * scale),
                                 );
                             } else {
-                                super::notion_ui::show_reader_scaled(ui, &preview.blocks, scale);
+                                super::notion_ui::show_reader_scaled(
+                                    ui,
+                                    &preview.blocks,
+                                    scale,
+                                    &mut self.pods_ui,
+                                );
                             }
                         });
                 },
             );
         });
+        self.pods_ui.end_frame();
     }
 
     pub(crate) fn notion_reader_active(&self) -> bool {

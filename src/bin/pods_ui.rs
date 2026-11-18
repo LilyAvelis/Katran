@@ -117,8 +117,25 @@ impl State {
     }
     pub(super) fn paint(&mut self, ui: &egui::Ui, event: &Value, rect: egui::Rect) {
         let text = event["text_preview"].as_str().unwrap_or("");
+        self.paint_text(ui, text, rect, rect.height() * 0.55, false);
+    }
+
+    pub(crate) fn paint_inline(&mut self, ui: &egui::Ui, text: &str, rect: egui::Rect, size: f32) {
+        if ui.is_rect_visible(rect) {
+            self.paint_text(ui, text, rect, size, true);
+        }
+    }
+
+    fn paint_text(
+        &mut self,
+        ui: &egui::Ui,
+        text: &str,
+        rect: egui::Rect,
+        point_size: f32,
+        inline: bool,
+    ) {
         let ppp = ui.ctx().pixels_per_point();
-        let size = (rect.height() * 0.55 * ppp).clamp(12.0, 128.0).round() as u32;
+        let size = (point_size * ppp).clamp(12.0, 128.0).round() as u32;
         let key = (
             text.to_owned(),
             size,
@@ -185,8 +202,8 @@ impl State {
                 .failed
                 .get(&key)
                 .is_some_and(|until| Instant::now() < *until);
-            if failed {
-                let mut font_size = (size as f32 / ppp).min(rect.height() * 0.55);
+            if failed || inline {
+                let mut font_size = (size as f32 / ppp).min(point_size);
                 let mut galley = ui.painter().layout_no_wrap(
                     text.to_owned(),
                     egui::FontId::proportional(font_size),
@@ -206,7 +223,9 @@ impl State {
                 ui.painter()
                     .with_clip_rect(ui.clip_rect().intersect(rect))
                     .galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
-                ui.ctx().request_repaint_after(Duration::from_secs(3));
+                if failed {
+                    ui.ctx().request_repaint_after(Duration::from_secs(3));
+                }
             }
             if !text.is_empty()
                 && !failed
