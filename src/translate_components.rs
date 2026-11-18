@@ -22,6 +22,7 @@ pub struct Status {
     pub ollama_exe: Option<PathBuf>,
     pub ollama_models: Option<PathBuf>,
 }
+#[derive(Clone, PartialEq, Eq)]
 pub struct Components {
     pub paddle_python: PathBuf,
     pub paddle_models: PathBuf,

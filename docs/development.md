@@ -5,7 +5,9 @@ and an independent tag scope, introduced by schema v14. The in-memory ordered
 collection belongs to `crates/baloh-collection`. `TranslateSelectedImage`
 captures the chosen source and target at submission. Japanese-to-English uses
 the local Qwen3 4B Instruct model with full GPU placement. Managed PNG storage and
-Translate membership commit in the same transaction. See
+Translate membership commit in the same transaction. Translated PNGs appear
+only in Translate, including under tag sorting and in tab snapshots. The
+translation service owns warm OCR workers and a private Ollama process. See
 [the Translate foundation](patch-4.0/TRANSLATE.md).
 
 Static image upscale runs in its own job lane. `upscale_components.rs`

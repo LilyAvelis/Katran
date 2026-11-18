@@ -26,6 +26,10 @@ The local one-page command recognizes Japanese and outputs English with
 Qwen3 4B Instruct on the GPU. Reject incomplete output and partial GPU placement.
 It publishes a separate PNG and Translate membership together. Invoke only
 detected local components, without implicit model downloads.
+Published translations appear exclusively in Translate, including tag sort
+and read-only tab snapshots. Keep the OCR workers and private Ollama resident
+for the Service lifetime; release their owned process trees on exit. Report
+skipped regions when the renderer can only safely letter part of a page.
 
 ## Ready text preview retention · 2026-11-18
 

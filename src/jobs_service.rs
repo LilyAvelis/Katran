@@ -87,6 +87,7 @@ pub(crate) enum PreparedWork {
         blob: storage::PreparedBlob,
         target: settings::Language,
         dimensions: [u32; 2],
+        report: image_translate::RenderReport,
     },
     ImageUpscale {
         event: Event,
@@ -699,6 +700,7 @@ impl Service {
                 let quota = self.quota;
                 let references = self.reference_paths()?;
                 let target = settings::Language::English;
+                let session = self.image_translation.clone();
                 self.jobs.submit(Lane::ImageTranslate, move |cancel| {
                     use std::io::Read;
                     const MAX_SOURCE: u64 = 32 * 1024 * 1024;
@@ -720,7 +722,10 @@ impl Service {
                         settings::Language::English => "en",
                         settings::Language::Russian => "ru",
                     };
-                    let rendered = image_translate::translate(&source, &staging, &components, language, &cancel)?;
+                    let rendered = session
+                        .lock()
+                        .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?
+                        .translate(&source, &staging, components, language, &cancel)?;
                     let bytes = std::fs::read(rendered.path())?;
                     let name = format!("translation-{language}.png");
                     let blob = storage::prepare_bytes(
@@ -731,6 +736,7 @@ impl Service {
                     cancel.check()?;
                     Ok(PreparedWork::ImageTranslation { event, stamp, blob, target,
                         dimensions: [rendered.width, rendered.height],
+                        report: rendered.report,
                     })
                 })?
             }
@@ -2035,7 +2041,7 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
-                PreparedWork::ImageTranslation { event, stamp, blob, target, dimensions: [width,height] } => {
+                PreparedWork::ImageTranslation { event, stamp, blob, target, dimensions: [width,height], report } => {
                     let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection","Image is no longer available"))?;
                     if current.revision != event.revision || current.path != event.path || current.kind != event.kind
                         || media_service::stamp(&event.path)? != stamp {
@@ -2043,7 +2049,9 @@ impl Service {
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
                     let id = storage::commit_translated_png(&mut self.db, &self.root, self.quota, blob)?;
-                    Ok(json!({"event": self.get(id)?, "source_language": "ja", "target_language": target, "width":width, "height":height}))
+                    Ok(json!({"event": self.get(id)?, "source_language": "ja", "target_language": target,
+                        "width": width, "height": height, "rendered_blocks": report.rendered,
+                        "skipped_blocks": report.skipped}))
                 },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {

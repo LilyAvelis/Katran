@@ -28,6 +28,12 @@ pub(crate) struct StagedTranslation {
     path: PathBuf,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) report: RenderReport,
+}
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+pub(crate) struct RenderReport {
+    pub(crate) rendered: u32,
+    pub(crate) skipped: u32,
 }
 impl StagedTranslation {
     pub(crate) fn path(&self) -> &Path {
@@ -39,17 +45,37 @@ impl Drop for StagedTranslation {
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
-struct OwnedServer {
+struct OwnedProcess {
     child: Child,
     #[cfg(windows)]
     job: Option<std::os::windows::io::OwnedHandle>,
 }
-impl Drop for OwnedServer {
+impl Drop for OwnedProcess {
     fn drop(&mut self) {
         #[cfg(windows)]
         drop(self.job.take());
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+impl OwnedProcess {
+    fn spawn(mut command: Command, stage: &str) -> Result<Self> {
+        let child = command
+            .spawn()
+            .map_err(|e| error(format!("Cannot start {stage}: {e}")))?;
+        let mut process = Self {
+            child,
+            #[cfg(windows)]
+            job: None,
+        };
+        #[cfg(windows)]
+        {
+            process.job = Some(
+                contain_server(&process.child)
+                    .map_err(|e| error(format!("Cannot contain {stage}: {e}")))?,
+            );
+        }
+        Ok(process)
     }
 }
 #[cfg(windows)]
@@ -133,7 +159,7 @@ fn hidden(command: &mut Command) {
 fn reachable(port: u16) -> bool {
     TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(250)).is_ok()
 }
-fn server(executable: &Path, models: &Path, cancel: &Cancellation) -> Result<(u16, OwnedServer)> {
+fn server(executable: &Path, models: &Path, cancel: &Cancellation) -> Result<(u16, OwnedProcess)> {
     let socket = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| error(format!("Cannot reserve local translation port: {e}")))?;
     let port = socket.local_addr()?.port();
@@ -144,23 +170,11 @@ fn server(executable: &Path, models: &Path, cancel: &Cancellation) -> Result<(u1
         .env("OLLAMA_MODELS", models)
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_NO_CLOUD", "1")
-        .env("OLLAMA_KEEP_ALIVE", "0");
+        .env("OLLAMA_MAX_LOADED_MODELS", "1")
+        .env("OLLAMA_NUM_PARALLEL", "1")
+        .env("OLLAMA_KEEP_ALIVE", "-1");
     hidden(&mut command);
-    let child = command
-        .spawn()
-        .map_err(|e| error(format!("Cannot start local translation service: {e}")))?;
-    let mut owned = OwnedServer {
-        child,
-        #[cfg(windows)]
-        job: None,
-    };
-    #[cfg(windows)]
-    {
-        owned.job = Some(
-            contain_server(&owned.child)
-                .map_err(|e| error(format!("Cannot contain local translation service: {e}")))?,
-        );
-    }
+    let mut owned = OwnedProcess::spawn(command, "local translation service")?;
     let start = Instant::now();
     loop {
         cancel.check()?;
@@ -175,6 +189,119 @@ fn server(executable: &Path, models: &Path, cancel: &Cancellation) -> Result<(u1
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+#[derive(Default)]
+pub(crate) struct Session {
+    runtime: Option<Runtime>,
+}
+
+struct Runtime {
+    components: Components,
+    dir: PathBuf,
+    paddle: Option<OwnedProcess>,
+    manga: Option<OwnedProcess>,
+    ollama: Option<(u16, OwnedProcess)>,
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        drop(self.paddle.take());
+        drop(self.manga.take());
+        drop(self.ollama.take());
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+impl Runtime {
+    fn new(root: &Path, components: Components) -> Result<Self> {
+        let runtime = Self {
+            components,
+            dir: create_stage(root)?,
+            paddle: None,
+            manga: None,
+            ollama: None,
+        };
+        for (name, script) in [
+            ("ocr_page.py", OCR),
+            ("manga_recognize.py", MANGA),
+            ("translate_page.py", TRANSLATE),
+            ("render_page.py", RENDER),
+        ] {
+            write_new(&runtime.dir.join(name), script.as_bytes())?;
+        }
+        Ok(runtime)
+    }
+
+    fn translation_port(&mut self, cancel: &Cancellation) -> Result<u16> {
+        if let Some((port, process)) = &mut self.ollama {
+            if process.child.try_wait()?.is_none() && reachable(*port) {
+                return Ok(*port);
+            }
+        }
+        drop(self.ollama.take());
+        let (port, process) = server(
+            &self.components.ollama_exe,
+            &self.components.ollama_models,
+            cancel,
+        )?;
+        self.ollama = Some((port, process));
+        Ok(port)
+    }
+}
+
+fn recognize(
+    worker: &mut Option<OwnedProcess>,
+    mut command: Command,
+    dir: &Path,
+    marker: &str,
+    stage: &str,
+    cancel: &Cancellation,
+) -> Result<()> {
+    cancel.check()?;
+    if let Some(process) = worker {
+        if process.child.try_wait()?.is_some() {
+            drop(worker.take());
+        }
+    }
+    if worker.is_none() {
+        hidden(&mut command);
+        command.arg("--worker").stdin(Stdio::piped());
+        *worker = Some(OwnedProcess::spawn(command, stage)?);
+    }
+    let process = worker.as_mut().expect("OCR worker started");
+    let result = (|| {
+        let mut request = serde_json::to_vec(dir).map_err(error)?;
+        request.push(b'\n');
+        if request.len() > 4096 {
+            return Err(error("Translation staging path is too long"));
+        }
+        process
+            .child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| error("OCR request pipe is missing"))?
+            .write_all(&request)
+            .map_err(|_| error(format!("{stage} worker failed")))?;
+        let marker = dir.join(marker);
+        let start = Instant::now();
+        loop {
+            cancel.check()?;
+            if marker.try_exists()? {
+                return Ok(());
+            }
+            if let Some(status) = process.child.try_wait()? {
+                return Err(error(format!("{stage} failed ({status})")));
+            }
+            if start.elapsed() > Duration::from_secs(300) {
+                return Err(error(format!("{stage} timed out")));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    })();
+    if result.is_err() {
+        drop(worker.take());
+    }
+    result
 }
 fn run(mut command: Command, cancel: &Cancellation, stage: &str, timeout: Duration) -> Result<()> {
     cancel.check()?;
@@ -220,159 +347,177 @@ fn bounded_file(path: &Path, max: u64) -> Result<()> {
     Ok(())
 }
 
-/// Prepares one local Japanese-to-English translation. Source bytes are immutable.
-pub(crate) fn translate(
-    source: &[u8],
-    staging_root: &Path,
-    components: &Components,
-    target: &str,
-    cancel: &Cancellation,
-) -> Result<StagedTranslation> {
-    cancel.check()?;
-    if source.is_empty() || source.len() > MAX_BYTES {
-        return Err(error("Image exceeds input size limit"));
+impl Session {
+    /// Prepares one local Japanese-to-English translation. Source bytes are immutable.
+    pub(crate) fn translate(
+        &mut self,
+        source: &[u8],
+        staging_root: &Path,
+        components: Components,
+        target: &str,
+        cancel: &Cancellation,
+    ) -> Result<StagedTranslation> {
+        cancel.check()?;
+        if source.is_empty() || source.len() > MAX_BYTES {
+            return Err(error("Image exceeds input size limit"));
+        }
+        if target != "en" {
+            return Err(error("Japanese image translation outputs English"));
+        }
+        let font = std::env::var_os("WINDIR")
+            .map(PathBuf::from)
+            .map(|path| path.join("Fonts").join("arial.ttf"))
+            .ok_or_else(|| error("Windows font directory is unavailable"))?;
+        if !font.is_file() {
+            return Err(error("Translation font is missing"));
+        }
+        let reader = image::ImageReader::new(Cursor::new(source))
+            .with_guessed_format()
+            .map_err(|e| error(e.to_string()))?;
+        if reader.format() == Some(image::ImageFormat::Gif) {
+            return Err(error("Use a static PNG or JPEG instead of GIF"));
+        }
+        let (width, height) = reader
+            .into_dimensions()
+            .map_err(|e| error(format!("Invalid image: {e}")))?;
+        if width == 0
+            || height == 0
+            || width > 8192
+            || height > 8192
+            || u64::from(width) * u64::from(height) > MAX_PIXELS
+        {
+            return Err(error("Image dimensions exceed translation limits"));
+        }
+        let decoded =
+            image::load_from_memory(source).map_err(|e| error(format!("Invalid image: {e}")))?;
+        let mut png = Cursor::new(Vec::new());
+        decoded
+            .write_to(&mut png, image::ImageFormat::Png)
+            .map_err(|e| error(e.to_string()))?;
+        if png.get_ref().len() as u64 > MAX_PNG {
+            return Err(error("Prepared PNG exceeds translation limit"));
+        }
+        let dir = create_stage(staging_root)?;
+        let mut staged = StagedTranslation {
+            path: dir.join("result.png"),
+            dir,
+            width,
+            height,
+            report: RenderReport::default(),
+        };
+        let input = staged.dir.join("input.png");
+        let ocr = staged.dir.join("ocr.json");
+        let grouped = staged.dir.join("grouped.json");
+        let translation = staged.dir.join("translation.json");
+        let report_path = staged.dir.join("render-report.json");
+        write_new(&input, png.get_ref())?;
+        if self
+            .runtime
+            .as_ref()
+            .is_none_or(|runtime| runtime.components != components)
+        {
+            drop(self.runtime.take());
+            self.runtime = Some(Runtime::new(staging_root, components)?);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .expect("translation runtime initialized");
+        let mut cmd = Command::new(&runtime.components.paddle_python);
+        cmd.arg(runtime.dir.join("ocr_page.py"))
+            .env("KATRAN_PADDLE_MODELS", &runtime.components.paddle_models)
+            .env("KATRAN_PROCESS_CACHE", &runtime.dir)
+            .env("PYTHONNOUSERSITE", "1")
+            .env("PYTHONUTF8", "1")
+            .env("HF_HUB_OFFLINE", "1")
+            .env("TRANSFORMERS_OFFLINE", "1")
+            .env("TEMP", &runtime.dir)
+            .env("TMP", &runtime.dir);
+        recognize(
+            &mut runtime.paddle,
+            cmd,
+            &staged.dir,
+            "paddle.done",
+            "Japanese text detection",
+            cancel,
+        )?;
+        bounded_file(&ocr, 1_000_000)?;
+        let mut cmd = Command::new(&runtime.components.manga_python);
+        cmd.arg(runtime.dir.join("manga_recognize.py"))
+            .env("KATRAN_MANGA_MODEL", &runtime.components.manga_model)
+            .env("HF_HOME", &runtime.dir)
+            .env("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+            .env("PYTHONNOUSERSITE", "1")
+            .env("PYTHONUTF8", "1")
+            .env("TEMP", &runtime.dir)
+            .env("TMP", &runtime.dir);
+        recognize(
+            &mut runtime.manga,
+            cmd,
+            &staged.dir,
+            "manga.done",
+            "Japanese text recognition",
+            cancel,
+        )?;
+        bounded_file(&grouped, 1_000_000)?;
+        let port = runtime.translation_port(cancel)?;
+        let mut cmd = Command::new(&runtime.components.manga_python);
+        cmd.arg(runtime.dir.join("translate_page.py"))
+            .arg(&grouped)
+            .arg(&translation)
+            .args([
+                "--ordered",
+                "--source",
+                "ja",
+                "--target",
+                target,
+                "--model",
+                MODEL,
+                "--port",
+                &port.to_string(),
+            ])
+            .env("PYTHONNOUSERSITE", "1");
+        run(cmd, cancel, "Local translation", Duration::from_secs(240))?;
+        bounded_file(&translation, 1_000_000)?;
+        let mut cmd = Command::new(&runtime.components.manga_python);
+        cmd.arg(runtime.dir.join("render_page.py"))
+            .arg(&input)
+            .arg(&translation)
+            .arg(&staged.path)
+            .arg(&font)
+            .arg("--report")
+            .arg(&report_path)
+            .env("PYTHONNOUSERSITE", "1");
+        run(
+            cmd,
+            cancel,
+            "Translated image rendering",
+            Duration::from_secs(120),
+        )?;
+        bounded_file(&report_path, 1024)?;
+        let report: RenderReport =
+            serde_json::from_slice(&fs::read(report_path)?).map_err(error)?;
+        if report.rendered == 0 || report.rendered.saturating_add(report.skipped) > 128 {
+            return Err(error("Invalid translation rendering report"));
+        }
+        staged.report = report;
+        bounded_file(&staged.path, MAX_PNG)?;
+        cancel.check()?;
+        let bytes = fs::read(&staged.path)?;
+        let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
+        let dimensions = reader
+            .into_dimensions()
+            .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
+        if dimensions != (width, height) {
+            return Err(error("Translated PNG dimensions changed"));
+        }
+        let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
+        let output = reader
+            .decode()
+            .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
+        if output.width() != width || output.height() != height {
+            return Err(error("Translated PNG dimensions changed"));
+        }
+        Ok(staged)
     }
-    if target != "en" {
-        return Err(error("Japanese image translation outputs English"));
-    }
-    let font = std::env::var_os("WINDIR")
-        .map(PathBuf::from)
-        .map(|path| path.join("Fonts").join("arial.ttf"))
-        .ok_or_else(|| error("Windows font directory is unavailable"))?;
-    if !font.is_file() {
-        return Err(error("Translation font is missing"));
-    }
-    let reader = image::ImageReader::new(Cursor::new(source))
-        .with_guessed_format()
-        .map_err(|e| error(e.to_string()))?;
-    if reader.format() == Some(image::ImageFormat::Gif) {
-        return Err(error("Use a static PNG or JPEG instead of GIF"));
-    }
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|e| error(format!("Invalid image: {e}")))?;
-    if width == 0
-        || height == 0
-        || width > 8192
-        || height > 8192
-        || u64::from(width) * u64::from(height) > MAX_PIXELS
-    {
-        return Err(error("Image dimensions exceed translation limits"));
-    }
-    let decoded =
-        image::load_from_memory(source).map_err(|e| error(format!("Invalid image: {e}")))?;
-    let mut png = Cursor::new(Vec::new());
-    decoded
-        .write_to(&mut png, image::ImageFormat::Png)
-        .map_err(|e| error(e.to_string()))?;
-    if png.get_ref().len() as u64 > MAX_PNG {
-        return Err(error("Prepared PNG exceeds translation limit"));
-    }
-    let dir = create_stage(staging_root)?;
-    let staged = StagedTranslation {
-        path: dir.join("result.png"),
-        dir,
-        width,
-        height,
-    };
-    let input = staged.dir.join("input.png");
-    let ocr = staged.dir.join("ocr.json");
-    let grouped = staged.dir.join("grouped.json");
-    let translation = staged.dir.join("translation.json");
-    write_new(&input, png.get_ref())?;
-    for (name, text) in [
-        ("ocr_page.py", OCR),
-        ("manga_recognize.py", MANGA),
-        ("translate_page.py", TRANSLATE),
-        ("render_page.py", RENDER),
-    ] {
-        write_new(&staged.dir.join(name), text.as_bytes())?;
-    }
-    let mut cmd = Command::new(&components.paddle_python);
-    cmd.arg(staged.dir.join("ocr_page.py"))
-        .arg(&input)
-        .arg(&ocr)
-        .args(["--lang", "japan"])
-        .env("KATRAN_PADDLE_MODELS", &components.paddle_models)
-        .env("KATRAN_PROCESS_CACHE", &staged.dir)
-        .env("PYTHONNOUSERSITE", "1")
-        .env("HF_HUB_OFFLINE", "1")
-        .env("TRANSFORMERS_OFFLINE", "1")
-        .env("TEMP", &staged.dir)
-        .env("TMP", &staged.dir);
-    run(
-        cmd,
-        cancel,
-        "Japanese text detection",
-        Duration::from_secs(300),
-    )?;
-    bounded_file(&ocr, 1_000_000)?;
-    let mut cmd = Command::new(&components.manga_python);
-    cmd.arg(staged.dir.join("manga_recognize.py"))
-        .arg(&input)
-        .arg(&ocr)
-        .arg(&grouped)
-        .env("KATRAN_MANGA_MODEL", &components.manga_model)
-        .env("HF_HOME", &staged.dir)
-        .env("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-        .env("PYTHONNOUSERSITE", "1")
-        .env("TEMP", &staged.dir)
-        .env("TMP", &staged.dir);
-    run(
-        cmd,
-        cancel,
-        "Japanese text recognition",
-        Duration::from_secs(300),
-    )?;
-    bounded_file(&grouped, 1_000_000)?;
-    let (port, _owned_server) = server(&components.ollama_exe, &components.ollama_models, cancel)?;
-    let mut cmd = Command::new(&components.manga_python);
-    cmd.arg(staged.dir.join("translate_page.py"))
-        .arg(&grouped)
-        .arg(&translation)
-        .args([
-            "--ordered",
-            "--source",
-            "ja",
-            "--target",
-            target,
-            "--model",
-            MODEL,
-            "--port",
-            &port.to_string(),
-        ])
-        .env("PYTHONNOUSERSITE", "1");
-    run(cmd, cancel, "Local translation", Duration::from_secs(240))?;
-    bounded_file(&translation, 1_000_000)?;
-    let mut cmd = Command::new(&components.manga_python);
-    cmd.arg(staged.dir.join("render_page.py"))
-        .arg(&input)
-        .arg(&translation)
-        .arg(&staged.path)
-        .arg(&font)
-        .env("PYTHONNOUSERSITE", "1");
-    run(
-        cmd,
-        cancel,
-        "Translated image rendering",
-        Duration::from_secs(120),
-    )?;
-    bounded_file(&staged.path, MAX_PNG)?;
-    cancel.check()?;
-    let bytes = fs::read(&staged.path)?;
-    let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
-    let dimensions = reader
-        .into_dimensions()
-        .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
-    if dimensions != (width, height) {
-        return Err(error("Translated PNG dimensions changed"));
-    }
-    let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
-    let output = reader
-        .decode()
-        .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
-    if output.width() != width || output.height() != height {
-        return Err(error("Translated PNG dimensions changed"));
-    }
-    Ok(staged)
 }

@@ -23,15 +23,7 @@ class MangaModel(VisionEncoderDecoderModel, GenerationMixin):
     pass
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("image", type=Path)
-    parser.add_argument("ocr", type=Path)
-    parser.add_argument("output", type=Path)
-    args = parser.parse_args()
-    if args.ocr.stat().st_size > 1_000_000:
-        raise ValueError("OCR input too large")
-    groups = group_regions(json.loads(args.ocr.read_text(encoding="utf-8")), True)
+def load_model():
     model_path = str(MODEL_DIR)
     processor = ViTImageProcessor.from_pretrained(model_path, local_files_only=True, trust_remote_code=False)
     model = MangaModel.from_pretrained(model_path, local_files_only=True, trust_remote_code=False, weights_only=True).eval()
@@ -39,7 +31,14 @@ def main():
     model.to(device)
     # Character vocabulary; inference only decodes, so MeCab is unnecessary.
     vocab = (MODEL_DIR / "vocab.txt").read_text(encoding="utf-8").splitlines()
-    image = Image.open(args.image)
+    return processor, model, device, vocab
+
+
+def recognize(image_path, ocr_path, output_path, processor, model, device, vocab):
+    if ocr_path.stat().st_size > 1_000_000:
+        raise ValueError("OCR input too large")
+    groups = group_regions(json.loads(ocr_path.read_text(encoding="utf-8")), True)
+    image = Image.open(image_path)
     if getattr(image, "n_frames", 1) != 1 or max(image.size) > 8192 or image.width * image.height > 32_000_000:
         raise ValueError("Unsupported image")
     image = image.convert("L").convert("RGB")
@@ -59,8 +58,34 @@ def main():
                 raise ValueError("Invalid recognition token")
             text = "".join(vocab[i].removeprefix("##") for i in ids if i not in (0, 2, 3, 4))
             output.append({"source_text": "".join(text.split()), "polygons": group["polygons"]})
-    with args.output.open("x", encoding="utf-8") as f:
+    with output_path.open("x", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image", type=Path, nargs="?")
+    parser.add_argument("ocr", type=Path, nargs="?")
+    parser.add_argument("output", type=Path, nargs="?")
+    parser.add_argument("--worker", action="store_true")
+    args = parser.parse_args()
+    if args.worker:
+        if any(value is not None for value in (args.image, args.ocr, args.output)):
+            parser.error("--worker does not accept positional arguments")
+        model = load_model()
+        for line in sys.stdin:
+            value = json.loads(line)
+            if not isinstance(value, str) or not Path(value).is_absolute():
+                raise ValueError("worker request must be an absolute staging directory path")
+            staging = Path(value)
+            recognize(staging / "input.png", staging / "ocr.json", staging / "grouped.json", *model)
+            with (staging / "manga.done").open("x", encoding="utf-8"):
+                pass
+    else:
+        if any(value is None for value in (args.image, args.ocr, args.output)):
+            parser.error("image, ocr and output are required")
+        model = load_model()
+        recognize(args.image, args.ocr, args.output, *model)
 
 
 if __name__ == "__main__":

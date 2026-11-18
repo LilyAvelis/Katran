@@ -6,7 +6,9 @@ The local Translate tab is restricted to internally published managed image
 results. The independent Rust collection preserves page order. This change
 introduces catalogue schema v14. Rollback to a v13 binary requires the
 pre-migration profile backup. The local Japanese-image action uses Qwen3 4B Instruct
-on the GPU and publishes a separate English PNG here.
+on the GPU and publishes a separate English PNG here. OCR and Ollama keep
+their models loaded between pages until Katran exits. Translate shows results
+under tag sorting, and unsafe lettering regions stay in the source language.
 See [Translate](../patch-4.0/TRANSLATE.md).
 
 ## Katran 4.0 · Local static image upscale

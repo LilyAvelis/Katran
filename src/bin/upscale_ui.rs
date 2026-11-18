@@ -93,9 +93,15 @@ impl Shelf {
                     self.upscale.job = None;
                     let result = &response["result"];
                     self.upscale.status = match self.upscale.kind {
-                        ImageJob::Translate => {
-                            tr("PNG сохранён в Translate", "PNG saved in Translate").into()
-                        }
+                        ImageJob::Translate => match result["skipped_blocks"].as_u64() {
+                            Some(skipped) if skipped > 0 => format!(
+                                "{} {} {}",
+                                tr("PNG сохранён в Translate.", "PNG saved in Translate."),
+                                skipped,
+                                tr("обл. оставлено в оригинале.", "region(s) left unchanged."),
+                            ),
+                            _ => tr("PNG сохранён в Translate", "PNG saved in Translate").into(),
+                        },
                         ImageJob::Upscale => format!(
                             "{}: {} × {} → {} × {}. {}",
                             tr("Размер", "Size"),

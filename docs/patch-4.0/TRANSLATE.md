@@ -4,6 +4,8 @@ Translate is a dedicated shelf view for managed images explicitly published
 as translation results. Catalogue v14 adds the result link and a separate tag
 scope. Ordinary clipboard images, upscale results and original inputs do not
 gain Translate membership through their filename or source label.
+Published results are exclusive to Translate. Tag sorting includes Translate
+and uses its own tag assignments, including in background tab previews.
 
 `crates/baloh-collection` is a separate Rust library for ordered payloads
 with stable entry keys. An image translation job will use one entry per
@@ -37,7 +39,10 @@ translation backend and explicit optional component setup after the fixtures.
 Select a Japanese image and open Ctrl+K → AI Commands → Translate image
 from Japanese. The action is independently rebindable. Settings → AI →
 Image translation reports the locally detected components and the English
-output language. Output is a separate, managed PNG in Translate.
+output language. Output is a separate, managed PNG in Translate. When some
+regions cannot be erased or lettered safely, the original regions remain and
+the result reports how many were skipped. Nothing is published if no lettering
+can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
@@ -45,8 +50,11 @@ Use the dedicated Instruct variant to avoid generating reasoning tokens.
 Japanese is the only exposed recognition language for this integration.
 The translator requires full GPU placement and a complete English answer.
 The English-only rollout follows the owner's acceptance scope for this stage.
-The worker embeds the tested scripts, starts an isolated loopback Ollama
-with cloud disabled, and contains its Windows process tree. Nothing is
+The worker embeds the tested scripts and lazily starts both OCR workers and
+a private loopback Ollama with cloud disabled. Paddle stays in RAM, Manga OCR
+stays on its selected device, and Qwen stays on the GPU between translations.
+Closing the application releases the owned Windows process trees. Cancelling a
+busy OCR stage or a worker failure can require that worker to load again. Nothing is
 downloaded on invoking the action. Setup/Portable can point
 `KATRAN_TRANSLATE_ROOT` at an existing component directory with `venv`,
 `paddlex/official_models`, and `manga-model`, or use the active profile's
@@ -65,6 +73,10 @@ input on RTX 5090, Instruct returned both numbered translations in 2.2 s,
 including weight load. On the complex page it returned all 19 recognized
 blocks in 1.7 s with the model already loaded. Grouping and transcription on
 that page still need work. These measurements cover separate stages.
+
+With resident workers, the normal Katran API processed the simple page in
+18.7 s on first use and 4.5 s on immediate repeat. The same session processed
+the complex page in 21.6 s, lettering 14 blocks and leaving 5 original regions.
 
 ## Local one-page probe
 

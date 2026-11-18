@@ -54,10 +54,6 @@ fn target_follows_interface_and_explicit_choice_persists() {
 fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let input = std::env::var_os("KATRAN_TRANSLATE_TEST_IMAGE").expect("approved input fixture");
     let profile = tempfile::tempdir().unwrap();
-    let source_dir = tempfile::tempdir().unwrap();
-    let source = source_dir.path().join("original.png");
-    std::fs::copy(input, &source).unwrap();
-    let original = std::fs::read(&source).unwrap();
     let mut service = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
     let mut settings: Settings =
         serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
@@ -65,32 +61,124 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     call(&mut service, Command::SetSettings { settings });
     let metadata = call(&mut service, Command::AiComponentsStatus);
     assert_eq!(metadata["image_translate"]["ready"], true, "{metadata}");
-    call(
+    let staging = profile.path().join("translate-work");
+    let first = translate_page(&mut service, &input);
+    assert_eq!(first["skipped_blocks"], 0);
+    let session_dirs = || {
+        std::fs::read_dir(&staging)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>()
+    };
+    let session = session_dirs();
+    assert_eq!(session.len(), 1);
+
+    let warm = translate_page(&mut service, &input);
+    assert_eq!(warm["skipped_blocks"], 0);
+    assert_eq!(session_dirs(), session);
+    let mut results = vec![first, warm];
+    if let Some(complex) = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE") {
+        let result = translate_page(&mut service, &complex);
+        assert!(result["skipped_blocks"].as_u64().unwrap() > 0);
+        results.push(result);
+    }
+    for (tab, expected) in [(ShelfTab::Images, false), (ShelfTab::Translate, true)] {
+        call(&mut service, Command::SetTab { tab });
+        let page = browse(&mut service);
+        for result in &results {
+            assert_eq!(has_event(&page, &result["event"]["id"]), expected);
+        }
+    }
+    drop(service);
+    assert!(
+        session_dirs().is_empty(),
+        "session files survive service shutdown"
+    );
+}
+
+#[test]
+fn saved_translations_are_visible_with_tag_sort_and_exclusive_to_translate() {
+    let profile = tempfile::tempdir().unwrap();
+    let mut service = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    let event = call(
         &mut service,
+        Command::IngestBytes {
+            name: "result.png".into(),
+            bytes: vec![1, 2, 3],
+            source: "image_translation".into(),
+        },
+    );
+    rusqlite::Connection::open(profile.path().join("index.sqlite3"))
+        .unwrap()
+        .execute(
+            "INSERT INTO translated_images(event_id) VALUES(?1)",
+            [event["id"].as_i64().unwrap()],
+        )
+        .unwrap();
+    for (tab, expected) in [(ShelfTab::Images, false), (ShelfTab::Translate, true)] {
+        call(&mut service, Command::SetTab { tab });
+        call(
+            &mut service,
+            Command::SetSort {
+                mode: katran::sorting::SortMode::Tags,
+                reverse: false,
+                seed: None,
+            },
+        );
+        assert_eq!(has_event(&browse(&mut service), &event["id"]), expected);
+        let mut reader = Service::open_read_only(profile.path()).unwrap();
+        let snapshot = call(
+            &mut reader,
+            Command::BrowseTabSnapshot {
+                tab,
+                query: String::new(),
+                limit: 10,
+            },
+        );
+        assert_eq!(has_event(&snapshot, &event["id"]), expected);
+    }
+}
+
+fn has_event(page: &Value, id: &Value) -> bool {
+    page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["id"] == *id)
+}
+
+fn browse(service: &mut Service) -> Value {
+    call(
+        service,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        },
+    )
+}
+
+fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
+    let source_dir = tempfile::tempdir().unwrap();
+    let source = source_dir.path().join("original.png");
+    std::fs::copy(input, &source).unwrap();
+    let original = std::fs::read(&source).unwrap();
+    call(
+        service,
         Command::ChooseFolder {
             path: source_dir.path().to_owned(),
         },
     );
-    let browse = |service: &mut Service| {
-        call(
-            service,
-            Command::BrowseShelfSorted {
-                query: String::new(),
-                limit: 10,
-                cursor: None,
-            },
-        )
-    };
-    let id = browse(&mut service)["events"][0]["id"].as_i64().unwrap();
-    call(&mut service, Command::SetVisible { ids: vec![id] });
+    let id = browse(service)["events"][0]["id"].as_i64().unwrap();
+    call(service, Command::SetVisible { ids: vec![id] });
     call(
-        &mut service,
+        service,
         Command::Select {
             id,
             mode: SelectionMode::Replace,
         },
     );
-    let actions = call(&mut service, Command::Actions);
+    let actions = call(service, Command::Actions);
     assert!(
         actions
             .as_array()
@@ -98,8 +186,9 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
             .iter()
             .any(|item| item["id"] == "translate_image_ja")
     );
+    let started_at = Instant::now();
     let started = call(
-        &mut service,
+        service,
         Command::RunAction {
             id: "translate_image_ja".into(),
         },
@@ -107,7 +196,7 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let job_id = JobId(started["job_id"].as_u64().unwrap());
     let deadline = Instant::now() + Duration::from_secs(300);
     let result = loop {
-        let result = call(&mut service, Command::PollJob { job_id });
+        let result = call(service, Command::PollJob { job_id });
         match result["state"].as_str() {
             Some("succeeded") => break result["result"].clone(),
             Some("queued" | "running" | "ready") => assert!(Instant::now() < deadline),
@@ -118,6 +207,7 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     assert_eq!(result["source_language"], "ja");
     assert_eq!(result["target_language"], "en");
     assert_eq!(result["event"]["kind"], "managed_image");
+    assert!(result["rendered_blocks"].as_u64().unwrap() > 0);
     let output = result["event"]["path"].as_str().unwrap();
     let image = image::ImageReader::open(output)
         .unwrap()
@@ -129,13 +219,11 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
         image::image_dimensions(&source).unwrap()
     );
     assert_eq!(std::fs::read(&source).unwrap(), original);
-    call(
-        &mut service,
-        Command::SetTab {
-            tab: ShelfTab::Translate,
-        },
+    eprintln!(
+        "Translate in {:?}: {} rendered, {} skipped",
+        started_at.elapsed(),
+        result["rendered_blocks"],
+        result["skipped_blocks"]
     );
-    let page = browse(&mut service);
-    assert_eq!(page["events"].as_array().unwrap().len(), 1);
-    assert_eq!(page["events"][0]["id"], result["event"]["id"]);
+    result
 }

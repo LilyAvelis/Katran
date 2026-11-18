@@ -95,7 +95,7 @@ def translate(blocks, source, target, model, port):
     options = {"num_gpu": 99, "num_predict": 384, "num_ctx": 8192,
                "temperature": 0, "seed": 42}
     preload = Request(base + "/api/generate", data=json.dumps({
-        "model": model, "stream": False, "keep_alive": "2m", "options": options,
+        "model": model, "stream": False, "keep_alive": -1, "options": options,
     }).encode(), headers={"Content-Type": "application/json"})
     read_json(preload, timeout=60)
     running = read_json(base + "/api/ps", timeout=5)["models"]
@@ -113,7 +113,7 @@ def translate(blocks, source, target, model, port):
             f"lines. Preserve the meaning.\n{lines}"
         )
         payload = {
-            "model": model, "stream": False, "keep_alive": "2m",
+            "model": model, "stream": False, "keep_alive": -1,
             "options": options,
             "messages": [{"role": "user", "content": prompt}],
         }

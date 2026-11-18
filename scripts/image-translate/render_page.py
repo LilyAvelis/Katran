@@ -118,77 +118,106 @@ def _bubble_box(cleaned, region, other_regions, fallback):
 def render(source, blocks, output, font):
     original = Image.open(source).convert("RGBA")
     alpha = original.getchannel("A")
-    image = original.convert("RGB")
-    rgb = np.asarray(image)
+    rgb = np.asarray(original.convert("RGB"))
     height, width = rgb.shape[:2]
     if not isinstance(blocks, list):
         raise ValueError("blocks must be an ordered list")
     if not Path(font).is_file():
         raise ValueError("font file not found")
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    erase = np.zeros((height, width), dtype=np.uint8)
-    regions = []
-    # Prepare and validate all regions before producing an output file.
+    records = []
+    # Geometry must be valid even for skipped blocks so we can protect it.
     for index, block in enumerate(blocks):
         try:
-            if not isinstance(block, dict) or not isinstance(block.get("text"), str) or not block["text"].strip():
-                raise ValueError("text must be a nonempty string")
             raw = block.get("polygons")
             if raw is None:
                 raw = [block["polygon"]]
             if not isinstance(raw, list) or not raw:
                 raise ValueError("polygons must be a nonempty list")
             polygons = [_polygon(value, width, height) for value in raw]
-            region = np.zeros_like(erase)
+            region = np.zeros((height, width), dtype=np.uint8)
             for polygon in polygons:
                 cv2.fillPoly(region, [polygon], 255)
-            samples = gray[region != 0]
-            # Select dark ink relative to the local light background. Reject an
-            # ambiguous area rather than erasing a whole bubble or illustration.
-            background = float(np.percentile(samples, 85))
-            if background < 90:
-                raise ValueError("region background is too dark to isolate dark lettering")
-            threshold = min(background - 25, 190)
-            ink = ((gray < threshold) & (region != 0)).astype(np.uint8) * 255
-            coverage = cv2.countNonZero(ink) / len(samples)
-            if coverage < 0.001 or coverage > 0.55:
-                raise ValueError("cannot isolate dark lettering safely inside polygon")
-            # A one-pixel dilation includes antialiasing; clip it to the polygons.
-            ink = cv2.dilate(ink, np.ones((3, 3), dtype=np.uint8), iterations=1)
-            erase = cv2.bitwise_or(erase, cv2.bitwise_and(ink, region))
             if "text_box" in block:
                 box = block["text_box"]
                 if not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in box):
                     raise ValueError("text_box must be [left, top, right, bottom]")
                 box = tuple(int(v) for v in box)
             else:
-                all_points = np.concatenate(polygons)
-                x, y, w, h = cv2.boundingRect(all_points)
+                x, y, w, h = cv2.boundingRect(np.concatenate(polygons))
                 box = (x, y, x + w, y + h)
             left, top, right, bottom = box
             if not (0 <= left < right <= width and 0 <= top < bottom <= height):
                 raise ValueError("text_box exceeds image bounds or is empty")
-            regions.append((region, box, "text_box" in block, block["text"]))
-        except (KeyError, TypeError, ValueError, cv2.error) as exc:
-            raise ValueError(f"block {index + 1}: {exc}") from exc
-    result = cv2.inpaint(rgb, erase, 3, cv2.INPAINT_TELEA) if cv2.countNonZero(erase) else rgb.copy()
-    result_image = Image.fromarray(result)
-    draw = ImageDraw.Draw(result_image)
-    placements = []
-    for index, (region, box, explicit, text) in enumerate(regions):
-        if not explicit:
-            others = [item[0] for pos, item in enumerate(regions) if pos != index]
-            box = _bubble_box(result, region, others, box)
+            records.append({"region": region, "box": box, "explicit": "text_box" in block,
+                            "text": block.get("text"), "ink": None})
+        except (AttributeError, KeyError, TypeError, ValueError, cv2.error) as exc:
+            raise ValueError(f"block {index + 1}: invalid geometry: {exc}") from exc
+
+    active = set()
+    for index, record in enumerate(records):
         try:
-            placements.append((box, _fit(text, font, draw, box)))
-        except ValueError as exc:
-            raise ValueError(f"block {index + 1}: {exc}") from exc
-    for (left, top, right, bottom), (face, text, spacing, bounds) in placements:
-        x = left + (right - left - (bounds[2] - bounds[0])) / 2 - bounds[0]
-        y = top + (bottom - top - (bounds[3] - bounds[1])) / 2 - bounds[1]
-        draw.multiline_text((x, y), text, font=face, fill=(0, 0, 0), spacing=spacing, align="center")
-    result_image.putalpha(alpha)
-    result_image.save(output)
+            if not isinstance(record["text"], str) or not record["text"].strip():
+                raise ValueError("text must be nonempty")
+            region = record["region"]
+            samples = gray[region != 0]
+            background = float(np.percentile(samples, 85))
+            if background < 90:
+                raise ValueError("region background is too dark")
+            ink = ((gray < min(background - 25, 190)) & (region != 0)).astype(np.uint8) * 255
+            coverage = cv2.countNonZero(ink) / len(samples)
+            if coverage < 0.001 or coverage > 0.55:
+                raise ValueError("cannot isolate lettering")
+            ink = cv2.dilate(ink, np.ones((3, 3), dtype=np.uint8), iterations=1)
+            record["ink"] = cv2.bitwise_and(ink, region)
+            active.add(index)
+        except (TypeError, ValueError, cv2.error):
+            continue
+
+    # Recompute after every rejected placement: no inpainting may survive for a
+    # skipped block, and no new text may overlap any skipped original region.
+    while active:
+        protected = np.zeros((height, width), dtype=np.uint8)
+        erase = np.zeros_like(protected)
+        for index, record in enumerate(records):
+            if index in active:
+                erase = cv2.bitwise_or(erase, record["ink"])
+            else:
+                protected = cv2.bitwise_or(protected, record["region"])
+        rejected = {i for i in active if np.any((records[i]["region"] != 0) & (protected != 0))}
+        if rejected:
+            active.difference_update(rejected)
+            continue
+        result = cv2.inpaint(rgb, erase, 3, cv2.INPAINT_TELEA) if cv2.countNonZero(erase) else rgb.copy()
+        result_image = Image.fromarray(result)
+        draw = ImageDraw.Draw(result_image)
+        placements = []
+        for index in sorted(active):
+            record = records[index]
+            box = record["box"]
+            if not record["explicit"]:
+                others = [item["region"] for pos, item in enumerate(records) if pos != index]
+                box = _bubble_box(result, record["region"], others, box)
+            left, top, right, bottom = box
+            try:
+                if np.any(protected[top:bottom, left:right]):
+                    raise ValueError("placement overlaps a skipped block")
+                fitted = _fit(record["text"], font, draw, box)
+                placements.append((box, fitted))
+            except ValueError:
+                rejected.add(index)
+        if rejected:
+            active.difference_update(rejected)
+            continue
+        for (left, top, right, bottom), (face, text, spacing, text_bounds) in placements:
+            x = left + (right - left - (text_bounds[2] - text_bounds[0])) / 2 - text_bounds[0]
+            y = top + (bottom - top - (text_bounds[3] - text_bounds[1])) / 2 - text_bounds[1]
+            draw.multiline_text((x, y), text, font=face, fill=(0, 0, 0), spacing=spacing, align="center")
+        result_image.putalpha(alpha)
+        with open(output, "xb") as target:
+            result_image.save(target, format="PNG")
+        return {"rendered": len(active), "skipped": len(records) - len(active)}
+    raise ValueError("No text blocks could be rendered safely")
 
 
 def main():
@@ -197,10 +226,14 @@ def main():
     parser.add_argument("blocks_json")
     parser.add_argument("output")
     parser.add_argument("font")
+    parser.add_argument("--report", help="Write rendered and skipped block counts as JSON")
     args = parser.parse_args()
     with open(args.blocks_json, encoding="utf-8") as stream:
         blocks = json.load(stream)
-    render(args.source, blocks, args.output, args.font)
+    report = render(args.source, blocks, args.output, args.font)
+    if args.report:
+        with open(args.report, "x", encoding="utf-8") as receipt:
+            json.dump(report, receipt)
 
 
 if __name__ == "__main__":

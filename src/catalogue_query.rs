@@ -292,6 +292,9 @@ fn query_sorted_slice_inner(
                 "files" => {
                     "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='files' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
                 }
+                "translate" => {
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='translate' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                }
                 _ => {
                     return Err(ApiError::new(
                         "folder_has_no_tags",
@@ -503,7 +506,7 @@ fn slice_projection(
         ShelfTab::Translate => translated_image_predicate(),
         ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
-        ShelfTab::Images => format!("{} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
+        ShelfTab::Images => format!("{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
     };
     // Literal quoting is restricted to this optional tag value; all search and
     // cursor values remain bound parameters in the shared SQL pipeline.
@@ -564,6 +567,11 @@ fn projection_sql(
             &format!("AND e.legacy_source_ref=0 AND {}", translated_image_predicate()),
         );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
+    } else if tab == ShelfTab::Images {
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND NOT {TRANSLATION_MEMBERSHIP}"),
+        );
     }
     if tab == ShelfTab::Links {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id)");
@@ -585,9 +593,12 @@ fn projection_sql(
     sql
 }
 
+pub(crate) const TRANSLATION_MEMBERSHIP: &str =
+    "EXISTS(SELECT 1 FROM translated_images t WHERE t.event_id=e.id)";
+
 pub(crate) fn translated_image_predicate() -> String {
     format!(
-        "e.blob_hash IS NOT NULL AND {} AND EXISTS(SELECT 1 FROM translated_images t WHERE t.event_id=e.id)",
+        "e.blob_hash IS NOT NULL AND {} AND {TRANSLATION_MEMBERSHIP}",
         crate::file_types::sql_image_predicate()
     )
 }
