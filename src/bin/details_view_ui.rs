@@ -324,13 +324,23 @@ impl Shelf {
                     egui::Sense::hover(),
                 );
                 self.images.paint_at(ui, event, rect, 512);
-                ui.weak(match self.images.visual_status(event, 512) {
-                    "image" => tr("Изображение", "Image"),
-                    "shell_thumbnail" => tr("Миниатюра", "Thumbnail"),
-                    "shell_icon" | "generic_icon" => tr("Значок файла", "File icon"),
-                    "unavailable" => tr("Предпросмотр недоступен", "Preview unavailable"),
-                    _ => tr("Загрузка…", "Loading…"),
-                });
+                ui.weak(
+                    if matches!(
+                        event["source"].as_str(),
+                        Some("image_translation_collection" | "image_collection")
+                    ) && super::images::is_bull(event)
+                    {
+                        tr("Коллекция изображений", "Image collection")
+                    } else {
+                        match self.images.visual_status(event, 512) {
+                            "image" => tr("Изображение", "Image"),
+                            "shell_thumbnail" => tr("Миниатюра", "Thumbnail"),
+                            "shell_icon" | "generic_icon" => tr("Значок файла", "File icon"),
+                            "unavailable" => tr("Предпросмотр недоступен", "Preview unavailable"),
+                            _ => tr("Загрузка…", "Loading…"),
+                        }
+                    },
+                );
             }
         }
         ui.separator();

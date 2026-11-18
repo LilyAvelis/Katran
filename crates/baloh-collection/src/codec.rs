@@ -104,8 +104,7 @@ fn number<R: Read>(reader: &mut R) -> io::Result<u32> {
     reader.read_exact(&mut bytes)?;
     Ok(u32::from_le_bytes(bytes))
 }
-/// Read and authenticate a collection, rejecting any trailing byte.
-pub fn read<R: Read>(mut input: R) -> io::Result<Vec<Vec<u8>>> {
+fn read_header(mut input: impl Read) -> io::Result<usize> {
     let mut magic = [0; 8];
     input.read_exact(&mut magic)?;
     if &magic != MAGIC {
@@ -116,22 +115,40 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<Vec<u8>>> {
     }
     let count = number(&mut input)? as usize;
     check_count(count)?;
+    Ok(count)
+}
+
+fn read_page(mut input: impl Read, total: &mut usize) -> io::Result<Vec<u8>> {
+    let size = number(&mut input)? as usize;
+    check_size(size, total)?;
+    let mut digest = [0u8; 32];
+    input.read_exact(&mut digest)?;
+    let mut page = vec![0; size];
+    input.read_exact(&mut page)?;
+    if Sha256::digest(&page).as_slice() != digest {
+        return Err(invalid("PNG digest mismatch"));
+    }
+    if !png_valid(&page) {
+        return Err(invalid("invalid PNG structure"));
+    }
+    Ok(page)
+}
+
+/// Verify the header and first page for a thumbnail. Opening the collection
+/// still validates every page and the file boundary with `read`.
+pub fn read_cover(mut input: impl Read) -> io::Result<Vec<u8>> {
+    read_header(&mut input)?;
+    let mut total = HEADER;
+    read_page(&mut input, &mut total)
+}
+
+/// Read and authenticate a collection, rejecting any trailing byte.
+pub fn read<R: Read>(mut input: R) -> io::Result<Vec<Vec<u8>>> {
+    let count = read_header(&mut input)?;
     let mut total = HEADER;
     let mut pages = Vec::with_capacity(count);
     for _ in 0..count {
-        let size = number(&mut input)? as usize;
-        check_size(size, &mut total)?;
-        let mut digest = [0u8; 32];
-        input.read_exact(&mut digest)?;
-        let mut page = vec![0; size];
-        input.read_exact(&mut page)?;
-        if Sha256::digest(&page).as_slice() != digest {
-            return Err(invalid("PNG digest mismatch"));
-        }
-        if !png_valid(&page) {
-            return Err(invalid("invalid PNG structure"));
-        }
-        pages.push(page);
+        pages.push(read_page(&mut input, &mut total)?);
     }
     let mut trailing = [0];
     if input.read(&mut trailing)? != 0 {

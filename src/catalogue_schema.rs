@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 14;
+pub(crate) const VERSION: i64 = 15;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -193,6 +193,14 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
              PRAGMA user_version=14;",
         )?;
     }
+    if version < 15 {
+        tx.execute_batch("CREATE TABLE bull_members(
+            collection_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            member_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            PRIMARY KEY(collection_id,position)
+        ); PRAGMA user_version=15;")?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -202,6 +210,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn members_migrate_v14_and_keep_a_verified_rollback() {
+        let profile = tempfile::tempdir().unwrap();
+        drop(crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap());
+        let database = profile.path().join("index.sqlite3");
+        let legacy = Connection::open(&database).unwrap();
+        legacy.execute_batch("DROP TABLE bull_members; PRAGMA user_version=14;").unwrap();
+        drop(legacy);
+        let reopened = crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
+        let version: i64 = reopened.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 15);
+        assert!(reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bull_members')", [], |row| row.get::<_, bool>(0)).unwrap());
+        let backup = std::fs::read_dir(profile.path().join("backups")).unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.file_name().unwrap().to_string_lossy().starts_with("index-before-v15"))
+            .unwrap();
+        let backup = Connection::open(backup).unwrap();
+        assert_eq!(backup.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 14);
+        assert_eq!(backup.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0)).unwrap(), "ok");
+    }
+
+    #[test]
     fn translate_migrates_v13_and_keeps_a_verified_rollback() {
         let profile = tempfile::tempdir().unwrap();
         drop(crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap());
@@ -209,7 +238,8 @@ mod tests {
         let legacy = Connection::open(&database).unwrap();
         legacy
             .execute_batch(
-                "DROP TABLE translated_images;
+                "DROP TABLE bull_members;
+             DROP TABLE translated_images;
              DELETE FROM tag_scoped_slots WHERE scope='translate';
              PRAGMA user_version=13;",
             )
@@ -233,7 +263,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("index-before-v14")
+                    .starts_with("index-before-v15")
             })
             .unwrap();
         let backup = Connection::open(backup).unwrap();

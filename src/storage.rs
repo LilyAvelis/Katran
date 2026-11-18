@@ -457,18 +457,107 @@ fn commit_blob(
     Ok(id)
 }
 
+pub(crate) type CollectionMembers = std::collections::BTreeMap<usize, i64>;
+
+pub(crate) fn collection_members(db: &Connection, id: i64) -> Result<CollectionMembers> {
+    let mut statement = db.prepare("SELECT position,member_id FROM bull_members WHERE collection_id=?1")?;
+    Ok(statement.query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+pub(crate) fn visible_collection_input(db: &Connection, id: i64, translated: bool) -> Result<bool> {
+    let membership = crate::catalogue_query::TRANSLATION_MEMBERSHIP;
+    let category = if translated {
+        crate::catalogue_query::translated_image_predicate()
+    } else {
+        format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate())
+    };
+    Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM events e WHERE e.id=?1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id))"), [id], |row| row.get(0))?)
+}
+
+fn require_collection_input(db: &Connection, id: i64, translated: bool) -> Result<()> {
+    if !visible_collection_input(db, id, translated)? {
+        return Err(ApiError::new("stale_selection", "Select visible cards from the same Images or Translate shelf"));
+    }
+    Ok(())
+}
+
+fn retire_collection(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<String> {
+    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection')", [id], |row| row.get(0))?;
+    tx.execute("DELETE FROM events WHERE id=?1", [id])?;
+    Ok(hash)
+}
+
+pub(crate) fn commit_shelf_image_collection(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    packed: crate::image_collection::Packed,
+) -> Result<(i64, Vec<String>)> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let scope = if packed.translated { "translate" } else { "images" };
+    let first = packed.inputs[0].event.id;
+    let slot = |id| crate::tag_slots::visible_slot(&tx, scope, id)
+        .map_err(|error| ApiError::new("storage_error", error));
+    let first_slot = slot(first)?;
+    let first_tags = crate::pinned::tags(&tx, first)?;
+    let mut pinned = false;
+    let mut same_tags = true;
+    for input in &packed.inputs {
+        let id = input.event.id;
+        require_collection_input(&tx, id, packed.translated)?;
+        if crate::image_collection::is_managed(&input.event) && tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM bull_members WHERE collection_id=?1 AND position>=?2)",
+            params![id, input.count], |row| row.get::<_, bool>(0),
+        )? {
+            return Err(ApiError::new("invalid_collection", "Saved collection membership is out of range"));
+        }
+        pinned |= crate::pinned::properties(&tx, id)?.pinned;
+        same_tags &= slot(id)? == first_slot
+            && crate::pinned::tags(&tx, id)? == first_tags;
+    }
+    let id = commit_blob_in(&tx, root, quota, packed.blob, packed.translated)?;
+    if pinned {
+        tx.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)", [id])?;
+        tx.execute("UPDATE katran_pinned_order SET position=(SELECT MIN(position)-1 FROM katran_pinned_order) WHERE event_id=?1", [id])?;
+        if same_tags {
+            if let Some(slot) = first_slot {
+                tx.execute("INSERT INTO tag_scoped_assignments(event_id,slot_number,scope) VALUES(?1,?2,?3)", params![id, slot, scope])?;
+            }
+            tx.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) SELECT ?1,tag_key,tag_display FROM katran_tags WHERE event_id=?2", params![id, first])?;
+        }
+    }
+    let mut obsolete = HashSet::new();
+    for input in packed.inputs {
+        if crate::image_collection::is_managed(&input.event) {
+            tx.execute("UPDATE bull_members SET collection_id=?1,position=position+?2 WHERE collection_id=?3", params![id, input.offset, input.event.id])?;
+            obsolete.insert(retire_collection(&tx, input.event.id)?);
+        } else {
+            tx.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,?3)", params![id, input.event.id, input.offset])?;
+        }
+    }
+    tx.commit()?;
+    Ok((id, crate::delete_shelf::prune_unused_blobs(db, root, obsolete)))
+}
+
 pub(crate) fn commit_extracted_collection_pages(
     db: &mut Connection,
     root: &Path,
     quota: u64,
-    pages: Vec<PreparedBlob>,
+    collection_id: i64,
+    expected_members: &CollectionMembers,
+    pages: Vec<Option<PreparedBlob>>,
     translated: bool,
     newest_first: bool,
-) -> Result<Vec<i64>> {
+) -> Result<(Vec<i64>, Vec<String>)> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    require_collection_input(&tx, collection_id, translated)?;
+    if collection_members(&tx, collection_id)? != *expected_members {
+        return Err(ApiError::new("stale_selection", "Collection membership changed"));
+    }
     let mut additions = std::collections::HashSet::new();
     let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| row.get(0))?;
-    for page in &pages {
+    for page in pages.iter().flatten() {
         if page.source != "image_collection_page" || page.text.is_some() || !page.name.ends_with(".png") {
             return Err(ApiError::new("invalid_collection", "Expected an extracted PNG page"));
         }
@@ -482,14 +571,18 @@ pub(crate) fn commit_extracted_collection_pages(
         return Err(ApiError::new("quota_exceeded", "The collection pages do not fit in the cache"));
     }
     drop(additions);
-    let mut pages = pages;
+    let mut pages: Vec<_> = pages.into_iter().enumerate().collect();
     if newest_first {
         pages.reverse();
     }
     let mut items = Vec::with_capacity(pages.len());
-    for page in pages {
+    for (index, page) in pages {
+        let Some(page) = page else {
+            items.push(*expected_members.get(&index).ok_or_else(|| ApiError::new("invalid_collection", "Collection page is missing"))?);
+            continue;
+        };
         let existing: Option<i64> = tx.query_row(
-            "SELECT id FROM events WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 ORDER BY id LIMIT 1",
+            "SELECT id FROM events e WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY id LIMIT 1",
             params![page.name, page.hash], |row| row.get(0)
         ).optional()?;
         items.push(match existing {
@@ -500,8 +593,9 @@ pub(crate) fn commit_extracted_collection_pages(
     if newest_first {
         items.reverse();
     }
+    let obsolete = retire_collection(&tx, collection_id)?;
     tx.commit()?;
-    Ok(items)
+    Ok((items, crate::delete_shelf::prune_unused_blobs(db, root, [obsolete])))
 }
 
 fn commit_blob_in(
@@ -667,7 +761,7 @@ pub fn query_events(
         ));
     }
     let mut stmt = db.prepare("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json,COALESCE((SELECT preview FROM text_fragments WHERE event_id=events.id),(SELECT preview FROM link_fragments WHERE event_id=events.id),(SELECT preview FROM table_fragments WHERE event_id=events.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments WHERE event_id=events.id) AS is_link, EXISTS(SELECT 1 FROM table_fragments WHERE event_id=events.id) AS is_table, modified_at_ms FROM events
-        WHERE id <= ?1 AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2) OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE l.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2))
+        WHERE id <= ?1 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=events.id) AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2) OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE l.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2))
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_app'),'') ELSE '' END,?2)
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_domain'),'') ELSE '' END,?2))
         ORDER BY id DESC LIMIT ?3")?;

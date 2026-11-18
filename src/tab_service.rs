@@ -24,6 +24,7 @@ pub(crate) struct BackgroundActions {
     video: bool,
     translate: bool,
     unpack_bull: bool,
+    merge_bull: bool,
 }
 
 // The Actions catalogue is presentation metadata. Resolve at most one event;
@@ -67,6 +68,7 @@ fn background_actions(
         video,
         translate: image,
         unpack_bull: crate::image_collection::is_managed(&event),
+        merge_bull: false,
     }
 }
 
@@ -93,13 +95,10 @@ impl Service {
     pub(crate) fn background_action_availability(&self) -> BackgroundActions {
         let selected = &self.interaction.selected;
         if (2..=crate::image_translation_batch::MAX_PAGES).contains(&selected.len()) {
+            let events = selected.iter().map(|id| self.get(*id)).collect::<Result<Vec<_>>>();
             return BackgroundActions {
-                translate: selected.iter().all(|id| {
-                    self.get(*id).is_ok_and(|event| {
-                        event.kind == crate::EventKind::ManagedImage
-                            || crate::file_types::is_native_image(&event.path)
-                    })
-                }),
+                translate: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image)),
+                merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_managed)),
                 ..Default::default()
             };
         }
@@ -123,7 +122,8 @@ impl Service {
             }
             "search_image_google_lens" => background.image,
             "create_image_collection" => {
-                self.interaction.tab != ShelfTab::All && (background.translate || background.unpack_bull)
+                matches!(self.interaction.tab, ShelfTab::Images | ShelfTab::Translate)
+                    && (background.translate || background.unpack_bull || background.merge_bull)
             }
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
@@ -148,6 +148,9 @@ impl Service {
     pub(crate) fn action_label(&self, id: &str, fallback: &str, background: BackgroundActions) -> String {
         let english = self.settings.language == crate::settings::Language::English;
         if id == "create_image_collection" {
+            if background.merge_bull {
+                return if english { "Merge BULL collections" } else { "Объединить BULL" }.into();
+            }
             return match (background.unpack_bull, english) {
                 (true, true) => "Unpack BULL",
                 (true, false) => "Разобрать BULL",

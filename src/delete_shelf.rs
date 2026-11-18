@@ -9,6 +9,9 @@ use std::{collections::HashSet, path::Path};
 /// stored path and its canonical form so a missing/replaced file at the same
 /// name remains protected. Owned blob paths are not original-file aliases.
 pub(crate) fn protected_by_pin(db: &Connection, id: i64) -> Result<bool> {
+    if db.query_row("SELECT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?1)", [id], |row| row.get::<_, bool>(0))? {
+        return Err(ApiError::new("packed_member", "Unpack the BULL before removing this image"));
+    }
     let event: Option<(String, Option<String>, bool)> = db.query_row(
         "SELECT e.path,e.blob_hash,COALESCE(p.pinned,0) FROM events e LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.id=?1",
         [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -128,6 +131,21 @@ pub fn delete_events(
         tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     }
     tx.commit()?;
+    let deleted = eligible.len();
+    Ok(DeleteResult {
+        ids,
+        confirmation_required: false,
+        deleted,
+        cleanup_pending: prune_unused_blobs(db, root, hashes),
+        items,
+    })
+}
+
+pub(crate) fn prune_unused_blobs(
+    db: &mut Connection,
+    root: &Path,
+    hashes: impl IntoIterator<Item = String>,
+) -> Vec<String> {
     let mut cleanup_pending = vec![];
     for hash in hashes {
         let cleanup = (|| -> std::result::Result<(), String> {
@@ -185,12 +203,5 @@ pub fn delete_events(
             cleanup_pending.push(format!("{hash}: {error}"));
         }
     }
-    let deleted = eligible.len();
-    Ok(DeleteResult {
-        ids,
-        confirmation_required: false,
-        deleted,
-        cleanup_pending,
-        items,
-    })
+    cleanup_pending
 }

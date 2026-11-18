@@ -51,11 +51,15 @@ Keep the collection viewport stable while a page is pending. Retain the last
 ready texture with its own index until the requested page is ready. Wheel
 zoom anchors at the pointer, and Ctrl+wheel anchors at the viewport center.
 
-Standalone BULL uses one rebindable shelf action for packing selected images
-and unpacking one saved collection. Reuse BULL v1 and the ordered selection.
-Ordinary BULL cards belong to Images and use its pin/tag scope. Preserve the
-originals and the portable collection, and publish extracted PNGs on the
-collection's shelf in one transaction. Repeated extraction reuses its pages.
+Standalone BULL uses one rebindable action to pack selected images, merge two
+or more collections, or unpack one collection on Images and Translate.
+Catalogue v15 hides packed event IDs using `bull_members`; the ordered BULL v1
+file stays portable. Preserve those events and metadata, replace the selected
+cards on pack/merge, and restore the original IDs on unpack. Fill unmapped
+pages from the portable PNGs. Publish the replacement and membership in one
+transaction. A new collection inherits a pin from any pinned input and the
+tag only with identical selected-card assignments. Use the first ordered
+image for its thumbnail. Older binaries require the pre-v15 backup.
 
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.

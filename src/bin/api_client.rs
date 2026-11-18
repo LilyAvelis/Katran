@@ -1502,6 +1502,8 @@ impl Shelf {
                     "{}: {count}",
                     tr("Извлечено изображений", "Images unpacked")
                 )
+            } else if result["merged"] == true {
+                format!("{}: {count}", tr("Страниц в объединённом BULL", "Pages in merged BULL"))
             } else {
                 format!(
                     "{}: {count}",

@@ -18,11 +18,13 @@ retains its last ready page while loading and shares the image-preview zoom
 geometry. See [Translate](patch-4.0/TRANSLATE.md) and
 [the local BULL contract](patch-4.0/BULL.md).
 
-`CreateImageCollection` is a contextual job for packing selected images or
-unpacking a single managed BULL. It reuses the ordered selection and v1 codec.
-Ordinary BULL cards use the Images catalogue and standard pin/tag paths.
-Unpacking validates the collection before a single catalogue transaction and
-reuses existing extracted page rows when repeated.
+`CreateImageCollection` packs selected images, flattens selected BULLs into
+one ordered collection, or unpacks a single BULL on its shelf. It reuses the
+ordered selection and v1 codec. Catalogue v15 stores ownership by page index
+and hides members before shelf filtering, sorting and pagination. A single
+transaction publishes the new card and its membership, or retires the BULL
+and restores members. Only pages without a source record need new PNG cards.
+The first PNG is verified and cached as the cover through `PreviewImage`.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded

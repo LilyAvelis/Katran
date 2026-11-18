@@ -191,6 +191,20 @@ impl Interaction {
         self.selected.clear();
         self.anchor = self.cursor;
     }
+    pub(crate) fn replace_collection_rows(&mut self, consumed: &[i64], replacement: Option<i64>) {
+        self.view_generation = self.view_generation.wrapping_add(1);
+        self.selected.retain(|id| !consumed.contains(id));
+        self.visible.retain(|id| !consumed.contains(id));
+        if self.cursor.is_some_and(|id| consumed.contains(&id)) {
+            self.cursor = replacement;
+            self.anchor = replacement;
+        } else if self.anchor.is_some_and(|id| consumed.contains(&id)) {
+            self.anchor = self.cursor;
+        }
+        if self.preview.is_some_and(|id| consumed.contains(&id)) {
+            self.set_preview(None);
+        }
+    }
     pub fn select_all(&mut self, ids: Vec<i64>) {
         self.selected = ids;
         self.anchor = self.cursor;

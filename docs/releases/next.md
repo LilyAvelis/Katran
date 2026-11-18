@@ -25,9 +25,11 @@ recognition pass and enabling oneDNN for detection. See the separate
 warm/cold and renderer measurements in the Translate contract.
 See [Translate](../patch-4.0/TRANSLATE.md).
 
-Ctrl+K now offers one rebindable action to pack selected images into BULL
-and unpack a selected BULL back onto its shelf. Ordinary collections appear
-in Images, support pins and tags, and open in the existing page viewer.
+Ctrl+K now replaces selected images or BULLs with one ordered collection on
+Images or Translate. The action also unpacks a single BULL into its original
+cards. The first page is the cover. Pinned inputs give the collection a pin,
+and matching tags carry over. The local profile uses catalogue schema v15;
+previous builds require the pre-v15 backup for rollback.
 
 ## Local follow-up · Google Lens
 

@@ -70,9 +70,11 @@ pub fn render(root: &Path, event: &Event, edge: u32) -> Result<serde_json::Value
             "Preview cache directory is a symbolic link",
         ));
     }
+    let collection = crate::image_collection::is_managed(event);
+    let version = if collection { "bull-cover-v1" } else { "v1" };
     let key = format!(
         "{:x}",
-        Sha256::digest(format!("v1:{}:{edge}", event.revision))
+        Sha256::digest(format!("{version}:{}:{edge}", event.revision))
     );
     let cache = directory.join(format!("{key}.png"));
     let mut hit = false;
@@ -85,13 +87,15 @@ pub fn render(root: &Path, event: &Event, edge: u32) -> Result<serde_json::Value
             image.to_rgba8()
         }
         None => {
-            let mut reader = image::ImageReader::open(&event.path)?.with_guessed_format()?;
-            let mut limits = image::Limits::default();
-            limits.max_alloc = Some(256 * 1024 * 1024);
-            reader.limits(limits);
-            let decoded = reader
-                .decode()
-                .map_err(|e| ApiError::new("preview_unavailable", e))?;
+            let decoded = if collection {
+                crate::image_collection::cover(&event.path)?
+            } else {
+                let mut reader = image::ImageReader::open(&event.path)?.with_guessed_format()?;
+                let mut limits = image::Limits::default();
+                limits.max_alloc = Some(256 * 1024 * 1024);
+                reader.limits(limits);
+                reader.decode().map_err(|e| ApiError::new("preview_unavailable", e))?
+            };
             let thumb = decoded.thumbnail(edge, edge).to_rgba8();
             let current = if event.revision.starts_with("ref:") {
                 format!("ref:{}", content_hash(&event.path)?)

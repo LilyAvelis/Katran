@@ -526,7 +526,7 @@ fn slice_projection(
       CASE WHEN json_extract(e.delete_policy_json,'$.kind')='live_original' THEN EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=e.id AND p.available=1) ELSE NULL END AS projected_available,
       COALESCE((SELECT preview FROM text_fragments f WHERE f.event_id=e.id),(SELECT preview FROM link_fragments f WHERE f.event_id=e.id),(SELECT preview FROM table_fragments f WHERE f.event_id=e.id)) AS text_preview,
       EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AS is_table,e.modified_at_ms
-      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND e.id <= ?4 {tag_filter} {slot_filter}
+      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) AND e.id <= ?4 {tag_filter} {slot_filter}
       AND (?1 OR ?2 OR ?3='' OR ?3!='') AND {} ORDER BY id DESC LIMIT ?6", search_predicate("CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END", "OR katran_contains(COALESCE(k.display_name,''),?5)"))
 }
 
@@ -622,6 +622,7 @@ fn sql() -> String {
           e.reference_hash,e.delete_policy_json,p.available AS projected_available,NULL AS text_preview,0 AS is_link,0 AS is_table,e.modified_at_ms
         FROM source_projection p CROSS JOIN events e ON e.id=p.event_id
         WHERE ?2=0 AND (?3='' OR ?3='{source}') AND p.source_id='{source}' AND p.available=1
+          AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id)
           AND p.generation=(SELECT generation FROM source_configurations WHERE source_id='{source}' AND enabled=1)
           AND p.event_id <= ?4
           AND json_extract(e.delete_policy_json,'$.kind')='live_original'
@@ -638,6 +639,7 @@ fn sql() -> String {
                    NULL AS projected_available,COALESCE((SELECT preview FROM text_fragments t WHERE t.event_id=e.id),(SELECT preview FROM link_fragments l WHERE l.event_id=e.id),(SELECT preview FROM table_fragments t WHERE t.event_id=e.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments l WHERE l.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id) AS is_table,e.modified_at_ms
             FROM events e
             WHERE ?1 AND e.id <= ?4 AND e.legacy_source_ref=0
+              AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id)
               AND {ordinary_search}
               AND json_extract(e.delete_policy_json,'$.kind')='shelf_only'
               AND (?2=0 OR {image})
@@ -753,6 +755,24 @@ mod tests {
         service.db.execute("INSERT INTO translated_images VALUES (?1), (?2)", [source, result]).unwrap();
         assert_eq!(ids(&service.db, ShelfTab::Translate, "", 10, None), vec![result]);
         assert!(ids(&service.db, ShelfTab::Translate, "unmatched", 10, None).is_empty());
+    }
+    #[test]
+    fn collection_members_are_hidden_before_paging_and_remain_addressable() {
+        let (_dir, service) = fixture();
+        let db = &service.db;
+        let visible = ordinary(db, "visible.png", "fixture");
+        let member = ordinary(db, "hidden.png", "fixture");
+        let collection = ordinary(db, "album.bull", "fixture");
+        db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![collection,member]).unwrap();
+        db.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)", [member]).unwrap();
+        db.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'hidden','hidden')", [member]).unwrap();
+        assert_eq!(ids(db, ShelfTab::Images, "", 1, None), vec![visible]);
+        assert_eq!(service.get(member).unwrap().id, member);
+        let (pinned, _) = query_sorted_slice(db, ShelfTab::Images, "", 10, None,
+            crate::sorting::SortSpec::default(), true, None, None, 0, (true,true,true,true)).unwrap();
+        assert!(pinned.is_empty());
+        db.execute("DELETE FROM bull_members WHERE collection_id=?1", [collection]).unwrap();
+        assert_eq!(ids(db, ShelfTab::Images, "", 2, None), vec![member, visible]);
     }
     #[test]
     fn membership_is_current_projection_not_provenance_or_path_and_never_stats_live_paths() {

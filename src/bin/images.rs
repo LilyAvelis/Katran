@@ -24,7 +24,7 @@ fn context_namespace(context: &str) -> Option<String> {
     let parts = parsed.as_array()?;
     (parts.len() == 4).then(|| serde_json::json!([parts[0], parts[1], parts[2]]).to_string())
 }
-type Work = (ImageKey, Option<PathBuf>, egui::Context);
+type Work = (ImageKey, Option<PathBuf>, bool, egui::Context);
 struct Queue {
     pending: VecDeque<Work>,
     closed: bool,
@@ -52,13 +52,17 @@ fn work_path(event: &Value, id: i64) -> Option<Option<PathBuf>> {
         None
     }
 }
-fn work_command(key: &ImageKey, path: Option<PathBuf>) -> Command {
+fn work_command(key: &ImageKey, path: Option<PathBuf>, collection: bool) -> Command {
     match path {
         Some(path) => Command::PreviewPath {
             path,
             revision: key.2.clone(),
             max_edge: key.1,
             image_only: key.1 > 512,
+        },
+        None if collection => Command::PreviewImage {
+            id: key.0,
+            max_edge: key.1,
         },
         None => preview_command(key.0, key.1),
     }
@@ -127,7 +131,9 @@ impl Images {
             let (lock, wake) = &*self.queue;
             let mut state = lock.lock().unwrap();
             if state.pending.len() < 64 {
-                state.pending.push_back((key, path, ctx.clone()));
+                state
+                    .pending
+                    .push_back((key, path, is_managed_collection(event), ctx.clone()));
                 wake.notify_one();
             } else {
                 self.requested.remove(&key);
@@ -153,7 +159,7 @@ impl Images {
                     return;
                 };
                 loop {
-                    let (key, path, ctx) = {
+                    let (key, path, collection, ctx) = {
                         let (lock, wake) = &*queue;
                         let mut state = lock.lock().unwrap();
                         while state.pending.is_empty() && !state.closed {
@@ -167,7 +173,7 @@ impl Images {
                     let reply = api.execute(Request {
                         api_version: 1,
                         request_id: "preview".into(),
-                        command: work_command(&key, path),
+                        command: work_command(&key, path, collection),
                     });
                     if results.send((key, reply)).is_err() {
                         return;
@@ -355,7 +361,7 @@ impl Images {
         let mut state = lock.lock().unwrap();
         state
             .pending
-            .retain(|(key, _, _)| self.active.contains(key));
+            .retain(|(key, ..)| self.active.contains(key));
         // Requests removed before execution must be eligible if the user returns.
         self.requested.retain(|key| self.active.contains(key));
     }
@@ -415,7 +421,25 @@ impl Images {
         rect: egui::Rect,
         edge: u32,
     ) {
-        self.paint_image(ui, event, rect, edge, None);
+        let cover_rect =
+            if is_managed_collection(event) && rect.width() >= 48.0 && rect.height() >= 48.0 {
+                let frame = rect.shrink2(egui::vec2(7.0, 6.0));
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(
+                    frame.translate(egui::vec2(5.0, 4.0)),
+                    4.0,
+                    Color32::from_gray(55),
+                );
+                painter.rect_filled(
+                    frame.translate(egui::vec2(2.5, 2.0)),
+                    4.0,
+                    Color32::from_gray(75),
+                );
+                frame
+            } else {
+                rect
+            };
+        self.paint_image(ui, event, cover_rect, edge, None);
         if is_bull(event) {
             let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
             let badge = egui::Rect::from_min_size(rect.right_bottom() - size, size);
@@ -450,13 +474,16 @@ impl Images {
             let (lock, wake) = &*self.queue;
             let mut state = lock.lock().unwrap();
             if state.pending.len() >= 64
-                && let Some((old, _, _)) = state.pending.pop_back()
+                && let Some((old, _, _, _)) = state.pending.pop_back()
             {
                 self.requested.remove(&old);
             }
-            state
-                .pending
-                .push_front((key.clone(), path, ui.ctx().clone()));
+            state.pending.push_front((
+                key.clone(),
+                path,
+                is_managed_collection(event),
+                ui.ctx().clone(),
+            ));
             wake.notify_one();
         }
         if let Some(entry) = self.textures.get_mut(&key) {
@@ -503,22 +530,31 @@ impl Images {
         } else {
             ui.painter_at(rect)
                 .rect_filled(rect, 6.0, Color32::from_gray(34));
-            ui.painter_at(rect).text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                if self.textures.contains_key(&key) {
-                    tr("Нет превью", "No preview")
-                } else {
-                    "…"
-                },
-                egui::FontId::proportional(14.0),
-                Color32::GRAY,
-            );
+            if !is_managed_collection(event) || self.textures.contains_key(&key) {
+                ui.painter_at(rect).text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    if self.textures.contains_key(&key) {
+                        tr("Нет превью", "No preview")
+                    } else {
+                        "…"
+                    },
+                    egui::FontId::proportional(14.0),
+                    Color32::GRAY,
+                );
+            }
             if self.textures.contains_key(&key) {
                 ui.ctx().request_repaint_after(Duration::from_secs(3));
             }
         }
     }
+}
+
+fn is_managed_collection(event: &Value) -> bool {
+    matches!(
+        event["source"].as_str(),
+        Some("image_translation_collection" | "image_collection")
+    ) && is_bull(event)
 }
 
 /// Managed collection blobs have digest paths; ordinary files use their actual path.
@@ -694,13 +730,12 @@ mod tests {
             },
         );
         images.requested.insert(pending.clone());
-        images
-            .queue
-            .0
-            .lock()
-            .unwrap()
-            .pending
-            .push_back((pending.clone(), None, ctx.clone()));
+        images.queue.0.lock().unwrap().pending.push_back((
+            pending.clone(),
+            None,
+            false,
+            ctx.clone(),
+        ));
         images.set_context(&b);
         let new_epoch = images.context_epoch;
         assert_ne!(old_epoch, new_epoch);
@@ -778,13 +813,12 @@ mod tests {
         );
         let pending = (2, 320, "blob:pending".to_owned(), epoch);
         images.requested.insert(pending.clone());
-        images
-            .queue
-            .0
-            .lock()
-            .unwrap()
-            .pending
-            .push_back((pending.clone(), None, ctx.clone()));
+        images.queue.0.lock().unwrap().pending.push_back((
+            pending.clone(),
+            None,
+            false,
+            ctx.clone(),
+        ));
         let event = serde_json::json!({"id":1,"revision":"blob:old","kind":"managed_image"});
         for _ in 0..4 {
             let mut after = before.clone();
@@ -866,12 +900,33 @@ mod tests {
     }
 
     #[test]
+    fn managed_collection_cards_request_first_page_from_image_preview() {
+        let event = serde_json::json!({"id": 4, "source":"image_collection", "path":"digest", "name":"album.bull", "revision":"blob:r"});
+        let key = (4, 512, "blob:r".to_owned(), 0);
+        assert!(is_managed_collection(&event));
+        assert!(matches!(
+            work_command(&key, work_path(&event, 4).unwrap(), true),
+            Command::PreviewImage {
+                id: 4,
+                max_edge: 512
+            }
+        ));
+        assert!(matches!(
+            work_command(&key, work_path(&event, 4).unwrap(), false),
+            Command::PreviewFile {
+                id: 4,
+                max_edge: 512
+            }
+        ));
+    }
+
+    #[test]
     fn folder_preview_carries_path_revision_and_size() {
         let event = serde_json::json!({"id": -1, "source": "work_folder", "path": "folder/image.png", "revision": "file:abc"});
         let path = work_path(&event, -1).unwrap();
         let key = (-1, 320, "file:abc".to_owned(), 0);
         assert!(
-            matches!(work_command(&key, path), Command::PreviewPath { path, revision, max_edge: 320, image_only: false } if path == std::path::Path::new("folder/image.png") && revision == "file:abc")
+            matches!(work_command(&key, path, false), Command::PreviewPath { path, revision, max_edge: 320, image_only: false } if path == std::path::Path::new("folder/image.png") && revision == "file:abc")
         );
         assert!(work_path(&serde_json::json!({}), -1).is_none());
     }
@@ -918,7 +973,7 @@ mod tests {
         let desktop = serde_json::json!({"id": -(1_i64 << 62) - 1, "source":"desktop", "path":"managed/extensionless", "revision":"file:r"});
         let id = desktop["id"].as_i64().unwrap();
         assert!(
-            matches!(work_command(&(id, 320, "file:r".into(), 0), work_path(&desktop, id).unwrap()), Command::PreviewFile { id: actual, .. } if actual == id)
+            matches!(work_command(&(id, 320, "file:r".into(), 0), work_path(&desktop, id).unwrap(), false), Command::PreviewFile { id: actual, .. } if actual == id)
         );
         assert!(
             work_path(
