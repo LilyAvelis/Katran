@@ -404,6 +404,11 @@ pub enum Command {
     TranslateSelectedImageFrom {
         source: ImageTranslationSource,
     },
+    TranslationCollectionPage {
+        id: i64,
+        revision: String,
+        index: usize,
+    },
     ToggleMediaPause {
         #[serde(default)]
         session: Option<u64>,
@@ -436,6 +441,10 @@ pub enum Command {
     },
     PreviewExternal {
         id: i64,
+    },
+    PreviewPublishedTranslation {
+        id: i64,
+        revision: String,
     },
     SelectTabPosition {
         position: u8,

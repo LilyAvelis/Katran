@@ -61,8 +61,6 @@ pub struct Interaction {
     pub preview_view: crate::preview_view::State,
     pub table_view: crate::table_view::State,
     anchor: Option<i64>,
-    #[serde(skip)]
-    range_order: bool,
 }
 impl Interaction {
     pub fn set_tab(&mut self, tab: ShelfTab) {
@@ -102,7 +100,6 @@ impl Interaction {
         self.selected.clear();
         self.cursor = None;
         self.anchor = None;
-        self.range_order = false;
         self.set_preview(None);
     }
     pub fn select_position(&mut self, tab: ShelfTab) {
@@ -144,16 +141,6 @@ impl Interaction {
             .and_then(|id| self.visible.iter().position(|i| *i == id))
             .unwrap_or(0);
         self.visible = ids;
-        if self.range_order {
-            let ranks: std::collections::HashMap<_, _> = self
-                .visible
-                .iter()
-                .enumerate()
-                .map(|(rank, id)| (*id, rank))
-                .collect();
-            self.selected
-                .sort_by_key(|id| ranks.get(id).copied().unwrap_or(usize::MAX));
-        }
         if self.preview.is_some_and(|id| !self.visible.contains(&id)) {
             self.set_preview(None);
         }
@@ -173,12 +160,10 @@ impl Interaction {
         };
         match mode {
             SelectionMode::Replace => {
-                self.range_order = false;
                 self.selected = vec![id];
                 self.anchor = Some(id);
             }
             SelectionMode::Toggle => {
-                self.range_order = false;
                 if self.selected.contains(&id) {
                     self.selected.retain(|i| *i != id);
                 } else {
@@ -187,7 +172,6 @@ impl Interaction {
                 self.anchor = Some(id);
             }
             SelectionMode::Range => {
-                self.range_order = true;
                 let anchor = self.anchor.or(self.cursor).unwrap_or(id);
                 self.anchor = Some(anchor);
                 let start = self
@@ -196,18 +180,19 @@ impl Interaction {
                     .position(|i| *i == anchor)
                     .unwrap_or(end);
                 self.selected = self.visible[start.min(end)..=start.max(end)].to_vec();
+                if end < start {
+                    self.selected.reverse();
+                }
             }
         }
         self.cursor = Some(id);
     }
     pub fn clear_selection(&mut self) {
         self.selected.clear();
-        self.range_order = false;
         self.anchor = self.cursor;
     }
     pub fn select_all(&mut self, ids: Vec<i64>) {
         self.selected = ids;
-        self.range_order = false;
         self.anchor = self.cursor;
     }
     pub fn navigate(&mut self, delta: i32, mode: SelectionMode) {

@@ -22,6 +22,7 @@ pub fn label(tab: ShelfTab) -> &'static str {
 pub(crate) struct BackgroundActions {
     image: bool,
     video: bool,
+    translate: bool,
 }
 
 // The Actions catalogue is presentation metadata. Resolve at most one event;
@@ -60,7 +61,7 @@ fn background_actions(
         && ["mp4", "m4v", "mov", "mkv", "webm"]
             .iter()
             .any(|candidate| extension.eq_ignore_ascii_case(candidate));
-    BackgroundActions { image, video }
+    BackgroundActions { image, video, translate: image }
 }
 
 impl Service {
@@ -84,6 +85,16 @@ impl Service {
     }
 
     pub(crate) fn background_action_availability(&self) -> BackgroundActions {
+        let selected = &self.interaction.selected;
+        if (2..=crate::image_translation_batch::MAX_PAGES).contains(&selected.len()) {
+            return BackgroundActions {
+                translate: selected.iter().all(|id| {
+                    self.get(*id).is_ok_and(|event| event.kind == crate::EventKind::ManagedImage
+                        || crate::file_types::is_native_image(&event.path))
+                }),
+                ..Default::default()
+            };
+        }
         background_actions(&self.interaction.selected, self.interaction.cursor, |id| {
             self.get(id)
         })
@@ -98,10 +109,8 @@ impl Service {
             "upscale_remacri_x2"
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
-            | "upscale_realesrgan_x4"
-            | "translate_image_ja"
-            | "translate_image_zh"
-            | "translate_image_ko" => background.image,
+            | "upscale_realesrgan_x4" => background.image,
+            "translate_image_ja" | "translate_image_zh" | "translate_image_ko" => background.translate,
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,

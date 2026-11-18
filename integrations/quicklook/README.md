@@ -23,3 +23,5 @@ on this host has SHA256
 b8c1bfb001270be5d4551467f0df014ee98f0bca01bfea300d3562da6f2a6ca6.
 
 See docs/quicklook-fast-backend.md for protocol, lifecycle and validation boundaries.
+The separate [BULL viewer](QuickLook.Plugin.BullViewer/README.md) uses the
+existing viewer plugin interface and opens the local ordered PNG format.

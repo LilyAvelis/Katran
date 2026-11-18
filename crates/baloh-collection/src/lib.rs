@@ -3,6 +3,8 @@
 //! Keys identify entries independently of their positions. The caller defines
 //! the payload and key types. Storage and interchange belong to the caller.
 
+pub mod codec;
+
 use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -42,6 +44,10 @@ impl<K: Clone + Ord, T> Collection<K, T> {
 
     pub fn entries(&self) -> &[Entry<K, T>] {
         &self.entries
+    }
+
+    pub fn into_entries(self) -> Vec<Entry<K, T>> {
+        self.entries
     }
 
     pub fn get(&self, key: &K) -> Option<&T> {

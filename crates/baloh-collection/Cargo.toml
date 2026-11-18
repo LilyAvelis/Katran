@@ -6,3 +6,7 @@ license = "MIT"
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+sha2 = "=0.10.9"
+crc32fast = "=1.5.4"

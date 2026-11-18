@@ -14,10 +14,10 @@ preserving the input order. Katran owns image storage, job state and shelf
 publication. The collection library is independent of the Katran catalogue
 and may later be reused by Avilon or another project.
 
-The collection library defines in-memory behavior. File encoding, validation
-of standalone .bull archives, and QuickLook are later work. A translation
-batch should reopen as a single ordered result, with successful pages and
-per-page failures associated with their originals.
+The collection library also defines a local v1 portable PNG container. The
+container can hold any sequence of PNG pages. Katran uses it for successful
+batch outputs and reports failed input positions in the job receipt. See
+[the collection contract](BULL.md).
 
 ## First functional gate
 
@@ -45,8 +45,21 @@ size. If it cannot safely replace a region, it can add a white card nearby
 or put the numbered translation on a white side margin. Remaining cards can
 use the lower panel. Margins may increase PNG dimensions within the same
 size limits. The result reports margin entries, panel entries and skips.
+Bright matching numbers identify translations on the margins and the
+corresponding recognized areas on the image. When the image has no safe
+space for a number, its card shows the original coordinates.
 Nothing is published if no lettering can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
+The Katran UI opens a newly saved single-page PNG in QuickLook. QuickLook
+receives a named snapshot of the saved revision and handles Space dismissal.
+If external preview fails, the published result stays in Translate.
+
+For a sequence of 2–32 images, use Ctrl to choose the order by clicking, or
+Shift to select from the first page to the last in either direction. The
+translation action steps through that order with progress and cancellation.
+Once published, the collection appears as one card in Translate and opens
+in the Katran page viewer. The separate QuickLook action uses its collection
+viewer when installed.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
 Use the dedicated Instruct variant to avoid generating reasoning tokens.
@@ -75,6 +88,43 @@ Chinese and `korean_PP-OCRv5_mobile_rec` for Korean, each containing
 `inference.json`, `inference.pdiparams` and `inference.yml`. The model
 packages are listed in the [PaddleOCR recognition documentation](https://www.paddleocr.ai/latest/en/version3.x/module_usage/text_recognition.html).
 
+## Single-page performance report · 2026-11-18
+
+The timings below come from local Windows tests using the provided Japanese
+pages, RTX 5090 for Qwen and Manga OCR, and CPU for Paddle. Full API timing
+starts at action submission and includes the saved result in Translate.
+Stage timings come from a separate instrumented reproduction.
+
+| Warm complex page | Previous | Optimized |
+| --- | ---: | ---: |
+| Paddle detection and initial recognition | 15.1 s | 0.6 s |
+| Manga OCR | 1.3 s | 0.8 s |
+| Qwen translation | 1.6 s | 1.5 s |
+| Rendering in the stage probe | 1.9 s | 0.9 s |
+| Full API, including the later side-margin layout | 21.6 s | 4.1 s |
+
+The largest change was in Japanese OCR. The previous Paddle pipeline detected
+and read each crop, then Manga OCR read the crops again. Now Paddle runs only
+the detector, with oneDNN on CPU, and Manga OCR reads up to four crops in one
+GPU call. Both versions found the same 53 polygons and produced the same 19
+grouped transcriptions on the complex fixture. This comparison measures speed
+at the same OCR output quality on these pages.
+
+Ollama receives all region IDs and text for the page in one structured call.
+The earlier warm Instruct implementation made five calls on the complex
+fixture. The table shows the effect of combining them after the separate
+change from reasoning-enabled Qwen3 4B to Qwen3 4B Instruct. The private
+Ollama process and both OCR processes stay alive after the first operation,
+so repeated pages reuse loaded models until Katran exits.
+
+The most recent cold simple-page API run before marker changes took 15.1 s.
+Repeating it in the same session took 1.3 s. The complex page's full warm
+path was about 5.2 times as fast. The detector stage by itself was about
+25 times as fast. These are fixture measurements from one machine.
+With the numbered markers, a later API run measured 14.2 s cold simple,
+1.2 s warm simple, and 3.7 s warm complex. All twelve margin cards in the
+complex fixture had matching markers. Cold initialization varied between runs.
+
 On the approved simple page, separate cold workers spent 7.6 s in Paddle
 detection and recognition, 9.6 s in Manga OCR, and 0.5 s rendering. The earlier
 Qwen3 4B reasoning run spent 14.8 s generating 4,578 tokens. With the same OCR
@@ -93,7 +143,7 @@ The subsequent stage probe on the same warm complex page measured Paddle
 transcripts on both test pages. Ollama logged five translation requests for
 the original complex page and one for the updated page. The old five layout
 skips came from three ambiguous text masks, one area too narrow for the
-translation, and one overlapping block. The current output contains five
+translation, and one overlapping block. That intermediate output contained five
 in-page placements and fourteen entries in the panel, with zero skips.
 This covers recognized regions. OCR grouping and accuracy on dense artwork
 still limit the result.

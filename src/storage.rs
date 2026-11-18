@@ -430,6 +430,20 @@ pub(crate) fn commit_translated_png(
     commit_blob(db, root, quota, prepared, true)
 }
 
+pub(crate) fn commit_translation_collection(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    prepared: PreparedBlob,
+) -> Result<i64> {
+    if !prepared.name.ends_with(".bull") || prepared.text.is_some()
+        || prepared.source != "image_translation_collection"
+    {
+        return Err(ApiError::new("invalid_translation", "Expected a portable translation collection"));
+    }
+    commit_blob(db, root, quota, prepared, true)
+}
+
 fn commit_blob(
     db: &mut Connection,
     root: &Path,

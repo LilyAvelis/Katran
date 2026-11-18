@@ -98,3 +98,9 @@ For the multilingual and lettering follow-up, the existing sessions were
 reused. Vela owned raster placement and side margins, Nemi owned the Paddle
 worker, and Fenna owned command discovery, shortcuts and Settings. Polly
 owned the API and runtime integration, model placement and end-to-end checks.
+
+For ordered translation batches and collection previews, Nemi owned the
+standalone Rust codec, Vela owned marker layout and the external QuickLook
+adapter, and Fenna owned Katran preview UX. Polly owned selection order,
+batch jobs, publication, package integration and verification. The requested
+Luna profile for Kiki was unavailable in this session.

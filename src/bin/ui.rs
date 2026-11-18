@@ -706,6 +706,7 @@ impl Shelf {
             || self.actions
             || self.audio_extract.open
             || self.upscale.open
+            || self.upscale.collection_open()
             || self.open_apps.open
             || self.workspace.open
             || self.info.is_open()

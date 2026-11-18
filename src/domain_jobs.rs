@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
 };
@@ -85,6 +85,13 @@ pub struct JobStatus {
     pub state: JobState,
     pub result: Option<Value>,
     pub error: Option<JobError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<JobProgress>,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct JobProgress {
+    pub completed: u32,
+    pub total: u32,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct JobStats {
@@ -93,8 +100,22 @@ pub struct JobStats {
     pub workers: usize,
 }
 #[derive(Clone)]
-pub struct Cancellation(Arc<AtomicU8>);
+pub struct Cancellation(Arc<AtomicU8>, Arc<AtomicU64>);
 impl Cancellation {
+    pub(crate) fn report_progress(&self, completed: u32, total: u32) {
+        self.1.store(
+            (u64::from(total) << 32) | u64::from(completed),
+            Ordering::Release,
+        );
+    }
+
+    fn progress(&self) -> Option<JobProgress> {
+        let value = self.1.load(Ordering::Acquire);
+        (value != 0).then_some(JobProgress {
+            completed: value as u32,
+            total: (value >> 32) as u32,
+        })
+    }
     /// Fence an intentional external effect. Once begun, cancellation must not
     /// claim that an export/preview request was undone.
     pub fn begin_effect(&self) -> Result<()> {
@@ -243,7 +264,7 @@ impl<T: Send + 'static> DomainJobs<T> {
             .next_id
             .checked_add(1)
             .ok_or_else(|| ApiError::new("job_id_exhausted", "Job identifier exhausted"))?;
-        let cancellation = Cancellation(Arc::new(AtomicU8::new(0)));
+        let cancellation = Cancellation(Arc::new(AtomicU8::new(0)), Arc::new(AtomicU64::new(0)));
         let phase = Arc::new(AtomicU8::new(0));
         let task = Task {
             id,
@@ -271,6 +292,7 @@ impl<T: Send + 'static> DomainJobs<T> {
                     job_id: id,
                     lane,
                     state: JobState::Queued,
+                    progress: None,
                     result: None,
                     error: None,
                 },
@@ -447,6 +469,7 @@ impl<T: Send + 'static> DomainJobs<T> {
             )
         })?;
         let mut status = entry.status.clone();
+        status.progress = entry.cancellation.progress();
         if status.state == JobState::Queued && entry.phase.load(Ordering::Acquire) != 0 {
             status.state = JobState::Running;
         }

@@ -1997,6 +1997,19 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "preview" && self.state["preview"].is_null() {
+            let interaction = self.call(Command::Interaction);
+            if let Some(event_id) = interaction["cursor"].as_i64() {
+                let event = self.call(Command::Get { id: event_id });
+                if event["source"] == "image_translation_collection"
+                    && let Some(revision) = event["revision"].as_str()
+                {
+                    self.actions = false;
+                    self.open_translation_collection(event_id, revision.to_owned(), ctx);
+                    return;
+                }
+            }
+        }
         if let Some(source) = upscale_ui::translation_source(&id) {
             self.start_image_translation(source, ctx);
             self.actions = false;

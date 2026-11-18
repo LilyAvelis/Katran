@@ -65,6 +65,32 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let first = translate_page(&mut service, &input, ImageTranslationSource::Japanese);
     assert_eq!(first["skipped_blocks"], 0);
     assert_eq!(first["fallback_blocks"], 0);
+    struct Preview(std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>);
+    impl katran::quicklook::Launcher for Preview {
+        fn launch(&self, path: &std::path::Path) -> katran::Result<()> {
+            self.0.lock().unwrap().push(path.to_owned());
+            Ok(())
+        }
+    }
+    let launched = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    service.set_preview_launcher(Box::new(Preview(launched.clone())));
+    let preview = call(
+        &mut service,
+        Command::PreviewPublishedTranslation {
+            id: first["event"]["id"].as_i64().unwrap(),
+            revision: first["event"]["revision"].as_str().unwrap().into(),
+        },
+    );
+    assert!(wait_for_job(&mut service, preview)["requested"] == true);
+    let started = launched.lock().unwrap();
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].extension().unwrap(), "png");
+    assert!(
+        std::fs::read(&started[0])
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n")
+    );
+    drop(started);
     let session_dirs = || {
         std::fs::read_dir(&staging)
             .unwrap()
@@ -78,12 +104,18 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     assert_eq!(warm["skipped_blocks"], 0);
     assert_eq!(session_dirs(), session);
     let mut results = vec![first, warm];
-    if let Some(complex) = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE") {
+    let complex = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE");
+    if let Some(complex) = complex.as_ref() {
         let result = translate_page(&mut service, &complex, ImageTranslationSource::Japanese);
         assert!(result["side_blocks"].as_u64().unwrap() > 0);
         assert_eq!(result["skipped_blocks"], 0);
         results.push(result);
     }
+    let collection = complex.as_ref().map(|complex| {
+        let result = reverse_batch(&mut service, &input, complex);
+        results.push(result.clone());
+        result
+    });
     for (language, fixture) in [
         (
             ImageTranslationSource::Chinese,
@@ -118,6 +150,92 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
         session_dirs().is_empty(),
         "session files survive service shutdown"
     );
+    if let Some(batch) = collection {
+        let mut reopened = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+        let event = &batch["event"];
+        let read = |api: &mut Service, index| {
+            let request = call(
+                api,
+                Command::TranslationCollectionPage {
+                    id: event["id"].as_i64().unwrap(),
+                    revision: event["revision"].as_str().unwrap().into(),
+                    index,
+                },
+            );
+            let page = wait_for_job(api, request);
+            assert_eq!(page["count"], 2);
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(page["png"].as_str().unwrap())
+                .unwrap();
+            image::load_from_memory(&bytes).unwrap().width()
+        };
+        assert!(read(&mut reopened, 0) > read(&mut reopened, 1));
+    }
+}
+
+fn reverse_batch(
+    service: &mut Service,
+    simple: &std::ffi::OsStr,
+    complex: &std::ffi::OsStr,
+) -> Value {
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::copy(simple, folder.path().join("first.png")).unwrap();
+    std::fs::write(folder.path().join("broken.png"), b"invalid PNG").unwrap();
+    std::fs::copy(complex, folder.path().join("last.png")).unwrap();
+    call(
+        service,
+        Command::ChooseFolder {
+            path: folder.path().to_owned(),
+        },
+    );
+    let page = browse(service);
+    let ids: Vec<i64> = ["first.png", "broken.png", "last.png"]
+        .into_iter()
+        .map(|name| {
+            page["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|event| event["name"] == name)
+                .unwrap()["id"]
+                .as_i64()
+                .unwrap()
+        })
+        .collect();
+    call(service, Command::SetVisible { ids: ids.clone() });
+    call(
+        service,
+        Command::Select {
+            id: ids[2],
+            mode: SelectionMode::Replace,
+        },
+    );
+    let selected = call(
+        service,
+        Command::Select {
+            id: ids[0],
+            mode: SelectionMode::Range,
+        },
+    );
+    assert_eq!(
+        selected["selected"],
+        serde_json::json!([ids[2], ids[1], ids[0]])
+    );
+    let started = call(
+        service,
+        Command::RunAction {
+            id: "translate_image_ja".into(),
+        },
+    );
+    let result = wait_for_job(service, started);
+    assert_eq!(result["total"], 3);
+    assert_eq!(result["translated"], 2);
+    assert_eq!(result["pages"][0]["page"], 0);
+    assert_eq!(result["pages"][1]["ok"], false);
+    assert_eq!(result["pages"][2]["page"], 1);
+    assert_eq!(result["event"]["source"], "image_translation_collection");
+    result
 }
 
 #[test]
@@ -217,17 +335,7 @@ fn translate_page(
     );
     let started_at = Instant::now();
     let started = call(service, Command::RunAction { id: action });
-    let job_id = JobId(started["job_id"].as_u64().unwrap());
-    let deadline = Instant::now() + Duration::from_secs(300);
-    let result = loop {
-        let result = call(service, Command::PollJob { job_id });
-        match result["state"].as_str() {
-            Some("succeeded") => break result["result"].clone(),
-            Some("queued" | "running" | "ready") => assert!(Instant::now() < deadline),
-            _ => panic!("{result}"),
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    let result = wait_for_job(service, started);
     assert_eq!(result["source_language"], language.code());
     assert_eq!(result["target_language"], "en");
     assert_eq!(result["event"]["kind"], "managed_image");
@@ -261,4 +369,18 @@ fn translate_page(
         result["skipped_blocks"]
     );
     result
+}
+
+fn wait_for_job(service: &mut Service, started: Value) -> Value {
+    let job_id = JobId(started["job_id"].as_u64().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(300);
+    loop {
+        let result = call(service, Command::PollJob { job_id });
+        match result["state"].as_str() {
+            Some("succeeded") => return result["result"].clone(),
+            Some("queued" | "running" | "ready") => assert!(Instant::now() < deadline),
+            _ => panic!("{result}"),
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }

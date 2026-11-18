@@ -81,6 +81,7 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    ImageTranslationBatch(image_translation_batch::Prepared),
     ImageTranslation {
         event: Event,
         stamp: media_service::Stamp,
@@ -700,6 +701,25 @@ impl Service {
                     Command::TranslateSelectedImageFrom { source } => source,
                     _ => ImageTranslationSource::Japanese,
                 };
+                let selection = self.selected_refs()?;
+                if selection.len() > 1 {
+                    if selection.len() > image_translation_batch::MAX_PAGES {
+                        return Err(ApiError::new("invalid_selection", "Select up to 32 pages"));
+                    }
+                    let events = selection.iter().map(|item| self.get(item.id)).collect::<Result<Vec<_>>>()?;
+                    let root = self.root.clone();
+                    let quota = self.quota;
+                    let references = self.reference_paths()?;
+                    let session = self.image_translation.clone();
+                    let id = self.jobs.submit(Lane::ImageTranslate, move |cancel| {
+                        let mut session = session.lock()
+                            .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?;
+                        Ok(PreparedWork::ImageTranslationBatch(image_translation_batch::prepare(
+                            events, &root, quota, &references, source_language, &mut session, &cancel,
+                        )?))
+                    })?;
+                    return Ok(json!({"job_id":id,"state":"queued","total":selection.len()}));
+                }
                 let event = self.selected_background_image()?;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -1407,6 +1427,49 @@ impl Service {
                 })?
             }
             Command::PreviewExternal { id } => return self.begin_preview_job(id),
+            Command::TranslationCollectionPage { id, revision, index } => {
+                let event = self.get(id)?;
+                if event.source != "image_translation_collection" || event.revision != revision
+                    || !self.db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
+                        [id], |row| row.get::<_, bool>(0)
+                    )?
+                {
+                    return Err(ApiError::new("stale_selection", "Saved collection is unavailable"));
+                }
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    Ok(PreparedWork::Value(image_translation_batch::page(&event, index, &cancel)?))
+                })?
+            }
+            Command::PreviewPublishedTranslation { id, revision } => {
+                let event = self.get(id)?;
+                let published: bool = self.db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
+                    [id], |row| row.get(0)
+                )?;
+                if !published || event.revision != revision {
+                    return Err(ApiError::new("stale_selection", "Saved translation is unavailable"));
+                }
+                let root = self.root.clone();
+                let quota = self.quota;
+                let launcher = self.external_preview.clone();
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    cancel.check()?;
+                    let plan = copy_out::prepare_with_budget(
+                        &root.join("open-cache"), std::slice::from_ref(&event), quota,
+                    ).map_err(|e| ApiError::new("open_cache_failed", e))?;
+                    let path = plan.paths.first().ok_or_else(|| {
+                        ApiError::new("preview_unavailable", "Could not prepare the saved translation")
+                    })?;
+                    let launcher = launcher.lock().map_err(|_| {
+                        ApiError::new("quicklook_busy", "Preview launcher lock poisoned")
+                    })?;
+                    cancel.begin_effect()?;
+                    // QuickLook can open the named snapshot after acknowledging the request.
+                    plan.retain_without_retiring();
+                    Ok(PreparedWork::Value(launcher.launch_receipt(path)?))
+                })?
+            }
             Command::OpenCurrent | Command::TogglePreview => {
                 if let Some(id) = self.interaction.cursor
                     && !file_types::has_internal_preview(&self.get(id)?)
@@ -1556,6 +1619,12 @@ impl Service {
     }
     fn begin_preview_job(&mut self, id: i64) -> Result<Value> {
         let event = self.get(id)?;
+        if event.source == "image_translation_collection" && event.storage == "cached" {
+            return self.begin_job(Command::PreviewPublishedTranslation {
+                id,
+                revision: event.revision,
+            });
+        }
         let launcher = std::sync::Arc::clone(&self.external_preview);
         let id = self.jobs.submit(Lane::Foreground, move |cancel| {
             cancel.check()?;
@@ -2047,6 +2116,22 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::ImageTranslationBatch(batch) => {
+                    for (event, stamp) in &batch.validated_sources {
+                        let current = self.get(event.id)?;
+                        if current.revision != event.revision || current.path != event.path
+                            || media_service::stamp(&event.path)? != *stamp
+                        {
+                            return Err(ApiError::new("source_changed", "Page changed before collection publication"));
+                        }
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let id = storage::commit_translation_collection(&mut self.db, &self.root, self.quota, batch.blob)?;
+                    let mut receipt = batch.receipt;
+                    receipt["event"] = serde_json::to_value(self.get(id)?)
+                        .map_err(|error| ApiError::new("collection_error", error))?;
+                    Ok(receipt)
+                },
                 PreparedWork::ImageTranslation { event, stamp, blob, target, source, dimensions: [width,height], report } => {
                     let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection","Image is no longer available"))?;
                     if current.revision != event.revision || current.path != event.path || current.kind != event.kind

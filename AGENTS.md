@@ -17,7 +17,7 @@ AI operations belong in Ctrl+K → AI Commands. Give each model and fixed
 operation its own independently rebindable command that starts directly.
 For ×2 and ×4, multiply both output dimensions by exactly that factor.
 
-The Translate shelf accepts only managed image results with internal
+The Translate shelf accepts managed image and collection results with internal
 translation membership. Keep generic ordered collections in the independent
 `baloh-collection` crate. Russian/English are the primary translation
 languages; OCR should also cover Japanese, Korean and Chinese. Keep .bull
@@ -35,7 +35,15 @@ Submit all recognized blocks of a single page in one Qwen request with stable
 IDs. Japanese uses Paddle detection and Manga OCR. Chinese and Korean use
 their respective Paddle recognition weights. Keep placements disjoint with
 white cards near the source regions or along the page sides. Use the lower
-panel if side placements do not fit the output limits.
+panel if side placements do not fit the output limits. Match side and lower
+cards to small colored source markers. Launch QuickLook for a committed
+single PNG using a named snapshot and the committed revision.
+
+Translation batches follow Ctrl click order or the direction of the Shift
+gesture and publish one ordered collection. The local BULL v1 candidate
+is independent of translation. Keep validation in the collection codec and
+at each image decoding boundary. A failed page reports its original input
+position; successful pages remain in relative order.
 
 ## Ready text preview retention · 2026-11-18
 

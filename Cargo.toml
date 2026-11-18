@@ -18,6 +18,7 @@ members = ["crates/avilon-actions", "crates/avilon-egui", "crates/avilon-media",
 resolver = "3"
 
 [dependencies]
+baloh-collection = { path = "crates/baloh-collection" }
 avilon-actions = { path = "crates/avilon-actions" }
 avilon-egui = { path = "crates/avilon-egui", optional = true }
 avilon-media = { path = "crates/avilon-media", optional = true, features = ["egui"] }

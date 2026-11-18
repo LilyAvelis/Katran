@@ -43,6 +43,7 @@ pub mod interaction;
 mod jobs_service;
 mod image_upscale;
 mod image_translate;
+mod image_translation_batch;
 mod upscale_components;
 mod translate_components;
 pub mod known_folders;
@@ -541,6 +542,7 @@ impl Service {
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
+            command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,
@@ -1449,7 +1451,15 @@ impl Service {
                 self.interaction.preview_view.pan(delta, viewport, fitted)?;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::PreviewExternal { id } => self.preview_external(id),
+            Command::PreviewExternal { id } => {
+                let event = self.get(id)?;
+                if event.source == "image_translation_collection" && event.storage == "cached" {
+                    self.begin_job(Command::PreviewPublishedTranslation { id, revision: event.revision })
+                } else {
+                    self.preview_external(id)
+                }
+            }
+            command @ Command::PreviewPublishedTranslation { .. } => self.begin_job(command),
             Command::TogglePreview => {
                 if self.interaction.preview.is_none()
                     && let Some(id) = self.interaction.cursor

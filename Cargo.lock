@@ -153,6 +153,10 @@ dependencies = [
 [[package]]
 name = "baloh-collection"
 version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "sha2",
+]
 
 [[package]]
 name = "base64"
@@ -1605,6 +1609,7 @@ dependencies = [
  "avilon-egui",
  "avilon-media",
  "avilon-windows",
+ "baloh-collection",
  "base64 0.22.1",
  "clipboard-win",
  "eframe",

@@ -195,7 +195,7 @@ fn recorded_mtime_unknown_last_without_stat_and_origin_provenance() {
     assert_eq!(names(&page(&mut api, "", 100, None))[0], "file2.PNG");
 }
 #[test]
-fn selection_range_is_display_order_and_toggle_is_click_order() {
+fn selection_range_follows_gesture_direction_and_toggle_is_click_order() {
     let (_root, mut api) = fixture();
     sort(&mut api, SortMode::Natural, false);
     let events = page(&mut api, "file", 100, None);
@@ -220,6 +220,9 @@ fn selection_range_is_display_order_and_toggle_is_click_order() {
             mode: SelectionMode::Range,
         },
     );
+    assert_eq!(selected["selected"], json!([ids[2], ids[1], ids[0]]));
+    call(&mut api, Command::Select { id: ids[0], mode: SelectionMode::Replace });
+    let selected = call(&mut api, Command::Select { id: ids[2], mode: SelectionMode::Range });
     assert_eq!(selected["selected"], json!(ids));
     call(
         &mut api,

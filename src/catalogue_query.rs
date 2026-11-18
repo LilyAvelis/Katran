@@ -598,7 +598,7 @@ pub(crate) const TRANSLATION_MEMBERSHIP: &str =
 
 pub(crate) fn translated_image_predicate() -> String {
     format!(
-        "e.blob_hash IS NOT NULL AND {} AND {TRANSLATION_MEMBERSHIP}",
+        "e.blob_hash IS NOT NULL AND ({} OR (e.source='image_translation_collection' AND substr(e.name,-5)='.bull')) AND {TRANSLATION_MEMBERSHIP}",
         crate::file_types::sql_image_predicate()
     )
 }

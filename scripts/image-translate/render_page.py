@@ -438,14 +438,70 @@ def render(source, blocks, output, font):
         if not isinstance(text, str) or not text.strip():
             continue
         x, y, _, _ = record["box"]
-        lines = _panel_wrap(f"#{index + 1} ({x}, {y}): {text}", panel_font, panel_draw, output_width - 24)
+        # Reserve three digits so final paired numbering never changes wrapping.
+        lines = _panel_wrap(f"#000 ({x}, {y}): {text}", panel_font, panel_draw, output_width - 24)
         if not lines:
             continue
         block_height = len(lines) * line_height + 10
         if height + panel_height + block_height + 8 > max_height:
             continue
-        panel_items.append(lines)
+        panel_items.append((index, lines, block_height))
         panel_height += block_height
+    # Mark only translations that actually have a matching outside card. Find
+    # positions beside the original text without covering any OCR region, an
+    # in-page translation or another marker. The bounded search is deterministic.
+    forbidden = np.zeros((height, width), dtype=np.uint8)
+    for record in records:
+        forbidden = cv2.bitwise_or(forbidden, record["region"])
+    for box, _ in placements:
+        x0, y0, x1, y1 = box
+        forbidden[y0:y1, x0:x1] = 255
+    for box, _, _, _, _ in near:
+        x0, y0, x1, y1 = box
+        forbidden[y0:y1, x0:x1] = 255
+    forbidden[np.asarray(alpha) == 0] = 255
+    forbidden = cv2.dilate(forbidden, np.ones((3, 3), dtype=np.uint8))
+    marker_integral = cv2.integral((forbidden != 0).astype(np.uint8), sdepth=cv2.CV_32S)
+    marker_width, marker_height = 26, 22
+    marker_boxes = []
+    marker_for = {}
+    outside_indices = sorted(side_indices | {item[0] for item in panel_items})
+    for index in outside_indices:
+        x0, y0, x1, y1 = records[index]["box"]
+        cx = (x0 + x1) // 2 - marker_width // 2
+        cy = (y0 + y1) // 2 - marker_height // 2
+        candidates = []
+        for delta in (0, 26, -26, 52, -52, 78, -78, 104, -104):
+            candidates.extend(((cx + delta, y0 - marker_height - 4),
+                               (cx + delta, y1 + 4),
+                               (x0 - marker_width - 4, cy + delta),
+                               (x1 + 4, cy + delta)))
+        for x, y in candidates:
+            right, bottom = x + marker_width, y + marker_height
+            if x < 0 or y < 0 or right > width or bottom > height:
+                continue
+            if marker_integral[bottom, right] - marker_integral[y, right] - marker_integral[bottom, x] + marker_integral[y, x]:
+                continue
+            box = (x, y, right, bottom)
+            if any(_overlaps(box, old) for old in marker_boxes):
+                continue
+            marker_for[index] = box
+            marker_boxes.append(box)
+            break
+    panel_height = 12 + sum(item[2] for item in panel_items)
+    number_for = {index: number for number, index in enumerate(sorted(marker_for), 1)}
+    marker_font = ImageFont.truetype(str(font), 13)
+    def draw_badge(draw, left, top, label):
+        draw.rounded_rectangle((left, top, left + marker_width - 1, top + marker_height - 1), radius=7,
+                               fill=(201, 25, 58, 255), outline=(75, 0, 17, 255), width=2)
+        label = str(label)
+        bounds = draw.textbbox((0, 0), label, font=marker_font, stroke_width=0)
+        x = left + (marker_width - (bounds[2] - bounds[0])) / 2 - bounds[0]
+        y = top + (marker_height - (bounds[3] - bounds[1])) / 2 - bounds[1]
+        draw.text((x, y), label, font=marker_font, fill=(255, 255, 255, 255))
+    marker_draw = ImageDraw.Draw(result_image)
+    for index, box in marker_for.items():
+        draw_badge(marker_draw, box[0], box[1], number_for[index])
     fallback = len(panel_items) + len(side_items)
     if not active and not near and not fallback:
         raise ValueError("No text blocks could be rendered safely")
@@ -457,20 +513,30 @@ def render(source, blocks, output, font):
         for side, y, index, lines, item_height in side_items:
             sx = 0 if side == "left" else left_pad + width
             # Number and original coordinates serve as an unambiguous pointer.
-            source_x, source_y, _, _ = records[index]["box"]
             canvas_draw.rectangle((sx + 4, y, sx + side_width - 5, y + item_height - 1),
                                   outline=(185, 185, 185, 255), width=1)
-            prefix = f"#{index + 1}  {'→' if side == 'left' else '←'} ({source_x}, {source_y})"
             yy = y + 6
-            canvas_draw.text((sx + 12, yy), prefix, font=panel_font, fill=(70, 70, 70, 255))
+            if index in number_for:
+                draw_badge(canvas_draw, sx + 12, yy, number_for[index])
+                canvas_draw.text((sx + 44, yy), '→' if side == 'left' else '←', font=panel_font, fill=(70, 70, 70, 255))
+            else:
+                source_x, source_y, _, _ = records[index]["box"]
+                canvas_draw.text((sx + 12, yy), f"({source_x}, {source_y})", font=panel_font, fill=(70, 70, 70, 255))
             yy += line_height
             for line in lines:
                 canvas_draw.text((sx + 12, yy), line, font=panel_font, fill=(0, 0, 0, 255))
                 yy += line_height
         y = height + 12
-        for lines in panel_items:
-            for line in lines:
-                canvas_draw.text((12, y), line, font=panel_font, fill=(0, 0, 0, 255))
+        for index, lines, _ in panel_items:
+            source_x, source_y, _, _ = records[index]["box"]
+            prefix = f"#000 ({source_x}, {source_y}): "
+            if index in number_for:
+                draw_badge(canvas_draw, 12, y, number_for[index])
+                lines = [lines[0].removeprefix(prefix), *lines[1:]]
+            else:
+                lines = [lines[0].removeprefix("#000 "), *lines[1:]]
+            for line_index, line in enumerate(lines):
+                canvas_draw.text((44 if index in number_for and line_index == 0 else 12, y), line, font=panel_font, fill=(0, 0, 0, 255))
                 y += line_height
             y += 10
         result_image = canvas

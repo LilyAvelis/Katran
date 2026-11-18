@@ -14,6 +14,9 @@ function Get-KatranSources([string]$Root) {
         $files += @((Get-Item -LiteralPath (Join-Path $crateRoot 'Cargo.toml'),(Join-Path $crateRoot 'LICENSE')).FullName)
         $files += @(Get-ChildItem -LiteralPath (Join-Path $crateRoot 'src') -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName.Substring($crateRoot.Length + 1) -notmatch '(^|[\\/])(target|build)[\\/]' } | ForEach-Object FullName)
     }
+    $collectionCrate = Join-Path $Root 'crates/baloh-collection'
+    $files += (Get-Item -LiteralPath (Join-Path $collectionCrate 'Cargo.toml')).FullName
+    $files += @(Get-ChildItem -LiteralPath (Join-Path $collectionCrate 'src') -Recurse -File -Filter '*.rs' | ForEach-Object FullName)
     if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
     if (Test-Path -LiteralPath $imageUpscaleWorker) { $files += $imageUpscaleWorker }
     $translationScripts = Join-Path $Root 'scripts/image-translate'
