@@ -51,4 +51,4 @@ requires the exact build's component/license/source compliance review.
 Afio Rust/egui integration informed this adapter; Afio project code is MIT.
 '@ | Set-Content -LiteralPath (Join-Path $OutputDirectory 'LIBMPV-NOTICE.txt') -Encoding utf8
 Write-Output "Video player installed and hash-verified: $destination"
-Write-Output 'Restart Katran after placing the DLL next to katran-ui.exe.'
+Write-Output 'Restart Katran to use the installed video player.'

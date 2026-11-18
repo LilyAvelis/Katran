@@ -64,6 +64,8 @@ recycle stages are cleaned up automatically.
 Video entries in BULL and BS play with the usual Katran video controls.
 Page turns and closing the viewer stop playback and release the temporary
 video file.
+Versioned Raycast builds find the shared video player installed by the
+local setup script.
 
 ## Local follow-up · Google Lens
 

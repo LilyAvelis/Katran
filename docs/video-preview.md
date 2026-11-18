@@ -129,14 +129,17 @@ desktop automation. No personal media or Clipboard is used in fixtures.
 
 ## Optional runtime
 
-Windows x64 uses Afio's pinned build20261107-git-9028187538. Load only an absolute
-KATRAN_MPV_DLL override or libmpv-2.dll next to katran-ui.exe. Exact SHA256 is
+Windows x64 uses Afio's pinned build20261107-git-9028187538. Discovery checks
+an absolute `KATRAN_MPV_DLL` override, then the DLL beside the executable,
+then the shared `runtime/components/mpv-20261107` component for launcher
+versions. Exact SHA256 is
 verified under a read handle denying replacement; native dependency lookup is
 restricted to its directory and System32, without PATH/CWD engine discovery.
 Scripts/configuration and reference autoloading are disabled for local playback.
 
-Install through a visible terminal:
-`./scripts/setup-video-player.ps1 -OutputDirectory 'C:/Katran/runtime/versions/current-id'`.
+Install the shared component through a visible terminal with
+`./scripts/setup-video-player.ps1`. For a standalone executable, use
+`-OutputDirectory` to place the DLL in the executable's directory.
 Pass a directory, not an executable filename. The script downloads the pinned
 approximately30MiB archive, checks it and the extracted approximately116MiB DLL,
 and saves a receipt/notice. An explicit -Archive can reuse verified cached bytes.

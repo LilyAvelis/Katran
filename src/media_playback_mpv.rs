@@ -30,6 +30,8 @@ use std::{
 };
 
 const DLL_SHA256: &str = "c91949577ae9cc2d500208da51f2c4a24cfa7a02d0ce6e130bf67ec738b450bb";
+const DLL_NAME: &str = "libmpv-2.dll";
+const PLAYER_COMPONENT: &str = "mpv-20261107";
 type Handle = *mut c_void;
 #[repr(C)]
 struct Param {
@@ -242,19 +244,58 @@ impl MpvBackend {
 }
 
 fn library_path() -> Result<PathBuf> {
-    let path = match std::env::var_os("KATRAN_MPV_DLL") {
-        Some(p) => PathBuf::from(p),
-        None => std::env::current_exe()
-            .map_err(|e| err("media_unavailable", e))?
-            .with_file_name("libmpv-2.dll"),
-    };
-    if !path.is_absolute() {
-        return Err(err(
-            "media_unavailable",
-            "The video engine path must be absolute",
-        ));
+    let exe = std::env::current_exe().map_err(|e| err("media_unavailable", e))?;
+    resolve_library_path(&exe, std::env::var_os("KATRAN_MPV_DLL").map(PathBuf::from))
+}
+
+fn resolve_library_path(exe: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return if path.is_absolute() {
+            Ok(path)
+        } else {
+            Err(err(
+                "media_unavailable",
+                "The video engine path must be absolute",
+            ))
+        };
     }
-    Ok(path)
+
+    let sibling = exe.with_file_name(DLL_NAME);
+    if !matches!(std::fs::symlink_metadata(&sibling), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Ok(sibling);
+    }
+    if let Some(shared) = installed_player_path(exe)
+        && !matches!(std::fs::symlink_metadata(&shared), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Ok(shared);
+    }
+    Err(err(
+        "media_unavailable",
+        "Video engine is missing. Run scripts/setup-video-player.ps1 to install it.",
+    ))
+}
+
+/// The stable launcher runs runtime/versions/<id>/katran-ui.exe. The
+/// separately installed component lives outside those immutable versions.
+fn installed_player_path(exe: &Path) -> Option<PathBuf> {
+    let version = exe.parent()?;
+    let id = version.file_name()?.to_str()?;
+    let versions = version.parent()?;
+    let runtime = versions.parent()?;
+    if id.len() != 12
+        || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || versions.file_name()? != "versions"
+        || runtime.file_name()? != "runtime"
+    {
+        return None;
+    }
+    Some(
+        runtime
+            .join("components")
+            .join(PLAYER_COMPONENT)
+            .join(DLL_NAME),
+    )
 }
 impl Backend for MpvBackend {
     fn open(&mut self, source: Source) -> Result<()> {
@@ -1246,6 +1287,38 @@ fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_engine_resolves_shared_player_for_launcher_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = root.path().join("runtime");
+        let exe = runtime.join("versions/012345abcdef/katran-ui.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        assert_eq!(
+            resolve_library_path(&exe, None).unwrap_err().code,
+            "media_unavailable"
+        );
+
+        let shared = runtime
+            .join("components")
+            .join(PLAYER_COMPONENT)
+            .join(DLL_NAME);
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        std::fs::write(&shared, b"resolver fixture").unwrap();
+        assert_eq!(resolve_library_path(&exe, None).unwrap(), shared);
+        let other_exe = runtime.join("versions/unrecognized/katran-ui.exe");
+        assert!(resolve_library_path(&other_exe, None).is_err());
+
+        let sibling = exe.with_file_name(DLL_NAME);
+        std::fs::write(&sibling, b"resolver fixture").unwrap();
+        assert_eq!(resolve_library_path(&exe, None).unwrap(), sibling);
+        let explicit = root.path().join("custom.dll");
+        assert_eq!(
+            resolve_library_path(&exe, Some(explicit.clone())).unwrap(),
+            explicit
+        );
+        assert!(resolve_library_path(&exe, Some(DLL_NAME.into())).is_err());
+    }
     #[test]
     #[ignore = "requires full-resolution synthetic fixture and real GPU"]
     fn synthetic_mpv_current_frame_capture() {
