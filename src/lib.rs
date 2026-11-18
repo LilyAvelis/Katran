@@ -1001,6 +1001,25 @@ impl Service {
                 Ok(serde_json::json!({"recorded": true}))
             }
             Command::CopyNotionPageFields { pages } => self.copy_notion_page_fields(&pages),
+            Command::CopyNotionReaderSelection { text } => {
+                if text.contains('\0') {
+                    return Err(ApiError::new("invalid_text", "Clipboard text contains NUL"));
+                }
+                let prepared = text_fragments::prepare(
+                    &self.root, self.quota, &text, "notion_reader", &self.ingest_origin,
+                    &self.reference_paths()?,
+                )?;
+                let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
+                match self.publish_text_result(serde_json::json!({
+                    "merged": true, "text": text, "items": [{"id": id}]
+                })) {
+                    Ok(mut reply) => {
+                        reply["saved_id"] = serde_json::json!(id);
+                        Ok(reply)
+                    }
+                    Err(error) => Ok(serde_json::json!({"saved_id":id,"text_copied":false,"clipboard_error":error.message})),
+                }
+            }
             Command::OpenNotionPage { page } => {
                 let url = page.browser_url()?;
                 {

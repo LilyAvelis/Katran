@@ -826,8 +826,8 @@ fn commit_blob_in(
             "text_fragments"
         };
         let existing: Option<i64> = tx.query_row(
-            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
-            params![prepared.hash, content], |row| row.get(0),
+            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 AND (NOT ?3 OR (e.source='notion_reader')=?4) AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
+            params![prepared.hash, content, prepared.is_pod(), prepared.source == "notion_reader"], |row| row.get(0),
         ).optional()?;
         if let Some(id) = existing {
             return Ok(id);

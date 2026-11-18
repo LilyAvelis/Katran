@@ -492,6 +492,16 @@ impl Shelf {
     }
 
     pub(crate) fn show_notion_folder_reader(&mut self, ui: &mut egui::Ui) {
+        if !self.modal_owns_input() && !super::search_or_text_edit_focused(ui.ctx()) {
+            if ui.ctx().data_mut(|data| {
+                data.remove_temp::<bool>(egui::Id::new("notion-reader-copy-request"))
+            }) == Some(true)
+            {
+                ui.ctx()
+                    .input_mut(|input| input.events.push(egui::Event::Copy));
+            }
+            super::notion_ui::arm_reader_copy(ui.ctx());
+        }
         let Some(database) = self.workspace.database.as_ref() else {
             return;
         };
@@ -573,6 +583,20 @@ impl Shelf {
             && self.state["preview"]
                 .as_i64()
                 .is_some_and(katran::notion::is_folder_page_id)
+    }
+
+    pub(crate) fn save_notion_reader_copy(&mut self, ctx: &egui::Context) {
+        let text =
+            ctx.data_mut(|data| data.remove_temp::<String>(egui::Id::new("notion-reader-copied")));
+        if let Some(text) = text {
+            let reply = self.call(Command::CopyNotionReaderSelection { text });
+            if reply["text_copied"] == true {
+                self.message =
+                    tr("Скопировано и сохранено в Text", "Copied and saved in Text").into();
+            } else if let Some(error) = reply["clipboard_error"].as_str() {
+                self.message = format!("{} · {error}", tr("Сохранено в Text", "Saved in Text"));
+            }
+        }
     }
 
     pub(crate) fn notion_reader_controls_open(&self) -> bool {
@@ -888,6 +912,11 @@ impl Shelf {
             "preview" | "quicklook" => self.state = self.call(Command::TogglePreview),
             "select_all" => self.state = self.call(Command::SelectAll),
             "refresh" => self.refresh_notion_database(),
+            "copy" if self.notion_reader_active() => {
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::new("notion-reader-copy-request"), true)
+                });
+            }
             "copy" => self.copy_notion_database_fields(),
             "open" | "paste_previous" => {
                 if let Some(page) = self.current_notion_page() {
@@ -1011,6 +1040,50 @@ mod tests {
             *self.0.lock().unwrap() = text.to_owned();
             Ok(1)
         }
+    }
+
+    #[test]
+    fn notion_reader_selection_is_published_and_saved_as_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let clipboard = Arc::new(Mutex::new(String::new()));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_text_clipboard_sink(Box::new(Clipboard(clipboard.clone())));
+        let ctx = egui::Context::default();
+        let text = "docs/README.md 👩🏽‍💻";
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new("notion-reader-copied"), text.to_owned())
+        });
+        app.save_notion_reader_copy(&ctx);
+        assert_eq!(*clipboard.lock().unwrap(), text);
+        let events = app.call(Command::SearchPage {
+            query: String::new(),
+            limit: 20,
+            after_id: None,
+        });
+        assert!(
+            events["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| event["kind"] == "text_fragment" && event["text_preview"] == text)
+        );
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Pods,
+            enabled: true,
+        });
+        let pod = app.call(Command::IngestText {
+            text: "🐄".into(),
+            source: "fixture".into(),
+        });
+        assert!(pod["id"].is_i64());
+        let copy = app.call(Command::CopyNotionReaderSelection {
+            text: "🐄".into()
+        });
+        assert!(copy["saved_id"].is_i64());
+        assert_ne!(copy["saved_id"], pod["id"]);
     }
 
     #[test]

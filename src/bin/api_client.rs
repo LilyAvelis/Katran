@@ -1197,6 +1197,7 @@ impl Shelf {
                 let label = match action["id"].as_str() {
                     Some("sort_arrival") => tr("По дате создания · новые сначала", "By creation date · newest first"),
                     Some("sort_arrival_reverse") => tr("По дате создания · старые сначала", "By creation date · oldest first"),
+                    Some("copy") if self.notion_reader_active() => tr("Скопировать выделенный текст", "Copy selected text"),
                     Some("copy") => tr("Скопировать свойства страниц", "Copy page properties"),
                     Some("paste_previous") => tr("Приложить текущую страницу как Markdown", "Attach current page as Markdown"),
                     Some("open") => tr("Открыть текущую страницу в Notion", "Open current page in Notion"),

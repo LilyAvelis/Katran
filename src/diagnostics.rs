@@ -237,6 +237,7 @@ pub fn summarize_command(command: &crate::Command) -> Value {
         crate::Command::SetNotionToken { .. } => json!({"type":"set_notion_token"}),
         crate::Command::ReadNotionPage { .. } => json!({"type":"read_notion_page"}),
         crate::Command::CopyNotionPageFields { .. } => json!({"type":"copy_notion_page_fields"}),
+        crate::Command::CopyNotionReaderSelection { .. } => json!({"type":"copy_notion_reader_selection"}),
         crate::Command::PrepareNotionPagesDrag { .. } => json!({"type":"prepare_notion_pages_drag"}),
         crate::Command::RecordNotionDatabaseVisit { .. } => json!({"type":"record_notion_database_visit"}),
         crate::Command::ToggleNotionDatabaseFavorite { .. } => json!({"type":"toggle_notion_database_favorite"}),

@@ -12,6 +12,7 @@ pub(super) fn show_reader_scaled(
     reader::show_scaled(ui, blocks, scale, emoji);
 }
 
+pub(super) use reader::arm_copy as arm_reader_copy;
 pub(super) use reader::label as reader_label;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -698,6 +699,7 @@ impl Shelf {
                     .max_height(max_height)
                     .show(ui, |ui| {
                         if state.preview_open {
+                            reader::arm_copy(ui.ctx());
                             if let Some(item) = results.get(state.selected) {
                                 let font = egui::TextStyle::Heading.resolve(ui.style());
                                 reader::label(ui, &mut self.pods_ui, &item.page.title, font);

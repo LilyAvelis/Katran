@@ -254,6 +254,7 @@ pub enum Command {
     CopyNotionPageFields {
         pages: Vec<NotionPageFields>,
     },
+    CopyNotionReaderSelection { text: String },
     PrepareNotionPagesDrag {
         pages: Vec<crate::notion::Page>,
     },

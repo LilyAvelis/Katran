@@ -89,6 +89,7 @@ impl Reader {
             "i" => "i",
             "s" => "s",
             "u" => "u",
+            "code" => "code",
             "span" => "span",
             "mention" => "mention",
             "br" => {
@@ -178,6 +179,7 @@ impl Reader {
             "i" => self.style.italic = true,
             "s" => self.style.strike = true,
             "u" => self.style.underline = true,
+            "code" => self.style.code = true,
             "mention" => self.style.link = true,
             "span" => {
                 if let Some(color) = crate::notion_reader::attribute(&inner[name.len()..], "color")
@@ -321,6 +323,24 @@ pub fn parse(source: &str) -> Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notion_code_tag_marks_only_the_inline_span() {
+        let document = parse("before <code>docs/README.md</code> after");
+        let runs = &document.lines[0].runs;
+        assert_eq!(
+            runs.iter()
+                .filter(|run| run.style.code)
+                .map(|run| run.text.as_str())
+                .collect::<Vec<_>>(),
+            ["docs/README.md"]
+        );
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "before docs/README.md after"
+        );
+        assert!(!document.lines[0].code);
+    }
 
     #[test]
     fn notion_inline_styles_are_native_and_escaped_tags_stay_literal() {

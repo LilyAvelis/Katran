@@ -500,7 +500,7 @@ fn slice_projection(
         ShelfTab::Screenshots => "e.source='sharex'".into(),
         ShelfTab::Downloads => "e.source='downloads'".into(),
         ShelfTab::Text => text_shelf_predicate().into(),
-        ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
+        ShelfTab::Pods => pods_shelf_predicate().into(),
         ShelfTab::Files => files_shelf_predicate().into(),
         ShelfTab::Desktop => "0".into(),
         ShelfTab::Translate => translated_image_predicate(),
@@ -555,7 +555,7 @@ fn projection_sql(
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Pods {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE t.event_id=e.id AND katran_is_pod(c.content)=1)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", pods_shelf_predicate()));
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Files {
@@ -629,7 +629,11 @@ pub(crate) fn files_shelf_predicate() -> &'static str {
 }
 
 pub(crate) fn text_shelf_predicate() -> &'static str {
-    "(EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=0) OR (e.blob_hash IS NOT NULL AND e.source='text_collection' AND lower(substr(e.name,-5))='.bull'))"
+    "(EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND (e.source='notion_reader' OR katran_is_pod(c.content)=0)) OR (e.blob_hash IS NOT NULL AND e.source='text_collection' AND lower(substr(e.name,-5))='.bull'))"
+}
+
+pub(crate) fn pods_shelf_predicate() -> &'static str {
+    "(e.source<>'notion_reader' AND EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1))"
 }
 
 /// Ordinary image collections share the Images shelf, but remain managed blobs.

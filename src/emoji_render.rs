@@ -12,17 +12,39 @@ const MAX_HEIGHT: u32 = 256;
 
 /// Recognizes the same Unicode emoji sequences as the Pods catalogue.
 pub fn is_emoji_sequence(text: &str) -> bool {
-    use std::{collections::HashSet, sync::OnceLock};
-    static EMOJI: OnceLock<HashSet<&str>> = OnceLock::new();
-    !text.is_ascii()
-        && EMOJI
-            .get_or_init(|| {
-                crate::pod_metadata::emoji_entries()
-                    .iter()
-                    .map(|entry| entry.text.as_str())
-                    .collect()
-            })
-            .contains(text)
+    emoji_placeholder(text).is_some()
+}
+
+const EMOJI_PLACEHOLDER_START: u32 = 0xF0000;
+
+pub fn emoji_placeholder(text: &str) -> Option<char> {
+    use std::{collections::HashMap, sync::OnceLock};
+    static EMOJI: OnceLock<HashMap<&str, char>> = OnceLock::new();
+    if text.is_ascii() {
+        return None;
+    }
+    EMOJI
+        .get_or_init(|| {
+            crate::pod_metadata::emoji_entries()
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    (
+                        entry.text.as_str(),
+                        char::from_u32(EMOJI_PLACEHOLDER_START + index as u32).unwrap(),
+                    )
+                })
+                .collect()
+        })
+        .get(text)
+        .copied()
+}
+
+pub fn emoji_from_placeholder(ch: char) -> Option<&'static str> {
+    let index = (ch as u32).checked_sub(EMOJI_PLACEHOLDER_START)? as usize;
+    crate::pod_metadata::emoji_entries()
+        .get(index)
+        .map(|entry| entry.text.as_str())
 }
 
 pub fn render(text: &str, size: f32) -> Result<Rendered, String> {

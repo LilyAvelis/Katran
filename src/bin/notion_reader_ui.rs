@@ -6,6 +6,55 @@ use katran::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+#[derive(Default)]
+pub(crate) struct ReaderCopy;
+
+impl egui::Plugin for ReaderCopy {
+    fn debug_name(&self) -> &'static str {
+        "Notion reader copy"
+    }
+
+    fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
+        let armed = egui::Id::new(("notion-reader-copy-armed", ctx.viewport_id()));
+        if ctx.data_mut(|data| data.remove_temp::<bool>(armed)) != Some(true) {
+            return;
+        }
+        let mut copied = None;
+        output.platform_output.commands.retain(|command| {
+            if let egui::OutputCommand::CopyText(text) = command {
+                copied = Some(text.chars().fold(String::new(), |mut decoded, ch| {
+                    if let Some(emoji) = katran::emoji_render::emoji_from_placeholder(ch) {
+                        decoded.push_str(emoji);
+                    } else {
+                        decoded.push(ch);
+                    }
+                    decoded
+                }));
+                false
+            } else {
+                true
+            }
+        });
+        if let Some(text) = copied {
+            ctx.data_mut(|data| data.insert_temp(egui::Id::new("notion-reader-copied"), text));
+            ctx.request_repaint();
+        }
+    }
+}
+
+pub(crate) fn arm_copy(ctx: &egui::Context) {
+    if ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Copy))
+    }) {
+        let _ = ctx.plugin_or_default::<ReaderCopy>();
+        let armed = egui::Id::new(("notion-reader-copy-armed", ctx.viewport_id()));
+        ctx.data_mut(|data| data.insert_temp(armed, true));
+    }
+}
+
 #[cfg(test)]
 pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
     show_scaled(ui, blocks, 1.0, &mut EmojiCache::default());
@@ -158,15 +207,15 @@ impl<'a> InlineLine<'a> {
         }
         let mut start = 0;
         for (offset, cluster) in text.grapheme_indices(true) {
-            if !katran::emoji_render::is_emoji_sequence(cluster) {
+            let Some(placeholder) = katran::emoji_render::emoji_placeholder(cluster) else {
                 continue;
-            }
+            };
             let plain = &text[start..offset];
             self.job.append(plain, 0.0, format.clone());
             self.chars += plain.chars().count();
             self.emojis.push((self.chars, cluster, format.font_id.size));
             self.job.append(
-                "■",
+                &placeholder.to_string(),
                 0.0,
                 egui::TextFormat {
                     color: Color32::TRANSPARENT,
@@ -195,9 +244,15 @@ impl<'a> InlineLine<'a> {
         if self.emojis.is_empty() {
             return ui.add(label);
         }
-        let (pos, galley, response) = label.selectable(false).layout_in_ui(ui);
-        ui.painter()
-            .galley(pos, galley.clone(), ui.visuals().text_color());
+        let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
+        egui::text_selection::LabelSelectionState::label_text_selection(
+            ui,
+            &response,
+            pos,
+            galley.clone(),
+            ui.visuals().text_color(),
+            Stroke::NONE,
+        );
         visit_emoji_slots(&galley, pos, self.emojis, |cluster, rect, size| {
             emoji.paint_inline(ui, cluster, rect, size);
         });
@@ -252,18 +307,23 @@ fn show_document(
                     0 => 15.0,
                     level => 26.0 - f32::from(level) * 1.6,
                 } * scale;
-                let color = style.color.as_deref().map_or_else(
-                    || {
-                        if style.link {
-                            Color32::from_rgb(153, 198, 240)
-                        } else if header || style.bold {
-                            Color32::WHITE
-                        } else {
-                            Color32::from_gray(228)
-                        }
-                    },
-                    callout_color_for_text,
-                );
+                let inline_code = style.code && !line.code;
+                let color = if inline_code {
+                    Color32::from_rgb(247, 125, 116)
+                } else {
+                    style.color.as_deref().map_or_else(
+                        || {
+                            if style.link {
+                                Color32::from_rgb(153, 198, 240)
+                            } else if header || style.bold {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_gray(228)
+                            }
+                        },
+                        callout_color_for_text,
+                    )
+                };
                 let underline = if style.underline || style.link {
                     Stroke::new(1.0, color)
                 } else {
@@ -283,13 +343,17 @@ fn show_document(
                             egui::FontId::proportional(size)
                         },
                         color,
-                        background: style
-                            .color
-                            .as_deref()
-                            .filter(|color| color.ends_with("_bg"))
-                            .map_or(Color32::TRANSPARENT, |color| {
-                                callout_color(Some(color)).gamma_multiply(0.32)
-                            }),
+                        background: if inline_code {
+                            Color32::from_gray(44)
+                        } else {
+                            style
+                                .color
+                                .as_deref()
+                                .filter(|color| color.ends_with("_bg"))
+                                .map_or(Color32::TRANSPARENT, |color| {
+                                    callout_color(Some(color)).gamma_multiply(0.32)
+                                })
+                        },
                         italics: style.italic,
                         underline,
                         strikethrough: if style.strike {
@@ -389,6 +453,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reader_copy_expands_emoji_and_owns_only_armed_output() {
+        let ctx = egui::Context::default();
+        let marker = katran::emoji_render::emoji_placeholder("👩🏽‍💻").unwrap();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Copy],
+                ..Default::default()
+            },
+            |ui| {
+                arm_copy(ui.ctx());
+                ui.copy_text(format!("code {marker}"));
+            },
+        );
+        output.textures_delta.clear();
+        assert!(
+            output
+                .platform_output
+                .commands
+                .iter()
+                .all(|command| !matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        assert_eq!(
+            ctx.data_mut(|data| data.remove_temp::<String>(egui::Id::new("notion-reader-copied")))
+                .as_deref(),
+            Some("code 👩🏽‍💻")
+        );
+    }
+
+    #[test]
     fn wrapped_emoji_slots_keep_whole_sequences_and_text_punctuation() {
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -396,7 +489,14 @@ mod tests {
             let format = egui::TextFormat::simple(egui::FontId::proportional(16.0), Color32::WHITE);
             line.append("© 2026 🐄\n", format.clone());
             line.append("Longer second line with a flag 🇰🇿 and 👩🏽‍💻", format);
-            assert_eq!(line.job.text.matches('■').count(), 3);
+            assert_eq!(
+                line.job
+                    .text
+                    .chars()
+                    .filter(|ch| katran::emoji_render::emoji_from_placeholder(*ch).is_some())
+                    .count(),
+                3
+            );
             assert!(line.job.text.starts_with("© 2026"));
             line.job.wrap.max_width = 108.0;
             let galley = ui.fonts_mut(|fonts| fonts.layout_job(line.job));

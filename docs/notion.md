@@ -73,6 +73,9 @@ without changing the column width. These preferences carry across pages.
 The reader uses the emoji font selected in Katran for inline color emoji.
 Compound emoji share one position in the text, and Markdown exports retain
 the original Unicode characters.
+Notion inline code is highlighted in red on a dark background. In the reader,
+select text with the mouse and press **Ctrl+C** to copy it to the clipboard and
+save the selection in Text. In the database list, **Ctrl+C** copies row properties.
 
 Rows load in groups of 30. Press **↓** at the last row or use **Load more**.
 The default order comes from Notion's data source API. The standard sorting

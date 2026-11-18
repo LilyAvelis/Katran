@@ -782,6 +782,7 @@ impl Shelf {
     }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        self.save_notion_reader_copy(&ctx);
         if self.transfer_input_reserved() {
             root.disable();
         }
@@ -1255,6 +1256,7 @@ impl Shelf {
                                     | "collection_fullscreen"
                             )
                             && (!self.open_apps.open || s.id == "open_with")
+                            && (s.id != "copy" || !self.notion_reader_active())
                             && (s.id != "toggle_pinned_view"
                                 || (self.state["preview"].is_null()
                                     && !ctx.egui_wants_keyboard_input()
