@@ -12,6 +12,8 @@ struct Data {
     fail_open: bool,
     duration: Option<u64>,
     frame: Option<Frame>,
+    ready: bool,
+    step_pending: bool,
 }
 struct Fake(Arc<Mutex<Data>>);
 fn error(code: &str) -> ApiError {
@@ -37,15 +39,20 @@ impl Backend for Fake {
     fn snapshot(&mut self) -> Result<Snapshot> {
         let d = self.0.lock().unwrap();
         Ok(Snapshot {
-            state: PlaybackState::Loading,
+            state: if d.ready {
+                PlaybackState::Paused
+            } else {
+                PlaybackState::Loading
+            },
             duration_ms: d.duration,
             position_ms: 0,
             volume: 0.5,
             has_audio: true,
-            width: 0,
-            height: 0,
+            width: u32::from(d.ready),
+            height: u32::from(d.ready),
             error: None,
             acceleration: None,
+            step_pending: d.step_pending,
         })
     }
     fn frame(&mut self, _: u64) -> Result<Option<Frame>> {
@@ -66,6 +73,47 @@ fn source(path: &str) -> Source {
     Source {
         path: PathBuf::from(path),
     }
+}
+#[test]
+fn frame_steps_require_ready_current_session_and_do_not_queue_while_busy() {
+    let data = Arc::new(Mutex::new(Data::default()));
+    let mut player = Player::new(Box::new(Fake(data.clone())));
+    let token = player.open(identity(1), source("a")).unwrap().token;
+    assert_eq!(
+        player
+            .control(token, Action::StepFrame { backwards: false })
+            .unwrap_err()
+            .code,
+        "media_step_unavailable"
+    );
+    data.lock().unwrap().ready = true;
+    player
+        .control(token, Action::StepFrame { backwards: false })
+        .unwrap();
+    data.lock().unwrap().step_pending = true;
+    assert_eq!(
+        player
+            .control(token, Action::StepFrame { backwards: true })
+            .unwrap_err()
+            .code,
+        "media_step_busy"
+    );
+    let actions = data
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .filter(|c| c.starts_with("control:"))
+        .count();
+    assert_eq!(actions, 1);
+    player.close();
+    assert_eq!(
+        player
+            .control(token, Action::StepFrame { backwards: false })
+            .unwrap_err()
+            .code,
+        "stale_media_session"
+    );
 }
 #[test]
 fn replacement_closes_previous_before_attempt_and_failure_never_resurrects_it() {

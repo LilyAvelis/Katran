@@ -16,6 +16,11 @@ GPU video acceleration defaults off, exposes actual renderer/decoder status and
 falls back to CPU when GPU initialization fails. The GL path still reads bounded
 RGBA through CPU memory; no zero-copy or measured speedup is claimed.
 
+Owner accepted GPU/P/seek/layout. The next local follow-up adds Ctrl/Shift arrows
+for1s/10s seeks and Alt arrows for native paused frame stepping with bounded hold.
+One step is confirmed before the next; release/input ownership changes cancel
+repeat. Decoder/reverse seek limits prevent a guaranteed monitor-Hz rate.
+
 Local 2026-11-18 follow-up: [Tags sorting](../patch-3.8/TAG-SORT.md) is comma then
 Slash, current tag order with untagged last; custom pinned order remains separate.
 [Image refresh correction](../patch-3.8/TAG-EDITOR-UX.md) now also covers rename,

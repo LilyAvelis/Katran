@@ -16,6 +16,11 @@ is CPU. Changing the setting closes existing sessions and invalidates prepared
 opens. P input is owned by the active video surface before shelf search; modals
 and text fields keep input. UI seek keeps its desired position until native
 observation rather than treating an asynchronous command ACK as completion.
+Video modified arrows are routed before shelf navigation only on an active video
+surface. StepFrame{backwards} extends ControlMedia; step_pending prevents a second
+in-flight step. Native pause/step completion binds observed position and frame;
+GUI hold additionally waits for a new uploaded serial. Never implement frame
+stepping by dividing time by guessed FPS or enqueue unrestricted key repeats.
 
 Build/test outputs belong in `target/build`. Read the [storage budget](devops.md)
 before cleanup: `maintain-build-cache.ps1` plans by default, `-Apply` uses guarded

@@ -170,6 +170,7 @@ fn empty() -> Snapshot {
         height: 0,
         error: None,
         acceleration: None,
+        step_pending: false,
     }
 }
 struct Shared {
@@ -285,7 +286,16 @@ impl Backend for MpvBackend {
             return Ok(());
         }
         if let Some(s) = &self.shared {
-            s.lock().map_err(|e| err("media_unavailable", e))?.last_poll = Instant::now();
+            let mut s = s.lock().map_err(|e| err("media_unavailable", e))?;
+            s.last_poll = Instant::now();
+            if s.snapshot.step_pending
+                && matches!(
+                    action,
+                    Action::StepFrame { .. } | Action::Play | Action::Seek { .. }
+                )
+            {
+                return Err(err("media_step_busy", "A frame step is already pending"));
+            }
         }
         let tx = self
             .tx
@@ -296,6 +306,9 @@ impl Backend for MpvBackend {
             .map_err(|_| err("media_busy", "Playback worker is busy or stopped"))?;
         match recv.recv_timeout(Duration::from_secs(2)) {
             Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) if e == "media_step_busy" => {
+                Err(err("media_step_busy", "A frame step is already pending"))
+            }
             Ok(Err(e)) => Err(err("media_control_failed", e)),
             Err(e) => {
                 let shared = self.shared.clone();
@@ -386,6 +399,12 @@ fn issue(api: &Api, handle: Handle, parts: &[&str]) -> std::result::Result<(), S
     ptrs.push(std::ptr::null());
     api.check(unsafe { (api.command)(handle, 1, ptrs.as_ptr()) })
 }
+struct PendingStep {
+    backwards: bool,
+    started: Instant,
+    start_ms: Option<u64>,
+    start_serial: u64,
+}
 fn run(
     dll: PathBuf,
     path: String,
@@ -406,6 +425,7 @@ fn run(
     );
     if let Ok(mut s) = shared.lock() {
         s.frame = None;
+        s.snapshot.step_pending = false;
         match result {
             Ok(()) => {
                 s.snapshot.state = PlaybackState::Stopped;
@@ -571,6 +591,7 @@ fn worker(
         let mut paused = true;
         let mut ended = false;
         let mut frame_pending = false;
+        let mut step: Option<PendingStep> = None;
         while !cancel.load(Ordering::Acquire) {
             let expired = shared
                 .lock()
@@ -584,10 +605,34 @@ fn worker(
             if expired {
                 break;
             }
-            match rx.recv_timeout(Duration::from_millis(12)) {
+            match rx.recv_timeout(Duration::from_millis(if step.is_some() { 4 } else { 12 })) {
                 Ok(Command::Close) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Ok(Command::Control(action, reply)) => {
                     let result = match action {
+                        Action::Play if step.is_some() => Err("media_step_busy".into()),
+                        Action::Seek { .. } if step.is_some() => Err("media_step_busy".into()),
+                        Action::StepFrame { .. } if step.is_some() => Err("media_step_busy".into()),
+                        Action::StepFrame { backwards } => {
+                            let mut s = shared.lock().map_err(|_| "Playback state unavailable")?;
+                            if paused
+                                && ((backwards && s.snapshot.position_ms == 0)
+                                    || (!backwards && ended))
+                            {
+                                Ok(())
+                            } else {
+                                let pause = issue(&core.api, handle, &["set", "pause", "yes"]);
+                                if pause.is_ok() {
+                                    s.snapshot.step_pending = true;
+                                    step = Some(PendingStep {
+                                        backwards,
+                                        started: Instant::now(),
+                                        start_ms: None,
+                                        start_serial: serial,
+                                    });
+                                }
+                                pause
+                            }
+                        }
                         Action::Play => issue(&core.api, handle, &["set", "pause", "no"]),
                         Action::Pause => issue(&core.api, handle, &["set", "pause", "yes"]),
                         Action::Seek { position_ms } => issue(
@@ -712,10 +757,54 @@ fn worker(
                 };
                 (s.snapshot.width, s.snapshot.height)
             };
+            if let Some(pending) = step.as_mut() {
+                if pending.start_ms.is_none() && paused {
+                    let mut s = shared.lock().map_err(|_| "Playback state unavailable")?;
+                    let start = s.snapshot.position_ms;
+                    if (pending.backwards && start == 0) || (!pending.backwards && ended) {
+                        s.snapshot.step_pending = false;
+                        step = None;
+                    } else {
+                        issue(
+                            &core.api,
+                            handle,
+                            if pending.backwards {
+                                &["frame-back-step"]
+                            } else {
+                                &["frame-step"]
+                            },
+                        )?;
+                        pending.start_ms = Some(start);
+                        pending.start_serial = serial;
+                    }
+                } else if let Some(start) = pending.start_ms {
+                    let mut s = shared.lock().map_err(|_| "Playback state unavailable")?;
+                    let position = s.snapshot.position_ms;
+                    let moved = if pending.backwards {
+                        position < start
+                    } else {
+                        position > start
+                    };
+                    if paused && moved && serial > pending.start_serial {
+                        s.snapshot.step_pending = false;
+                        step = None;
+                    } else if pending.started.elapsed() > Duration::from_secs(5) {
+                        if (pending.backwards && position == 0) || (!pending.backwards && ended) {
+                            s.snapshot.step_pending = false;
+                            step = None;
+                        } else {
+                            return Err("Frame step was not confirmed".into());
+                        }
+                    }
+                } else if pending.started.elapsed() > Duration::from_secs(5) {
+                    return Err("Pause before frame step was not confirmed".into());
+                }
+            }
             if core.notify.swap(false, Ordering::AcqRel) {
                 frame_pending |= (core.api.render_update)(core.render) & 1 != 0;
             }
-            if !frame_pending || w == 0 || h == 0 || Instant::now() < next_frame {
+            if !frame_pending || w == 0 || h == 0 || (step.is_none() && Instant::now() < next_frame)
+            {
                 continue;
             }
             frame_pending = false;
@@ -800,6 +889,136 @@ fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires 24fps synthetic fixture and real GPU"]
+    fn synthetic_mpv_frame_steps() {
+        let source = PathBuf::from(
+            std::env::var_os("KATRAN_MEDIA_STEP_MP4").expect("24fps synthetic fixture"),
+        );
+        let target = std::fs::canonicalize("target").unwrap();
+        let source = std::fs::canonicalize(source).unwrap();
+        assert!(source.starts_with(&target));
+        let temp = tempfile::tempdir_in(&target).unwrap();
+        let path = temp.path().join("Кадры.mp4");
+        std::fs::copy(source, path.clone()).unwrap();
+        for use_gpu in [false, true] {
+            let mut backend = MpvBackend::with_gpu(use_gpu);
+            backend.open(Source { path: path.clone() }).unwrap();
+            backend.control(Action::SetVolume { volume: 0.0 }).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.duration_ms.is_some() && s.width > 0,
+                "step metadata",
+            );
+            backend.control(Action::Play).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Playing && s.position_ms > 200,
+                "step playback",
+            );
+            backend.control(Action::Pause).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Paused,
+                "step pause",
+            );
+            backend.control(Action::Seek { position_ms: 1000 }).unwrap();
+            wait_for(
+                &mut backend,
+                |s| (900..=1100).contains(&s.position_ms),
+                "step seek",
+            );
+            let before = backend.snapshot().unwrap().position_ms;
+            backend
+                .control(Action::StepFrame { backwards: false })
+                .unwrap();
+            if backend.snapshot().unwrap().step_pending {
+                let error = backend
+                    .control(Action::StepFrame { backwards: false })
+                    .unwrap_err();
+                assert_eq!(error.code, "media_step_busy");
+            }
+            wait_for(&mut backend, |s| !s.step_pending, "forward step");
+            let after = backend.snapshot().unwrap();
+            let delta = after.position_ms.saturating_sub(before);
+            assert!(
+                after.state == PlaybackState::Paused && (20..=85).contains(&delta),
+                "forward {before} -> {after:?}"
+            );
+            let a = after.acceleration.as_ref().unwrap();
+            assert_eq!(
+                a.renderer,
+                if use_gpu { "gpu" } else { "cpu" },
+                "{:?}",
+                a.fallback_reason
+            );
+            backend
+                .control(Action::StepFrame { backwards: true })
+                .unwrap();
+            wait_for(&mut backend, |s| !s.step_pending, "backward step");
+            let back = backend.snapshot().unwrap();
+            let delta = after.position_ms.saturating_sub(back.position_ms);
+            assert!(
+                back.state == PlaybackState::Paused && (20..=85).contains(&delta),
+                "back {} -> {back:?}",
+                after.position_ms
+            );
+            for _ in 0..4 {
+                let before = backend.snapshot().unwrap().position_ms;
+                backend
+                    .control(Action::StepFrame { backwards: false })
+                    .unwrap();
+                wait_for(&mut backend, |s| !s.step_pending, "repeated step");
+                let s = backend.snapshot().unwrap();
+                assert!(
+                    s.position_ms > before && s.position_ms - before <= 85,
+                    "repeat {before} -> {s:?}"
+                );
+            }
+            backend.control(Action::Play).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Playing,
+                "playing before step",
+            );
+            backend
+                .control(Action::StepFrame { backwards: true })
+                .unwrap();
+            wait_for(
+                &mut backend,
+                |s| !s.step_pending && s.state == PlaybackState::Paused,
+                "step pauses active playback",
+            );
+            backend.control(Action::Seek { position_ms: 0 }).unwrap();
+            wait_for(&mut backend, |s| s.position_ms == 0, "start seek");
+            backend
+                .control(Action::StepFrame { backwards: true })
+                .unwrap();
+            assert!(!backend.snapshot().unwrap().step_pending);
+            let duration = backend.snapshot().unwrap().duration_ms.unwrap();
+            backend
+                .control(Action::Seek {
+                    position_ms: duration - 200,
+                })
+                .unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.position_ms >= duration - 500,
+                "end seek",
+            );
+            backend.control(Action::Play).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Ended,
+                "step EOF",
+            );
+            backend
+                .control(Action::StepFrame { backwards: false })
+                .unwrap();
+            wait_for(&mut backend, |s| !s.step_pending, "EOF boundary");
+            backend.close();
+        }
+    }
     #[test]
     #[ignore = "requires pinned KATRAN_MPV_DLL and synthetic target fixtures"]
     fn synthetic_mpv_muted_unicode() {

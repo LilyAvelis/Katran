@@ -139,6 +139,60 @@ fn take_video_pause_key(ctx: &egui::Context) -> bool {
         fresh
     })
 }
+fn video_arrow_modifiers(modifiers: egui::Modifiers) -> bool {
+    !modifiers.mac_cmd
+        && ((modifiers.ctrl && !modifiers.shift && !modifiers.alt)
+            || (!modifiers.ctrl && !modifiers.command && (modifiers.shift ^ modifiers.alt)))
+}
+/// Modified video arrows are consumed before shelf selection/navigation.
+fn take_video_seek_keys(ctx: &egui::Context) -> Option<i64> {
+    ctx.input_mut(|input| {
+        let mut amount = None;
+        input.events.retain(|event| {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            if !matches!(key, egui::Key::ArrowLeft | egui::Key::ArrowRight)
+                || !video_arrow_modifiers(*modifiers)
+            {
+                return true;
+            }
+            if !modifiers.alt {
+                let delta = if modifiers.ctrl { 1000 } else { 10000 };
+                let delta = if *key == egui::Key::ArrowLeft {
+                    -delta
+                } else {
+                    delta
+                };
+                amount = Some(amount.unwrap_or(0i64).saturating_add(delta));
+            }
+            false
+        });
+        amount
+    })
+}
+fn video_frame_hold_direction(ctx: &egui::Context) -> Option<bool> {
+    ctx.input(|input| {
+        let m = input.modifiers;
+        if !input.focused || !m.alt || m.ctrl || m.shift || m.command || m.mac_cmd {
+            return None;
+        }
+        match (
+            input.key_down(egui::Key::ArrowLeft),
+            input.key_down(egui::Key::ArrowRight),
+        ) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
+    })
+}
 fn search_or_text_edit_focused(ctx: &egui::Context) -> bool {
     let focused = ctx.memory(|memory| memory.focused());
     focused.is_some_and(|id| {
@@ -586,7 +640,9 @@ impl Shelf {
             || self.modal_owns_input()
             || self.state["settings_open"] == true
             || search_or_text_edit_focused(ctx)
+            || !ctx.input(|input| input.focused)
         {
+            self.media_preview.cancel_frame_hold();
             return;
         }
         let full = self.state["preview"].as_i64();
@@ -598,20 +654,35 @@ impl Shelf {
         let video = id
             .and_then(|id| self.events.iter().find(|e| e["id"] == id))
             .and_then(|event| media_preview_ui::target(event, &self.state, full.is_some()));
-        if video.is_none() || !take_video_pause_key(ctx) {
+        if video.is_none() {
+            self.media_preview.cancel_frame_hold();
             return;
         }
+        let pause = take_video_pause_key(ctx);
+        let seek = take_video_seek_keys(ctx);
+        let hold = video_frame_hold_direction(ctx);
         self.media_preview_lifecycle(ctx);
         if let Some(api) = self.api.as_mut() {
-            self.media_preview.toggle_pause(&mut |command| {
+            let mut call = |command| {
                 api.execute(Request {
                     api_version: 1,
-                    request_id: "media-ui-pause".into(),
+                    request_id: "media-ui-keys".into(),
                     command,
                 })
-            });
+            };
+            if pause {
+                self.media_preview.cancel_frame_hold();
+                self.media_preview.toggle_pause(&mut call);
+            } else if let Some(delta) = seek {
+                self.media_preview.cancel_frame_hold();
+                self.media_preview.seek_by(delta, &mut call);
+            } else {
+                self.media_preview.handle_frame_hold(ctx, hold, &mut call);
+            }
         }
-        ctx.request_repaint();
+        if pause || seek.is_some() || hold.is_some() {
+            ctx.request_repaint();
+        }
     }
     fn transfer_input_reserved(&self) -> bool {
         self.transfer_busy.as_ref().is_some_and(|busy| busy.active)
@@ -2467,6 +2538,72 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn video_arrow_chords_seek_and_hold_without_consuming_ordinary_navigation() {
+        let ctx = egui::Context::default();
+        let key = |key, modifiers, repeat| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat,
+            modifiers,
+        };
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    key(egui::Key::ArrowRight, egui::Modifiers::CTRL, false),
+                    key(egui::Key::ArrowLeft, egui::Modifiers::SHIFT, true),
+                    key(egui::Key::ArrowRight, egui::Modifiers::ALT, true),
+                    key(egui::Key::ArrowLeft, egui::Modifiers::NONE, false),
+                ],
+                ..Default::default()
+            },
+            |_| {
+                ctx.input_mut(|input| input.modifiers = egui::Modifiers::ALT);
+                assert_eq!(take_video_seek_keys(&ctx), Some(-9000));
+                ctx.input(|input| {
+                    assert_eq!(
+                        input
+                            .events
+                            .iter()
+                            .filter(|e| matches!(e, egui::Event::Key { pressed: true, .. }))
+                            .count(),
+                        1
+                    );
+                });
+                // Both arrows held: no ambiguous frame direction.
+                assert_eq!(video_frame_hold_direction(&ctx), None);
+            },
+        );
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowLeft,
+                    physical_key: Some(egui::Key::ArrowLeft),
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::ALT,
+                }],
+                ..Default::default()
+            },
+            |_| {
+                ctx.input_mut(|input| input.modifiers = egui::Modifiers::ALT);
+                assert_eq!(video_frame_hold_direction(&ctx), Some(false));
+            },
+        );
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                ..Default::default()
+            },
+            |_| {
+                assert_eq!(video_frame_hold_direction(&ctx), None);
+            },
+        );
+        output.textures_delta.clear();
+    }
     #[test]
     fn video_p_does_not_capture_search_or_modal_input() {
         let profile = tempfile::tempdir().unwrap();

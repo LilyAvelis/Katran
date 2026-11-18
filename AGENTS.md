@@ -17,6 +17,11 @@ Optional Settings.video_gpu_acceleration defaults off; WGL/libmpv OpenGL renderi
 and observed hwdec-current are reported separately. Initialization failure falls
 back to CPU with a reason; runtime driver failure stops with an explicit error.
 Bounded RGBA readback remains: do not claim zero-copy or benchmarked acceleration.
+Owner accepted that combined runtime. Video keys now add Ctrl/Shift arrows for
+1s/10s seeks and Alt arrows for native paused frame steps. API StepFrame and
+Snapshot.step_pending guard one in-flight step; hold repeat waits for a confirmed
+new frame and ends on release/context/input-owner change. Do not promise monitor-
+Hz stepping or emulate frames by guessed FPS. See the video contract/evidence.
 Read [the contract](docs/video-preview.md) before changing playback or preview
 routing. No schema change or new GitHub publication is authorized for this work.
 

@@ -8,6 +8,8 @@ runtime; this local addition is separate from the v3.8.0 release tag.
 P pauses/resumes a video; confirmed seek prevents a stale-position jump. Controls
 fit large UI sizes. Settings → General offers optional GPU video acceleration,
 off by default, with actual renderer/decoder status and CPU initialization fallback.
+Video shortcuts: Ctrl+←/→ seeks1second, Shift+←/→10seconds; Alt+←/→ pauses and
+steps by a frame, with bounded hold-repeat paced by confirmed decoded frames.
 
 **Katran 3.8.0** adds: per-tab tag sets with preservation of
 legacy assignments, inline live tag settings, drag reordering of complete tags

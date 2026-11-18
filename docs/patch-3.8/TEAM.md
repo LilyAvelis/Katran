@@ -1,5 +1,16 @@
 # Katran 3.8 · FEATURE-5 / Мастерская + Iris
 
+## Current: video seek/frame keys · 2026-11-18
+
+Owner accepted ad534e0b6952, then requested Ctrl/Shift/Alt modified arrows.
+Reused existing sessions, no team expansion:
+- /root/mira · gpt-6.1-terra/high: native StepFrame/confirmation and CPU/GPU
+  synthetic test. Final gate1/1 passed, frozen.
+- /root/fenna · gpt-6.1-terra/high: relative-seek/hold UI, no queued repeats,
+  serial gating/cancellation; frozen after API/native gate.
+- /root · lead: policy/dispatcher contract, key ownership, boundary correction,
+  tests/docs/lint/build/primary installation. Final gate/build pending.
+
 ## Current: P, seek/layout polish and optional GPU · 2026-11-18
 
 Existing sessions reused; no expansion:

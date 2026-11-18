@@ -22,6 +22,7 @@ pub enum Action {
     Play,
     Pause,
     Seek { position_ms: u64 },
+    StepFrame { backwards: bool },
     SetVolume { volume: f64 },
     Stop,
 }
@@ -57,6 +58,8 @@ pub struct Snapshot {
     pub error: Option<String>,
     #[serde(default)]
     pub acceleration: Option<Acceleration>,
+    #[serde(default)]
+    pub step_pending: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -225,6 +228,27 @@ impl Player {
                     return Err(ApiError::new(
                         "invalid_media_seek",
                         "Seek position exceeds duration",
+                    ));
+                }
+            }
+            Action::StepFrame { .. } => {
+                let state = self.backend.snapshot()?;
+                if state.width == 0
+                    || state.height == 0
+                    || !matches!(
+                        state.state,
+                        PlaybackState::Paused | PlaybackState::Playing | PlaybackState::Ended
+                    )
+                {
+                    return Err(ApiError::new(
+                        "media_step_unavailable",
+                        "Video is not ready for a frame step",
+                    ));
+                }
+                if state.step_pending {
+                    return Err(ApiError::new(
+                        "media_step_busy",
+                        "A frame step is still pending",
                     ));
                 }
             }

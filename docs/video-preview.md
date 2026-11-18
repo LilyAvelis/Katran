@@ -25,6 +25,20 @@ controls. Seek holds the requested position until observed confirmation or a
 bounded timeout/error. Physical P pauses/resumes only on a video surface; text
 editing and modals retain input, and autorepeat does not toggle.
 
+Video-only modified arrows: Ctrl+Left/Right seeks by1second; Shift+Left/Right by
+10seconds, clamped to the clip and preserving play/pause. Consecutive seeks use
+the pending target rather than a stale time. Alt+Left/Right pauses and performs
+one native libmpv frame-back-step/frame-step; holding repeats only after the
+previous step's observed position, pause and new frame are confirmed. Release,
+focus loss, a modal, text editing or context change stops repeat. Bare arrows
+continue ordinary browsing; text document Ctrl+arrows keep their own behavior.
+
+No unbounded step queue or catch-up after release. Ordinary playback keeps its
+frame cap; pending steps bypass it. UI redraw and decoder confirmation pace the
+hold, not a guaranteed monitor-Hz rate. Reverse stepping depends on libmpv's
+exact-seek support; VFR and filters can limit frame accuracy. There is no FPS-to-
+millisecond approximation for the native step command. Boundaries do not loop.
+
 ## Domain and native boundary
 
 `media_playback.rs` owns one session, monotonic tokens, validated controls and
@@ -65,6 +79,11 @@ candidate's acceptance. Initial gates missed a relevant filename class.
 Controls: OpenMedia{id,revision}; ControlMedia{session,action}; MediaState;
 MediaFrame{session,after_serial}. Actions are play, pause, seek(position_ms),
 set_volume(volume0..1), stop. Wirev2 preserves large IDs/session/serial values.
+step_frame(backwards:bool) requires a ready current session and rejects a busy
+step. Snapshot.step_pending defaults false for old clients. A submission ACK is
+not completion: the worker clears pending after observing pause/directional
+position movement/new frame, or a confirmed boundary. Failure to confirm is a
+bounded error/stop. Native steps reserve pending before acknowledging submission.
 Frames are bounded and serial/session checked before texture upload. Reuse one
 UI TextureHandle; do not recreate it for each frame.
 

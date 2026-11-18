@@ -11,6 +11,7 @@ struct Counts {
     closes: usize,
     paths: Vec<std::path::PathBuf>,
     controls: usize,
+    ready: bool,
 }
 struct Fake(Arc<Mutex<Counts>>);
 impl Backend for Fake {
@@ -26,7 +27,11 @@ impl Backend for Fake {
     }
     fn snapshot(&mut self) -> katran::Result<Snapshot> {
         Ok(Snapshot {
-            state: PlaybackState::Loading,
+            state: if self.0.lock().unwrap().ready {
+                PlaybackState::Paused
+            } else {
+                PlaybackState::Loading
+            },
             duration_ms: Some(100),
             position_ms: 0,
             volume: 1.0,
@@ -35,6 +40,7 @@ impl Backend for Fake {
             height: 1,
             error: None,
             acceleration: None,
+            step_pending: false,
         })
     }
     fn frame(&mut self, _: u64) -> katran::Result<Option<Frame>> {
@@ -109,6 +115,16 @@ fn preview_controls_validate_context_and_source() {
         },
     );
     assert_eq!(frame["frame"]["rgba_base64"], "AQIDBA==");
+    counts.lock().unwrap().ready = true;
+    let stepped = ok(
+        &mut service,
+        Command::ControlMedia {
+            session: token,
+            action: Action::StepFrame { backwards: false },
+        },
+    );
+    assert_eq!(stepped["token"], token);
+    assert_eq!(counts.lock().unwrap().controls, 1);
     assert_eq!(
         call(
             &mut service,

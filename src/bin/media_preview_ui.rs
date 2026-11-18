@@ -74,6 +74,10 @@ pub(super) struct State {
     auto_start: bool,
     last_activity: Option<Instant>,
     controls_focused: bool,
+    frame_hold: Option<bool>,
+    frame_wait_serial: Option<u64>,
+    frame_retry: Option<Instant>,
+    frame_blocked: bool,
 }
 
 impl State {
@@ -109,6 +113,10 @@ impl State {
             self.serial = 0;
             self.seek_position = None;
             self.pending_seek = None;
+            self.frame_hold = None;
+            self.frame_wait_serial = None;
+            self.frame_retry = None;
+            self.frame_blocked = false;
         }
         if self.stopping {
             self.stop(call);
@@ -266,6 +274,10 @@ impl State {
     pub(super) fn stop(&mut self, call: &mut dyn FnMut(Command) -> Value) {
         self.seek_position = None;
         self.pending_seek = None;
+        self.frame_hold = None;
+        self.frame_wait_serial = None;
+        self.frame_retry = None;
+        self.frame_blocked = false;
         if let Some(pending) = self.pending.as_mut() {
             pending.cancelled = true;
             if !pending.cancel_sent {
@@ -399,6 +411,110 @@ impl State {
             self.error =
                 Some(tr("Не удалось подтвердить перемотку", "Could not confirm seek").into());
         }
+    }
+
+    /// Release key ownership without sending commands or discarding an in-flight step.
+    pub(super) fn cancel_frame_hold(&mut self) {
+        self.frame_hold = None;
+        self.frame_blocked = false;
+    }
+
+    /// One in-flight native step at a time; release never cancels an accepted step.
+    pub(super) fn handle_frame_hold(
+        &mut self,
+        ctx: &egui::Context,
+        direction: Option<bool>,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) {
+        let Some(backwards) = direction else {
+            self.cancel_frame_hold();
+            return;
+        };
+        if self.session.is_none() || self.stopping || self.pending.is_some() {
+            self.cancel_frame_hold();
+            return;
+        }
+        self.frame_hold = Some(backwards);
+        // Holding overrides the normal paused polling interval; native completion
+        // remains the pacing gate, with at most one accepted step in flight.
+        self.next_poll = None;
+        self.sync(ctx, self.target.clone(), call);
+        ctx.request_repaint_after(Duration::from_millis(16));
+        let Some(token) = self.session else {
+            return;
+        };
+        if self.frame_blocked
+            || self.pending_seek.is_some()
+            || self.snapshot["step_pending"] == true
+        {
+            return;
+        }
+        if self.frame_retry.is_some_and(|retry| Instant::now() < retry) {
+            return;
+        }
+        if let Some(serial) = self.frame_wait_serial {
+            if self.serial <= serial {
+                return;
+            }
+            self.frame_wait_serial = None;
+        }
+        let position = self.snapshot["position_ms"].as_u64().unwrap_or(0);
+        if (backwards && position == 0 && self.snapshot["state"] != "playing")
+            || (!backwards && self.snapshot["state"] == "ended")
+        {
+            return;
+        }
+        let before = self.serial;
+        let result = call(Command::ControlMedia {
+            session: token,
+            action: Action::StepFrame { backwards },
+        });
+        if result["ok"] == true {
+            if result["result"]["token"].as_u64() == Some(token) {
+                self.snapshot = result["result"]["snapshot"].clone();
+                self.frame_wait_serial = Some(before);
+                self.frame_retry = None;
+                self.error = None;
+            } else {
+                self.error = Some(tr("Сессия видео изменилась", "Video session changed").into());
+                self.frame_blocked = true;
+            }
+        } else {
+            let code = result["error"]["code"].as_str().unwrap_or("");
+            let message = result["error"]["message"].as_str().unwrap_or("");
+            if code == "media_step_busy"
+                || (code == "media_control_failed" && message.contains("media_step_busy"))
+            {
+                self.frame_retry = Some(Instant::now() + Duration::from_millis(100));
+            } else {
+                self.error = Some(Self::message(&result));
+                self.frame_blocked = true;
+            }
+        }
+    }
+
+    pub(super) fn seek_by(
+        &mut self,
+        delta_ms: i64,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) -> bool {
+        if self.session.is_none() || self.stopping || self.pending.is_some() {
+            return false;
+        }
+        let Some(duration) = self.snapshot["duration_ms"]
+            .as_u64()
+            .filter(|duration| *duration > 0)
+        else {
+            return false;
+        };
+        let current = self
+            .seek_position
+            .or_else(|| self.pending_seek.as_ref().map(|seek| seek.position))
+            .unwrap_or_else(|| self.snapshot["position_ms"].as_u64().unwrap_or(0));
+        let position_ms = current.saturating_add_signed(delta_ms).min(duration);
+        self.seek_position = None;
+        self.control(Action::Seek { position_ms }, call);
+        true
     }
 
     pub(super) fn toggle_pause(&mut self, call: &mut dyn FnMut(Command) -> Value) -> bool {
@@ -810,6 +926,35 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn backward_at_start_of_playing_video_still_requests_pause_step() {
+        let ctx = egui::Context::default();
+        let target = t("details");
+        let mut state = State {
+            target: Some(target),
+            session: Some(7),
+            snapshot: session(7, "playing")["snapshot"].clone(),
+            ..Default::default()
+        };
+        let mut count = 0;
+        let mut call = |command| match command {
+            Command::MediaState => ok(session(7, "playing")),
+            Command::MediaFrame { .. } => ok(json!({"session":7,"frame":null})),
+            Command::ControlMedia {
+                action: Action::StepFrame { backwards: true },
+                ..
+            } => {
+                count += 1;
+                ok(session(7, "paused"))
+            }
+            _ => panic!("unexpected command"),
+        };
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            state.handle_frame_hold(ui.ctx(), Some(true), &mut call)
+        });
+        output.textures_delta.clear();
+        assert_eq!(count, 1);
+    }
+    #[test]
     fn pause_toggle_uses_acknowledged_media_session() {
         let mut state = State {
             session: Some(8),
@@ -851,6 +996,102 @@ mod tests {
     }
     fn ok(value: Value) -> Value {
         json!({"ok":true,"result":value})
+    }
+
+    #[test]
+    fn held_steps_wait_for_completion_and_new_frame_and_release_stops_repeating() {
+        let ctx = egui::Context::default();
+        let target = t(r#"["images",null,"details"]"#);
+        let mut state = State {
+            target: Some(target),
+            session: Some(7),
+            snapshot: session(7, "paused")["snapshot"].clone(),
+            serial: 1,
+            ..Default::default()
+        };
+        state.snapshot["position_ms"] = json!(1000);
+        let pending = std::cell::Cell::new(false);
+        let serial = std::cell::Cell::new(1u64);
+        let steps = std::cell::RefCell::new(Vec::new());
+        let mut call = |command| match command {
+            Command::MediaState => {
+                let mut value = session(7, "paused");
+                value["snapshot"]["position_ms"] = json!(1000);
+                value["snapshot"]["step_pending"] = json!(pending.get());
+                ok(value)
+            }
+            Command::MediaFrame { after_serial, .. } => ok(
+                json!({"session":7,"frame": if serial.get() > after_serial { json!({"serial":serial.get(),"width":1,"height":1,"rgba_base64":"AQIDBA=="}) } else { Value::Null }}),
+            ),
+            Command::ControlMedia {
+                action: Action::StepFrame { backwards },
+                ..
+            } => {
+                steps.borrow_mut().push(backwards);
+                pending.set(true);
+                let mut value = session(7, "paused");
+                value["snapshot"]["position_ms"] = json!(1000);
+                value["snapshot"]["step_pending"] = json!(true);
+                ok(value)
+            }
+            _ => panic!("unexpected command"),
+        };
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                state.handle_frame_hold(ui.ctx(), Some(false), &mut call)
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(&*steps.borrow(), &[false]);
+        pending.set(false);
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.handle_frame_hold(ui.ctx(), Some(true), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(&*steps.borrow(), &[false]);
+        serial.set(2);
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.handle_frame_hold(ui.ctx(), Some(true), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(&*steps.borrow(), &[false, true]);
+        state.cancel_frame_hold();
+        pending.set(false);
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.handle_frame_hold(ui.ctx(), None, &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(&*steps.borrow(), &[false, true]);
+    }
+
+    #[test]
+    fn relative_seek_accumulates_against_stale_ack_and_clamps() {
+        let mut state = State {
+            session: Some(7),
+            snapshot: session(7, "paused")["snapshot"].clone(),
+            ..Default::default()
+        };
+        state.snapshot["position_ms"] = json!(2000);
+        let mut positions = Vec::new();
+        let mut call = |command| match command {
+            Command::ControlMedia {
+                action: Action::Seek { position_ms },
+                ..
+            } => {
+                positions.push(position_ms);
+                ok(session(7, "paused"))
+            }
+            _ => panic!("unexpected command"),
+        };
+        assert!(state.seek_by(1000, &mut call));
+        assert!(state.seek_by(1000, &mut call));
+        assert!(state.seek_by(10000, &mut call));
+        assert!(state.seek_by(-10000, &mut call));
+        assert_eq!(positions, [3000, 4000, 5000, 0]);
+        assert_eq!(state.snapshot["state"], "paused");
+        assert_eq!(state.pending_seek.as_ref().unwrap().position, 0);
+        state.session = None;
+        assert!(!state.seek_by(1000, &mut |_| panic!("no session")));
     }
 
     #[test]

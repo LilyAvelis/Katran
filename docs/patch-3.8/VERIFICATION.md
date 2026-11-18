@@ -1,5 +1,25 @@
 # Katran 3.8 verification handoff
 
+## Accepted GPU/UX and video key follow-up · 2026-11-18
+
+Owner answered «works работает» for runtimead534e0b6952 (P, seek stability,
+panel and GPU), then requested Ctrl arrows1s, Shift arrows10s and Alt arrows
+paused native frame steps with hold. No new publication authorization.
+
+New native synthetic24fps moving H264/AAC gate passed1/1 on both CPU and GPU:
+forward/back, four repeated steps, Paused/position, playing→pause and start/EOF.
+Final compile5.79s, test5.75s; target/build/media-mpv-frame-step-final.log. Muted
+and Unicode path. Actual frame-step/back-step commands, no FPS seek estimate.
+This is not a claim of arbitrary-file accuracy or monitor-Hz throughput.
+
+Domain/service gate10/10 passed before GUI frame wiring. Integrated UI282/282
+and API/policy/wire16/16 passed. A final UI playing-at-zero guard correction and
+keyboard-ownership test then passed focused player14/14 plus keys1/1, reusing
+unaffected successful cases. Logs: media-step-api-gate.log, media-step-ui-api.log,
+media-step-ui-final.log and media-step-keys-final.log. Final locked offline
+Clippy all-targets/UI/-D warnings passed26.20s, media-step-clippy.log. Build and
+owner keyboard acceptance remain pending.
+
 ## Owner playback acceptance and GPU/UX follow-up · 2026-11-18
 
 Installed from source **5498cd1**, one optimized UI build **93.55s**, Windows x64 /
