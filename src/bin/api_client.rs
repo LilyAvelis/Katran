@@ -1997,6 +1997,11 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "translate_image_ja" {
+            self.start_image_translation(ctx);
+            self.actions = false;
+            return;
+        }
         if let Some(operation) = katran::actions::upscale_operation(&id) {
             self.start_upscale(operation, ctx);
             self.actions = false;

@@ -42,7 +42,9 @@ mod foreground_windows;
 pub mod interaction;
 mod jobs_service;
 mod image_upscale;
+mod image_translate;
 mod upscale_components;
+mod translate_components;
 pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
@@ -535,6 +537,7 @@ impl Service {
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
+            command @ Command::TranslateSelectedImage => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,
@@ -553,6 +556,13 @@ impl Service {
                 status["image_upscale"] = serde_json::json!({
                     "runtime_found": upscale_components::resolve_python().is_some(),
                     "models": models,
+                });
+                let translation = translate_components::resolve(&self.root, translate_components::MODEL);
+                status["image_translate"] = serde_json::json!({
+                    "ready": translation.is_ok(),
+                    "model": translate_components::MODEL,
+                    "recognizes": ["ja"],
+                    "error": translation.err().map(|error| error.message),
                 });
                 Ok(status)
             }

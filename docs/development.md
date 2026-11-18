@@ -2,7 +2,9 @@
 
 Translate uses the normal catalogue shelf with an internal membership relation
 and an independent tag scope, introduced by schema v14. The in-memory ordered
-collection belongs to `crates/baloh-collection`. See
+collection belongs to `crates/baloh-collection`. `TranslateSelectedImage`
+captures the chosen source and target at submission. Managed PNG storage and
+Translate membership commit in the same transaction. See
 [the Translate foundation](patch-4.0/TRANSLATE.md).
 
 Static image upscale runs in its own job lane. `upscale_components.rs`

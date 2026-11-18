@@ -116,7 +116,9 @@ def _bubble_box(cleaned, region, other_regions, fallback):
 
 
 def render(source, blocks, output, font):
-    image = Image.open(source).convert("RGB")
+    original = Image.open(source).convert("RGBA")
+    alpha = original.getchannel("A")
+    image = original.convert("RGB")
     rgb = np.asarray(image)
     height, width = rgb.shape[:2]
     if not isinstance(blocks, list):
@@ -185,6 +187,7 @@ def render(source, blocks, output, font):
         x = left + (right - left - (bounds[2] - bounds[0])) / 2 - bounds[0]
         y = top + (bottom - top - (bounds[3] - bounds[1])) / 2 - bounds[1]
         draw.multiline_text((x, y), text, font=face, fill=(0, 0, 0), spacing=spacing, align="center")
+    result_image.putalpha(alpha)
     result_image.save(output)
 
 

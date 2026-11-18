@@ -94,7 +94,7 @@ def translate(blocks, source, target, model, port):
         "register and meaning. Do not add notes. Return the specified JSON object."
     )
     body = json.dumps({
-        "model": model, "stream": False, "think": False, "keep_alive": 0,
+        "model": model, "stream": False, "think": False,
         "format": schema, "options": {"temperature": 0, "num_predict": 2048, "num_ctx": 4096},
         "messages": [{"role": "system", "content": instruction},
                      {"role": "user", "content": json.dumps(segments, ensure_ascii=False)}],

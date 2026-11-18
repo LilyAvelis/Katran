@@ -22,6 +22,10 @@ translation membership. Keep generic ordered collections in the independent
 `baloh-collection` crate. Russian/English are the primary translation
 languages; OCR should also cover Japanese, Korean and Chinese. Keep .bull
 serialization and QuickLook after the one-page and batch translation gates.
+The local one-page command recognizes Japanese and captures the target from
+Settings → AI at submission (interface language by default). It publishes a
+separate PNG and Translate membership together. Invoke only detected local
+components, without implicit model downloads.
 
 ## Ready text preview retention · 2026-11-18
 

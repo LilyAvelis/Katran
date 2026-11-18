@@ -12,6 +12,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
     let mut api = Service::open(root.path(), 100).unwrap();
     let settings = Settings {
         language: katran::settings::Language::English,
+        translation_target: Default::default(),
         theme: Default::default(),
         window_resizable: false,
         desktop_wallpaper_id: None,

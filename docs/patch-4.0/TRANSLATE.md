@@ -34,13 +34,28 @@ environment already has PyTorch, Transformers and OpenCV, but no working
 OCR and inpainting translation pipeline has been verified. Select the
 translation backend and explicit optional component setup after the fixtures.
 
-The Translate shelf can be opened before any results exist. It displays
-only accepted managed outputs once that publishing path is implemented.
+Select a Japanese image and open Ctrl+K → AI Commands → Translate image
+from Japanese. The action is independently rebindable. Settings → AI →
+Image translation selects Interface language, Russian or English and reports
+the locally detected components. The default follows Katran's interface
+language at submission. Output is a separate, managed PNG in Translate.
+Cancellation before publication leaves no result. Source bytes stay intact.
+
+The action uses PP-OCRv5, Manga OCR and the installed `qwen3:30b` tag.
+Japanese is the only exposed recognition language for this integration.
+The worker embeds the tested scripts, starts an isolated loopback Ollama
+with cloud disabled, and contains its Windows process tree. Nothing is
+downloaded on invoking the action. Setup/Portable can point
+`KATRAN_TRANSLATE_ROOT` at an existing component directory with `venv`,
+`paddlex/official_models`, and `manga-model`, or use the active profile's
+`translate-runtime` directory. The verified local development runtime can
+reuse the existing probe files. Manga recognition and rendering use the
+existing portable ComfyUI Python. `KATRAN_OLLAMA_EXE` can point at a local
+executable, and `OLLAMA_MODELS` selects its model store.
 
 ## Local one-page probe
 
-The prototype lives in `scripts/image-translate`; it is intentionally separate
-from the Katran tab until the page gate passes. Test images, model packs,
+The standalone probe lives in `scripts/image-translate`. Test images, model packs,
 intermediate JSON and generated previews stay outside Git.
 
 1. `ocr_page.py` uses PaddlePaddle 3.2.2 / PaddleOCR 3.3.3 in a separate Python

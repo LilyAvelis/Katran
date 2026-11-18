@@ -81,6 +81,13 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    ImageTranslation {
+        event: Event,
+        stamp: media_service::Stamp,
+        blob: storage::PreparedBlob,
+        target: settings::Language,
+        dimensions: [u32; 2],
+    },
     ImageUpscale {
         event: Event,
         stamp: media_service::Stamp,
@@ -686,6 +693,47 @@ impl Service {
             };
         }
         let id = match command {
+            Command::TranslateSelectedImage => {
+                let event = self.selected_background_image()?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let references = self.reference_paths()?;
+                let target = self.settings.translation_target.language(self.settings.language);
+                self.jobs.submit(Lane::ImageTranslate, move |cancel| {
+                    use std::io::Read;
+                    const MAX_SOURCE: u64 = 32 * 1024 * 1024;
+                    cancel.check()?;
+                    let components = translate_components::resolve(&root, translate_components::MODEL)?;
+                    let stamp = media_service::stamp(&event.path)?;
+                    let path = wallpaper_engine::validate(&root, &event)?;
+                    let mut source = Vec::new();
+                    std::fs::File::open(&path)?.take(MAX_SOURCE + 1).read_to_end(&mut source)?;
+                    if source.len() as u64 > MAX_SOURCE {
+                        return Err(ApiError::new("invalid_image", "Image exceeds 32 MiB"));
+                    }
+                    if media_service::stamp(&path)? != stamp {
+                        return Err(ApiError::new("source_changed", "Image changed during preparation"));
+                    }
+                    let staging = root.join("translate-work");
+                    std::fs::create_dir_all(&staging)?;
+                    let language = match target {
+                        settings::Language::English => "en",
+                        settings::Language::Russian => "ru",
+                    };
+                    let rendered = image_translate::translate(&source, &staging, &components, language, &cancel)?;
+                    let bytes = std::fs::read(rendered.path())?;
+                    let name = format!("translation-{language}.png");
+                    let blob = storage::prepare_bytes(
+                        &root, quota,
+                        storage::ByteIngest { name: &name, source: "image_translation", bytes: &bytes, origin: &Origin::default() },
+                        &references,
+                    )?;
+                    cancel.check()?;
+                    Ok(PreparedWork::ImageTranslation { event, stamp, blob, target,
+                        dimensions: [rendered.width, rendered.height],
+                    })
+                })?
+            }
             Command::UpscaleSelectedImage { operation } => {
                 let event = self.selected_background_image()?;
                 let root = self.root.clone();
@@ -1987,6 +2035,16 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::ImageTranslation { event, stamp, blob, target, dimensions: [width,height] } => {
+                    let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection","Image is no longer available"))?;
+                    if current.revision != event.revision || current.path != event.path || current.kind != event.kind
+                        || media_service::stamp(&event.path)? != stamp {
+                        return Err(ApiError::new("source_changed","Image changed during translation"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    let id = storage::commit_translated_png(&mut self.db, &self.root, self.quota, blob)?;
+                    Ok(json!({"event": self.get(id)?, "source_language": "ja", "target_language": target, "width":width, "height":height}))
+                },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {
                         ApiError::new("stale_selection", "Image is no longer available")

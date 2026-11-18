@@ -188,7 +188,9 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
             "themes тема цвета акцент выделение интенсивность окно compact компактное стекло оптика gpu преломление размытие фон background лилии изображение видео components компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
         }
         5 => "tags метки теги tag",
-        6 => "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты",
+        6 => {
+            "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese ocr язык language"
+        }
         _ => "",
     };
     let query = query.trim().to_lowercase();
@@ -590,6 +592,82 @@ impl State {
         if !self.ai_error.is_empty() {
             ui.colored_label(Color32::LIGHT_RED, &self.ai_error);
         }
+        let translate = self
+            .ai_components
+            .as_ref()
+            .and_then(|v| v.get("image_translate"))
+            .cloned();
+        SettingsSection::group(
+            ui,
+            super::i18n::tr("Перевод изображений", "Image translation"),
+            |ui| {
+                use katran::settings::TranslationTarget;
+                ui.label(super::i18n::tr(
+                    "Распознавание текста: японский",
+                    "Text recognition: Japanese",
+                ));
+                if let Some(status) = translate.as_ref() {
+                    let availability = if status["ready"] == true {
+                        super::i18n::tr("Компоненты найдены", "Components found")
+                    } else {
+                        super::i18n::tr("Недоступно", "Unavailable")
+                    };
+                    ui.label(format!(
+                        "{}: {availability}",
+                        super::i18n::tr("Состояние", "Status")
+                    ));
+                    if let Some(model) = status["model"].as_str() {
+                        ui.label(format!("{}: {model}", super::i18n::tr("Модель", "Model")));
+                    }
+                    if let Some(error) = status["error"]
+                        .as_str()
+                        .or_else(|| status["error"]["message"].as_str())
+                    {
+                        ui.colored_label(Color32::LIGHT_RED, error);
+                    }
+                } else {
+                    ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
+                }
+                if let Some(draft) = self.draft.as_mut() {
+                    let current = match draft.translation_target {
+                        TranslationTarget::Interface => {
+                            match draft.language {
+                                katran::settings::Language::English => super::i18n::tr("Язык интерфейса (английский)", "Interface language (English)"),
+                                katran::settings::Language::Russian => super::i18n::tr("Язык интерфейса (русский)", "Interface language (Russian)"),
+                            }
+                        }
+                        TranslationTarget::Russian => super::i18n::tr("Русский", "Russian"),
+                        TranslationTarget::English => super::i18n::tr("Английский", "English"),
+                    };
+                    SettingsRow::show(
+                        ui,
+                        super::i18n::tr("Язык перевода", "Translation language"),
+                        super::i18n::tr("Применяется автоматически.", "Applies automatically."),
+                        |ui| {
+                            egui::ComboBox::from_id_salt("translation-target")
+                                .selected_text(current)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut draft.translation_target,
+                                        TranslationTarget::Interface,
+                                        super::i18n::tr("Язык интерфейса", "Interface language"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.translation_target,
+                                        TranslationTarget::Russian,
+                                        super::i18n::tr("Русский", "Russian"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft.translation_target,
+                                        TranslationTarget::English,
+                                        super::i18n::tr("Английский", "English"),
+                                    );
+                                });
+                        },
+                    );
+                }
+            },
+        );
         if let Some(upscale) = self
             .ai_components
             .as_ref()

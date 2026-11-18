@@ -9,6 +9,14 @@ pub(super) struct State {
     job: Option<katran::domain_jobs::JobId>,
     label: &'static str,
     status: String,
+    kind: ImageJob,
+}
+
+#[derive(Clone, Copy, Default)]
+enum ImageJob {
+    #[default]
+    Upscale,
+    Translate,
 }
 
 fn label(operation: katran::UpscaleOperation) -> &'static str {
@@ -27,16 +35,44 @@ impl Shelf {
         operation: katran::UpscaleOperation,
         ctx: &egui::Context,
     ) {
+        self.start_image_job(
+            Command::UpscaleSelectedImage { operation },
+            label(operation),
+            ImageJob::Upscale,
+            ctx,
+        );
+    }
+
+    pub(super) fn start_image_translation(&mut self, ctx: &egui::Context) {
+        self.start_image_job(
+            Command::TranslateSelectedImage,
+            tr(
+                "Перевод изображения с японского",
+                "Image translation from Japanese",
+            ),
+            ImageJob::Translate,
+            ctx,
+        );
+    }
+
+    fn start_image_job(
+        &mut self,
+        command: Command,
+        label: &'static str,
+        kind: ImageJob,
+        ctx: &egui::Context,
+    ) {
         if self.upscale.job.is_some() {
             self.upscale.open = true;
             return;
         }
-        let result = self.call(Command::UpscaleSelectedImage { operation });
+        let result = self.call(command);
         let job = result["job_id"].as_u64().map(katran::domain_jobs::JobId);
         self.upscale = State {
             open: true,
             job,
-            label: label(operation),
+            label,
+            kind,
             status: if job.is_some() {
                 String::new()
             } else {
@@ -56,15 +92,20 @@ impl Shelf {
                 Some("succeeded") => {
                     self.upscale.job = None;
                     let result = &response["result"];
-                    self.upscale.status = format!(
-                        "{}: {} × {} → {} × {}. {}",
-                        tr("Размер", "Size"),
-                        result["input_width"],
-                        result["input_height"],
-                        result["width"],
-                        result["height"],
-                        tr("Сохранено в Images", "Saved in Images")
-                    );
+                    self.upscale.status = match self.upscale.kind {
+                        ImageJob::Translate => {
+                            tr("PNG сохранён в Translate", "PNG saved in Translate").into()
+                        }
+                        ImageJob::Upscale => format!(
+                            "{}: {} × {} → {} × {}. {}",
+                            tr("Размер", "Size"),
+                            result["input_width"],
+                            result["input_height"],
+                            result["width"],
+                            result["height"],
+                            tr("Сохранено в Images", "Saved in Images")
+                        ),
+                    };
                     self.refresh();
                 }
                 Some("cancelled") => {
@@ -75,10 +116,16 @@ impl Shelf {
                     self.upscale.job = None;
                     self.upscale.status = response["error"]["message"]
                         .as_str()
-                        .unwrap_or(tr(
-                            "Не удалось увеличить изображение",
-                            "Could not upscale image",
-                        ))
+                        .unwrap_or(match self.upscale.kind {
+                            ImageJob::Upscale => tr(
+                                "Не удалось увеличить изображение",
+                                "Could not upscale image",
+                            ),
+                            ImageJob::Translate => tr(
+                                "Не удалось перевести изображение",
+                                "Could not translate image",
+                            ),
+                        })
                         .into();
                 }
                 _ => {
@@ -100,7 +147,10 @@ impl Shelf {
             ui.heading(self.upscale.label);
             if self.upscale.job.is_some() {
                 ui.spinner();
-                ui.label(tr("Увеличение изображения…", "Upscaling image…"));
+                ui.label(match self.upscale.kind {
+                    ImageJob::Upscale => tr("Увеличение изображения…", "Upscaling image…"),
+                    ImageJob::Translate => tr("Перевод изображения…", "Translating image…"),
+                });
                 cancel = ui.button(tr("Отменить", "Cancel")).clicked();
             } else {
                 ui.label(&self.upscale.status);

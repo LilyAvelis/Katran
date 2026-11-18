@@ -16,6 +16,10 @@ function Get-KatranSources([string]$Root) {
     }
     if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
     if (Test-Path -LiteralPath $imageUpscaleWorker) { $files += $imageUpscaleWorker }
+    $translationScripts = Join-Path $Root 'scripts/image-translate'
+    if (Test-Path -LiteralPath $translationScripts) {
+        $files += @((Get-ChildItem -LiteralPath $translationScripts -File -Filter '*.py').FullName)
+    }
     # Optional AI installer resources are embedded, so their bytes are build inputs.
     foreach ($inputDir in @('scripts/ai-components','scripts/emoji-ai','assets/emoji-ai/cldr')) {
         $files += @((Get-ChildItem -LiteralPath (Join-Path $Root $inputDir) -File).FullName)

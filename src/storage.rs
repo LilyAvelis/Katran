@@ -415,6 +415,28 @@ pub(crate) fn commit_prepared_bytes(
     quota: u64,
     prepared: PreparedBlob,
 ) -> Result<i64> {
+    commit_blob(db, root, quota, prepared, false)
+}
+
+pub(crate) fn commit_translated_png(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    prepared: PreparedBlob,
+) -> Result<i64> {
+    if !prepared.name.ends_with(".png") || prepared.text.is_some() {
+        return Err(ApiError::new("invalid_translation", "Expected a translated PNG"));
+    }
+    commit_blob(db, root, quota, prepared, true)
+}
+
+fn commit_blob(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    prepared: PreparedBlob,
+    translated: bool,
+) -> Result<i64> {
     if prepared.directory != directory(root)? {
         return Err(ApiError::new(
             "integrity_error",
@@ -496,6 +518,9 @@ pub(crate) fn commit_prepared_bytes(
     )?;
     tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![crate::now_ms(),prepared.source,prepared.name,encoded,prepared.size,prepared.hash,serde_json::to_string(&prepared.origin).map_err(|error|ApiError::new("invalid_argument",error))?])?;
     let id = tx.last_insert_rowid();
+    if translated {
+        tx.execute("INSERT INTO translated_images(event_id) VALUES(?1)", [id])?;
+    }
     tx.execute(
         "UPDATE events SET modified_at_ms=detected_at_ms WHERE id=?1",
         [id],

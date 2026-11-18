@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from translate_page import group_regions, bounds
 
 # Official kha-white/manga-ocr-base, snapshot aa6573bd10b0d446cbf622e29c3e084914df9741.
-MODEL_DIR = Path(__file__).resolve().parents[2] / "target/build/translate-probe/ocr/manga-model"
+MODEL_DIR = Path(os.environ.get("KATRAN_MANGA_MODEL", Path(__file__).resolve().parents[2] / "target/build/translate-probe/ocr/manga-model"))
 
 
 class MangaModel(VisionEncoderDecoderModel, GenerationMixin):

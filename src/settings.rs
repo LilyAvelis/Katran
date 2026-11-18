@@ -11,6 +11,29 @@ pub enum Language {
     Russian,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationTarget {
+    #[default]
+    Interface,
+    Russian,
+    English,
+}
+
+impl TranslationTarget {
+    fn is_interface(&self) -> bool {
+        *self == Self::Interface
+    }
+
+    pub fn language(self, interface: Language) -> Language {
+        match self {
+            Self::Interface => interface,
+            Self::Russian => Language::Russian,
+            Self::English => Language::English,
+        }
+    }
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -35,6 +58,8 @@ pub struct Settings {
     /// Old settings without this field retain the Russian interface.
     #[serde(default = "legacy_language")]
     pub language: Language,
+    #[serde(skip_serializing_if = "TranslationTarget::is_interface")]
+    pub translation_target: TranslationTarget,
     pub theme: crate::theme::ThemePreferences,
     pub overlay_hotkey: String,
     /// Global hotkeys are retained even when the associated tab is hidden.
@@ -93,6 +118,7 @@ impl Settings {
     pub fn defaults(quota: u64) -> Self {
         let mut settings = Self {
             language: Language::English,
+            translation_target: TranslationTarget::Interface,
             theme: crate::theme::ThemePreferences {
                 preset: crate::theme::Preset::BlueExperimental,
                 lily_background: Some(1),

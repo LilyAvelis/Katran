@@ -4,11 +4,11 @@ import json
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2] / "target" / "build" / "translate-probe" / "ocr"
-MODELS = ROOT / "paddlex" / "official_models"
+ROOT = Path(os.environ.get("KATRAN_PADDLE_ROOT", Path(__file__).resolve().parents[2] / "target" / "build" / "translate-probe" / "ocr"))
+MODELS = Path(os.environ.get("KATRAN_PADDLE_MODELS", ROOT / "paddlex" / "official_models"))
 # Keep all model and hub caches inside the explicit probe directory.
 for key, child in (("PADDLE_PDX_CACHE_HOME", "paddlex"), ("HF_HOME", "huggingface"), ("MODELSCOPE_CACHE", "modelscope"), ("XDG_CACHE_HOME", "cache")):
-    os.environ[key] = str(ROOT / child)
+    os.environ[key] = str(Path(os.environ.get("KATRAN_PROCESS_CACHE", ROOT)) / child)
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 os.environ["FLAGS_enable_pir_api"] = "0"
 

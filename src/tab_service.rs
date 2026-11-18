@@ -98,7 +98,7 @@ impl Service {
             "upscale_remacri_x2"
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
-            | "upscale_realesrgan_x4" => background.image,
+            | "upscale_realesrgan_x4" | "translate_image_ja" => background.image,
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,

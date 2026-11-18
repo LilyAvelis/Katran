@@ -382,6 +382,7 @@ pub enum Command {
     UpscaleSelectedImage {
         operation: UpscaleOperation,
     },
+    TranslateSelectedImage,
     ToggleMediaPause {
         #[serde(default)]
         session: Option<u64>,
