@@ -2,6 +2,18 @@
 
 ## Ready Link/Text preview retention · 2026-11-18
 
+Installed source5eb3f93, one optimized UI build28.32s on Windows x64/Rust1.95.0,
+locked offline/ui+clipboard-events; compiled-source fingerprints matched before /
+after. Primary runtime **09244a0440d7**, executable SHA256
+`09244a0440d71aace8f474114c5ddfa423cfa485b37b72698295166aa90887c7`.
+All inherited helper/runtime hashes verified; previous accepted runtimee884d5e4b9e4
+and an integrity-checked v13 backup retained in runtime/rollback-link-preview-retain.json.
+Pointer switched atomically; running app untouched. Owner asked to tray-exit and
+Relaunch via Raycast, check ready Link across pinned/all toggles. Owner native
+acceptance pending; no schema change, public push/tag/release or new components.
+Post-batch maintenance removed0.37GiB, zero failures,34.25→33.88GiB; runtime
+unchanged. Protected dependency/release outputs retained above32GiB budget.
+
 Owner requested closing the residual blink after accepting the geometry fix.
 Only text_preview_ui.rs changes production behavior: successful ready content /
 parsed document / mode survive generation-only changes in the same namespace

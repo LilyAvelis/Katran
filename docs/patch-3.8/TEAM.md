@@ -494,3 +494,8 @@ Same sessions: Fenna (/root/fenna, gpt-6.1-terra/high) owns text_preview_ui.rs;
 Nemi (/root/nemi, gpt-6.1-terra/high) reviews identity/late-reply safety read-only.
 Polly integrates docs/tests/one local build/primary installation. No new roster,
 provider rewrite, domain/schema/player changes or public publication.
+
+Residual preview retention integrated: source5eb3f93, primary09244a0440d7.
+Fenna area frozen, Nemi's targeted review has no blocking findings, Polly ran
+Text14 + Details5, Clippy and one build/install with backup/hash evidence.
+Native owner acceptance pending; README/AGENTS/development map carry4.0 handoff.
