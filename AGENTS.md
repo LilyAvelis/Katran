@@ -22,6 +22,9 @@ Owner accepted that combined runtime. Video keys now add Ctrl/Shift arrows for
 Snapshot.step_pending guard one in-flight step; hold repeat waits for a confirmed
 new frame and ends on release/context/input-owner change. Do not promise monitor-
 Hz stepping or emulate frames by guessed FPS. See the video contract/evidence.
+Step UI must mask transient native Playing/Paused state: retain panel/label
+geometry and use confirmed frame positions for timeline/time until completion.
+Do not reintroduce ordinary idle-autohide while a frame step/hold is active.
 Read [the contract](docs/video-preview.md) before changing playback or preview
 routing. No schema change or new GitHub publication is authorized for this work.
 

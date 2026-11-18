@@ -21,6 +21,10 @@ surface. StepFrame{backwards} extends ControlMedia; step_pending prevents a seco
 in-flight step. Native pause/step completion binds observed position and frame;
 GUI hold additionally waits for a new uploaded serial. Never implement frame
 stepping by dividing time by guessed FPS or enqueue unrestricted key repeats.
+The presentation also retains a confirmed step position and stable paused-mode
+controls across transient native states. Completion clears the marker after the
+new serial even on key-up, restoring ordinary playback/autohide. Regression
+tests assert actual control rectangles and displayed time without mouse activity.
 
 Build/test outputs belong in `target/build`. Read the [storage budget](devops.md)
 before cleanup: `maintain-build-cache.ps1` plans by default, `-Apply` uses guarded

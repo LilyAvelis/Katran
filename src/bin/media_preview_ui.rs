@@ -76,6 +76,7 @@ pub(super) struct State {
     controls_focused: bool,
     frame_hold: Option<bool>,
     frame_wait_serial: Option<u64>,
+    confirmed_step_position: Option<u64>,
     frame_retry: Option<Instant>,
     frame_blocked: bool,
 }
@@ -115,6 +116,7 @@ impl State {
             self.pending_seek = None;
             self.frame_hold = None;
             self.frame_wait_serial = None;
+            self.confirmed_step_position = None;
             self.frame_retry = None;
             self.frame_blocked = false;
         }
@@ -261,6 +263,18 @@ impl State {
                 return;
             }
         }
+        if self.snapshot["step_pending"] != true
+            && self
+                .frame_wait_serial
+                .is_some_and(|serial| self.serial > serial)
+        {
+            self.frame_wait_serial = None;
+            self.confirmed_step_position = if self.frame_hold.is_some() {
+                self.snapshot["position_ms"].as_u64()
+            } else {
+                None
+            };
+        }
         let delay = if self.snapshot["state"] == "playing" {
             Duration::from_millis(33)
         } else {
@@ -276,6 +290,7 @@ impl State {
         self.pending_seek = None;
         self.frame_hold = None;
         self.frame_wait_serial = None;
+        self.confirmed_step_position = None;
         self.frame_retry = None;
         self.frame_blocked = false;
         if let Some(pending) = self.pending.as_mut() {
@@ -343,6 +358,8 @@ impl State {
         let Some(token) = self.session else {
             return false;
         };
+        let ordinary_transport =
+            matches!(&action, Action::Play | Action::Pause | Action::Seek { .. });
         let requested_seek = match &action {
             Action::Seek { position_ms } => Some(*position_ms),
             _ => None,
@@ -356,6 +373,9 @@ impl State {
             action,
         });
         if result["ok"] == true {
+            if ordinary_transport {
+                self.confirmed_step_position = None;
+            }
             if result["result"].is_null() {
                 self.session = None;
                 self.texture = None;
@@ -417,6 +437,9 @@ impl State {
     pub(super) fn cancel_frame_hold(&mut self) {
         self.frame_hold = None;
         self.frame_blocked = false;
+        if self.frame_wait_serial.is_none() && self.snapshot["step_pending"] != true {
+            self.confirmed_step_position = None;
+        }
     }
 
     /// One in-flight native step at a time; release never cancels an accepted step.
@@ -435,6 +458,7 @@ impl State {
             return;
         }
         self.frame_hold = Some(backwards);
+        self.last_activity = Some(Instant::now());
         // Holding overrides the normal paused polling interval; native completion
         // remains the pacing gate, with at most one accepted step in flight.
         self.next_poll = None;
@@ -465,6 +489,7 @@ impl State {
             return;
         }
         let before = self.serial;
+        self.confirmed_step_position.get_or_insert(position);
         let result = call(Command::ControlMedia {
             session: token,
             action: Action::StepFrame { backwards },
@@ -619,8 +644,15 @@ impl State {
         if activity {
             self.last_activity = Some(now);
         }
+        let stepping = self.frame_hold.is_some()
+            || self.frame_wait_serial.is_some()
+            || self.snapshot["step_pending"] == true;
         let visible = controls_visible(
-            self.snapshot["state"].as_str(),
+            if stepping {
+                Some("paused")
+            } else {
+                self.snapshot["state"].as_str()
+            },
             busy,
             self.error.is_some(),
             self.controls_focused,
@@ -716,7 +748,13 @@ impl State {
             |ui| {
                 ui.set_clip_rect(canvas.intersect(ui.clip_rect()));
                 let mut focused = false;
-                let mut position = self.snapshot["position_ms"].as_u64().unwrap_or(0);
+                let mut position = if stepping {
+                    self.confirmed_step_position
+                        .or_else(|| self.snapshot["position_ms"].as_u64())
+                        .unwrap_or(0)
+                } else {
+                    self.snapshot["position_ms"].as_u64().unwrap_or(0)
+                };
                 let duration = self.snapshot["duration_ms"].as_u64().unwrap_or(0);
                 if self.session.is_some() && duration > 0 {
                     position = self
@@ -724,6 +762,10 @@ impl State {
                         .or_else(|| self.pending_seek.as_ref().map(|seek| seek.position))
                         .unwrap_or(position)
                         .min(duration);
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(egui::Id::new("media-position"), position)
+                    });
                     let width = ui.available_width().max(1.0);
                     ui.spacing_mut().slider_width = width;
                     let response = ui.add_sized(
@@ -753,7 +795,7 @@ impl State {
                 let mut group_rect = egui::Rect::NOTHING;
                 let label = if self.session.is_none() {
                     tr("Воспроизвести", "Play")
-                } else if self.snapshot["state"] == "playing" {
+                } else if !stepping && self.snapshot["state"] == "playing" {
                     tr("Пауза", "Pause")
                 } else if self.snapshot["state"] == "ended" {
                     tr("Сначала", "Replay")
@@ -762,6 +804,7 @@ impl State {
                 };
                 let button_font = egui::TextStyle::Button.resolve(ui.style());
                 let body_font = egui::TextStyle::Body.resolve(ui.style());
+                let time_font = egui::TextStyle::Monospace.resolve(ui.style());
                 let measure = |ui: &egui::Ui, text: &str, font: egui::FontId| {
                     ui.painter()
                         .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
@@ -781,7 +824,7 @@ impl State {
                         + measure(
                             ui,
                             &format!("{} / {}", timestamp(position), timestamp(duration)),
-                            body_font,
+                            time_font,
                         )
                         + 130.0;
                 }
@@ -813,7 +856,7 @@ impl State {
                                 ui.ctx().request_repaint_after(Duration::from_millis(100));
                             }
                         } else if !self.stopping {
-                            let playing = self.snapshot["state"] == "playing";
+                            let playing = !stepping && self.snapshot["state"] == "playing";
                             let button = ui.button(if playing {
                                 tr("Пауза", "Pause")
                             } else if self.snapshot["state"] == "ended" {
@@ -823,6 +866,7 @@ impl State {
                             });
                             #[cfg(test)]
                             ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("media-transport-playing"), playing);
                                 data.insert_temp(egui::Id::new("media-button"), button.rect)
                             });
                             group_rect = group_rect.union(button.rect);
@@ -836,11 +880,14 @@ impl State {
                         }
                         if self.session.is_some() && !self.stopping {
                             group_rect = group_rect.union(
-                                ui.label(format!(
-                                    "{} / {}",
-                                    timestamp(position),
-                                    timestamp(duration)
-                                ))
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} / {}",
+                                        timestamp(position),
+                                        timestamp(duration)
+                                    ))
+                                    .monospace(),
+                                )
                                 .rect,
                             );
                             let mut volume = self.snapshot["volume"]
@@ -996,6 +1043,95 @@ mod tests {
     }
     fn ok(value: Value) -> Value {
         json!({"ok":true,"result":value})
+    }
+
+    #[test]
+    fn stepping_keeps_actual_controls_stable_until_confirmed_then_autohides() {
+        let ctx = egui::Context::default();
+        let target = t(r#"["images",null,"details"]"#);
+        let mut state = State {
+            target: Some(target.clone()),
+            session: Some(7),
+            snapshot: session(7, "paused")["snapshot"].clone(),
+            serial: 1,
+            frame_hold: Some(false),
+            frame_wait_serial: Some(1),
+            confirmed_step_position: Some(1000),
+            last_activity: Some(Instant::now() - Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let mut call = |command| match command {
+            Command::MediaState => ok(session(7, "playing")),
+            Command::MediaFrame { .. } => ok(json!({"session":7,"frame":null})),
+            _ => panic!("unexpected command"),
+        };
+        let mut previous = None;
+        for (playback, position) in [("paused", 1000), ("playing", 1900), ("paused", 1100)] {
+            state.snapshot["state"] = json!(playback);
+            state.snapshot["position_ms"] = json!(position);
+            state.snapshot["step_pending"] = json!(true);
+            state.next_poll = Some(Instant::now() + Duration::from_secs(60));
+            ctx.data_mut(|data| {
+                data.remove::<egui::Rect>(egui::Id::new("media-panel"));
+            });
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| state.show(ui, &target, &mut call),
+            );
+            out.textures_delta.clear();
+            let (panel, seek, button, playing): (egui::Rect, egui::Rect, egui::Rect, bool) = ctx
+                .data(|data| {
+                    (
+                        data.get_temp(egui::Id::new("media-panel")).unwrap(),
+                        data.get_temp(egui::Id::new("media-seek")).unwrap(),
+                        data.get_temp(egui::Id::new("media-button")).unwrap(),
+                        data.get_temp(egui::Id::new("media-transport-playing"))
+                            .unwrap(),
+                    )
+                });
+            assert!(!playing);
+            assert_eq!(
+                ctx.data(|data| data.get_temp::<u64>(egui::Id::new("media-position"))),
+                Some(1000)
+            );
+            if let Some((old_panel, old_seek, old_button)) = previous {
+                assert_eq!((panel, seek, button), (old_panel, old_seek, old_button));
+            }
+            previous = Some((panel, seek, button));
+        }
+        state.serial = 2;
+        state.next_poll = None;
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.sync(ui.ctx(), Some(target.clone()), &mut call)
+        });
+        out.textures_delta.clear();
+        assert_eq!(state.confirmed_step_position, Some(0));
+        state.frame_wait_serial = Some(2);
+        state.cancel_frame_hold();
+        state.serial = 3;
+        state.next_poll = None;
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            state.sync(ui.ctx(), Some(target.clone()), &mut call)
+        });
+        out.textures_delta.clear();
+        assert!(state.frame_wait_serial.is_none());
+        assert!(state.confirmed_step_position.is_none());
+        state.last_activity = Some(Instant::now() - Duration::from_secs(5));
+        ctx.data_mut(|data| {
+            data.remove::<egui::Rect>(egui::Id::new("media-panel"));
+        });
+        let mut out = ctx.run_ui(Default::default(), |ui| state.show(ui, &target, &mut call));
+        out.textures_delta.clear();
+        assert!(
+            ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("media-panel")))
+                .is_none()
+        );
     }
 
     #[test]

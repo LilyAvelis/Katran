@@ -39,6 +39,13 @@ hold, not a guaranteed monitor-Hz rate. Reverse stepping depends on libmpv's
 exact-seek support; VFR and filters can limit frame accuracy. There is no FPS-to-
 millisecond approximation for the native step command. Boundaries do not loop.
 
+Frame stepping is presented as a stable paused inspection mode. Internal mpv
+Playing/Paused transitions must not hide the overlay, change its transport label
+or move the timeline through intermediate seek positions. The panel remains
+visible during hold/in-flight step, and time/slider advance only with confirmed
+frame completion. The time counter uses monospace digits. A completed frame
+marker is released even after key-up so normal playback/autohide can resume.
+
 ## Domain and native boundary
 
 `media_playback.rs` owns one session, monotonic tokens, validated controls and

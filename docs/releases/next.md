@@ -20,6 +20,9 @@ Owner accepted GPU/P/seek/layout. The next local follow-up adds Ctrl/Shift arrow
 for1s/10s seeks and Alt arrows for native paused frame stepping with bounded hold.
 One step is confirmed before the next; release/input ownership changes cancel
 repeat. Decoder/reverse seek limits prevent a guaranteed monitor-Hz rate.
+Owner then reported panel/time flicker only during frame steps. The UI keeps
+paused inspection controls and confirmed frame position through native transient
+states, with stable counter width, returning to normal behavior after completion.
 
 Local 2026-11-18 follow-up: [Tags sorting](../patch-3.8/TAG-SORT.md) is comma then
 Slash, current tag order with untagged last; custom pinned order remains separate.

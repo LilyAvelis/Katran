@@ -1,5 +1,23 @@
 # Katran 3.8 verification handoff
 
+## Frame-step panel/time stability · 2026-11-18
+
+Owner reported new keys work in4acbfb44eca9 except panel/timeline flicker during
+Alt stepping. Native frame-step transitions Playing/Paused were reaching ordinary
+autohide and transport-label layout; intermediate time-pos reached the slider.
+UI retains paused inspection mode and confirmed position throughout a step/hold,
+uses monospace time, and clears completed frame markers after key-up. Native
+backend/domain/GPU/runtime components are unchanged; their gates remain valid.
+
+Targeted player UI15/15 passed. New headless regression alternates native states
+without mouse movement and with old idle time, asserts actual panel/seek/button
+rectangles and stable transport/time during intermediate positions, then confirms
+frame advancement and normal autohide after release/completion. Initial test-only
+egui remove_temp<Rect> API mismatch corrected to remove<Rect>. Raw evidence:
+target/build/media-step-stable-ui.log. Locked offline Clippy all-targets/UI/
+-D warnings passed3.18s (media-step-stable-clippy.log). Build and owner acceptance
+pending; native/API/GPU checks reused because those inputs did not change.
+
 ## Accepted GPU/UX and video key follow-up · 2026-11-18
 
 Installed source7fec1f5, single optimized UI build91.58s, Windows x64/Rust1.95.0/
