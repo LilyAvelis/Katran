@@ -40,6 +40,8 @@ selected files after verification and uses the first entry as its cover.
 The originals go to the Windows Recycle Bin. Unpack restores the files
 directly in Folder and recycles the archive after verification.
 Use Ctrl+E to name BULL and BS even when the collection is unpinned.
+Videos inside BULL and BS play in Katran's built-in viewer with its usual
+timeline, volume and playback controls.
 On the shelf, Delete removes
 the collection and its member cards. Use Unpack to get the cards back.
 Copy or drag a shelf card to transfer the entire file.

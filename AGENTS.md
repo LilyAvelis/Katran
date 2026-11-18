@@ -12,6 +12,9 @@ archive. Folder unpack restores entries directly into the current folder
 without replacing existing files. Recycle the archive only after all
 restored files are verified. Report partial publication and keep the archive.
 Use the first entry for collection covers. See docs/patch-4.0/BS.md.
+Play video entries in file BULL and BS through the shared libmpv session.
+Keep one verified temporary member snapshot until playback stops. Paging
+or closing cancels the old preparation and closes its media session.
 Ctrl+E may rename managed BULL and BS without a pin. In Folder, it
 renames the actual archive file without replacement and preserves its type.
 Rename a Links BULL entry via its revision and index. Save the name in

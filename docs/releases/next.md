@@ -61,6 +61,10 @@ Folder and recycles the archive after verifying all outputs. Ctrl+E renames
 unpinned collection cards and archive files in Folder. Verified completed
 recycle stages are cleaned up automatically.
 
+Video entries in BULL and BS play with the usual Katran video controls.
+Page turns and closing the viewer stop playback and release the temporary
+video file.
+
 ## Local follow-up · Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one

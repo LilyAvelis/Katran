@@ -1005,6 +1005,17 @@ impl Service {
                     Ok(PreparedWork::Media(prepared))
                 })?
             }
+            Command::OpenCollectionMedia { id, revision, index } => {
+                let (event, identity, epoch, index) =
+                    self.start_collection_media_prepare(id, revision, index)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                self.jobs.submit(Lane::Discovery, move |cancel| {
+                    let prepared = media_service::prepare_collection_media(event, identity, epoch, index, &root, quota, &cancel)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::Media(prepared))
+                })?
+            }
             Command::SearchEmojiAi {
                 query,
                 offset,
@@ -1882,7 +1893,7 @@ impl Service {
         Ok(json!({"id":id,"name":name,"revision":Self::collection_rename_revision(&event)}))
     }
 
-    fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
+    pub(crate) fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
         let event = self.get(id)?;
         if !(collection::is_managed(&event) || bs_collection::can_view(&event) || collection_kind::external(&event)) || event.revision != revision
             || (event.source == "image_translation_collection" && !self.db.query_row(

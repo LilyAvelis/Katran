@@ -487,8 +487,10 @@ pub(crate) fn page(
 ) -> Result<Value> {
     let (entry, count) = selected(event, index, cancel)?;
     cancel.check()?;
-    let preview_png = thumbnail(&entry.bytes)
-        .or_else(|| shell_preview(root, &entry, quota))
+    let video = crate::file_types::is_native_video(Path::new(&entry.name));
+    let preview_png = (!video)
+        .then(|| thumbnail(&entry.bytes).or_else(|| shell_preview(root, &entry, quota)))
+        .flatten()
         .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
     cancel.check()?;
     let extension = Path::new(&entry.name)
@@ -497,7 +499,7 @@ pub(crate) fn page(
         .unwrap_or("")
         .to_ascii_lowercase();
     Ok(
-        json!({"index":index,"count":count,"file":{"name":entry.name,"size":entry.bytes.len(),"extension":extension,"preview_png":preview_png,"archive_kind":if bs_name(event) {"bs"} else {"bull_file"}}}),
+        json!({"index":index,"count":count,"file":{"name":entry.name,"size":entry.bytes.len(),"extension":extension,"video":video,"preview_png":preview_png,"archive_kind":if bs_name(event) {"bs"} else {"bull_file"}}}),
     )
 }
 

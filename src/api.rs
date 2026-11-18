@@ -390,6 +390,11 @@ pub enum Command {
         id: i64,
         revision: String,
     },
+    OpenCollectionMedia {
+        id: i64,
+        revision: String,
+        index: usize,
+    },
     ControlMedia {
         session: u64,
         action: crate::media_playback::Action,

@@ -544,6 +544,7 @@ impl Service {
         }
         match command {
             Command::OpenMedia { id, revision } => self.open_media(id, revision),
+            command @ Command::OpenCollectionMedia { .. } => self.begin_job(command),
             Command::ControlMedia { session, action } => self.control_media(session, action),
             Command::MediaState => self.media_state(),
             Command::CaptureMediaFrame { session } => self.capture_media_frame(session),

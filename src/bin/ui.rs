@@ -595,19 +595,29 @@ impl Shelf {
             });
         }
     }
-    fn media_preview_lifecycle(&mut self, ctx: &egui::Context) {
+    fn media_preview_target(&self) -> Option<media_preview_ui::Target> {
+        if self.upscale.collection_open() {
+            return self.collection_media_target();
+        }
         let full = self.state["preview"].as_i64();
         let id = full.or_else(|| {
             (self.state["view"] == "details")
                 .then(|| self.state["cursor"].as_i64())
                 .flatten()
         });
-        let target = if self.video_visible
+        id.and_then(|id| self.events.iter().find(|e| e["id"] == id))
+            .and_then(|event| media_preview_ui::target(event, &self.state, full.is_some()))
+    }
+
+    fn media_surface_visible(&self, ctx: &egui::Context) -> bool {
+        self.video_visible
             && self.state["settings_open"] != true
             && !ctx.input(|i| i.viewport().minimized.unwrap_or(false))
-        {
-            id.and_then(|id| self.events.iter().find(|e| e["id"] == id))
-                .and_then(|event| media_preview_ui::target(event, &self.state, full.is_some()))
+    }
+
+    fn media_preview_lifecycle(&mut self, ctx: &egui::Context) {
+        let target = if self.media_surface_visible(ctx) {
+            self.media_preview_target()
         } else {
             None
         };
@@ -623,33 +633,24 @@ impl Shelf {
     }
     fn media_pause_input(&mut self, ctx: &egui::Context) {
         if self.api.is_none()
-            || !self.video_visible
-            || self.modal_owns_input()
-            || self.state["settings_open"] == true
+            || !self.media_surface_visible(ctx)
+            || self.non_collection_modal_owns_input()
             || search_or_text_edit_focused(ctx)
             || !ctx.input(|input| input.focused)
         {
             self.media_preview.cancel_frame_hold();
             return;
         }
-        let full = self.state["preview"].as_i64();
-        let id = full.or_else(|| {
-            (self.state["view"] == "details")
-                .then(|| self.state["cursor"].as_i64())
-                .flatten()
-        });
-        let video = id
-            .and_then(|id| self.events.iter().find(|e| e["id"] == id))
-            .and_then(|event| media_preview_ui::target(event, &self.state, full.is_some()));
-        if video.is_none() {
+        let Some(video) = self.media_preview_target() else {
             self.media_preview.cancel_frame_hold();
             return;
-        }
+        };
         let video_shortcuts: Vec<_> = self
             .shortcuts
             .iter()
             .filter(|shortcut| {
-                matches!(shortcut.id.as_str(), "video_pause" | "capture_video_frame")
+                shortcut.id == "video_pause"
+                    || (video.entry.is_none() && shortcut.id == "capture_video_frame")
             })
             .cloned()
             .collect();
@@ -657,7 +658,7 @@ impl Shelf {
         let seek = take_video_seek_keys(ctx);
         let hold = video_frame_hold_direction(ctx);
         self.media_preview_lifecycle(ctx);
-        if let Some(id) = video_action.as_ref() {
+        if let Some(id) = video_action.as_ref().filter(|_| video.entry.is_none()) {
             self.media_preview.cancel_frame_hold();
             self.run(id.clone(), ctx);
         }
@@ -671,6 +672,9 @@ impl Shelf {
             };
             if video_action.is_some() {
                 self.media_preview.cancel_frame_hold();
+                if video.entry.is_some() {
+                    self.media_preview.toggle_pause(&mut call);
+                }
             } else if let Some(delta) = seek {
                 self.media_preview.cancel_frame_hold();
                 self.media_preview.seek_by(delta, &mut call);
@@ -700,6 +704,9 @@ impl Shelf {
         }
     }
     fn modal_owns_input(&self) -> bool {
+        self.non_collection_modal_owns_input() || self.upscale.collection_open()
+    }
+    fn non_collection_modal_owns_input(&self) -> bool {
         self.transfer_input_reserved()
             || self.sorting_input.is_open()
             || self.pods_ui.selector_open
@@ -708,7 +715,6 @@ impl Shelf {
             || self.actions
             || self.audio_extract.open
             || self.upscale.open
-            || self.upscale.collection_open()
             || self.open_apps.open
             || self.workspace.open
             || self.info.is_open()

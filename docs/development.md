@@ -71,6 +71,11 @@ the item ID and content. Folder rename uses the verified source handle and an
 exclusive destination. Ctrl+E uses the existing properties editor for pinned
 shelf items and the name-only editor for unpinned collections.
 
+`OpenCollectionMedia` validates an active collection and member index.
+Its worker verifies the container and stages the selected video. The existing
+media dispatcher commits the same libmpv player with a visit-bound lease,
+which keeps the snapshot alive until the player closes.
+
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
 JPEG copy to the default browser through a short-lived loopback address.

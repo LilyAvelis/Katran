@@ -46,3 +46,5 @@ travels with the exported collection. In Folder, Ctrl+E renames the archive
 on disk and preserves its suffix.
 
 Folder and Files display the first entry's thumbnail or file-type icon.
+Video entries in file BULL and BS open directly in Katran's shared player.
+The viewer plays the current video page; changing pages stops the old clip.

@@ -34,6 +34,10 @@ struct Collection {
 }
 
 impl Collection {
+    fn video_ready(&self) -> bool {
+        self.ready_index == Some(self.index) && self.file.as_ref().is_some_and(|file| file.video)
+    }
+
     fn ready_target(&self) -> Option<(i64, String, usize)> {
         self.ready_index
             .filter(|_| {
@@ -57,6 +61,7 @@ struct FilePage {
     name: String,
     size: u64,
     extension: String,
+    video: bool,
 }
 
 struct TextPage {
@@ -222,6 +227,20 @@ fn decode_collection_page(encoded: &str) -> Result<egui::ColorImage, String> {
 }
 
 impl Shelf {
+    pub(super) fn collection_media_target(&self) -> Option<super::media_preview_ui::Target> {
+        let collection = self
+            .upscale
+            .collection
+            .as_ref()
+            .filter(|collection| collection.video_ready())?;
+        Some(super::media_preview_ui::collection_target(
+            collection.id,
+            &collection.revision,
+            collection.index,
+            &self.state,
+        ))
+    }
+
     fn open_ready_collection_entry(&mut self, ctx: &egui::Context) {
         let target = self.upscale.collection.as_ref().and_then(|c| {
             c.ready_target().and_then(|(id, revision, index)| {
@@ -298,6 +317,9 @@ impl Shelf {
     }
 
     fn close_translation_collection(&mut self) {
+        if self.collection_media_target().is_some() {
+            self.stop_media_preview();
+        }
         if let Some(job_id) = self.upscale.link_rename.take().and_then(|edit| edit.job) {
             self.call(Command::CancelJob { job_id });
         }
@@ -390,6 +412,9 @@ impl Shelf {
     }
 
     fn request_translation_page(&mut self, index: usize, ctx: &egui::Context) {
+        if self.collection_media_target().is_some() {
+            self.stop_media_preview();
+        }
         let Some(mut collection) = self.upscale.collection.take() else {
             return;
         };
@@ -471,6 +496,8 @@ impl Shelf {
                                             name: name.to_owned(),
                                             size: size.unwrap(),
                                             extension,
+                                            video: file.get("video").and_then(Value::as_bool)
+                                                == Some(true),
                                         });
                                         collection.text = None;
                                         collection.link = None;
@@ -663,6 +690,10 @@ impl Shelf {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
         let next_key = !editing
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+        let media_target = self
+            .media_surface_visible(ctx)
+            .then(|| self.collection_media_target())
+            .flatten();
         let collection = self.upscale.collection.as_mut().unwrap();
         let edit = &mut self.upscale.link_rename;
         let mut previous = previous_key;
@@ -768,7 +799,17 @@ impl Shelf {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
             let painter = ui.painter().with_clip_rect(canvas);
             painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
-            if let Some(file) = collection.file.as_ref() {
+            if media_target.is_some() {
+                if let Some(texture) = collection.texture.as_ref() {
+                    let rect = super::gallery_card::fit_rect(canvas, texture.size_vec2());
+                    painter.image(
+                        texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+            } else if let Some(file) = collection.file.as_ref() {
                 let inner = canvas.shrink(18.0);
                 let mut child = ui.new_child(
                     egui::UiBuilder::new()
@@ -961,6 +1002,18 @@ impl Shelf {
                         );
                     }
                 }
+            }
+            if let Some(target) = media_target.as_ref()
+                && let Some(api) = self.api.as_mut()
+            {
+                self.media_preview
+                    .show_in_canvas(ui, canvas, target, &mut |command| {
+                        api.execute(Request {
+                            api_version: 1,
+                            request_id: "collection-media-ui".into(),
+                            command,
+                        })
+                    });
             }
             if !collection.error.is_empty() {
                 let anchor = canvas.left_top() + egui::vec2(12.0, 12.0);
@@ -1399,6 +1452,36 @@ mod tests {
     }
 
     #[test]
+    fn collection_video_target_requires_current_ready_page() {
+        let mut collection = Collection {
+            id: 12,
+            revision: "rev".into(),
+            index: 0,
+            count: Some(2),
+            pending: None,
+            texture: None,
+            link: None,
+            text: None,
+            file: Some(FilePage {
+                name: "clip.mp4".into(),
+                size: 1,
+                extension: "mp4".into(),
+                video: true,
+            }),
+            ready_index: Some(0),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        };
+        assert!(collection.video_ready());
+        collection.index = 1;
+        assert!(!collection.video_ready());
+        collection.ready_index = Some(1);
+        collection.file.as_mut().unwrap().video = false;
+        assert!(!collection.video_ready());
+    }
+
+    #[test]
     fn bs_ready_entry_can_open_but_cannot_copy_or_paste() {
         let collection = Collection {
             id: 12,
@@ -1413,6 +1496,7 @@ mod tests {
                 name: "report.pdf".into(),
                 size: 123,
                 extension: "pdf".into(),
+                video: false,
             }),
             ready_index: Some(1),
             copy_held: false,

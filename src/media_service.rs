@@ -44,6 +44,9 @@ pub(crate) struct PreparedMedia {
     path: PathBuf,
     stamp: Stamp,
     epoch: u64,
+    archive: Option<(PathBuf, Stamp)>,
+    snapshot: Option<copy_out::Plan>,
+    collection_index: Option<usize>,
 }
 pub(crate) struct CaptureLease {
     token: u64,
@@ -57,6 +60,9 @@ pub(crate) struct CaptureLease {
 pub(crate) struct MediaState {
     player: media_playback::Player,
     lease: Option<(PathBuf, Stamp)>,
+    archive_lease: Option<(PathBuf, Stamp)>,
+    snapshot: Option<copy_out::Plan>,
+    collection_target: Option<i64>,
     context: Option<(i64, String)>,
     epoch: u64,
     timeline: u64,
@@ -79,6 +85,9 @@ impl MediaState {
         Self {
             player,
             lease: None,
+            archive_lease: None,
+            snapshot: None,
+            collection_target: None,
             context: None,
             epoch: 0,
             timeline: 0,
@@ -94,6 +103,9 @@ impl MediaState {
         self.epoch = self.epoch.saturating_add(1);
         self.player.close();
         self.lease = None;
+        self.archive_lease = None;
+        // The decoder must release the file before its owned snapshot is deleted.
+        self.snapshot = None;
     }
 }
 impl Service {
@@ -205,22 +217,65 @@ impl Service {
             .ok()?,
         ))
     }
+    fn collection_media_context(&self, id: i64) -> Option<(i64, String)> {
+        if !self.window_visible
+            || self.interaction.settings_open
+            || !self.interaction.visible.contains(&id)
+        {
+            return None;
+        }
+        let mode = match self.interaction.preview {
+            Some(current) if current == id => "collection_preview",
+            Some(_) => return None,
+            None if self.interaction.cursor == Some(id) => "collection_cursor",
+            None if self.interaction.selected.as_slice() == [id] => "collection_selection",
+            None => return None,
+        };
+        Some((
+            id,
+            serde_json::to_string(&(
+                self.interaction.tab,
+                &self.interaction.folder_path,
+                self.interaction.view,
+                self.interaction.view_generation,
+                mode,
+                self.settings.video_gpu_acceleration,
+            ))
+            .ok()?,
+        ))
+    }
+    fn active_media_context(&self) -> Option<(i64, String)> {
+        match self.media.collection_target {
+            Some(id) => self.collection_media_context(id),
+            None => self.media_context(),
+        }
+    }
     pub(crate) fn reconcile_media(&mut self) {
-        let context = self.media_context();
+        let context = self.active_media_context();
         if self.media.context != context {
             self.media.invalidate();
             self.media.context = context;
+        }
+        if self.media.collection_target.is_some() && self.media.context.is_none() {
+            self.media.collection_target = None;
         }
         // Ordinary catalogue lookups are indexed; avoid scanning the Desktop
         // catalogue on every frame. The lease separately checks the actual file.
         let identity = self.media.player.current_identity().cloned();
         if let Some(identity) = identity
             && !desktop_projection::is_desktop_id(identity.id)
-            && !self
-                .get(identity.id)
-                .is_ok_and(|event| event.revision == identity.revision)
         {
-            self.media.invalidate();
+            let valid = self.get(identity.id).is_ok_and(|event| {
+                event.revision == identity.revision
+                    && self
+                        .media
+                        .archive_lease
+                        .as_ref()
+                        .is_none_or(|(path, _)| event.path == *path)
+            });
+            if !valid {
+                self.media.invalidate();
+            }
         }
     }
     pub(crate) fn start_media_prepare(
@@ -228,6 +283,7 @@ impl Service {
         id: i64,
         revision: String,
     ) -> Result<(Event, Identity, u64, Option<String>)> {
+        self.media.collection_target = None;
         self.media.invalidate();
         let (current, context) = self
             .media_context()
@@ -270,6 +326,7 @@ impl Service {
         } else {
             None
         };
+        self.media.context = Some((current, context.clone()));
         Ok((
             event,
             Identity {
@@ -281,9 +338,48 @@ impl Service {
             desktop_digest,
         ))
     }
+    pub(crate) fn start_collection_media_prepare(
+        &mut self,
+        id: i64,
+        revision: String,
+        index: usize,
+    ) -> Result<(Event, Identity, u64, usize)> {
+        let (_, context) = self.collection_media_context(id).ok_or_else(|| {
+            ApiError::new(
+                "media_context_closed",
+                "Select or preview the collection first",
+            )
+        })?;
+        let event = self.get(id)?;
+        if event.revision != revision {
+            return Err(ApiError::new(
+                "stale_selection",
+                "Collection revision changed",
+            ));
+        }
+        if !(bs_collection::can_view(&event) || collection_kind::external(&event)) {
+            return Err(ApiError::new(
+                "invalid_collection",
+                "Select a file collection",
+            ));
+        }
+        self.media.invalidate();
+        self.media.collection_target = Some(id);
+        self.media.context = Some((id, context.clone()));
+        Ok((
+            event,
+            Identity {
+                id,
+                revision,
+                context,
+            },
+            self.media.epoch,
+            index,
+        ))
+    }
     pub(crate) fn commit_media(&mut self, prepared: PreparedMedia) -> Result<serde_json::Value> {
         if prepared.epoch != self.media.epoch
-            || self.media_context()
+            || self.active_media_context()
                 != Some((prepared.identity.id, prepared.identity.context.clone()))
         {
             return Err(ApiError::new(
@@ -300,6 +396,14 @@ impl Service {
                 "source_changed",
                 "Media source changed while loading",
             ));
+        }
+        if let Some((path, expected)) = &prepared.archive {
+            if &current.path != path || stamp(path)? != *expected {
+                return Err(ApiError::new(
+                    "source_changed",
+                    "Collection changed while loading",
+                ));
+            }
         }
         #[cfg(windows)]
         if let Some(current) = self.media.configured_gpu
@@ -319,7 +423,13 @@ impl Service {
             },
         )?;
         self.media.lease = Some((prepared.path, prepared.stamp));
-        Ok(serde_json::json!(session))
+        self.media.archive_lease = prepared.archive;
+        self.media.snapshot = prepared.snapshot;
+        let mut result = serde_json::json!(session);
+        if let Some(index) = prepared.collection_index {
+            result["collection_index"] = index.into();
+        }
+        Ok(result)
     }
     pub(crate) fn open_media(&mut self, id: i64, revision: String) -> Result<serde_json::Value> {
         let (event, identity, epoch, desktop_digest) = self.start_media_prepare(id, revision)?;
@@ -331,6 +441,12 @@ impl Service {
         {
             self.media.invalidate();
             return Err(ApiError::new("source_changed", "Media source changed"));
+        }
+        if let Some((path, expected)) = &self.media.archive_lease
+            && stamp(path).ok().as_ref() != Some(expected)
+        {
+            self.media.invalidate();
+            return Err(ApiError::new("source_changed", "Collection source changed"));
         }
         Ok(())
     }
@@ -346,6 +462,9 @@ impl Service {
         let result = self.media.player.control(token, action)?;
         if result.is_none() {
             self.media.lease = None;
+            self.media.archive_lease = None;
+            self.media.snapshot = None;
+            self.media.collection_target = None;
         }
         Ok(serde_json::json!(result))
     }
@@ -373,7 +492,9 @@ impl Service {
                 "Playback session is no longer current",
             ));
         }
-        if self.media_context() != Some((session.identity.id, session.identity.context.clone())) {
+        if self.active_media_context()
+            != Some((session.identity.id, session.identity.context.clone()))
+        {
             return Err(ApiError::new(
                 "media_context_closed",
                 "Open a video preview first",
@@ -423,6 +544,12 @@ impl Service {
         }
     }
     fn capture_session(&mut self, requested: Option<u64>) -> Result<media_playback::Session> {
+        if self.media.collection_target.is_some() {
+            return Err(ApiError::new(
+                "media_capture_unavailable",
+                "Frame capture is unavailable for videos inside collections",
+            ));
+        }
         self.check_media_lease()?;
         let session = self
             .media
@@ -615,5 +742,64 @@ pub(crate) fn prepare(
         path,
         stamp: after,
         epoch,
+        archive: None,
+        snapshot: None,
+        collection_index: None,
+    })
+}
+
+/// Materialize exactly one verified archive member in a plan-owned snapshot.
+/// The caller must keep the plan until the decoder has been closed.
+pub(crate) fn prepare_collection_media(
+    event: Event,
+    identity: Identity,
+    epoch: u64,
+    index: usize,
+    root: &Path,
+    quota: u64,
+    cancel: &domain_jobs::Cancellation,
+) -> Result<PreparedMedia> {
+    use sha2::{Digest, Sha256};
+    cancel.check()?;
+    let before = stamp(&event.path)?;
+    let entry = bs_collection::read_entry(&event, index, cancel)?;
+    if !file_types::is_native_video(Path::new(&entry.name)) {
+        return Err(ApiError::new(
+            "invalid_media_source",
+            "Selected collection item is not a video",
+        ));
+    }
+    let expected = format!("{:x}", Sha256::digest(&entry.bytes));
+    cancel.check()?;
+    let plan = copy_out::prepare_bs_entry(&root.join("collection-media"), &entry, quota)
+        .map_err(|e| ApiError::new("media_snapshot_error", e))?;
+    let path =
+        plan.paths.first().cloned().ok_or_else(|| {
+            ApiError::new("media_snapshot_error", "Could not prepare video snapshot")
+        })?;
+    let snapshot_stamp = stamp(&path)?;
+    if preview::content_hash(&path)? != expected || stamp(&path)? != snapshot_stamp {
+        return Err(ApiError::new(
+            "source_changed",
+            "Video snapshot changed while preparing",
+        ));
+    }
+    cancel.check()?;
+    if stamp(&event.path)? != before {
+        return Err(ApiError::new(
+            "source_changed",
+            "Collection changed while preparing video",
+        ));
+    }
+    cancel.check()?;
+    Ok(PreparedMedia {
+        archive: Some((event.path.clone(), before)),
+        event,
+        identity,
+        epoch,
+        path,
+        stamp: snapshot_stamp,
+        snapshot: Some(plan),
+        collection_index: Some(index),
     })
 }

@@ -14,6 +14,7 @@ pub(super) struct Target {
     pub id: i64,
     pub revision: String,
     pub context: String,
+    pub entry: Option<usize>,
 }
 
 /// Presentation routing only; the dispatcher revalidates the source and context.
@@ -36,6 +37,7 @@ pub(super) fn target(event: &Value, state: &Value, full: bool) -> Option<Target>
     Some(Target {
         id: event["id"].as_i64()?,
         revision: event["revision"].as_str()?.to_owned(),
+        entry: None,
         context: serde_json::json!([
             state["tab"],
             state["folder_path"],
@@ -43,6 +45,21 @@ pub(super) fn target(event: &Value, state: &Value, full: bool) -> Option<Target>
         ])
         .to_string(),
     })
+}
+
+pub(super) fn collection_target(id: i64, revision: &str, index: usize, state: &Value) -> Target {
+    Target {
+        id,
+        revision: revision.into(),
+        entry: Some(index),
+        context: serde_json::json!([
+            state["tab"],
+            state["folder_path"],
+            "collection",
+            state["view"]
+        ])
+        .to_string(),
+    }
 }
 
 struct PendingSeek {
@@ -101,11 +118,12 @@ impl State {
             self.error = None;
             self.stop(call);
             self.auto_start = target.as_ref().is_some_and(|target| {
-                serde_json::from_str::<Value>(&target.context)
-                    .ok()
-                    .and_then(|value| value.get(2).and_then(Value::as_str).map(str::to_owned))
-                    .as_deref()
-                    == Some("preview")
+                target.entry.is_some()
+                    || serde_json::from_str::<Value>(&target.context)
+                        .ok()
+                        .and_then(|value| value.get(2).and_then(Value::as_str).map(str::to_owned))
+                        .as_deref()
+                        == Some("preview")
             });
             self.last_activity = Some(Instant::now());
             self.controls_focused = false;
@@ -333,6 +351,7 @@ impl State {
         };
         if value["identity"]["id"].as_i64() != Some(target.id)
             || value["identity"]["revision"].as_str() != Some(target.revision.as_str())
+            || value["collection_index"].as_u64() != target.entry.map(|index| index as u64)
         {
             self.session = Some(token);
             self.stopping = true;
@@ -562,11 +581,20 @@ impl State {
     fn start(&mut self, target: &Target, call: &mut dyn FnMut(Command) -> Value) {
         self.target = Some(target.clone());
         self.error = None;
-        let result = call(Command::BeginJob {
-            command: Box::new(Command::OpenMedia {
+        let command = if let Some(index) = target.entry {
+            Command::OpenCollectionMedia {
                 id: target.id,
                 revision: target.revision.clone(),
-            }),
+                index,
+            }
+        } else {
+            Command::OpenMedia {
+                id: target.id,
+                revision: target.revision.clone(),
+            }
+        };
+        let result = call(Command::BeginJob {
+            command: Box::new(command),
         });
         if result["ok"] != true {
             self.error = Some(Self::message(&result));
@@ -613,15 +641,25 @@ impl State {
         target: &Target,
         call: &mut dyn FnMut(Command) -> Value,
     ) {
+        let width = ui.available_width().max(1.0);
+        let height = ui.available_height().max(1.0);
+        let (canvas, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        self.show_in_canvas(ui, canvas, target, call);
+    }
+
+    pub(super) fn show_in_canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        canvas: egui::Rect,
+        target: &Target,
+        call: &mut dyn FnMut(Command) -> Value,
+    ) {
         self.sync(ui.ctx(), Some(target.clone()), call);
         if self.auto_start && self.pending.is_none() && self.session.is_none() && !self.stopping {
             self.auto_start = false;
             self.start(target, call);
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
-        let width = ui.available_width().max(1.0);
-        let height = ui.available_height().max(1.0);
-        let (canvas, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         if let Some(texture) = &self.texture {
             ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
             let rect = super::gallery_card::fit_rect(canvas, texture.size_vec2());
@@ -1036,6 +1074,7 @@ mod tests {
             id: 5,
             revision: "r1".into(),
             context: context.into(),
+            entry: None,
         }
     }
     fn session(token: u64, state: &str) -> Value {
@@ -1345,6 +1384,42 @@ mod tests {
         }
         assert_eq!(opens, 1);
         assert!(state.error.is_some());
+    }
+
+    #[test]
+    fn collection_player_autoplays_only_the_acknowledged_page() {
+        let ctx = egui::Context::default();
+        let target = collection_target(5, "r1", 2, &json!({"tab":"files","view":"gallery"}));
+        let mut state = State::default();
+        let mut actions = Vec::new();
+        let mut call = |command| match command {
+            Command::BeginJob { command } => {
+                assert!(matches!(
+                    *command,
+                    Command::OpenCollectionMedia {
+                        id: 5,
+                        index: 2,
+                        ..
+                    }
+                ));
+                actions.push("open");
+                let mut opened = session(9, "paused");
+                opened["collection_index"] = json!(1);
+                ok(json!({"state":"succeeded","result":opened}))
+            }
+            Command::ControlMedia {
+                session: 9,
+                action: Action::Stop,
+            } => {
+                actions.push("stop");
+                ok(Value::Null)
+            }
+            _ => panic!("Unexpected control for stale page"),
+        };
+        let _ = ctx.run_ui(Default::default(), |ui| state.show(ui, &target, &mut call));
+        state.sync(&ctx, Some(target), &mut call);
+        assert_eq!(actions, ["open", "stop"]);
+        assert!(state.session.is_none());
     }
 
     #[test]

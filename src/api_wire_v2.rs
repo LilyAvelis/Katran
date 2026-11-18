@@ -112,6 +112,7 @@ fn command(value: &mut Value) -> Result<(), String> {
         }
         "describe_pod"
         | "open_media"
+        | "open_collection_media"
         | "get_pinned_properties"
         | "set_pinned_properties"
         | "set_pinned_tags"

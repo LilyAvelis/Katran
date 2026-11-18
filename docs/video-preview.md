@@ -19,6 +19,13 @@ when showing the same item. A late prepare result cannot reopen an abandoned
 session after leaving and returning. Metadata-only tag/pin changes keep the same
 content session. Ordinary image/Text/Pods interactions retain their routes.
 
+File BULL and BS video pages use the same player inside Katran's collection
+viewer. A ready video page autoplays and uses the usual transport and video
+keys. Bare arrows turn collection pages. Closing or turning the page cancels
+any pending open and stops the previous clip. The backend uses a verified,
+private snapshot of just the active member and releases it on stop.
+Frame capture is currently available for standalone videos.
+
 The owner confirmed playback/navigation in Folder and Desktop. Follow-up UI
 corrections size the overlay from actual widgets with a bottom inset for large
 controls. Seek holds the requested position until observed confirmation or a
