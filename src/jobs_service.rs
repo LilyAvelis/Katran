@@ -698,7 +698,7 @@ impl Service {
                 let root = self.root.clone();
                 let quota = self.quota;
                 let references = self.reference_paths()?;
-                let target = self.settings.translation_target.language(self.settings.language);
+                let target = settings::Language::English;
                 self.jobs.submit(Lane::ImageTranslate, move |cancel| {
                     use std::io::Read;
                     const MAX_SOURCE: u64 = 32 * 1024 * 1024;

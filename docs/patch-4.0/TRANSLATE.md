@@ -36,13 +36,14 @@ translation backend and explicit optional component setup after the fixtures.
 
 Select a Japanese image and open Ctrl+K → AI Commands → Translate image
 from Japanese. The action is independently rebindable. Settings → AI →
-Image translation selects Interface language, Russian or English and reports
-the locally detected components. The default follows Katran's interface
-language at submission. Output is a separate, managed PNG in Translate.
+Image translation reports the locally detected components and the English
+output language. Output is a separate, managed PNG in Translate.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
-The action uses PP-OCRv5, Manga OCR and the installed `qwen3:1.7b` tag.
+The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b` tag.
 Japanese is the only exposed recognition language for this integration.
+The translator requires full GPU placement and a complete English answer.
+The English-only rollout follows the owner's acceptance scope for this stage.
 The worker embeds the tested scripts, starts an isolated loopback Ollama
 with cloud disabled, and contains its Windows process tree. Nothing is
 downloaded on invoking the action. Setup/Portable can point

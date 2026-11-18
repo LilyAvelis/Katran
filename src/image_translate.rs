@@ -220,7 +220,7 @@ fn bounded_file(path: &Path, max: u64) -> Result<()> {
     Ok(())
 }
 
-/// Prepares one local Japanese-to-Russian/English translation. Source bytes are immutable.
+/// Prepares one local Japanese-to-English translation. Source bytes are immutable.
 pub(crate) fn translate(
     source: &[u8],
     staging_root: &Path,
@@ -232,8 +232,8 @@ pub(crate) fn translate(
     if source.is_empty() || source.len() > MAX_BYTES {
         return Err(error("Image exceeds input size limit"));
     }
-    if !matches!(target, "ru" | "en") {
-        return Err(error("Translation target must be Russian or English"));
+    if target != "en" {
+        return Err(error("Japanese image translation outputs English"));
     }
     let font = std::env::var_os("WINDIR")
         .map(PathBuf::from)

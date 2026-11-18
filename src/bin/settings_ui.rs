@@ -601,7 +601,6 @@ impl State {
             ui,
             super::i18n::tr("Перевод изображений", "Image translation"),
             |ui| {
-                use katran::settings::TranslationTarget;
                 ui.label(super::i18n::tr(
                     "Распознавание текста: японский",
                     "Text recognition: Japanese",
@@ -628,44 +627,10 @@ impl State {
                 } else {
                     ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
                 }
-                if let Some(draft) = self.draft.as_mut() {
-                    let current = match draft.translation_target {
-                        TranslationTarget::Interface => {
-                            match draft.language {
-                                katran::settings::Language::English => super::i18n::tr("Язык интерфейса (английский)", "Interface language (English)"),
-                                katran::settings::Language::Russian => super::i18n::tr("Язык интерфейса (русский)", "Interface language (Russian)"),
-                            }
-                        }
-                        TranslationTarget::Russian => super::i18n::tr("Русский", "Russian"),
-                        TranslationTarget::English => super::i18n::tr("Английский", "English"),
-                    };
-                    SettingsRow::show(
-                        ui,
-                        super::i18n::tr("Язык перевода", "Translation language"),
-                        super::i18n::tr("Применяется автоматически.", "Applies automatically."),
-                        |ui| {
-                            egui::ComboBox::from_id_salt("translation-target")
-                                .selected_text(current)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut draft.translation_target,
-                                        TranslationTarget::Interface,
-                                        super::i18n::tr("Язык интерфейса", "Interface language"),
-                                    );
-                                    ui.selectable_value(
-                                        &mut draft.translation_target,
-                                        TranslationTarget::Russian,
-                                        super::i18n::tr("Русский", "Russian"),
-                                    );
-                                    ui.selectable_value(
-                                        &mut draft.translation_target,
-                                        TranslationTarget::English,
-                                        super::i18n::tr("Английский", "English"),
-                                    );
-                                });
-                        },
-                    );
-                }
+                ui.label(super::i18n::tr(
+                    "Язык перевода: английский",
+                    "Translation language: English",
+                ));
             },
         );
         if let Some(upscale) = self

@@ -6,6 +6,10 @@ pub fn icon(id: &str) -> Lucide {
         "quicklook" | "preview" => Lucide::Eye,
         "video_pause" => Lucide::Pause,
         "capture_video_frame" => Lucide::Camera,
+        "extract_video_audio" => Lucide::Volume2,
+        "translate" | "translate_image_ja" => Lucide::Languages,
+        "upscale_remacri_x2" | "upscale_remacri_x4"
+        | "upscale_realesrgan_x2" | "upscale_realesrgan_x4" => Lucide::ZoomIn,
         "density_more" => Lucide::ZoomOut,
         "density_less" => Lucide::ZoomIn,
         "all" => Lucide::LayoutGrid,

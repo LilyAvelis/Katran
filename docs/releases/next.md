@@ -5,8 +5,8 @@
 The local Translate tab is restricted to internally published managed image
 results. The independent Rust collection preserves page order. This change
 introduces catalogue schema v14. Rollback to a v13 binary requires the
-pre-migration profile backup. The local Japanese-image action publishes
-separate PNGs here and uses the Settings → AI target language.
+pre-migration profile backup. The local Japanese-image action uses Qwen3 4B
+on the GPU and publishes a separate English PNG here.
 See [Translate](../patch-4.0/TRANSLATE.md).
 
 ## Katran 4.0 · Local static image upscale
