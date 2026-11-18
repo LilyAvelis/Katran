@@ -84,3 +84,12 @@ the raster cleanup/typesetting, and Polly verified reading order and local
 Ollama translation. Simple-page Russian output is reproducible without a
 manual transcript; complex grouping still mixes dialogue and other page text.
 Prototype scripts are checkpointed separately from the app build.
+
+Polly integrated the Japanese action and committed at `06d3c01`. Vela
+owned subprocess preparation, Nemi owned runtime discovery, and Fenna owned
+the Settings → AI card. The approved simple page passed via the normal
+dispatcher using the English interface default, and the PNG appeared in
+Translate without modifying input. Settings round-trip verified the Russian
+override. Targeted headless palette and Settings checks passed. The primary
+launcher selects `909c59a69df4`; the v14 backup and prior runtime remain
+available. Owner Windows acceptance and complex pages remain open.
