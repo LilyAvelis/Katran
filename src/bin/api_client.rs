@@ -1170,6 +1170,7 @@ impl Shelf {
         }
     }
     pub(super) fn call(&mut self, command: Command) -> Value {
+        let notion_actions = matches!(&command, Command::Actions);
         let notion_catalogue = self.notion_database_active()
             && matches!(&command, Command::Actions | Command::SortActions);
         let Some(api) = self.api.as_mut() else {
@@ -1202,6 +1203,8 @@ impl Shelf {
                     Some("folder_favorites") => tr("Избранное Notion", "Notion favorites"),
                     Some("folder_history") => tr("История Notion", "Notion history"),
                     Some("shelf_search") => tr("Поиск страниц в базе", "Search pages in database"),
+                    Some("density_more") if self.notion_reader_active() => tr("Уменьшить текст", "Smaller text"),
+                    Some("density_less") if self.notion_reader_active() => tr("Увеличить текст", "Larger text"),
                     _ => continue,
                 };
                 action["label"] = Value::String(label.to_owned());
@@ -1212,6 +1215,17 @@ impl Shelf {
                 "group":tr("Сортировка", "Sorting"),
                 "enabled":true
             }));
+            if self.notion_reader_active() && notion_actions {
+                for (id, label) in [
+                    ("notion_reader_background", tr("Фон страницы…", "Page background…")),
+                    ("notion_reader_landscape", tr("Переключить Landscape", "Toggle Landscape")),
+                    ("notion_reader_cinema", tr("Переключить Cinema", "Toggle Cinema")),
+                ] {
+                    actions.push(serde_json::json!({
+                        "id": id, "label": label, "group": tr("Читалка Notion", "Notion reader"), "enabled": true
+                    }));
+                }
+            }
         }
         result
     }

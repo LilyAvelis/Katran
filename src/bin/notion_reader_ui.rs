@@ -5,10 +5,20 @@ use katran::{
 };
 
 pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
+    show_scaled(ui, blocks, 1.0);
+}
+
+pub(super) fn show_scaled(ui: &mut egui::Ui, blocks: &[Block], scale: f32) {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let body_size = egui::TextStyle::Body.resolve(ui.style()).size * scale;
     for (index, block) in blocks.iter().enumerate() {
         ui.push_id(index, |ui| match block {
             Block::Markdown(document) => {
-                show_document(ui, document, false);
+                show_document(ui, document, false, scale);
             }
             Block::Callout {
                 icon,
@@ -29,9 +39,9 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
                                 .as_deref()
                                 .filter(|icon| icon.chars().count() <= 12 && !icon.contains("://"))
                             {
-                                ui.label(RichText::new(icon).size(16.0));
+                                ui.label(RichText::new(icon).size(16.0 * scale));
                             }
-                            ui.vertical(|ui| show(ui, children));
+                            ui.vertical(|ui| show_scaled(ui, children, scale));
                         });
                     });
             }
@@ -41,11 +51,11 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
                 } else {
                     title
                 };
-                egui::CollapsingHeader::new(title)
+                egui::CollapsingHeader::new(RichText::new(title).size(body_size))
                     .id_salt("notion-toggle")
-                    .show(ui, |ui| show(ui, children));
+                    .show(ui, |ui| show_scaled(ui, children, scale));
             }
-            Block::Table { rows } => show_table(ui, rows),
+            Block::Table { rows } => show_table(ui, rows, scale),
             Block::Reference { kind, title, url } => {
                 let label = match kind {
                     ReferenceKind::Database => super::tr("База Notion", "Notion database"),
@@ -57,12 +67,12 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
                     .inner_margin(8)
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            ui.weak(label);
+                            ui.label(RichText::new(label).size(body_size).weak());
                             let title = if title.is_empty() { label } else { title };
                             if let Some(url) = url {
-                                ui.hyperlink_to(RichText::new(title).strong(), url);
+                                ui.hyperlink_to(RichText::new(title).size(body_size).strong(), url);
                             } else {
-                                ui.label(RichText::new(title).strong());
+                                ui.label(RichText::new(title).size(body_size).strong());
                             }
                         });
                     });
@@ -71,7 +81,7 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
     }
 }
 
-fn show_document(ui: &mut egui::Ui, document: &Document, header: bool) {
+fn show_document(ui: &mut egui::Ui, document: &Document, header: bool, scale: f32) {
     for line in &document.lines {
         if line.rule {
             ui.separator();
@@ -88,7 +98,7 @@ fn show_document(ui: &mut egui::Ui, document: &Document, header: bool) {
                 let size = match line.heading {
                     0 => 15.0,
                     level => 26.0 - f32::from(level) * 1.6,
-                };
+                } * scale;
                 let color = style.color.as_deref().map_or_else(
                     || {
                         if style.link {
@@ -178,7 +188,7 @@ fn callout_color(color: Option<&str>) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
+fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>], scale: f32) {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     if columns == 0 {
         return;
@@ -212,7 +222,7 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
                                     .inner_margin(5)
                                     .show(ui, |ui| {
                                         ui.set_width(cell_width);
-                                        show_document(ui, &cell.document, header);
+                                        show_document(ui, &cell.document, header, scale);
                                     });
                             }
                             ui.end_row();
@@ -225,6 +235,47 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaling_changes_reader_text_in_all_block_types() {
+        let blocks = katran::notion_reader::parse(
+            "Reader body\n\n| Column |\n| --- |\n| Cell |\n\n<toggle>\nToggle title\n</toggle>\n",
+        )
+        .unwrap();
+        let context = egui::Context::default();
+        crate::ui_fonts::install(&context);
+        let render = |scale| {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                show_scaled(ui, &blocks, scale)
+            });
+            output.textures_delta.clear();
+            output
+        };
+        fn size(shape: &egui::Shape, text: &str) -> Option<f32> {
+            match shape {
+                egui::Shape::Text(value) if value.galley.job.text.contains(text) => value
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|section| section.format.font_id.size),
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| size(shape, text)),
+                _ => None,
+            }
+        }
+        let normal = render(1.0);
+        let large = render(1.5);
+        for text in ["Reader body", "Column", "Cell", "Toggle title"] {
+            let find = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| size(&shape.shape, text))
+                    .unwrap()
+            };
+            assert!((find(&large) - find(&normal) * 1.5).abs() < 0.01, "{text}");
+        }
+    }
 
     #[test]
     fn notion_reader_paints_callout_table_and_collapsed_toggle() {

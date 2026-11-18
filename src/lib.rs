@@ -967,6 +967,27 @@ impl Service {
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
+            Command::GetNotionReaderPreferences => {
+                use rusqlite::OptionalExtension;
+                let document: Option<String> = self.db.query_row(
+                    "SELECT document FROM preferences WHERE key='notion_reader'",
+                    [],
+                    |row| row.get(0),
+                ).optional()?;
+                let preferences: settings::NotionReaderPreferences = document
+                    .and_then(|document| serde_json::from_str(&document).ok())
+                    .filter(|value: &settings::NotionReaderPreferences| (80..=200).contains(&value.text_percent))
+                    .unwrap_or_default();
+                Ok(serde_json::json!(preferences))
+            }
+            Command::SetNotionReaderPreferences { preferences } => {
+                if !(80..=200).contains(&preferences.text_percent) {
+                    return Err(ApiError::new("invalid_settings", "Notion reader text scale must be between 80 and 200 percent"));
+                }
+                let document = serde_json::json!(preferences);
+                self.db.execute("INSERT INTO preferences(key,document) VALUES('notion_reader',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document", [document.to_string()])?;
+                Ok(document)
+            }
             Command::ListSavedNotionPages { favorites } => {
                 let pages = notion::saved_pages(&self.root, favorites)?;
                 if favorites {

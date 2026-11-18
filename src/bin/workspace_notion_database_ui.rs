@@ -1,5 +1,6 @@
 //! Read-only Folder projection for Notion data source rows.
 use super::*;
+use katran::settings::NotionReaderPreferences;
 use katran::{api::NotionPageFields, notion::Page};
 
 #[derive(serde::Deserialize)]
@@ -79,6 +80,8 @@ pub(super) struct State {
     rows_job: Option<JobId>,
     visited: bool,
     preview: Option<Preview>,
+    reader: NotionReaderPreferences,
+    reader_draft: Option<NotionReaderPreferences>,
     error: Option<String>,
 }
 
@@ -112,6 +115,8 @@ impl State {
             rows_job: None,
             visited: false,
             preview: None,
+            reader: Default::default(),
+            reader_draft: None,
             error: None,
         }
     }
@@ -174,6 +179,8 @@ impl Shelf {
         self.close_notion_database();
         self.workspace_close();
         let mut database = State::new(id, title);
+        database.reader = serde_json::from_value(self.call(Command::GetNotionReaderPreferences))
+            .unwrap_or_default();
         let saved = self.call(Command::ListSavedNotionPages { favorites: true });
         database.favorites = saved["pages"]
             .as_array()
@@ -205,6 +212,7 @@ impl Shelf {
         if self.state["tab"] != "folder" {
             if !database.suspended {
                 database.suspended = true;
+                database.reader_draft = None;
                 self.query.clear();
                 self.loaded_query.clear();
             }
@@ -494,8 +502,17 @@ impl Shelf {
         else {
             return;
         };
-        let width = ui.available_width().min(660.0);
-        let height = ui.available_height();
+        let prefs = database.reader_draft.unwrap_or(database.reader);
+        let area = ui.available_rect_before_wrap();
+        let width = if prefs.landscape {
+            area.width()
+        } else {
+            area.width().min(660.0)
+        };
+        let height = area.height();
+        let column = egui::Rect::from_center_size(area.center(), egui::vec2(width, height));
+        paint_reader_background(ui, column, prefs);
+        let scale = f32::from(prefs.text_percent) / 100.0;
         ui.vertical_centered(|ui| {
             ui.allocate_ui_with_layout(
                 egui::vec2(width, height),
@@ -503,7 +520,10 @@ impl Shelf {
                 |ui| {
                     ui.set_width(width);
                     ui.set_max_width(width);
-                    ui.add(egui::Label::new(egui::RichText::new(&row.page.title).heading()).wrap());
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(&row.page.title).size(19.0 * scale))
+                            .wrap(),
+                    );
                     let Some(preview) = database
                         .preview
                         .as_ref()
@@ -516,19 +536,145 @@ impl Shelf {
                         .max_width(width)
                         .show(ui, |ui| {
                             if let Some(error) = &preview.error {
-                                ui.colored_label(Color32::LIGHT_RED, error);
+                                ui.label(
+                                    egui::RichText::new(error)
+                                        .color(Color32::LIGHT_RED)
+                                        .size(15.0 * scale),
+                                );
                             } else if preview.job.is_none() && preview.blocks.is_empty() {
-                                ui.weak(tr(
-                                    "У страницы нет содержимого",
-                                    "This page has no content",
-                                ));
+                                ui.label(
+                                    egui::RichText::new(tr(
+                                        "У страницы нет содержимого",
+                                        "This page has no content",
+                                    ))
+                                    .weak()
+                                    .size(15.0 * scale),
+                                );
                             } else {
-                                super::notion_ui::show_reader(ui, &preview.blocks);
+                                super::notion_ui::show_reader_scaled(ui, &preview.blocks, scale);
                             }
                         });
                 },
             );
         });
+    }
+
+    pub(crate) fn notion_reader_active(&self) -> bool {
+        self.notion_database_active()
+            && self.state["preview"]
+                .as_i64()
+                .is_some_and(katran::notion::is_folder_page_id)
+    }
+
+    pub(crate) fn notion_reader_controls_open(&self) -> bool {
+        self.workspace
+            .database
+            .as_ref()
+            .is_some_and(|database| database.reader_draft.is_some())
+    }
+
+    fn save_notion_reader_preferences(&mut self, reader: NotionReaderPreferences) -> bool {
+        if self
+            .call(Command::SetNotionReaderPreferences {
+                preferences: reader,
+            })
+            .is_null()
+        {
+            return false;
+        }
+        if let Some(database) = &mut self.workspace.database {
+            database.reader = reader;
+        }
+        true
+    }
+
+    pub(crate) fn notion_reader_input(&mut self, ctx: &egui::Context) {
+        if !self.notion_reader_active()
+            || self.modal_owns_input()
+            || ctx.egui_wants_keyboard_input()
+        {
+            return;
+        }
+        let delta = ctx.input_mut(|input| {
+            use egui::{Event, Key};
+            let mut delta = 0;
+            input.events.retain(|event| {
+                let Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                else {
+                    return true;
+                };
+                if !modifiers.ctrl || modifiers.alt {
+                    return true;
+                }
+                match key {
+                    Key::Plus | Key::Equals => delta += 10,
+                    Key::Minus => delta -= 10,
+                    _ => return true,
+                }
+                false
+            });
+            delta
+        });
+        if delta != 0 {
+            self.adjust_notion_reader_text(delta);
+            ctx.request_repaint();
+        }
+    }
+
+    fn adjust_notion_reader_text(&mut self, delta: i16) {
+        if let Some(database) = &self.workspace.database {
+            let mut prefs = database.reader;
+            prefs.text_percent = (i16::from(prefs.text_percent) + delta).clamp(80, 200) as u8;
+            if prefs != database.reader {
+                self.save_notion_reader_preferences(prefs);
+            }
+        }
+    }
+
+    pub(crate) fn notion_reader_controls(&mut self, ctx: &egui::Context) {
+        if !self.notion_reader_active() {
+            if let Some(database) = &mut self.workspace.database {
+                database.reader_draft = None;
+            }
+            return;
+        }
+        let Some(mut draft) = self
+            .workspace
+            .database
+            .as_ref()
+            .and_then(|database| database.reader_draft)
+        else {
+            return;
+        };
+        let mut save = false;
+        let modal = egui::Modal::new(egui::Id::new("notion-reader-background"))
+            .backdrop_color(Color32::from_black_alpha(24))
+            .show(ctx, |ui| {
+                ui.heading(tr("Фон страницы Notion", "Notion page background"));
+                ui.horizontal(|ui| {
+                    ui.label(tr("Цвет", "Color"));
+                    ui.color_edit_button_srgb(&mut draft.color);
+                });
+                ui.add(
+                    egui::Slider::new(&mut draft.opacity, 0..=255)
+                        .custom_formatter(|alpha, _| format!("{:.0}%", alpha * 100.0 / 255.0))
+                        .text(tr("Непрозрачность", "Opacity")),
+                );
+                save = ui.button(tr("Готово", "Done")).clicked();
+            });
+        let keep = if save {
+            !self.save_notion_reader_preferences(draft)
+        } else {
+            !modal.should_close()
+        };
+        if let Some(database) = &mut self.workspace.database {
+            database.reader_draft = keep.then_some(draft);
+        }
     }
 
     pub(crate) fn notion_database_title(&self) -> Option<&str> {
@@ -669,6 +815,36 @@ impl Shelf {
         if !self.notion_database_active() {
             return false;
         }
+        if self.notion_reader_active()
+            && matches!(
+                id,
+                "notion_reader_background"
+                    | "notion_reader_landscape"
+                    | "notion_reader_cinema"
+                    | "density_more"
+                    | "density_less"
+            )
+        {
+            if let Some(database) = &mut self.workspace.database {
+                let mut prefs = database.reader;
+                match id {
+                    "notion_reader_background" => database.reader_draft = Some(prefs),
+                    "density_more" => self.adjust_notion_reader_text(-10),
+                    "density_less" => self.adjust_notion_reader_text(10),
+                    _ => {
+                        if id == "notion_reader_landscape" {
+                            prefs.landscape = !prefs.landscape;
+                        } else {
+                            prefs.cinema = !prefs.cinema;
+                        }
+                        self.save_notion_reader_preferences(prefs);
+                    }
+                }
+            }
+            self.actions = false;
+            ctx.request_repaint();
+            return true;
+        }
         if !Self::notion_catalogue_action(id) {
             self.actions = false;
             return true;
@@ -746,6 +922,66 @@ impl Shelf {
         ctx.request_repaint();
         true
     }
+}
+
+fn paint_reader_background(ui: &egui::Ui, column: egui::Rect, prefs: NotionReaderPreferences) {
+    use egui::{Pos2, Rect};
+    let outer = ui.ctx().content_rect();
+    let surround = if prefs.cinema {
+        Color32::from_black_alpha(155)
+    } else {
+        Color32::TRANSPARENT
+    };
+    if prefs.cinema {
+        let painter = ui.painter().with_clip_rect(outer);
+        for rect in [
+            Rect::from_min_max(outer.min, Pos2::new(outer.right(), column.top())),
+            Rect::from_min_max(Pos2::new(outer.left(), column.bottom()), outer.max),
+            Rect::from_min_max(Pos2::new(outer.left(), column.top()), column.left_bottom()),
+            Rect::from_min_max(
+                column.right_top(),
+                Pos2::new(outer.right(), column.bottom()),
+            ),
+        ] {
+            painter.rect_filled(rect, 0.0, surround);
+        }
+    }
+
+    let [r, g, b] = prefs.color;
+    let ink = Color32::from_rgba_unmultiplied(r, g, b, prefs.opacity);
+    let halo = column.expand2(egui::vec2(42.0, 10.0)).intersect(outer);
+    let xs = [halo.left(), column.left(), column.right(), halo.right()];
+    let ys = [
+        column.top(),
+        (column.top() + 10.0).min(column.center().y),
+        (column.bottom() - 10.0).max(column.center().y),
+        column.bottom(),
+    ];
+    let mut mesh = egui::Mesh::default();
+    for (y, top) in ys.into_iter().enumerate() {
+        for (x, left) in xs.into_iter().enumerate() {
+            let color = if (x == 1 || x == 2) && (y == 1 || y == 2) {
+                ink
+            } else if prefs.cinema {
+                if x == 0 || x == 3 {
+                    Color32::TRANSPARENT
+                } else {
+                    surround
+                }
+            } else {
+                Color32::TRANSPARENT
+            };
+            mesh.colored_vertex(Pos2::new(left, top), color);
+        }
+    }
+    for y in 0..3 {
+        for x in 0..3 {
+            let i = y * 4 + x;
+            mesh.add_triangle(i, i + 1, i + 4);
+            mesh.add_triangle(i + 1, i + 5, i + 4);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 fn job_error(reply: &Value) -> String {
@@ -829,6 +1065,44 @@ mod tests {
         assert!(database.rows_job.is_none() && database.pending.is_none());
         assert_eq!(database.preview.as_ref().unwrap().blocks.len(), 1);
         assert!(database.preview.as_ref().unwrap().job.is_none());
+
+        let actions = app.call(Command::Actions);
+        assert!(
+            actions
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["id"] == "notion_reader_landscape")
+        );
+        app.run_notion_database_action("notion_reader_landscape", &ctx);
+        app.run_notion_database_action("notion_reader_cinema", &ctx);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Equals,
+                    physical_key: Some(egui::Key::Equals),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+                ..Default::default()
+            },
+            |ui| app.notion_reader_input(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        let preferences = app.call(Command::GetNotionReaderPreferences);
+        assert_eq!(preferences["landscape"], true);
+        assert_eq!(preferences["cinema"], true);
+        assert_eq!(preferences["text_percent"], 110);
+        assert_eq!(app.state["preview"], page);
+        app.state = app.call(Command::ClosePreview);
+        assert!(
+            !app.call(Command::Actions)
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["id"] == "notion_reader_landscape")
+        );
     }
 
     #[test]

@@ -24,6 +24,8 @@ Keep database and page entries typed in History and Favorites. Ctrl+. in
 the picker pins the highlighted entry, while Ctrl+. inside a source pins the
 current page. Keep the open source, title filter, rows and reader in session
 memory across shelf tab switches. Ctrl+T uses the active source's title filter.
+Database page appearance uses its own preferences row. Background, Landscape,
+Cinema and text zoom belong to the in-place reader only.
 See [setup](docs/notion.md).
 
 ## Katran 4.0.0 public release authorization · 2026-11-18

@@ -3,8 +3,12 @@ use super::*;
 #[path = "notion_reader_ui.rs"]
 mod reader;
 
-pub(super) fn show_reader(ui: &mut egui::Ui, blocks: &[katran::notion_reader::Block]) {
-    reader::show(ui, blocks);
+pub(super) fn show_reader_scaled(
+    ui: &mut egui::Ui,
+    blocks: &[katran::notion_reader::Block],
+    scale: f32,
+) {
+    reader::show_scaled(ui, blocks, scale);
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

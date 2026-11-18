@@ -16,6 +16,8 @@ Notion page links and shows visited databases in History.
 Folder restores the active database, filter and reader after switching shelf
 tabs. Ctrl+T applies a Notion title filter to the active data source, and Ctrl+.
 in the picker pins the highlighted database or page to the mixed Favorites list.
+Inside a database page, the reader has a graduated tint, persistent background
+controls, Landscape and Cinema actions, and independent Ctrl+Plus/Minus text zoom.
 The official Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
 [Setup and limits](../notion.md)
 

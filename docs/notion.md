@@ -65,6 +65,12 @@ Switching to another shelf tab keeps the current database, filter, loaded rows,
 cursor and open reader in memory. Returning to Folder restores that view
 during the same Katran session.
 
+While a database page is open, **Ctrl+K** offers **Page background** for tint
+and opacity, **Landscape** for a wider column, and **Cinema** to dim the
+surrounding interface. The default tint fades into the wallpaper at the edges.
+**Ctrl+Plus** and **Ctrl+Minus** change the reader font size from 80% to 200%
+without changing the column width. These preferences carry across pages.
+
 Rows load in groups of 30. Press **↓** at the last row or use **Load more**.
 The default order comes from Notion's data source API. The standard sorting
 menu supports Notion order, name, creation time and last-edited time. A named

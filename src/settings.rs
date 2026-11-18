@@ -52,6 +52,28 @@ pub struct TabPreferences {
     pub compact_columns: u8,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotionReaderPreferences {
+    pub landscape: bool,
+    pub cinema: bool,
+    pub color: [u8; 3],
+    pub opacity: u8,
+    pub text_percent: u8,
+}
+
+impl Default for NotionReaderPreferences {
+    fn default() -> Self {
+        Self {
+            landscape: false,
+            cinema: false,
+            color: [15, 17, 29],
+            opacity: 205,
+            text_percent: 100,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {

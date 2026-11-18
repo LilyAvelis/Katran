@@ -8,6 +8,8 @@ switches to database search. Open a database in Folder to filter and read its
 rows, copy their properties, or drag them out as Markdown files.
 Ctrl+T searches page titles inside the open source. Folder remembers your
 place while you switch tabs, and the picker can pin both pages and databases.
+The database reader has a tinted backdrop, Landscape and Cinema modes, and
+independent Ctrl+Plus/Minus text zoom.
 [Notion setup](docs/notion.md)
 
 ## Katran 4.0 · Collections, Translate and media

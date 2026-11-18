@@ -12,6 +12,9 @@ IDs outside local file resolution.
 The Notion Folder projection keeps its session state across shelf tab switches.
 Notion favorites use typed entries, with distinct sidecar storage for databases
 and the existing page favorites.
+The database page reader stores appearance in its own preferences row via
+GetNotionReaderPreferences and SetNotionReaderPreferences. Text scale stays
+local to the reader and independent of its column width.
 See [connection setup](notion.md).
 
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)

@@ -211,6 +211,10 @@ pub enum Command {
         limit: u32,
     },
     NotionStatus,
+    GetNotionReaderPreferences,
+    SetNotionReaderPreferences {
+        preferences: crate::settings::NotionReaderPreferences,
+    },
     SetNotionToken {
         token: Option<crate::notion::Token>,
     },
