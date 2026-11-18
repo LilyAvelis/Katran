@@ -2,6 +2,10 @@
 
 ## Ready Link/Text preview retention · 2026-11-18
 
+Owner acceptance: Lilia confirmed the final follow-up works and requested ending
+the engineering session before the separate4.0 planning brief. Runtime09244a0440d7
+is accepted for the tested ready-link filter-toggle flow.
+
 Installed source5eb3f93, one optimized UI build28.32s on Windows x64/Rust1.95.0,
 locked offline/ui+clipboard-events; compiled-source fingerprints matched before /
 after. Primary runtime **09244a0440d7**, executable SHA256

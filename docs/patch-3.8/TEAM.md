@@ -499,3 +499,11 @@ Residual preview retention integrated: source5eb3f93, primary09244a0440d7.
 Fenna area frozen, Nemi's targeted review has no blocking findings, Polly ran
 Text14 + Details5, Clippy and one build/install with backup/hash evidence.
 Native owner acceptance pending; README/AGENTS/development map carry4.0 handoff.
+
+## Engineering session closure · 2026-11-18
+
+Lilia confirmed the ready-preview follow-up works and requested ending engineering.
+Primary09244a0440d7 accepted for the tested flow. Fenna/Nemi work is frozen; no
+new implementation or release is started. A separate4.0 team will take the owner’s
+proposed AI/media features. README/AGENTS/development and verification carry the
+preview-retention lesson; source changes remain local, no publication authorized.

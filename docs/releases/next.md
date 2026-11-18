@@ -224,3 +224,21 @@ Keep a successful unchanged Link/Text preview visible across browse-generation
 changes such as switching pinned view, while retaining strict request/source
 invalidation. This follows the separately accepted Mini stream geometry fix.
 Local owner acceptance remains separate from automated checks; no public release.
+
+## Owner ideas for4.0 · research only · 2026-11-18
+
+The owner ended this engineering session after accepting primary09244a0440d7.
+Proposed next-team scope: image upscale, possible video upscale/interpolation,
+extract audio as a file, batch image/manga translation, batch Text translation
+and Google Lens lookup. This is a planning brief, not implementation authorization.
+Candidate sources: https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan ;
+https://github.com/hzwer/Practical-RIFE ;
+https://github.com/zyddnys/manga-image-translator ;
+https://github.com/PaddlePaddle/PaddleOCR ;
+https://huggingface.co/Qwen/Qwen3-8B ; https://ffmpeg.org/ffmpeg.html ;
+https://support.google.com/websearch/answer/1325808 .
+Existing optional-component installation uses explicit visible terminal + functional
+verification. Future media jobs should preserve originals, return separate results,
+retain batch order, support cancellation and bounded temporary storage. No models
+were installed/evaluated for this brief; actual speed/quality/device acceptance,
+pinned versions and distribution-license choices belong to the next team.
