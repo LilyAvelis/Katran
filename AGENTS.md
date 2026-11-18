@@ -2,6 +2,11 @@
 
 ## Notion search pilot · 2026-11-18
 
+Closed on 2026-11-19 as the internal Katran 4.1 feature set. See the
+[4.1 handoff](docs/releases/4.1.md) for scope and verification. The Raycast
+runtime is `0a7912c7a199`. The 4.1 label is internal; this checkpoint carries
+no public-release authorization.
+
 Ctrl+Shift+K hosts Everything and Notion search. Keep Notion IDs separate
 from Folder paths and use only title search and page Markdown through the
 official ntn CLI. Store the dedicated read-only connection token in Windows

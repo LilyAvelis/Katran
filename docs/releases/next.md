@@ -1,6 +1,8 @@
 # Local release notes and development log
 
-## Local follow-up · Notion search
+## Katran 4.1 · Internal Notion integration
+
+[Feature Complete overview](4.1.md)
 
 Ctrl+Shift+K adds a read-only Notion mode alongside Everything. Ctrl+N or the
 header icon switches modes. Ctrl+Shift+N opens the Notion mode directly.

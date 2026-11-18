@@ -12,6 +12,9 @@ The database reader has a tinted backdrop, Landscape and Cinema modes, and
 independent Ctrl+Plus/Minus text zoom.
 [Notion setup](docs/notion.md)
 
+The [internal 4.1 feature overview](docs/releases/4.1.md) records the completed
+Notion integration.
+
 ## Katran 4.0 · Collections, Translate and media
 
 **BULL** turns an ordered selection into one portable `.bull` file. Use
