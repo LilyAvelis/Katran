@@ -31,3 +31,13 @@ mini-stream-layout-media.log and mini-stream-layout-clippy.log.
 Only UI layout changes; domain/native/media runtime evidence is reused.
 Native appearance and every owner-specific pin-only path still require manual
 acceptance; no claim to have reproduced the exact50ms duration or every provider.
+
+## Owner feedback after installation · 2026-11-18
+
+Lilia accepted the layout fix in runtimee884d5e4b9e4. A separate brief Link-content
+blink remains on switching to pinned view, considered low priority by the owner.
+Read-only tracing points to TextPreview clearing ready content on view_generation
+changes before asynchronous reload (TogglePinnedView resets browse context).
+A later bounded retention fix must preserve request epochs and stale-reply rejection;
+do not relax those guards just to hide the blank frame. Not reproduced natively
+or implemented in this feedback turn; primary installation is unchanged.

@@ -2,6 +2,17 @@
 
 ## Mini stream layout correction · 2026-11-18
 
+Owner accepted the geometry correction in runtimee884d5e4b9e4 («Да, всё исправлено»).
+Residual: Link preview briefly blinks when switching to pinned view. Owner considers
+it low severity / potentially deferrable. Read-only source trace: TogglePinnedView
+calls toggle_pinned_only→reset_context; TextPreview::set_context includes the browse
+view_generation and clears content/document/wanted on change, then reloads async.
+This explains a blank-content interval, but no new native reproduction of the
+owner's exact blink was performed. Candidate follow-up: retain validated ready
+content for unchanged item/revision/namespace while advancing request epoch and
+rejecting obsolete replies. Do not simply remove generation/stale-response guards.
+No implementation/new binary requested or applied for this residual observation.
+
 Installed sourceb8f34f1, one optimized Windows x64 UI build27.96s, Rust1.95.0,
 locked offline/ui+clipboard-events. Before/after compiled-source fingerprints matched.
 Primary runtime **e884d5e4b9e4**, executable SHA256
