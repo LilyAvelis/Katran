@@ -18,6 +18,28 @@ pub(crate) struct DragPreparation {
     pub(crate) plan: copy_out::Plan,
     preview: Option<drag_out::Preview>,
 }
+
+pub(crate) fn prepare_named_drag(
+    root: &std::path::Path,
+    files: &[(String, Vec<u8>)],
+    quota: u64,
+    references: &[PathBuf],
+) -> Result<DragPreparation> {
+    let mut plan = copy_out::prepare_named_files(
+        &root.join("drag-cache"),
+        files
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice())),
+        quota,
+    )
+    .map_err(|error| ApiError::new("drag_error", error))?;
+    plan.protect_references(references)
+        .map_err(|error| ApiError::new("drag_error", error))?;
+    Ok(DragPreparation {
+        plan,
+        preview: None,
+    })
+}
 pub(crate) fn prepare_owned(
     root: &std::path::Path,
     events: &[crate::Event],
@@ -178,4 +200,24 @@ impl Service {
             Err(e) => Err(ApiError::new("drag_error", e)),
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn notion_drag_prepares_distinct_markdown_files_in_order() {
+    let root = tempfile::tempdir().unwrap();
+    let files = [
+        ("001-Page.md".into(), b"# First\n".to_vec()),
+        ("002-Page.md".into(), b"# Second\n".to_vec()),
+    ];
+    let prepared = prepare_named_drag(root.path(), &files, 1024, &[]).unwrap();
+    assert!(prepared.plan.text_payload.is_none());
+    assert_eq!(prepared.plan.paths.len(), 2);
+    for (path, (name, text)) in prepared.plan.paths.iter().zip(&files) {
+        assert_eq!(path.file_name().unwrap(), name.as_str());
+        assert_eq!(&std::fs::read(path).unwrap(), text);
+    }
+    let file = prepared.plan.paths[0].clone();
+    drop(prepared);
+    assert!(!file.exists());
 }

@@ -62,10 +62,14 @@ fn flush(pending: &mut String, out: &mut Vec<Block>) {
     }
     pending.clear();
 }
-fn fence_marker(line: &str) -> Option<usize> {
+fn fence_marker(line: &str) -> Option<(u8, usize)> {
     let t = line.trim_start();
-    let n = t.bytes().take_while(|&b| b == b'`').count();
-    (n >= 3).then_some(n)
+    let marker = *t.as_bytes().first()?;
+    if marker != b'`' && marker != b'~' {
+        return None;
+    }
+    let n = t.bytes().take_while(|&b| b == marker).count();
+    (n >= 3).then_some((marker, n))
 }
 fn opening<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     let text = line.trim();
@@ -87,10 +91,12 @@ fn container_end(lines: &[&str], start: usize, name: &str) -> Option<usize> {
     let mut stack = vec![name];
     let mut fence = None;
     for (i, line) in lines.iter().enumerate().skip(start + 1) {
-        if let Some(size) = fence_marker(line) {
+        if let Some((marker, size)) = fence_marker(line) {
             if fence.is_none() {
-                fence = Some(size);
-            } else if size >= fence.unwrap() {
+                fence = Some((marker, size));
+            } else if fence.is_some_and(|(open, length)| open == marker && size >= length)
+                && line.trim_start()[size..].trim().is_empty()
+            {
                 fence = None;
             }
             continue;
@@ -218,11 +224,13 @@ fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str>
     while i < lines.len() {
         let line = &lines[i][offset..];
         if offset == 0
-            && let Some(size) = fence_marker(line)
+            && let Some((marker, size)) = fence_marker(line)
         {
             if fence.is_none() {
-                fence = Some(size);
-            } else if size >= fence.unwrap() {
+                fence = Some((marker, size));
+            } else if fence.is_some_and(|(open, length)| open == marker && size >= length)
+                && line.trim_start()[size..].trim().is_empty()
+            {
                 fence = None;
             }
             pending.push_str(line);
@@ -643,5 +651,15 @@ mod tests {
         assert!(
             matches!(&blocks[0], Block::Markdown(doc) if doc.source.contains("escaped</page>") && doc.source.contains("code</page>") && doc.source.contains("fenced</page>") && doc.source.contains("<p />\n```" ) && !doc.source.ends_with("<p />\n"))
         );
+    }
+
+    #[test]
+    fn tilde_code_fence_keeps_notion_markup_and_tables_literal() {
+        let source = "~~~html\n<table><tr><td>literal</td></tr></table>\n```\n<page url=\"https://notion.so/a\">literal</page>\n~~~\n";
+        let blocks = parse(source).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], Block::Markdown(doc)
+            if doc.lines.iter().any(|line| line.code && line.runs.iter().any(|run| run.text.contains("<table>")))
+            && doc.lines.iter().any(|line| line.code && line.runs.iter().any(|run| run.text.contains("<page")))));
     }
 }

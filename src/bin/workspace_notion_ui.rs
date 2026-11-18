@@ -14,6 +14,29 @@ enum SearchKind {
     Databases,
 }
 
+#[derive(Clone)]
+struct ResultItem {
+    page: katran::notion::Page,
+    database: bool,
+}
+
+impl ResultItem {
+    fn from_value(value: &Value) -> Option<Self> {
+        let database = match value["kind"].as_str()? {
+            "page" => false,
+            "database" => true,
+            _ => return None,
+        };
+        Some(Self {
+            page: katran::notion::Page {
+                id: value["id"].as_str()?.to_owned(),
+                title: value["title"].as_str()?.to_owned(),
+            },
+            database,
+        })
+    }
+}
+
 #[derive(Default)]
 pub(super) struct State {
     mode: Mode,
@@ -21,6 +44,8 @@ pub(super) struct State {
     pages: Vec<katran::notion::Page>,
     sources: Vec<katran::notion::Page>,
     search_kind: SearchKind,
+    exact: Option<ResultItem>,
+    history: Vec<ResultItem>,
     selected: usize,
     configured: bool,
     focus: bool,
@@ -31,6 +56,26 @@ pub(super) struct State {
     notice: Option<&'static str>,
     search_due: Option<Instant>,
     job: Option<(JobId, Operation)>,
+}
+
+impl State {
+    fn results(&self) -> Vec<ResultItem> {
+        if self.mode == Mode::History {
+            return self.history.clone();
+        }
+        if self.mode == Mode::Search
+            && let Some(exact) = &self.exact
+        {
+            return vec![exact.clone()];
+        }
+        let database = self.mode == Mode::Search && self.search_kind == SearchKind::Databases;
+        let pages = if database { &self.sources } else { &self.pages };
+        pages
+            .iter()
+            .cloned()
+            .map(|page| ResultItem { page, database })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -52,6 +97,34 @@ mod tests {
                 .push(path.to_string_lossy().into_owned());
             Ok(())
         }
+    }
+
+    #[test]
+    fn typed_exact_results_override_search_mode_and_history_retains_order() {
+        let mut state = State::default();
+        state.exact = ResultItem::from_value(
+            &serde_json::json!({"kind":"database","id":"db","title":"Database"}),
+        );
+        assert!(state.results()[0].database);
+        state.search_kind = SearchKind::Databases;
+        state.exact =
+            ResultItem::from_value(&serde_json::json!({"kind":"page","id":"page","title":"Page"}));
+        assert!(!state.results()[0].database);
+        state.mode = Mode::History;
+        state.history = [
+            serde_json::json!({"kind":"page","id":"p","title":"First"}),
+            serde_json::json!({"kind":"database","id":"d","title":"Second"}),
+        ]
+        .iter()
+        .filter_map(ResultItem::from_value)
+        .collect();
+        let results = state.results();
+        assert_eq!(results[0].page.id, "p");
+        assert!(results[1].database);
+        assert!(
+            ResultItem::from_value(&serde_json::json!({"kind":"other","id":"x","title":"X"}))
+                .is_none()
+        );
     }
 
     #[test]
@@ -303,7 +376,22 @@ impl Shelf {
             state.error = Some(self.message.clone());
         } else {
             state.pages = serde_json::from_value(reply["pages"].clone()).unwrap_or_default();
-            state.selected = state.selected.min(state.pages.len().saturating_sub(1));
+            if mode == Mode::History {
+                state.history = if let Some(history) = reply["history"].as_array() {
+                    history.iter().filter_map(ResultItem::from_value).collect()
+                } else {
+                    state
+                        .pages
+                        .iter()
+                        .cloned()
+                        .map(|page| ResultItem {
+                            page,
+                            database: false,
+                        })
+                        .collect()
+                };
+            }
+            state.selected = state.selected.min(state.results().len().saturating_sub(1));
         }
     }
 
@@ -320,6 +408,7 @@ impl Shelf {
             };
             state.pages.clear();
             state.sources.clear();
+            state.exact = None;
             state.selected = 0;
             state.more = false;
             state.error = None;
@@ -348,9 +437,14 @@ impl Shelf {
                 },
                 ctx,
             );
-        } else if pin && self.workspace.notion.search_kind == SearchKind::Pages {
+        } else if pin {
             let state = &self.workspace.notion;
-            if let Some(page) = state.pages.get(state.selected).cloned() {
+            if let Some(page) = state
+                .results()
+                .get(state.selected)
+                .filter(|item| !item.database)
+                .map(|item| item.page.clone())
+            {
                 let mode = state.mode;
                 let reply = self.call(Command::ToggleFavoriteNotionPage { page });
                 if let Some(favorite) = reply["favorite"].as_bool() {
@@ -397,6 +491,22 @@ impl Shelf {
 
     fn workspace_notion_accept(&mut self, result: &Value, operation: Operation) {
         let state = &mut self.workspace.notion;
+        if matches!(
+            operation,
+            Operation::SearchPages | Operation::SearchDatabases
+        ) {
+            state.exact = ResultItem::from_value(&result["exact"]);
+            if result["exact"]["source_count"]
+                .as_u64()
+                .is_some_and(|count| count > 1)
+            {
+                state.notice = Some(tr(
+                    "В базе несколько источников. Показан первый.",
+                    "This database has several sources. Showing the first.",
+                ));
+            }
+            state.selected = 0;
+        }
         match operation {
             Operation::SearchPages => {
                 state.pages = serde_json::from_value(result["pages"].clone()).unwrap_or_default();
@@ -479,11 +589,8 @@ impl Shelf {
             )
         });
         let old_selection = state.selected;
-        let count = if state.search_kind == SearchKind::Databases && state.mode == Mode::Search {
-            state.sources.len()
-        } else {
-            state.pages.len()
-        };
+        let results = state.results();
+        let count = results.len();
         if count > 0 && (move_down || move_up) {
             ctx.memory_mut(|mem| mem.surrender_focus(query_id));
             if !editing {
@@ -560,19 +667,26 @@ impl Shelf {
                     .max_height(max_height)
                     .show(ui, |ui| {
                         if state.preview_open {
-                            if let Some(page) = state.pages.get(state.selected) {
-                                ui.heading(&page.title);
+                            if let Some(item) = results.get(state.selected) {
+                                ui.heading(&item.page.title);
                             }
                             if let (Some(blocks), Some(page)) =
-                                (&state.preview, state.pages.get(state.selected))
+                                (&state.preview, results.get(state.selected))
                             {
-                                ui.push_id(&page.id, |ui| reader::show(ui, blocks));
+                                if blocks.is_empty() {
+                                    ui.weak(tr("Страница пуста", "Page is empty"));
+                                } else {
+                                    ui.push_id(&page.page.id, |ui| reader::show(ui, blocks));
+                                }
                             }
                         } else {
                             let databases = state.mode == Mode::Search && state.search_kind == SearchKind::Databases;
-                            let results = if databases { &state.sources } else { &state.pages };
-                            for (index, page) in results.iter().enumerate() {
-                                let row = ui.selectable_label(state.selected == index, &page.title);
+                            for (index, item) in results.iter().enumerate() {
+                                let row = ui.horizontal(|ui| {
+                                    let icon = if item.database { egui_lucide::Lucide::Database } else { egui_lucide::Lucide::FileText };
+                                    ui.add(icon.size(16.0).image().tint(Color32::from_gray(200)));
+                                    ui.selectable_label(state.selected == index, &item.page.title)
+                                }).inner;
                                 if row.clicked() {
                                     state.selected = index;
                                     ctx.memory_mut(|mem| mem.surrender_focus(query_id));
@@ -595,8 +709,8 @@ impl Shelf {
                             {
                                 ui.weak(if databases { tr("Базы данных не найдены", "No databases found") } else { tr("Страницы не найдены", "No pages found") });
                             }
-                            if state.pages.is_empty() && state.mode != Mode::Search && state.error.is_none() {
-                                ui.weak(tr("Здесь пока нет страниц", "No pages yet"));
+                            if results.is_empty() && state.mode != Mode::Search && state.error.is_none() {
+                                ui.weak(tr("Здесь пока нет записей", "No items yet"));
                             }
                         }
                         if let Some(error) = &state.error {
@@ -606,7 +720,7 @@ impl Shelf {
                 if let Some(notice) = state.notice {
                     ui.weak(notice);
                 }
-                if state.mode == Mode::Search && state.search_kind == SearchKind::Databases {
+                if results.get(state.selected).is_some_and(|item| item.database) || (state.mode == Mode::Search && state.search_kind == SearchKind::Databases && results.is_empty()) {
                     ui.weak(tr("Enter · открыть базу    \\ · страницы", "Enter · open database    \\ · pages"));
                 } else {
                 ui.weak(tr(
@@ -627,6 +741,7 @@ impl Shelf {
             let state = &mut self.workspace.notion;
             state.pages.clear();
             state.sources.clear();
+            state.exact = None;
             state.selected = 0;
             state.more = false;
             state.error = None;
@@ -639,12 +754,19 @@ impl Shelf {
             }
         } else if modal.should_close() {
             self.workspace_close();
-        } else if state.mode == Mode::Search && state.search_kind == SearchKind::Databases {
-            if enter && let Some(source) = state.sources.get(state.selected).cloned() {
-                self.open_notion_database(ctx, source.id, source.title);
-            }
-        } else if let Some(page) = state.pages.get(state.selected).cloned() {
-            if open_in_browser {
+        } else if let Some(item) = results.get(state.selected).cloned() {
+            let page = item.page;
+            if item.database {
+                if self.workspace.notion.preview_open {
+                    self.workspace_cancel_notion();
+                    self.workspace.notion.preview_open = false;
+                    self.workspace.notion.preview = None;
+                    self.workspace.notion.error = None;
+                }
+                if enter {
+                    self.open_notion_database(ctx, page.id, page.title);
+                }
+            } else if open_in_browser {
                 if self.call(Command::OpenNotionPage { page })["opened"] == true {
                     self.workspace_close();
                 } else {

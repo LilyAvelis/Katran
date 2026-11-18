@@ -1,6 +1,6 @@
 //! Read-only Folder projection for Notion data source rows.
 use super::*;
-use katran::{interaction::View, notion::Page};
+use katran::{api::NotionPageFields, notion::Page};
 
 #[derive(serde::Deserialize)]
 struct Property {
@@ -15,11 +15,28 @@ struct Row {
     #[serde(flatten)]
     page: Page,
     summary: String,
-    #[serde(skip)]
-    excerpt: Option<String>,
     properties: Vec<Property>,
     created_at: String,
     edited_at: String,
+}
+
+impl Row {
+    fn fields(&self) -> Vec<(String, String)> {
+        let mut fields: Vec<_> = self
+            .properties
+            .iter()
+            .map(|field| (field.name.clone(), field.value.clone()))
+            .collect();
+        for (name, value) in [
+            (tr("Создано", "Created"), &self.created_at),
+            (tr("Изменено", "Last edited"), &self.edited_at),
+        ] {
+            if !value.is_empty() {
+                fields.push((name.into(), value.clone()));
+            }
+        }
+        fields
+    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -48,7 +65,6 @@ pub(super) struct State {
     query: String,
     sort: Sort,
     descending: bool,
-    view: View,
     rows: Vec<Row>,
     favorites: std::collections::HashSet<String>,
     selected: usize,
@@ -57,8 +73,7 @@ pub(super) struct State {
     incomplete: bool,
     pending: Option<Instant>,
     rows_job: Option<JobId>,
-    excerpt_due: Option<(String, Instant)>,
-    excerpt_job: Option<(String, JobId)>,
+    visited: bool,
     preview: Option<Preview>,
     error: Option<String>,
 }
@@ -79,7 +94,6 @@ impl State {
             query: String::new(),
             sort: Sort::Source,
             descending: false,
-            view: View::Details,
             rows: Vec::new(),
             favorites: Default::default(),
             selected: 0,
@@ -88,8 +102,7 @@ impl State {
             incomplete: false,
             pending: Some(Instant::now()),
             rows_job: None,
-            excerpt_due: None,
-            excerpt_job: None,
+            visited: false,
             preview: None,
             error: None,
         }
@@ -184,68 +197,6 @@ impl Shelf {
             self.call(Command::CancelJob { job_id });
         }
         self.close_notion_database_preview(database);
-        self.cancel_notion_database_excerpt(database);
-    }
-
-    fn cancel_notion_database_excerpt(&mut self, database: &mut State) {
-        database.excerpt_due = None;
-        if let Some((_, job_id)) = database.excerpt_job.take() {
-            self.call(Command::CancelJob { job_id });
-        }
-    }
-
-    fn tick_notion_database_excerpt(&mut self, database: &mut State, ctx: &egui::Context) {
-        let wanted =
-            (database.view == View::Details && database.preview.is_none() && !self.workspace.open)
-                .then(|| database.selected())
-                .flatten()
-                .filter(|row| row.summary.is_empty() && row.excerpt.is_none())
-                .map(|row| row.page.id.clone());
-        let active_for = database
-            .excerpt_job
-            .as_ref()
-            .map(|pair| &pair.0)
-            .or_else(|| database.excerpt_due.as_ref().map(|pair| &pair.0));
-        if active_for != wanted.as_ref() {
-            self.cancel_notion_database_excerpt(database);
-            if let Some(id) = wanted {
-                database.excerpt_due = Some((id, Instant::now() + Duration::from_millis(300)));
-            }
-        }
-        if let Some((id, due)) = database.excerpt_due.take() {
-            let now = Instant::now();
-            if due > now {
-                ctx.request_repaint_after(due - now);
-                database.excerpt_due = Some((id, due));
-            } else {
-                let reply = self.call(Command::ReadNotionPageExcerpt {
-                    page_id: id.clone(),
-                });
-                if let Some(job_id) = reply["job_id"].as_u64() {
-                    database.excerpt_job = Some((id, JobId(job_id)));
-                } else if let Some(row) = database.rows.iter_mut().find(|row| row.page.id == id) {
-                    row.excerpt = Some(String::new());
-                }
-            }
-        }
-        if let Some((id, job_id)) = database.excerpt_job.take() {
-            let reply = self.call(Command::PollJob { job_id });
-            if matches!(
-                reply["state"].as_str(),
-                Some("queued" | "running" | "ready")
-            ) {
-                ctx.request_repaint_after(Duration::from_millis(45));
-                database.excerpt_job = Some((id, job_id));
-            } else if let Some(row) = database.rows.iter_mut().find(|row| row.page.id == id) {
-                row.excerpt = Some(
-                    reply["result"]["excerpt"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_owned(),
-                );
-                database.dirty = true;
-            }
-        }
     }
 
     fn close_notion_database_preview(&mut self, database: &mut State) {
@@ -309,6 +260,13 @@ impl Shelf {
                 Some("succeeded") => {
                     database.rows_job = None;
                     database.error = database.append(&reply["result"]).err();
+                    if database.error.is_none() && !database.visited {
+                        database.visited = self.call(Command::RecordNotionDatabaseVisit {
+                            source_id: database.id.clone(),
+                            title: database.title.clone(),
+                        })["recorded"]
+                            == true;
+                    }
                 }
                 _ => {
                     database.rows_job = None;
@@ -358,7 +316,6 @@ impl Shelf {
         database.selected = cursor
             .and_then(|id| database.rows.iter().position(|row| row.projection_id == id))
             .unwrap_or(0);
-        database.view = serde_json::from_value(self.state["view"].clone()).unwrap_or_default();
         let preview = self.state["preview"].as_i64().filter(|id| {
             database
                 .selected()
@@ -370,34 +327,33 @@ impl Shelf {
                 .as_ref()
                 .is_none_or(|preview| preview.page != id)
             {
-                self.cancel_notion_database_excerpt(&mut database);
                 self.start_notion_database_preview(&mut database);
             }
         } else {
             self.close_notion_database_preview(&mut database);
         }
         self.tick_notion_database(&mut database, ctx);
-        self.tick_notion_database_excerpt(&mut database, ctx);
         if let Some(due) = database.pending {
             ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
         if std::mem::take(&mut database.dirty) {
-            self.events = database.rows.iter().map(|row| {
-                let summary = if row.summary.is_empty() {
-                    row.excerpt.as_deref().unwrap_or("")
-                } else { row.summary.as_str() };
-                let mut fields: Vec<_> = row.properties.iter()
-                    .map(|property| serde_json::json!({"name":property.name,"value":property.value})).collect();
-                for (name, value) in [(tr("Создано", "Created"), &row.created_at), (tr("Изменено", "Last edited"), &row.edited_at)] {
-                    if !value.is_empty() { fields.push(serde_json::json!({"name":name,"value":value})); }
-                }
-                serde_json::json!({
-                    "id":row.projection_id, "name":row.page.title, "kind":"text_fragment",
-                    "source":"notion_page", "text_preview":summary,
-                    "revision":row.page.id,"notion_fields":fields, "detected_at_ms":0,
-                    "properties":{"pinned":database.favorites.contains(&row.page.id)}
+            self.events = database
+                .rows
+                .iter()
+                .map(|row| {
+                    let fields: Vec<_> = row
+                        .fields()
+                        .into_iter()
+                        .map(|(name, value)| serde_json::json!({"name":name,"value":value}))
+                        .collect();
+                    serde_json::json!({
+                        "id":row.projection_id, "name":row.page.title, "kind":"text_fragment",
+                        "source":"notion_page", "text_preview":row.summary,
+                        "revision":row.page.id,"notion_fields":fields, "detected_at_ms":0,
+                        "properties":{"pinned":database.favorites.contains(&row.page.id)}
+                    })
                 })
-            }).collect();
+                .collect();
             self.next_cursor = database.next_cursor.clone();
             if database.incomplete {
                 self.message = tr(
@@ -468,23 +424,41 @@ impl Shelf {
         else {
             return;
         };
-        ui.add(egui::Label::new(egui::RichText::new(&row.page.title).heading()).wrap());
-        let Some(preview) = database
-            .preview
-            .as_ref()
-            .filter(|preview| preview.page == row.projection_id)
-        else {
-            return;
-        };
-        egui::ScrollArea::vertical()
-            .id_salt(("notion-folder-reader", row.projection_id))
-            .max_width(ui.available_width())
-            .show(ui, |ui| {
-                if let Some(error) = &preview.error {
-                    ui.colored_label(Color32::LIGHT_RED, error);
-                }
-                super::notion_ui::show_reader(ui, &preview.blocks);
-            });
+        let width = ui.available_width().min(660.0);
+        let height = ui.available_height();
+        ui.vertical_centered(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    ui.set_max_width(width);
+                    ui.add(egui::Label::new(egui::RichText::new(&row.page.title).heading()).wrap());
+                    let Some(preview) = database
+                        .preview
+                        .as_ref()
+                        .filter(|preview| preview.page == row.projection_id)
+                    else {
+                        return;
+                    };
+                    egui::ScrollArea::vertical()
+                        .id_salt(("notion-folder-reader", row.projection_id))
+                        .max_width(width)
+                        .show(ui, |ui| {
+                            if let Some(error) = &preview.error {
+                                ui.colored_label(Color32::LIGHT_RED, error);
+                            } else if preview.job.is_none() && preview.blocks.is_empty() {
+                                ui.weak(tr(
+                                    "У страницы нет содержимого",
+                                    "This page has no content",
+                                ));
+                            } else {
+                                super::notion_ui::show_reader(ui, &preview.blocks);
+                            }
+                        });
+                },
+            );
+        });
     }
 
     pub(crate) fn notion_database_title(&self) -> Option<&str> {
@@ -505,6 +479,52 @@ impl Shelf {
             .iter()
             .find(|row| row.projection_id == id)
             .map(|row| row.page.clone())
+    }
+
+    fn selected_notion_rows(&self, ids: &[i64]) -> Vec<&Row> {
+        let Some(database) = self.workspace.database.as_ref() else {
+            return Vec::new();
+        };
+        let rows: std::collections::HashMap<_, _> = database
+            .rows
+            .iter()
+            .map(|row| (row.projection_id, row))
+            .collect();
+        ids.iter().filter_map(|id| rows.get(id).copied()).collect()
+    }
+
+    pub(crate) fn prepare_notion_database_drag(&mut self, ids: &[i64], ctx: &egui::Context) {
+        let pages: Vec<_> = self
+            .selected_notion_rows(ids)
+            .into_iter()
+            .map(|row| row.page.clone())
+            .collect();
+        if !pages.is_empty() {
+            self.start_job(
+                Command::PrepareNotionPagesDrag { pages },
+                false,
+                ctx.clone(),
+            );
+        }
+    }
+
+    fn copy_notion_database_fields(&mut self) {
+        let ids = self.selected_ids();
+        let pages = self
+            .selected_notion_rows(&ids)
+            .into_iter()
+            .map(|row| NotionPageFields {
+                title: row.page.title.clone(),
+                fields: row.fields(),
+            })
+            .collect::<Vec<_>>();
+        if pages.is_empty() {
+            return;
+        }
+        let reply = self.call(Command::CopyNotionPageFields { pages });
+        if reply["text_copied"] == true {
+            self.message = tr("Свойства страниц скопированы", "Page properties copied").into();
+        }
     }
 
     pub(super) fn pin_notion_database_page(&mut self) {
@@ -612,21 +632,12 @@ impl Shelf {
             "preview" | "quicklook" => self.state = self.call(Command::TogglePreview),
             "select_all" => self.state = self.call(Command::SelectAll),
             "refresh" => self.refresh_notion_database(),
-            "open" | "copy" | "paste_previous" => {
+            "copy" => self.copy_notion_database_fields(),
+            "open" | "paste_previous" => {
                 if let Some(page) = self.current_notion_page() {
                     match id {
                         "open" => {
                             self.call(Command::OpenNotionPage { page });
-                        }
-                        "copy" => {
-                            self.start_job(
-                                Command::CopyNotionPage {
-                                    page_id: page.id,
-                                    title: page.title,
-                                },
-                                false,
-                                ctx.clone(),
-                            );
                         }
                         _ => {
                             self.begin_paste_ui(
@@ -676,6 +687,15 @@ fn job_error(reply: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct Clipboard(Arc<Mutex<String>>);
+    impl katran::text_fragments::ClipboardSink for Clipboard {
+        fn write(&self, text: &str) -> katran::Result<u32> {
+            *self.0.lock().unwrap() = text.to_owned();
+            Ok(1)
+        }
+    }
 
     #[test]
     fn notion_rows_use_native_folder_render_search_and_actions() {
@@ -758,6 +778,43 @@ mod tests {
             page
         );
         assert!(!app.events.is_empty());
+        let clipboard = Arc::new(Mutex::new(String::new()));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_text_clipboard_sink(Box::new(Clipboard(clipboard.clone())));
+        app.workspace.database.as_mut().unwrap().append(&serde_json::json!({"rows":[{
+            "id":"12345678-0000-0000-0000-000000000003","title":"Second fixture","summary":"Body marker",
+            "properties":[{"name":"Status","value":"Draft"}],"created_at":"","edited_at":""
+        }],"next_cursor":null})).unwrap();
+        app.notion_database_sync(&context);
+        let ids: Vec<_> = app
+            .events
+            .iter()
+            .filter_map(|event| event["id"].as_i64())
+            .collect();
+        app.state = app.call(Command::SetVisible { ids: ids.clone() });
+        app.state = app.call(Command::SelectAll);
+        app.copy_request(&context);
+        assert_eq!(
+            *clipboard.lock().unwrap(),
+            "Fixture row\nStatus: Ready\n\nSecond fixture\nStatus: Draft\n"
+        );
+        app.start_drag(ids, &context);
+        assert!(matches!(app.job, Some(UiJob::TransferPrepaint { .. })));
+        app.cancel_released_notion_drag(
+            &context,
+            &egui::RawInput {
+                events: vec![egui::Event::PointerButton {
+                    pos: egui::Pos2::ZERO,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+        );
+        assert!(app.job.is_none() && app.native_drag.is_none() && app.transfer_busy.is_none());
         app.actions = false;
         context.memory_mut(|mem| mem.request_focus(egui::Id::new("shelf-search")));
         let mut output = context.run_ui(

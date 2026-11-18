@@ -299,27 +299,41 @@ pub(crate) fn prepare_named_file(
     bytes: &[u8],
     quota: u64,
 ) -> Result<Plan, String> {
+    prepare_named_files(root, [(name, bytes)], quota)
+}
+
+pub(crate) fn prepare_named_files<'a>(
+    root: &Path,
+    files: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+    quota: u64,
+) -> Result<Plan, String> {
     use std::io::Write;
-    crate::validate_name(name).map_err(|error| error.message)?;
-    let (mut plan, used) = prepare_batch(root, quota)?;
-    if bytes.len() as u64 > quota - used {
-        return Err("Export quota exceeded".into());
+    let (mut plan, mut used) = prepare_batch(root, quota)?;
+    for (name, bytes) in files {
+        crate::validate_name(name).map_err(|error| error.message)?;
+        if bytes.len() as u64 > quota - used {
+            return Err("Export quota exceeded".into());
+        }
+        used += bytes.len() as u64;
+        let destination = plan.directory.join(name);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .map_err(|error| error.to_string())?;
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| error.to_string())?;
+        drop(file);
+        plan.paths.push(
+            destination
+                .canonicalize()
+                .map_err(|error| error.to_string())?,
+        );
     }
-    let destination = plan.directory.join(name);
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&destination)
-        .map_err(|error| error.to_string())?;
-    file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| error.to_string())?;
-    drop(file);
-    plan.paths.push(
-        destination
-            .canonicalize()
-            .map_err(|error| error.to_string())?,
-    );
+    if plan.paths.is_empty() {
+        return Err("No files selected".into());
+    }
     Ok(plan)
 }
 
@@ -1285,7 +1299,10 @@ impl ClipboardSink for PreparedNativeClipboard {
         #[cfg(windows)]
         {
             let backend = native_publication::Backend::open(&self.files, self.pixels.as_deref())?;
-            if self.expected_sequence.is_some_and(|expected| crate::capture::sequence_number() != expected) {
+            if self
+                .expected_sequence
+                .is_some_and(|expected| crate::capture::sequence_number() != expected)
+            {
                 return Err("Clipboard changed while exporting the page".into());
             }
             publish_file_formats(

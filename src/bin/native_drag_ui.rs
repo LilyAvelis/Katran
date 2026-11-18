@@ -2,6 +2,45 @@
 use super::*;
 
 impl Shelf {
+    pub(super) fn cancel_released_notion_drag(
+        &mut self,
+        ctx: &egui::Context,
+        input: &egui::RawInput,
+    ) {
+        let preparing = self.transfer_busy.as_ref().is_some_and(|busy| {
+            busy.kind == TransferKind::NotionExport && (busy.active || self.native_drag.is_some())
+        });
+        if !preparing {
+            return;
+        }
+        let ended = input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } | egui::Event::Key {
+                    key: egui::Key::Escape,
+                    pressed: true,
+                    ..
+                }
+            )
+        });
+        if ended || !self.notion_database_active() {
+            if let Some(UiJob::Domain { job_id, .. }) = self.job.take() {
+                self.call(Command::CancelJob { job_id });
+            }
+            if let Some(token) = self.native_drag.take() {
+                self.call(Command::CancelPreparedDrag { token });
+            }
+            self.transfer_busy = None;
+            self.message = i18n::tr("Перетаскивание отменено", "Drag cancelled").into();
+            ctx.stop_dragging();
+            ctx.request_repaint();
+        }
+    }
+
     pub(super) fn perform_native_drag(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         let Some(token) = self.native_drag.take() else {
             return;

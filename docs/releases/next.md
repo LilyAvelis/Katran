@@ -9,7 +9,10 @@ Notion reference cards. Alt+Enter opens the selected page in the browser. Search
 pin pages, revisit page history, and attach a Markdown file to the previous window.
 Physical backslash switches to database search. Enter opens the selected data
 source in the standard Folder shelf. Search Shelf, Actions and the sort menu
-apply to the active Notion source. Mini stream shows row metadata and excerpts.
+apply to the active Notion source. Mini stream uses its details pane for row
+properties. Ctrl+C copies the selected rows' loaded properties, and drag
+exports separate Markdown files. The picker also accepts database IDs and
+Notion page links and shows visited databases in History.
 The official Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
 [Setup and limits](../notion.md)
 

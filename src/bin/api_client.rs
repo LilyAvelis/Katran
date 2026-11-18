@@ -1149,7 +1149,11 @@ impl Shelf {
         }
     }
     pub(super) fn start_drag(&mut self, ids: Vec<i64>, ctx: &egui::Context) {
-        if self.notion_database_active() || self.native_drag.is_some() || self.job.is_some() {
+        if self.native_drag.is_some() || self.job.is_some() {
+            return;
+        }
+        if self.notion_database_active() {
+            self.prepare_notion_database_drag(&ids, ctx);
             return;
         }
         let items = self.snapshot_ids(ids);
@@ -1192,7 +1196,7 @@ impl Shelf {
                 let label = match action["id"].as_str() {
                     Some("sort_arrival") => tr("По дате создания · новые сначала", "By creation date · newest first"),
                     Some("sort_arrival_reverse") => tr("По дате создания · старые сначала", "By creation date · oldest first"),
-                    Some("copy") => tr("Скопировать текущую страницу как Markdown", "Copy current page as Markdown"),
+                    Some("copy") => tr("Скопировать свойства страниц", "Copy page properties"),
                     Some("paste_previous") => tr("Приложить текущую страницу как Markdown", "Attach current page as Markdown"),
                     Some("open") => tr("Открыть текущую страницу в Notion", "Open current page in Notion"),
                     Some("folder_favorites") => tr("Избранное Notion", "Notion favorites"),
@@ -1361,7 +1365,9 @@ impl Shelf {
             return false;
         }
         self.busy_text_editing = ctx.egui_wants_keyboard_input();
-        let operation = if capture {
+        let operation = if matches!(&command, Command::PrepareNotionPagesDrag { .. }) {
+            Some((TransferKind::NotionExport, Some(true)))
+        } else if capture {
             None
         } else {
             self.delete_size_risk(&command).or_else(|| {

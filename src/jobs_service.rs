@@ -127,6 +127,7 @@ pub(crate) enum PreparedWork {
         sink: copy_out::PreparedNativeClipboard,
         sequence: u32,
     },
+    NotionDrag(drag_session::DragPreparation),
     CopyCollectionPage {
         event: Event,
         stamp: media_service::Stamp,
@@ -1565,11 +1566,17 @@ impl Service {
             }
             Command::SearchNotionPages { query } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
+                    if let Some(exact) = notion::lookup_target(&query, false, || cancel.check())? {
+                        return Ok(PreparedWork::Value(json!({"exact":exact})));
+                    }
                     crate::notion::search(&query, || cancel.check()).map(PreparedWork::Value)
                 })?
             }
             Command::SearchNotionDatabases { query } => {
                 self.jobs.submit(Lane::Discovery, move |cancel| {
+                    if let Some(exact) = notion::lookup_target(&query, true, || cancel.check())? {
+                        return Ok(PreparedWork::Value(json!({"exact":exact})));
+                    }
                     notion::search_databases(&query, || cancel.check()).map(PreparedWork::Value)
                 })?
             }
@@ -1609,6 +1616,37 @@ impl Service {
                     plan.protect_references(&references).map_err(|e| ApiError::new("copy_error", e))?;
                     let sink = copy_out::PreparedNativeClipboard::prepare_files_if_current(&plan.paths, sequence);
                     Ok(PreparedWork::CopyNotionFile { page, plan, sink, sequence })
+                })?
+            }
+            Command::PrepareNotionPagesDrag { pages } => {
+                if !(1..=text_fragments::MAX_ITEMS).contains(&pages.len()) {
+                    return Err(ApiError::new("invalid_argument", "Select at least one Notion page"));
+                }
+                for page in &pages { page.validate()?; }
+                self.pending_drag = None;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let mut seen = std::collections::HashSet::new();
+                    let mut files = Vec::new();
+                    let mut bytes = 0u64;
+                    let multiple = pages.len() > 1;
+                    for page in pages {
+                        if !seen.insert(page.id.clone()) { continue; }
+                        cancel.check()?;
+                        let markdown = notion::markdown(&page.id, || cancel.check())?;
+                        bytes += markdown.len() as u64;
+                        if bytes > quota.min(copy_out::DEFAULT_EXPORT_QUOTA) {
+                            return Err(ApiError::new("drag_error", "Notion files exceed the export quota"));
+                        }
+                        let name = if multiple { format!("{:03}-{}", files.len() + 1, page.filename()) } else { page.filename() };
+                        files.push((name, markdown.into_bytes()));
+                    }
+                    cancel.check()?;
+                    let prepared = drag_session::prepare_named_drag(&root, &files, quota, &references)?;
+                    cancel.check()?;
+                    Ok(PreparedWork::NotionDrag(prepared))
                 })?
             }
             Command::CheckUpdates => {
@@ -3318,6 +3356,10 @@ impl Service {
                     Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"warnings":receipt.warnings,"publication":receipt.publication}))
                 }
                 PreparedWork::Drag{events,prepared}=> {self.validate_job_events(&events)?;self.commit_drag_preparation(prepared)}
+                PreparedWork::NotionDrag(prepared) => {
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    self.commit_drag_preparation(prepared)
+                }
             });
             self.jobs.finish(ready, result)?;
         }

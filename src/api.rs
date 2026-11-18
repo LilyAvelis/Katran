@@ -62,6 +62,12 @@ pub struct Request {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct NotionPageFields {
+    pub title: String,
+    pub fields: Vec<(String, String)>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 // Keep Settings by value in the public command contract; boxing it would
 // change every dispatcher client just to reduce this enum's stack size.
@@ -236,6 +242,16 @@ pub enum Command {
     },
     ListSavedNotionPages {
         favorites: bool,
+    },
+    RecordNotionDatabaseVisit {
+        source_id: String,
+        title: String,
+    },
+    CopyNotionPageFields {
+        pages: Vec<NotionPageFields>,
+    },
+    PrepareNotionPagesDrag {
+        pages: Vec<crate::notion::Page>,
     },
     OpenNotionPage {
         page: crate::notion::Page,

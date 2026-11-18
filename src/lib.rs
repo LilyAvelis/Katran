@@ -968,8 +968,18 @@ impl Service {
             }
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
             Command::ListSavedNotionPages { favorites } => {
-                Ok(serde_json::json!({"pages": notion::saved_pages(&self.root, favorites)?}))
+                let pages = notion::saved_pages(&self.root, favorites)?;
+                if favorites {
+                    Ok(serde_json::json!({"pages": pages}))
+                } else {
+                    Ok(serde_json::json!({"pages": pages, "history": notion::saved_history(&self.root)?}))
+                }
             }
+            Command::RecordNotionDatabaseVisit { source_id, title } => {
+                notion::record_database_visit(&self.root, &source_id, &title)?;
+                Ok(serde_json::json!({"recorded": true}))
+            }
+            Command::CopyNotionPageFields { pages } => self.copy_notion_page_fields(&pages),
             Command::OpenNotionPage { page } => {
                 let url = page.browser_url()?;
                 {
@@ -991,6 +1001,7 @@ impl Service {
             command @ (Command::SearchNotionPages { .. }
             | Command::SearchNotionDatabases { .. }
             | Command::QueryNotionDatabase { .. }
+            | Command::PrepareNotionPagesDrag { .. }
             | Command::ReadNotionPageExcerpt { .. }
             | Command::ReadNotionPage { .. }
             | Command::CopyNotionPage { .. }) => self.begin_job(command),
@@ -2165,6 +2176,37 @@ impl Service {
             .map_err(|_| ApiError::new("quicklook_busy", "Preview launcher lock poisoned"))?;
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
+    fn copy_notion_page_fields(&self, pages: &[api::NotionPageFields]) -> Result<serde_json::Value> {
+        use std::fmt::Write;
+        if !(1..=text_fragments::MAX_ITEMS).contains(&pages.len()) {
+            return Err(ApiError::new("invalid_argument", "Select at least one Notion page"));
+        }
+        let mut text = String::new();
+        for (index, page) in pages.iter().enumerate() {
+            if page.title.len() > 8192 || page.fields.len() > 128 {
+                return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+            }
+            if index != 0 { text.push('\n'); }
+            let _ = writeln!(text, "{}", page.title);
+            for (name, value) in &page.fields {
+                if name.len() > 4096 || value.len() > 16384 {
+                    return Err(ApiError::new("invalid_argument", "Notion field exceeds export limits"));
+                }
+                let _ = writeln!(text, "{name}: {value}");
+                if text.len() > text_fragments::MAX_MERGED_BYTES {
+                    return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+                }
+            }
+        }
+        if text.len() > text_fragments::MAX_MERGED_BYTES {
+            return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+        }
+        let sequence = self.text_clipboard.lock()
+            .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
+            .write(&text)?;
+        Ok(serde_json::json!({"text_copied":true,"count":pages.len(),"clipboard_sequence":sequence}))
+    }
+
     fn get(&self, id: i64) -> Result<Event> {
         if notion::is_folder_page_id(id) {
             return Err(ApiError::new("notion_remote_page", "Notion pages are remote and read-only"));

@@ -17,6 +17,10 @@ Folder renders the selected source through its ordinary shelf, using paginated
 read-only Notion rows with reserved IDs. Keep these IDs outside filesystem
 resolution. Use the shared search, sort, and Actions controls with the source
 API; Space opens a row's page and Ctrl+. pins only the page. No Notion writes.
+Details in Notion uses the metadata pane without body fetches. Ctrl+C publishes
+loaded row properties as owned clipboard text. File drag fetches separate
+Markdown bodies under the ordinary cancellable prepared-drag lifecycle.
+Keep typed database history and direct Notion lookup separate from page favorites.
 See [setup](docs/notion.md).
 
 ## Katran 4.0.0 public release authorization · 2026-11-18

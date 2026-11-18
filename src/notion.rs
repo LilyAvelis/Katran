@@ -74,6 +74,9 @@ fn page_library(root: &std::path::Path) -> Result<rusqlite::Connection> {
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS pages (
             id TEXT PRIMARY KEY, title TEXT NOT NULL, visited INTEGER, pinned INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS database_history (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, visited INTEGER NOT NULL
         );",
     )?;
     Ok(db)
@@ -132,6 +135,37 @@ pub(crate) fn record_visit(root: &std::path::Path, page: &Page) -> Result<()> {
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// Preserve the existing page/favourites table; database visits have their own type.
+pub(crate) fn record_database_visit(root: &std::path::Path, id: &str, title: &str) -> Result<()> {
+    let id = canonical_id(id)
+        .ok_or_else(|| ApiError::new("notion_source_id", "Invalid Notion data source ID"))?;
+    if title.len() > 8192 || looks_like_token(title) {
+        return Err(ApiError::new(
+            "notion_page",
+            "Invalid Notion data source title",
+        ));
+    }
+    let mut db = page_library(root)?;
+    let tx = db.transaction()?;
+    tx.execute("INSERT INTO database_history(id,title,visited) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,visited=excluded.visited", rusqlite::params![id,title,crate::now_ms()])?;
+    tx.execute("DELETE FROM database_history WHERE id IN (SELECT id FROM database_history ORDER BY visited DESC,rowid DESC LIMIT -1 OFFSET 100)", [])?;
+    tx.commit()?;
+    Ok(())
+}
+pub(crate) fn saved_history(root: &std::path::Path) -> Result<Vec<Value>> {
+    let db = page_library(root)?;
+    let mut statement = db.prepare("SELECT kind,id,title FROM (SELECT 'page' AS kind,id,title,visited FROM pages WHERE visited IS NOT NULL UNION ALL SELECT 'database' AS kind,id,title,visited FROM database_history) ORDER BY visited DESC,kind,id LIMIT 100")?;
+    let rows = statement
+        .query_map([], |row| {
+            let kind: String = row.get(0)?;
+            let id: String = row.get(1)?;
+            let title: String = row.get(2)?;
+            Ok(json!({"kind":kind,"id":id,"title":title}))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -263,6 +297,188 @@ fn page_id(id: &str) -> bool {
                 byte.is_ascii_hexdigit()
             }
         })
+}
+
+fn canonical_id(value: &str) -> Option<String> {
+    if page_id(value) {
+        return Some(value.to_ascii_lowercase());
+    }
+    if value.len() != 32 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let value = value.to_ascii_lowercase();
+    Some(format!(
+        "{}-{}-{}-{}-{}",
+        &value[..8],
+        &value[8..12],
+        &value[12..16],
+        &value[16..20],
+        &value[20..]
+    ))
+}
+/// Returns None only for ordinary text, never forwarding a foreign or unsafe URL.
+fn target_id(query: &str) -> Result<Option<String>> {
+    let query = query.trim();
+    if query.len() > 8192 || looks_like_token(query) {
+        return Err(ApiError::new("notion_query", "Invalid Notion address"));
+    }
+    if let Some(id) = canonical_id(query) {
+        return Ok(Some(id));
+    }
+    if !query.contains("://") {
+        return Ok(None);
+    }
+    if query.chars().any(|c| c.is_control() || c.is_whitespace()) || query.contains('\\') {
+        return Err(ApiError::new("notion_url", "Invalid Notion address"));
+    }
+    let authority = query
+        .split_once("://")
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or(""));
+    let url = url::Url::parse(query)
+        .map_err(|_| ApiError::new("notion_url", "Invalid Notion address"))?;
+    let host = url.host_str().unwrap_or("");
+    if url.scheme() != "https"
+        || authority.is_none_or(|value| value.contains('@'))
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !(host == "notion.so"
+            || host == "notion.com"
+            || host.ends_with(".notion.so")
+            || host.ends_with(".notion.com"))
+    {
+        return Err(ApiError::new(
+            "notion_url",
+            "Use an HTTPS Notion page or database URL",
+        ));
+    }
+    let last = url
+        .path_segments()
+        .and_then(|parts| parts.filter(|part| !part.is_empty()).next_back())
+        .unwrap_or("");
+    if let Some(id) = canonical_id(last) {
+        return Ok(Some(id));
+    }
+    for size in [36usize, 32] {
+        if let Some(start) = last.len().checked_sub(size)
+            && let Some(tail) = last.get(start..)
+            && (start == 0 || last.as_bytes().get(start - 1) == Some(&b'-'))
+            && let Some(id) = canonical_id(tail)
+        {
+            return Ok(Some(id));
+        }
+    }
+    Err(ApiError::new(
+        "notion_url",
+        "Notion URL does not contain a page or database ID",
+    ))
+}
+
+fn lookup_target_with(
+    query: &str,
+    prefer_database: bool,
+    check: &impl Fn() -> Result<()>,
+    mut send: impl FnMut(&str) -> Result<Value>,
+) -> Result<Option<Value>> {
+    let Some(id) = target_id(query)? else {
+        return Ok(None);
+    };
+    let endpoints = if prefer_database {
+        ["data_sources", "databases", "pages"]
+    } else {
+        ["pages", "data_sources", "databases"]
+    };
+    let mut last_failure = None;
+    for endpoint in endpoints {
+        check()?;
+        let result = send(&format!("v1/{endpoint}/{id}"));
+        check()?;
+        let value = match result {
+            Ok(value) => value,
+            Err(error) if error.code == "notion_request" => {
+                last_failure = Some(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        if value["object"] == "error" {
+            if value["status"] == 404 {
+                last_failure = Some(ApiError::new(
+                    "notion_request",
+                    "Notion target is not accessible",
+                ));
+                continue;
+            }
+            return Err(ApiError::new(
+                "notion_request",
+                "Notion request failed. Check the token, page access and connection",
+            ));
+        }
+        if !value["id"]
+            .as_str()
+            .and_then(canonical_id)
+            .is_some_and(|found| found == id)
+            || value["in_trash"] == true
+            || value["archived"] == true
+            || value["is_archived"] == true
+        {
+            return Err(response_error());
+        }
+        match endpoint {
+            "pages" => {
+                let page = page_from_result(&value).ok_or_else(response_error)?;
+                return Ok(Some(json!({"kind":"page","id":id,"title":page.title})));
+            }
+            "data_sources" => {
+                let source = database_source(&value).ok_or_else(response_error)?;
+                return Ok(Some(
+                    json!({"kind":"database","id":id,"title":source["title"],"source_count":1}),
+                ));
+            }
+            "databases" => {
+                if value["object"] != "database" {
+                    return Err(response_error());
+                }
+                let entries = value["data_sources"]
+                    .as_array()
+                    .ok_or_else(response_error)?;
+                if entries.len() > 1000 {
+                    return Err(response_error());
+                }
+                let valid: Vec<_> = entries
+                    .iter()
+                    .filter_map(|source| {
+                        let id = source["id"].as_str().and_then(canonical_id)?;
+                        Some((id, normalized_text(&source["name"], 1024)))
+                    })
+                    .collect();
+                let (source_id, name) = valid.first().ok_or_else(|| {
+                    ApiError::new(
+                        "notion_source_missing",
+                        "This database has no accessible data source",
+                    )
+                })?;
+                let title = if name.trim().is_empty() {
+                    rich_text(&value["title"], 1024)
+                } else {
+                    name.clone()
+                };
+                return Ok(Some(
+                    json!({"kind":"database","id":source_id,"title":if title.trim().is_empty() { "Untitled" } else { &title },"source_count":valid.len(),"source_selection":"first"}),
+                ));
+            }
+            _ => unreachable!(),
+        }
+    }
+    Err(last_failure.unwrap_or_else(response_error))
+}
+pub(crate) fn lookup_target(
+    query: &str,
+    prefer_database: bool,
+    check: impl Fn() -> Result<()>,
+) -> Result<Option<Value>> {
+    lookup_target_with(query, prefer_database, &check, |path| {
+        request(path, None, &[], &check)
+    })
 }
 
 fn page_from_result(value: &Value) -> Option<Page> {
@@ -1052,5 +1268,104 @@ mod database_tests {
             Ok(json!({"results":[],"has_more":true,"next_cursor":null}))
         });
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod target_history_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    const PAGE: &str = "22222222-2222-4222-8222-222222222222";
+    const DATABASE: &str = "33333333-3333-4333-8333-333333333333";
+    const SOURCE: &str = "44444444-4444-4444-8444-444444444444";
+    fn ok() -> Result<()> {
+        Ok(())
+    }
+    #[test]
+    fn target_parser_never_exposes_tokens_or_untrusted_urls() {
+        assert_eq!(target_id("ordinary title").unwrap(), None);
+        assert_eq!(
+            target_id("22222222222242228222222222222222")
+                .unwrap()
+                .as_deref(),
+            Some(PAGE)
+        );
+        assert_eq!(target_id("https://app.notion.com/p/space/a-title-22222222222242228222222222222222/?source=ignored").unwrap().as_deref(), Some(PAGE));
+        for value in [
+            "http://notion.so/22222222222242228222222222222222",
+            "https://notion.so.evil.test/22222222222242228222222222222222",
+            "https://user@notion.so/22222222222242228222222222222222",
+            "https://@notion.so/22222222222242228222222222222222",
+            "https://notion.so/no-id",
+            "ntn_abcdefghijklmnopqrstuvwxyz0123456789",
+        ] {
+            assert!(target_id(value).is_err(), "{value}");
+        }
+    }
+    #[test]
+    fn database_lookup_resolves_first_data_source_not_database_id() {
+        let paths = RefCell::new(Vec::new());
+        let result = lookup_target_with(DATABASE, true, &ok, |path| {
+            paths.borrow_mut().push(path.to_owned());
+            if path.contains("data_sources") { return Err(ApiError::new("notion_request", "not found")); }
+            Ok(json!({"object":"database","id":DATABASE,"title":[{"plain_text":"Database"}],"data_sources":[{"id":SOURCE,"name":"Primary"},{"id":PAGE,"name":"Secondary"}]}))
+        }).unwrap().unwrap();
+        assert_eq!(result["kind"], "database");
+        assert_eq!(result["id"], SOURCE);
+        assert_eq!(result["title"], "Primary");
+        assert_eq!(result["source_count"], 2);
+        assert_eq!(result["source_selection"], "first");
+        assert_eq!(paths.borrow().len(), 2);
+        assert!(paths.borrow()[0].starts_with("v1/data_sources/"));
+        assert!(paths.borrow()[1].starts_with("v1/databases/"));
+    }
+    #[test]
+    fn page_first_fallback_and_cancel_are_bounded() {
+        let count = Cell::new(0);
+        let page = lookup_target_with(PAGE, false, &ok, |path| {
+            count.set(count.get()+1); assert!(path.starts_with("v1/pages/"));
+            Ok(json!({"object":"page","id":PAGE,"properties":{"Name":{"type":"title","title":[{"plain_text":"Page"}]}}}))
+        }).unwrap().unwrap();
+        assert_eq!(page["kind"], "page");
+        assert_eq!(page["title"], "Page");
+        assert_eq!(count.get(), 1);
+        let no_request = lookup_target_with("ordinary search", false, &ok, |_| {
+            panic!("not a direct lookup")
+        })
+        .unwrap();
+        assert!(no_request.is_none());
+        let cancelled = || Err(ApiError::new("job_cancelled", "cancelled"));
+        assert_eq!(
+            lookup_target_with(PAGE, true, &cancelled, |_| panic!("cancel before request"))
+                .unwrap_err()
+                .code,
+            "job_cancelled"
+        );
+    }
+    #[test]
+    fn mixed_history_keeps_legacy_page_favourites() {
+        let root = tempfile::tempdir().unwrap();
+        let db = rusqlite::Connection::open(root.path().join("notion-pages.sqlite3")).unwrap();
+        db.execute_batch("CREATE TABLE pages(id TEXT PRIMARY KEY,title TEXT NOT NULL,visited INTEGER,pinned INTEGER);").unwrap();
+        db.execute("INSERT INTO pages VALUES(?1,'Old page',10,5)", [PAGE])
+            .unwrap();
+        drop(db);
+        record_database_visit(root.path(), SOURCE, "Database").unwrap();
+        let db = page_library(root.path()).unwrap();
+        db.execute(
+            "UPDATE database_history SET visited=20 WHERE id=?1",
+            [SOURCE],
+        )
+        .unwrap();
+        drop(db);
+        let history = saved_history(root.path()).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0]["kind"], "database");
+        assert_eq!(history[0]["id"], SOURCE);
+        assert_eq!(history[1]["kind"], "page");
+        assert_eq!(history[1]["id"], PAGE);
+        let favorites = saved_pages(root.path(), true).unwrap();
+        assert_eq!(favorites.len(), 1);
+        assert_eq!(favorites[0].id, PAGE);
     }
 }

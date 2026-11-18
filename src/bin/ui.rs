@@ -284,6 +284,7 @@ enum UiJob {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TransferKind {
     Copy,
+    NotionExport,
     Move,
     Import,
     Paste,
@@ -304,6 +305,7 @@ impl TransferKind {
     fn label(self) -> &'static str {
         match self {
             Self::Copy => i18n::tr("Копирование…", "Copying…"),
+            Self::NotionExport => i18n::tr("Загрузка страниц Notion…", "Fetching Notion pages…"),
             Self::Move => i18n::tr("Перемещение…", "Moving…"),
             Self::Import => i18n::tr("Добавление в Катран…", "Adding to Katran…"),
             Self::Paste => i18n::tr("Вставка…", "Pasting…"),
@@ -2202,6 +2204,7 @@ impl eframe::App for Shelf {
     }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         ctx.options_mut(|options| options.zoom_with_keyboard = false);
+        self.cancel_released_notion_drag(ctx, input);
         if self.transfer_input_reserved() {
             let copy_bound = self.shortcuts.iter().any(|shortcut| {
                 shortcut.id == "transfer_copy"

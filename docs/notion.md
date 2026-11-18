@@ -49,10 +49,12 @@ limit is 1 MiB of Markdown.
    in Folder. Another **\\** in the picker switches back to pages.
 2. **Ctrl+T** focuses the normal shelf search and filters the database by row
    title. Switch between **Gallery**, **Stream** and **Mini stream** through
-   the usual Folder controls. Mini stream shows the selected row's readable properties
-   and a text excerpt. An excerpt is requested for the selected row when its
-   properties supply no summary.
-3. **Space** opens the selected page in the full Katran content area. **Enter**
+   the usual Folder controls. For Notion, Mini stream shows the selected row's
+   properties across the details pane. Page content loads on **Space**.
+3. **Space** opens the selected page in a centered reader. **Ctrl+C** copies
+   the loaded properties of the selected pages as text. Drag the selection
+   to export each page as a separate `.md` file. Keep the mouse button held
+   while Katran fetches the files. **Enter**
    attaches the page as `.md`, **Alt+Enter** opens Notion in the browser, and
    **Ctrl+.** pins the page in Notion favorites. Use **Ctrl+F** to view those
    favorites. **Ctrl+K** shows actions available for a Notion page. Click the
@@ -64,3 +66,7 @@ menu supports Notion order, name, creation time and last-edited time. A named
 Notion view's saved filters and sorts do not apply here. File-size sorting
 and local tags are unavailable for remote pages. The same read-only
 integration needs access to the source database.
+
+Paste a database ID or a Notion page URL into the picker for a direct lookup.
+When a database ID has multiple data sources, the first source opens. History
+shows visited databases and pages with distinct icons. Favorites contain pages.

@@ -183,32 +183,43 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
     if columns == 0 {
         return;
     }
-    let viewport_width = ui.available_width();
+    let viewport_width = ui.available_width().max(1.0);
     let cell_width = (viewport_width / columns as f32 - 10.0).clamp(128.0, 250.0);
-    egui::ScrollArea::horizontal()
-        .id_salt("notion-table")
-        .max_width(viewport_width)
-        .show(ui, |ui| {
-            egui::Grid::new("cells")
-                .striped(true)
-                .spacing(egui::vec2(1.0, 1.0))
-                .show(ui, |ui| {
-                    for row in rows {
-                        for cell in row {
-                            let header = cell.header;
-                            let fill = Color32::from_gray(if header { 61 } else { 36 });
-                            egui::Frame::new()
-                                .fill(fill)
-                                .inner_margin(5)
-                                .show(ui, |ui| {
-                                    ui.set_width(cell_width);
-                                    show_document(ui, &cell.document, header);
-                                });
+    // Clip to the reader column before the grid asks for its full width.
+    // The horizontal scroll area owns the overflow, not the surrounding page.
+    let clip = ui.clip_rect().intersect(egui::Rect::from_min_max(
+        ui.cursor().min,
+        egui::pos2(ui.cursor().min.x + viewport_width, ui.clip_rect().max.y),
+    ));
+    ui.scope(|ui| {
+        ui.set_max_width(viewport_width);
+        ui.set_clip_rect(clip);
+        egui::ScrollArea::horizontal()
+            .id_salt("notion-table")
+            .max_width(viewport_width)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                egui::Grid::new("cells")
+                    .striped(true)
+                    .spacing(egui::vec2(1.0, 1.0))
+                    .show(ui, |ui| {
+                        for row in rows {
+                            for cell in row {
+                                let header = cell.header;
+                                let fill = Color32::from_gray(if header { 61 } else { 36 });
+                                egui::Frame::new()
+                                    .fill(fill)
+                                    .inner_margin(5)
+                                    .show(ui, |ui| {
+                                        ui.set_width(cell_width);
+                                        show_document(ui, &cell.document, header);
+                                    });
+                            }
+                            ui.end_row();
                         }
-                        ui.end_row();
-                    }
-                });
-        });
+                    });
+            });
+    });
 }
 
 #[cfg(test)]
