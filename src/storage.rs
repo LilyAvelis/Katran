@@ -453,6 +453,7 @@ pub(crate) fn replace_link_collection_blob(
     id: i64,
     expected_revision: &str,
     prepared: PreparedBlob,
+    rename: Option<(usize, &str)>,
 ) -> Result<bool> {
     if prepared.source != "link_collection" || !prepared.name.to_ascii_lowercase().ends_with(".bull")
         || prepared.text.is_some() || prepared.link || prepared.table {
@@ -470,20 +471,31 @@ pub(crate) fn replace_link_collection_blob(
         params![id, expected_hash], |row| row.get(0),
     ).optional()?;
     let Some(old) = old else { return Ok(false); };
-    // Same digest is already the requested state; no new publication or metadata update.
-    if old == prepared.hash { tx.commit()?; return Ok(true); }
-    let target = prepared.directory.join(&prepared.hash);
-    let encoded = target.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
-    publish_blob_in(&tx, root, quota, &prepared)?;
-    let changed = tx.execute(
-        "UPDATE events SET path=?1,blob_hash=?2,size=?3 WHERE id=?4 AND blob_hash=?5
-         AND source='link_collection' AND NOT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?4)",
-        params![encoded, prepared.hash, prepared.size, id, old],
-    )?;
-    if changed != 1 { return Err(ApiError::new("source_changed", "Collection changed during replacement")); }
+    if old != prepared.hash {
+        let target = prepared.directory.join(&prepared.hash);
+        let encoded = target.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+        publish_blob_in(&tx, root, quota, &prepared)?;
+        let changed = tx.execute(
+            "UPDATE events SET path=?1,blob_hash=?2,size=?3 WHERE id=?4 AND blob_hash=?5
+             AND source='link_collection' AND NOT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?4)",
+            params![encoded, prepared.hash, prepared.size, id, old],
+        )?;
+        if changed != 1 { return Err(ApiError::new("source_changed", "Collection changed during replacement")); }
+    }
+    if let Some((index, title)) = rename {
+        // Keep legacy-name lookup and eventual unpack in sync with the file.
+        tx.execute(
+            "INSERT INTO katran_properties(event_id, display_name)
+             SELECT member_id, ?3 FROM bull_members WHERE collection_id=?1 AND position=?2
+             ON CONFLICT(event_id) DO UPDATE SET display_name=excluded.display_name",
+            params![id, index, title],
+        )?;
+    }
     tx.commit()?;
     // Preserve all other references; cleanup is guarded by the normal writer-locked path.
-    let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old]);
+    if old != prepared.hash {
+        let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old]);
+    }
     Ok(true)
 }
 
@@ -1052,7 +1064,7 @@ mod prepared_tests {
         let before = get_event(&s.db, id).unwrap();
         let old_path = before.path.clone();
         let staged = prepare_bytes(&s.root, 1000, collection_input(b"new collection"), &[]).unwrap();
-        assert!(replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged).unwrap());
+        assert!(replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged, None).unwrap());
         let after = get_event(&s.db, id).unwrap();
         assert_eq!(after.id, id);
         assert_eq!(after.name, before.name);
@@ -1075,11 +1087,11 @@ mod prepared_tests {
         let before = get_event(&s.db, id).unwrap();
         let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
         let target = staged.directory.join(&staged.hash);
-        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, "blob:0000000000000000000000000000000000000000000000000000000000000000", staged).unwrap());
+        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, "blob:0000000000000000000000000000000000000000000000000000000000000000", staged, None).unwrap());
         assert!(!target.exists());
         s.db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![parent,id]).unwrap();
         let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
-        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged).unwrap());
+        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged, None).unwrap());
         assert!(!target.exists());
         assert_eq!(get_event(&s.db, id).unwrap().revision, before.revision);
     }

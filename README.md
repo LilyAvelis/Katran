@@ -23,6 +23,7 @@ original cards with their pins and tags.
 
 Links uses the same BULL action. Names you give your links become the titles
 inside the collection. Descriptions and previews appear when available.
+Choose **Rename link** in the viewer to save a new name in the BULL file.
 Links BULL appears immediately,
 then saves titles and descriptions in the background without fetching images.
 Ctrl+C copies the visible URL,
@@ -34,8 +35,10 @@ Ctrl+C copies the current source. Enter in the BULL viewer uses Katran's
 previous-window paste flow for the visible image, URL or text.
 
 Files and Folder use the same rebindable collection action. Compatible files
-form a BULL and mixed files form a BS. Folder writes the collection next to
-the originals and unpacks into a new subfolder. On the shelf, Delete removes
+form a BULL and mixed files form a BS. In Folder, the collection replaces the
+selected files after verification and uses the first entry as its cover.
+The originals go to the Windows Recycle Bin. Unpack writes a new subfolder.
+On the shelf, Delete removes
 the collection and its member cards. Use Unpack to get the cards back.
 Copy or drag a shelf card to transfer the entire file.
 See [BS and file collections](docs/patch-4.0/BS.md).

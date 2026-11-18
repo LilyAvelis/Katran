@@ -32,6 +32,13 @@ pub(crate) fn choose_files(events: &[Event]) -> Kind {
     }
 }
 
+pub(crate) fn choose_folder_files(events: &[Event]) -> Kind {
+    match choose_files(events) {
+        Kind::Images => Kind::Files("images".into()),
+        other => other,
+    }
+}
+
 fn classify(name: &str) -> Kind {
     let path = Path::new(name);
     if file_types::is_native_image(path) {
@@ -72,7 +79,7 @@ pub(crate) fn external(event: &Event) -> bool {
 }
 
 fn family_valid(family: &str) -> bool {
-    matches!(family, "video" | "audio")
+    matches!(family, "video" | "audio" | "images")
         || family.strip_prefix("ext-").is_some_and(|suffix| {
             (1..=24).contains(&suffix.len())
                 && suffix
@@ -127,10 +134,7 @@ fn read_family(mut reader: impl Read) -> Result<String> {
     Ok(family)
 }
 
-pub(crate) fn read_raw(
-    mut reader: impl Read,
-    kind: &Kind,
-) -> Result<Vec<baloh_collection::bs::FileEntry>> {
+fn validate_file_header(mut reader: impl Read, kind: &Kind) -> Result<()> {
     if let Kind::Files(expected) = kind {
         let mut header = [0; 16];
         reader.read_exact(&mut header)?;
@@ -141,6 +145,14 @@ pub(crate) fn read_raw(
             ));
         }
     }
+    Ok(())
+}
+
+pub(crate) fn read_raw(
+    mut reader: impl Read,
+    kind: &Kind,
+) -> Result<Vec<baloh_collection::bs::FileEntry>> {
+    validate_file_header(&mut reader, kind)?;
     let entries = baloh_collection::bs::read(reader)?;
     if matches!(kind, Kind::Files(_)) {
         validate_entries(&entries, kind)?;
@@ -148,8 +160,28 @@ pub(crate) fn read_raw(
     Ok(entries)
 }
 
+pub(crate) fn read_raw_cover(
+    mut reader: impl Read,
+    kind: &Kind,
+    retain_limit: usize,
+) -> Result<(baloh_collection::bs::FileEntry, bool)> {
+    validate_file_header(&mut reader, kind)?;
+    let (entry, retained) = baloh_collection::bs::read_cover(reader, retain_limit)?;
+    if matches!(kind, Kind::Files(_)) {
+        validate_entries(std::slice::from_ref(&entry), kind)?;
+    }
+    Ok((entry, retained))
+}
+
 fn validate_entries(entries: &[baloh_collection::bs::FileEntry], kind: &Kind) -> Result<()> {
-    if entries.iter().any(|entry| classify(&entry.name) != *kind) {
+    let expected = match kind {
+        Kind::Files(family) if family == "images" => &Kind::Images,
+        other => other,
+    };
+    if entries
+        .iter()
+        .any(|entry| classify(&entry.name) != *expected)
+    {
         return Err(ApiError::new(
             "invalid_collection",
             "File BULL contains a file outside its declared family",

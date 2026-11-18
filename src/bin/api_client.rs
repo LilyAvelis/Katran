@@ -15,7 +15,8 @@ fn is_collection_preview(event: &Value, id: i64) -> bool {
                 | "text_collection"
         )
     ) || (super::images::is_bs(event) && (source != Some("work_folder") || id < 0))
-        || ((id < 0 && source == Some("work_folder") || source == Some("files")) && super::images::is_bull(event))
+        || ((id < 0 && source == Some("work_folder") || source == Some("files"))
+            && super::images::is_bull(event))
 }
 
 #[cfg(test)]
@@ -1445,7 +1446,11 @@ impl Shelf {
         }
         let interval = Duration::from_millis(500);
         ctx.request_repaint_after(interval);
-        if self.job.is_some() || self.overlay_ui.pending || self.api.is_none() {
+        if self.job.is_some()
+            || self.overlay_ui.pending
+            || self.upscale.saving_link_name()
+            || self.api.is_none()
+        {
             return;
         }
         if self
@@ -1639,6 +1644,30 @@ impl Shelf {
                 )
             };
             self.message = format!("{label}: {count}");
+            if result["archive_verified"] == false {
+                self.message = tr(
+                    "Не удалось проверить коллекцию. Исходники остались в папке",
+                    "Could not verify the collection. Originals kept",
+                )
+                .into();
+            } else if let Some(remaining) = result["sources_remaining"].as_u64().filter(|&n| n > 0)
+            {
+                self.message.push_str(&format!(
+                    " · {}: {remaining}",
+                    tr("Не отправлено в корзину", "Not recycled")
+                ));
+                if let Some(recovery) = result["original_removal"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find_map(|item| item["recovery_path"].as_str())
+                {
+                    self.message.push_str(&format!(
+                        " · {} {recovery}",
+                        tr("Восстановление", "Recovery")
+                    ));
+                }
+            }
             if let Some(path) = result["path"].as_str() {
                 self.message.push_str(" · ");
                 self.message.push_str(path);

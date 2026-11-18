@@ -93,6 +93,25 @@ pub(crate) fn link_url(event: &Event, index: usize, cancel: &Cancellation) -> Re
     Ok(link_at(event, index, cancel)?.0.url)
 }
 
+pub(crate) fn prepare_link_rename(
+    event: &Event,
+    index: usize,
+    title: &str,
+    root: &Path,
+    quota: u64,
+    references: &[PathBuf],
+    cancel: &Cancellation,
+) -> Result<storage::PreparedBlob> {
+    cancel.check()?;
+    let mut entries = read_links(event)?;
+    let entry = entries
+        .get_mut(index)
+        .ok_or_else(|| ApiError::new("invalid_page", "Page is outside the collection"))?;
+    entry.title = title.to_owned();
+    cancel.check()?;
+    prepare_links(&entries, &event.name, root, quota, references)
+}
+
 pub(crate) fn link_page(
     event: &Event,
     index: usize,
@@ -105,6 +124,7 @@ pub(crate) fn link_page(
         .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
     Ok(serde_json::json!({ "index":index, "count":count, "link":{
         "url":link.url, "title":display_name.unwrap_or(&link.title), "description":link.description, "preview_png":preview,
+        "editable":is_link_collection(event),
     }}))
 }
 
@@ -461,6 +481,7 @@ fn link_metadata_wait_does_not_block_pack_or_read_and_commits_in_place() {
             enriched.id,
             &enriched.revision,
             old_blob,
+            None,
         )
         .unwrap()
     );

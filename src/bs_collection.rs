@@ -367,6 +367,80 @@ pub(crate) fn read_entry(event: &Event, index: usize, cancel: &Cancellation) -> 
     Ok(selected(event, index, cancel)?.0)
 }
 
+fn raw_image(
+    event: &Event,
+    index: usize,
+    cancel: &Cancellation,
+) -> Result<(image::DynamicImage, usize)> {
+    if collection_kind::probe(event)? != Kind::Files("images".into()) {
+        return Err(ApiError::new(
+            "invalid_collection",
+            "Expected a raw image BULL",
+        ));
+    }
+    let (entry, count) = selected(event, index, cancel)?;
+    cancel.check()?;
+    let mut reader = image::ImageReader::new(Cursor::new(&entry.bytes))
+        .with_guessed_format()
+        .map_err(|e| ApiError::new("invalid_image", e))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(160 * 1024 * 1024);
+    reader.limits(limits);
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| ApiError::new("invalid_image", e))?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 32_000_000 {
+        return Err(ApiError::new(
+            "invalid_image",
+            "Image exceeds preview size limits",
+        ));
+    }
+    let orientation = decoder
+        .orientation()
+        .map_err(|e| ApiError::new("invalid_image", e))?;
+    let mut image = image::DynamicImage::from_decoder(decoder)
+        .map_err(|e| ApiError::new("invalid_image", e))?;
+    image.apply_orientation(orientation);
+    cancel.check()?;
+    Ok((image, count))
+}
+
+/// A display PNG; the encoded source bytes in the collection remain unchanged.
+pub(crate) fn raw_image_page(event: &Event, index: usize, cancel: &Cancellation) -> Result<Value> {
+    let (image, count) = raw_image(event, index, cancel)?;
+    let image = if image.width() > 2048 || image.height() > 2048 {
+        image.thumbnail(2048, 2048)
+    } else {
+        image
+    };
+    let mut output = Cursor::new(Vec::new());
+    image
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(|e| ApiError::new("invalid_image", e))?;
+    cancel.check()?;
+    Ok(
+        json!({"index":index,"count":count,"png":base64::engine::general_purpose::STANDARD.encode(output.into_inner())}),
+    )
+}
+
+pub(crate) fn raw_image_page_copy(
+    event: &Event,
+    index: usize,
+    cancel: &Cancellation,
+) -> Result<Vec<u8>> {
+    let (image, _) = raw_image(event, index, cancel)?;
+    let pixels = image.into_rgba8();
+    cancel.check()?;
+    Ok(crate::copy_out::dib(
+        pixels.width(),
+        pixels.height(),
+        pixels.as_raw(),
+    ))
+}
+
 fn thumbnail(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() > 16 * 1024 * 1024 {
         return None;

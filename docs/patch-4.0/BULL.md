@@ -42,6 +42,10 @@ the default browser. Copy the shelf card to send the whole BULL. The external
 QuickLook adapter currently opens v1 image BULLs. Katran also browses Links
 and Text collections.
 
+**Rename link** changes the current title in a Links BULL on the shelf.
+The original member card, when present, uses the same name after unpacking.
+An earlier exported copy retains the bytes it was exported with.
+
 The background HTML deadline is 7 seconds, independent of packing. Merge
 reuses stored metadata and may enrich entries with a blank title or description.
 A copy made before enrichment remains a valid independent snapshot. A later
@@ -82,11 +86,12 @@ collections can contain pages without original shelf records. Unpacking
 those pages adds PNG cards from the portable BULL. Exported BULLs contain
 ordered pages without Katran pin or tag metadata. Images, Links and Text have
 separate collection types. Delete removes the shelf card and its member
-records, while Unpack restores the original shelf cards. Folder uses side-by-side
-file creation and a separate unpack destination.
+records, while Unpack restores the original shelf cards. Folder pack and
+merge recycle the selected files after verifying the new archive. Folder
+unpack uses a separate destination and keeps the archive.
 
 Raw file BULL uses `BALOHCOL`, little-endian version 2 and the `FILE` tag.
-A byte gives the length of the ASCII family label (`video`, `audio` or
+A byte gives the length of the ASCII family label (`images`, `video`, `audio` or
 `ext-<suffix>`), followed by the label and a complete BS v1 payload. Readers
 validate every entry's name against the declared family. The payload
 preserves file names and bytes. See [BS v1](BS.md).

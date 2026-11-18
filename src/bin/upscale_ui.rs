@@ -13,6 +13,7 @@ pub(super) struct State {
     status: String,
     kind: ImageJob,
     collection: Option<Collection>,
+    link_rename: Option<LinkRename>,
     progress: Option<(u64, u64)>,
 }
 
@@ -68,6 +69,14 @@ struct LinkPage {
     url: String,
     title: String,
     description: String,
+    editable: bool,
+}
+
+struct LinkRename {
+    title: String,
+    focus: bool,
+    job: Option<katran::domain_jobs::JobId>,
+    error: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -100,6 +109,12 @@ pub(super) fn translation_source(id: &str) -> Option<katran::api::ImageTranslati
 impl State {
     pub(super) fn collection_open(&self) -> bool {
         self.collection.is_some()
+    }
+
+    pub(super) fn saving_link_name(&self) -> bool {
+        self.link_rename
+            .as_ref()
+            .is_some_and(|edit| edit.job.is_some())
     }
 }
 
@@ -283,10 +298,94 @@ impl Shelf {
     }
 
     fn close_translation_collection(&mut self) {
+        if let Some(job_id) = self.upscale.link_rename.take().and_then(|edit| edit.job) {
+            self.call(Command::CancelJob { job_id });
+        }
         if let Some(collection) = self.upscale.collection.take() {
             if let Some((job_id, _)) = collection.pending {
                 self.call(Command::CancelJob { job_id });
             }
+        }
+    }
+
+    fn poll_link_rename(&mut self, ctx: &egui::Context) {
+        let Some(job_id) = self.upscale.link_rename.as_ref().and_then(|edit| edit.job) else {
+            return;
+        };
+        let status = self.call(Command::PollJob { job_id });
+        if matches!(
+            status["state"].as_str(),
+            Some("queued" | "running" | "ready")
+        ) {
+            ctx.request_repaint_after(Duration::from_millis(50));
+            return;
+        }
+        let result = &status["result"];
+        if status["state"] == "succeeded"
+            && let (Some(id), Some(revision), Some(index), Some(title)) = (
+                result["id"].as_i64(),
+                result["revision"].as_str(),
+                result["index"].as_u64(),
+                result["title"].as_str(),
+            )
+            && let Some(collection) = self.upscale.collection.as_mut()
+            && collection.id == id
+            && collection.ready_index == Some(index as usize)
+            && let Some(link) = collection.link.as_mut()
+        {
+            collection.revision = revision.into();
+            link.title = title.into();
+            self.upscale.link_rename = None;
+            self.refresh();
+            return;
+        }
+        let edit = self.upscale.link_rename.as_mut().unwrap();
+        edit.job = None;
+        edit.focus = true;
+        edit.error = status["error"]["message"]
+            .as_str()
+            .unwrap_or(tr("Не удалось сохранить имя", "Could not save link name"))
+            .into();
+        if status["error"]["code"] == "stale_selection"
+            && let Some(id) = self
+                .upscale
+                .collection
+                .as_ref()
+                .map(|collection| collection.id)
+        {
+            let event = self.call(Command::Get { id });
+            if let Some(revision) = event["revision"].as_str() {
+                self.accept_link_collection_revision(id, revision, ctx);
+            }
+        }
+    }
+
+    fn submit_link_rename(&mut self, ctx: &egui::Context) {
+        let Some((id, revision, index)) = self
+            .upscale
+            .collection
+            .as_ref()
+            .and_then(Collection::ready_target)
+        else {
+            return;
+        };
+        let Some(edit) = self.upscale.link_rename.as_ref() else {
+            return;
+        };
+        let result = self.call(Command::RenameCollectionLink {
+            id,
+            revision,
+            index,
+            title: edit.title.clone(),
+        });
+        let edit = self.upscale.link_rename.as_mut().unwrap();
+        if let Some(job_id) = result["job_id"].as_u64() {
+            edit.job = Some(katran::domain_jobs::JobId(job_id));
+            edit.error.clear();
+            ctx.request_repaint_after(Duration::from_millis(50));
+        } else {
+            edit.error.clone_from(&self.message);
+            edit.focus = true;
         }
     }
 
@@ -316,6 +415,7 @@ impl Shelf {
     }
 
     fn translation_collection_ui(&mut self, ctx: &egui::Context) {
+        self.poll_link_rename(ctx);
         if let Some((job_id, expected)) = self.upscale.collection.as_ref().and_then(|v| v.pending) {
             let response = self.call(Command::PollJob { job_id });
             match response["state"].as_str() {
@@ -417,6 +517,8 @@ impl Shelf {
                                             url: url.to_owned(),
                                             title,
                                             description,
+                                            editable: link.get("editable")
+                                                == Some(&Value::Bool(true)),
                                         });
                                         collection.texture = texture;
                                         collection.ready_index = Some(expected);
@@ -477,91 +579,98 @@ impl Shelf {
         if self.upscale.collection.is_none() {
             return;
         }
-        let copy_requested = {
-            let collection = self.upscale.collection.as_mut().unwrap();
-            ctx.input_mut(|input| {
-                let key_down = input.key_down(egui::Key::C);
-                let focused = input.focused;
-                take_collection_copy(
-                    &mut input.events,
-                    focused,
-                    key_down,
-                    &mut collection.copy_held,
-                )
-            })
-        };
-        if copy_requested && !self.overlay_ui.pending {
-            let target = self
-                .upscale
-                .collection
-                .as_ref()
-                .and_then(Collection::ready_transfer_target);
-            if let Some((id, revision, index)) = target {
-                if !self.start_job(
-                    Command::CopyCollectionPage {
-                        id,
-                        revision,
-                        index,
-                    },
-                    false,
-                    ctx.clone(),
-                ) && self.job.is_some()
-                {
-                    self.message = tr(
-                        "Дождитесь завершения текущей операции",
-                        "Wait for the current operation to finish",
+        let editing = self.upscale.link_rename.is_some();
+        if !editing {
+            let copy_requested = {
+                let collection = self.upscale.collection.as_mut().unwrap();
+                ctx.input_mut(|input| {
+                    let key_down = input.key_down(egui::Key::C);
+                    let focused = input.focused;
+                    take_collection_copy(
+                        &mut input.events,
+                        focused,
+                        key_down,
+                        &mut collection.copy_held,
                     )
-                    .into();
-                }
-            }
-        }
-        let open_requested = ctx.input_mut(|input| {
-            let focused = input.focused;
-            let mut pressed = false;
-            input.events.retain(|event| match event {
-                egui::Event::Key {
-                    key: egui::Key::Enter,
-                    pressed: down,
-                    repeat,
-                    modifiers,
-                    ..
-                } if modifiers.alt && !modifiers.ctrl && !modifiers.shift => {
-                    if focused && *down && !*repeat {
-                        pressed = true;
+                })
+            };
+            if copy_requested && !self.overlay_ui.pending {
+                let target = self
+                    .upscale
+                    .collection
+                    .as_ref()
+                    .and_then(Collection::ready_transfer_target);
+                if let Some((id, revision, index)) = target {
+                    if !self.start_job(
+                        Command::CopyCollectionPage {
+                            id,
+                            revision,
+                            index,
+                        },
+                        false,
+                        ctx.clone(),
+                    ) && self.job.is_some()
+                    {
+                        self.message = tr(
+                            "Дождитесь завершения текущей операции",
+                            "Wait for the current operation to finish",
+                        )
+                        .into();
                     }
-                    false
                 }
-                _ => true,
+            }
+            let open_requested = ctx.input_mut(|input| {
+                let focused = input.focused;
+                let mut pressed = false;
+                input.events.retain(|event| match event {
+                    egui::Event::Key {
+                        key: egui::Key::Enter,
+                        pressed: down,
+                        repeat,
+                        modifiers,
+                        ..
+                    } if modifiers.alt && !modifiers.ctrl && !modifiers.shift => {
+                        if focused && *down && !*repeat {
+                            pressed = true;
+                        }
+                        false
+                    }
+                    _ => true,
+                });
+                pressed
             });
-            pressed
-        });
-        if open_requested && !self.overlay_ui.pending {
-            self.open_ready_collection_entry(ctx);
-        }
-        let paste_requested = ctx.input_mut(|input| {
-            let focused = input.focused;
-            take_collection_enter(&mut input.events, focused)
-        });
-        if paste_requested {
-            let target = self
-                .upscale
-                .collection
-                .as_ref()
-                .and_then(Collection::ready_transfer_target);
-            if let Some((id, revision, index)) = target {
-                self.paste_collection_page(ctx, id, revision, index);
+            if open_requested && !self.overlay_ui.pending {
+                self.open_ready_collection_entry(ctx);
+            }
+            let paste_requested = ctx.input_mut(|input| {
+                let focused = input.focused;
+                take_collection_enter(&mut input.events, focused)
+            });
+            if paste_requested {
+                let target = self
+                    .upscale
+                    .collection
+                    .as_ref()
+                    .and_then(Collection::ready_transfer_target);
+                if let Some((id, revision, index)) = target {
+                    self.paste_collection_page(ctx, id, revision, index);
+                }
             }
         }
-        let close_key = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
-        let previous_key =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-        let next_key =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+        let close_key =
+            !editing && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        let previous_key = !editing
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+        let next_key = !editing
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
         let collection = self.upscale.collection.as_mut().unwrap();
+        let edit = &mut self.upscale.link_rename;
         let mut previous = previous_key;
         let mut next = next_key;
         let mut close = close_key;
         let mut open_file = false;
+        let mut save_name = false;
+        let mut cancel_rename = false;
         let canvas_size = collection_canvas_size(ctx.content_rect().size());
         let modal = egui::Modal::new(egui::Id::new("translated-collection")).show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
@@ -569,7 +678,7 @@ impl Shelf {
             ui.horizontal(|ui| {
                 previous |= ui
                     .add_enabled(
-                        collection.index > 0,
+                        !editing && collection.index > 0,
                         egui::Button::new(tr("Назад", "Previous")),
                     )
                     .clicked();
@@ -587,15 +696,72 @@ impl Shelf {
                 );
                 next |= ui
                     .add_enabled(
-                        collection.count.is_some_and(|n| collection.index + 1 < n),
+                        !editing && collection.count.is_some_and(|n| collection.index + 1 < n),
                         egui::Button::new(tr("Далее", "Next")),
                     )
                     .clicked();
                 if collection.file.is_some() {
                     open_file |= ui.button(tr("Открыть", "Open")).clicked();
                 }
-                close |= ui.button(tr("Закрыть", "Close")).clicked();
+                if let Some(link) = collection.link.as_ref().filter(|link| link.editable)
+                    && !editing
+                    && ui
+                        .add_enabled(
+                            collection.pending.is_none()
+                                && collection.ready_index == Some(collection.index),
+                            egui::Button::new(tr("Переименовать ссылку", "Rename link")),
+                        )
+                        .clicked()
+                {
+                    *edit = Some(LinkRename {
+                        title: link.title.clone(),
+                        focus: true,
+                        job: None,
+                        error: String::new(),
+                    });
+                }
+                close |= ui
+                    .add_enabled(!editing, egui::Button::new(tr("Закрыть", "Close")))
+                    .clicked();
             });
+            if let Some(edit) = edit {
+                let idle = edit.job.is_none();
+                let can_save = idle
+                    && collection.pending.is_none()
+                    && collection.ready_index == Some(collection.index);
+                ui.horizontal(|ui| {
+                    let name = ui.add_enabled(
+                        idle,
+                        egui::TextEdit::singleline(&mut edit.title)
+                            .desired_width((canvas_size.x - 200.0).clamp(100.0, 480.0))
+                            .hint_text(tr("Имя ссылки", "Link name")),
+                    );
+                    if idle && std::mem::take(&mut edit.focus) {
+                        name.request_focus();
+                    }
+                    let enter = name.lost_focus()
+                        && ui.input(|input| {
+                            input.key_pressed(egui::Key::Enter) && input.modifiers.is_none()
+                        });
+                    save_name = ui
+                        .add_enabled(
+                            can_save && !edit.title.trim().is_empty(),
+                            egui::Button::new(tr("Сохранить", "Save")),
+                        )
+                        .clicked()
+                        || (can_save && enter && !edit.title.trim().is_empty());
+                    cancel_rename = ui
+                        .add_enabled(idle, egui::Button::new(tr("Отмена", "Cancel")))
+                        .clicked()
+                        || (idle
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                            }));
+                });
+                if !edit.error.is_empty() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, &edit.error);
+                }
+            }
             let (canvas, response) =
                 ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
             #[cfg(test)]
@@ -816,7 +982,13 @@ impl Shelf {
         if open_file && !self.overlay_ui.pending {
             self.open_ready_collection_entry(ctx);
         }
-        if close || modal.should_close() {
+        if cancel_rename {
+            self.upscale.link_rename = None;
+        } else if save_name {
+            self.submit_link_rename(ctx);
+        } else if self.upscale.link_rename.is_some() {
+            return;
+        } else if close || modal.should_close() {
             self.close_translation_collection();
         } else if previous && current > 0 {
             self.request_translation_page(current - 1, ctx);
@@ -896,6 +1068,7 @@ impl Shelf {
             job,
             preview_job: None,
             collection: None,
+            link_rename: None,
             progress: None,
             label,
             kind,
@@ -1126,6 +1299,72 @@ impl Shelf {
 mod tests {
     use super::*;
     use katran::actions::upscale_operation;
+
+    #[test]
+    fn collection_rename_refreshes_the_open_link_and_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        let mut bytes = Vec::new();
+        baloh_collection::links::write(
+            &mut bytes,
+            &[baloh_collection::links::Link {
+                url: "http://example.test/synthetic".into(),
+                title: "Before".into(),
+                description: "Keep this description".into(),
+                preview_png: None,
+            }],
+        )
+        .unwrap();
+        let event = app.call(Command::IngestBytes {
+            name: "test.bull".into(),
+            source: "link_collection".into(),
+            bytes,
+        });
+        let id = event["id"].as_i64().unwrap();
+        let revision = event["revision"].as_str().unwrap();
+        app.open_translation_collection(id, revision.into(), &ctx);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while app.upscale.collection.as_ref().unwrap().pending.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.translation_collection_ui(ui.ctx())
+            });
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            app.upscale
+                .collection
+                .as_ref()
+                .unwrap()
+                .link
+                .as_ref()
+                .unwrap()
+                .title,
+            "Before"
+        );
+        app.upscale.link_rename = Some(LinkRename {
+            title: "After".into(),
+            focus: false,
+            job: None,
+            error: String::new(),
+        });
+        app.submit_link_rename(&ctx);
+        assert!(app.upscale.saving_link_name());
+        while app.upscale.saving_link_name() {
+            assert!(std::time::Instant::now() < deadline);
+            app.poll_link_rename(&ctx);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(app.upscale.link_rename.is_none());
+        let collection = app.upscale.collection.as_ref().unwrap();
+        assert_eq!(collection.ready_index, Some(0));
+        assert_ne!(collection.revision, revision);
+        let link = collection.link.as_ref().unwrap();
+        assert_eq!(link.title, "After");
+        assert_eq!(link.description, "Keep this description");
+    }
+
     #[test]
     fn metadata_revision_keeps_visible_link_and_pending_target() {
         let root = tempfile::tempdir().unwrap();
@@ -1142,6 +1381,7 @@ mod tests {
                 url: "https://example.org".into(),
                 title: "old title".into(),
                 description: "".into(),
+                editable: true,
             }),
             text: None,
             file: None,
@@ -1198,6 +1438,7 @@ mod tests {
                 url: "https://example.org".into(),
                 title: "title".into(),
                 description: "description".into(),
+                editable: true,
             }),
             ready_index: Some(1),
             copy_held: false,

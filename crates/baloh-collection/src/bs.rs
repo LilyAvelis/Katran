@@ -113,8 +113,7 @@ pub fn write<W: Write>(mut out: W, entries: &[FileEntry]) -> io::Result<()> {
     }
     Ok(())
 }
-/// Enforce all bounds before allocation; return entries in their original order.
-pub fn read<R: Read>(mut input: R) -> io::Result<Vec<FileEntry>> {
+fn read_count<R: Read>(mut input: R) -> io::Result<usize> {
     let mut magic = [0; 8];
     input.read_exact(&mut magic)?;
     if &magic != MAGIC || number(&mut input)? != VERSION {
@@ -122,26 +121,69 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<FileEntry>> {
     }
     let count = number(&mut input)? as usize;
     count_valid(count)?;
-    let mut total = HEADER;
-    let mut entries = Vec::with_capacity(count);
-    for _ in 0..count {
-        let name_len = number(&mut input)? as usize;
-        let data_len = number(&mut input)? as usize;
-        size_valid(name_len, data_len, &mut total)?;
-        let mut expected = [0; 32];
-        input.read_exact(&mut expected)?;
-        let mut name = vec![0; name_len];
-        input.read_exact(&mut name)?;
-        let name = String::from_utf8(name).map_err(|_| invalid("invalid UTF-8 file name"))?;
-        if !valid_name(&name) {
-            return Err(invalid("unsafe file name"));
-        }
-        let mut bytes = vec![0; data_len];
+    Ok(count)
+}
+
+fn read_entry<R: Read>(
+    input: &mut R,
+    total: &mut usize,
+    retain_limit: usize,
+) -> io::Result<(FileEntry, bool)> {
+    let name_len = number(input)? as usize;
+    let data_len = number(input)? as usize;
+    size_valid(name_len, data_len, total)?;
+    let mut expected = [0; 32];
+    input.read_exact(&mut expected)?;
+    let mut name = vec![0; name_len];
+    input.read_exact(&mut name)?;
+    let name = String::from_utf8(name).map_err(|_| invalid("invalid UTF-8 file name"))?;
+    if !valid_name(&name) {
+        return Err(invalid("unsafe file name"));
+    }
+    let mut bytes = Vec::new();
+    let retained = data_len <= retain_limit;
+    if retained {
+        bytes.resize(data_len, 0);
         input.read_exact(&mut bytes)?;
         if digest(name.as_bytes(), &bytes) != expected {
             return Err(invalid("file record digest mismatch"));
         }
-        entries.push(FileEntry { name, bytes });
+    } else {
+        let mut hash = Sha256::new();
+        hash.update((name_len as u32).to_le_bytes());
+        hash.update((data_len as u32).to_le_bytes());
+        hash.update(name.as_bytes());
+        let mut left = data_len;
+        let mut buffer = [0; 64 * 1024];
+        while left > 0 {
+            let len = left.min(buffer.len());
+            input.read_exact(&mut buffer[..len])?;
+            hash.update(&buffer[..len]);
+            left -= len;
+        }
+        let actual: [u8; 32] = hash.finalize().into();
+        if actual != expected {
+            return Err(invalid("file record digest mismatch"));
+        }
+    }
+    Ok((FileEntry { name, bytes }, retained))
+}
+
+/// Read and validate the first record for a cover. Oversized payloads are
+/// verified without retaining bytes, so callers can still show a type icon.
+pub fn read_cover<R: Read>(mut input: R, retain_limit: usize) -> io::Result<(FileEntry, bool)> {
+    read_count(&mut input)?;
+    let mut total = HEADER;
+    read_entry(&mut input, &mut total, retain_limit)
+}
+
+/// Enforce all bounds before allocation; return entries in their original order.
+pub fn read<R: Read>(mut input: R) -> io::Result<Vec<FileEntry>> {
+    let count = read_count(&mut input)?;
+    let mut total = HEADER;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        entries.push(read_entry(&mut input, &mut total, MAX_FILE_BYTES)?.0);
     }
     let mut trailing = [0];
     if input.read(&mut trailing)? != 0 {

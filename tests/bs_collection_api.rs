@@ -358,8 +358,38 @@ fn one_action_packs_homogeneous_files_into_bull_and_deletes_hidden_shelf_members
 }
 
 #[cfg(windows)]
+struct SyntheticFolderTrash {
+    fail_name: Option<String>,
+    seen: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+}
+#[cfg(windows)]
+impl katran::downloads::Trash for SyntheticFolderTrash {
+    fn recycle(&self, path: &Path) -> katran::Result<()> {
+        assert!(
+            path.parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .is_some_and(|name| name.to_string_lossy().starts_with(".katran-recovery-"))
+        );
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        self.seen
+            .lock()
+            .unwrap()
+            .push((name.clone(), std::fs::read(path)?));
+        if self.fail_name.as_deref() == Some(name.as_str()) {
+            return Err(katran::ApiError {
+                code: "fixture_recycle_failure".into(),
+                message: "synthetic recycle failure".into(),
+            });
+        }
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
 #[test]
-fn folder_uses_same_action_and_publishes_collections_alongside_originals() {
+fn folder_packs_verified_archive_then_recycles_and_unpacks_without_removing_archive() {
     let profile = tempfile::tempdir().unwrap();
     let disk = tempfile::tempdir().unwrap();
     let a = disk.path().join("first.txt");
@@ -367,6 +397,11 @@ fn folder_uses_same_action_and_publishes_collections_alongside_originals() {
     std::fs::write(&a, b"text fixture").unwrap();
     std::fs::write(&b, [0, 4, 9]).unwrap();
     let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    api.set_trash(Box::new(SyntheticFolderTrash {
+        fail_name: None,
+        seen: seen.clone(),
+    }));
     call(
         &mut api,
         Command::ChooseFolder {
@@ -389,7 +424,20 @@ fn folder_uses_same_action_and_publishes_collections_alongside_originals() {
     let result = unified(&mut api);
     assert_eq!(result["kind"], "bs");
     let archive = PathBuf::from(result["path"].as_str().unwrap());
-    assert!(archive.exists() && a.exists() && b.exists());
+    assert_eq!(result["archive_verified"], true);
+    assert_eq!(result["sources_remaining"], 0);
+    assert!(archive.exists() && !a.exists() && !b.exists());
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert!(
+        seen.iter()
+            .any(|(name, bytes)| name == "first.txt" && bytes == b"text fixture")
+    );
+    assert!(
+        seen.iter()
+            .any(|(name, bytes)| name == "second.bin" && bytes == &[0, 4, 9])
+    );
+    drop(seen);
     let page = browse(&mut api);
     let selected = page["events"]
         .as_array()
@@ -421,6 +469,151 @@ fn folder_uses_same_action_and_publishes_collections_alongside_originals() {
     assert_eq!(
         std::fs::read(destination.join("second.bin")).unwrap(),
         [0, 4, 9]
+    );
+    assert!(archive.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn folder_recycle_failure_keeps_verified_archive_and_reports_retained_original() {
+    let profile = tempfile::tempdir().unwrap();
+    let disk = tempfile::tempdir().unwrap();
+    let a = disk.path().join("first.txt");
+    let b = disk.path().join("second.bin");
+    std::fs::write(&a, b"text fixture").unwrap();
+    std::fs::write(&b, b"second fixture").unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    api.set_trash(Box::new(SyntheticFolderTrash {
+        fail_name: Some("second.bin".into()),
+        seen: Arc::new(Mutex::new(Vec::new())),
+    }));
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: disk.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        },
+    );
+    let ids: Vec<_> = page["events"].as_array().unwrap().iter().map(id).collect();
+    select(&mut api, &ids);
+    let result = unified(&mut api);
+    assert_eq!(result["archive_verified"], true);
+    assert_eq!(result["sources_remaining"], 1);
+    assert!(!a.exists());
+    assert_eq!(std::fs::read(&b).unwrap(), b"second fixture");
+    let entries =
+        baloh_collection::bs::read(std::fs::File::open(result["path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.name == "first.txt" && e.bytes == b"text fixture")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.name == "second.bin" && e.bytes == b"second fixture")
+    );
+    let receipts = result["original_removal"].as_array().unwrap();
+    assert_eq!(receipts.iter().filter(|r| r["ok"] == false).count(), 1);
+    assert!(
+        receipts
+            .iter()
+            .any(|r| r["status"] == "restored" && r["original_removed"] == false)
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn folder_images_archive_preserves_names_and_exact_bytes() {
+    let profile = tempfile::tempdir().unwrap();
+    let disk = tempfile::tempdir().unwrap();
+    let mut png = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(7, 5)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let mut jpeg = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(6, 4)
+        .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+        .unwrap();
+    std::fs::write(disk.path().join("alpha.png"), png.get_ref()).unwrap();
+    std::fs::write(disk.path().join("beta.jpg"), jpeg.get_ref()).unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    api.set_trash(Box::new(SyntheticFolderTrash {
+        fail_name: None,
+        seen: Arc::new(Mutex::new(Vec::new())),
+    }));
+    call(
+        &mut api,
+        Command::ChooseFolder {
+            path: disk.path().into(),
+        },
+    );
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        },
+    );
+    let ids: Vec<_> = page["events"].as_array().unwrap().iter().map(id).collect();
+    select(&mut api, &ids);
+    let result = unified(&mut api);
+    assert_eq!(result["archive_verified"], true);
+    assert_eq!(result["sources_remaining"], 0);
+    let archive = PathBuf::from(result["path"].as_str().unwrap());
+    assert_eq!(archive.extension().unwrap(), "bull");
+    let page = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        },
+    );
+    let card = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["path"].as_str().is_some_and(|p| Path::new(p) == archive))
+        .unwrap();
+    let result = finish(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: id(card),
+            revision: revision(card),
+            index: 0,
+        },
+    );
+    assert!(result["png"].as_str().is_some_and(|png| !png.is_empty()));
+    let cover = call(
+        &mut api,
+        Command::PreviewPath {
+            path: archive.clone(),
+            revision: revision(card),
+            max_edge: 64,
+            image_only: false,
+        },
+    );
+    assert_eq!(cover["visual_kind"], "image");
+    select(&mut api, &[id(card)]);
+    let extracted = unified(&mut api);
+    let folder = PathBuf::from(extracted["path"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(folder.join("alpha.png")).unwrap(),
+        *png.get_ref()
+    );
+    assert_eq!(
+        std::fs::read(folder.join("beta.jpg")).unwrap(),
+        *jpeg.get_ref()
     );
     assert!(archive.exists());
 }

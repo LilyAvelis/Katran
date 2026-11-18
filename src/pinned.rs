@@ -154,6 +154,10 @@ fn normalized(value: &str, max: usize, field: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 
+pub(crate) fn normalize_display_name(value: &str) -> Result<String> {
+    normalized(value, MAX_NAME, "display name")
+}
+
 /// Replaces both optional properties; None or a blank name clears the value.
 pub fn set_properties(
     db: &Connection,
@@ -162,7 +166,7 @@ pub fn set_properties(
     opener: Option<PathBuf>,
 ) -> Result<Properties> {
     let display_name = match display_name {
-        Some(v) if !v.trim().is_empty() => Some(normalized(&v, MAX_NAME, "display name")?),
+        Some(v) if !v.trim().is_empty() => Some(normalize_display_name(&v)?),
         _ => None,
     };
     let opener = opener

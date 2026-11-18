@@ -33,6 +33,10 @@ other files can use the application picker, and executable or shortcut types
 are shown in Explorer. Copy or drag the shelf card to transfer the whole BS.
 A `.bs` file added to Files from disk can be viewed in Katran.
 
-Folder packs or merges into a new file beside the selected originals and
-unpacks into a new subfolder. Each output gets an available name. Source
-files stay in place.
+Folder packs or merges into a verified new archive, then recycles the
+selected files. Loose files, including images, retain their names and exact
+bytes. A failed or partially completed recycle reports each affected file
+and its recovery location when available. Unpack writes a new subfolder
+and keeps the archive. Each output gets an available name.
+
+Folder and Files display the first entry's thumbnail or file-type icon.

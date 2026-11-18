@@ -6,8 +6,12 @@ Keep one rebindable pack/unpack action. Loose files use image BULL for
 supported images, file BULL for a common file family, and BS for mixed files.
 Shelf pack replaces cards and unpack restores them. Delete on the shelf
 removes the collection and its hidden member records in one transaction.
-Referenced disk paths stay intact. Folder uses independent files beside
-sources and a new subfolder on unpack. See docs/patch-4.0/BS.md.
+Referenced disk paths stay intact on the shelf. Folder pack or merge
+recycles selected files only after publishing and verifying a lossless
+archive. Folder unpack writes a new subfolder and keeps the archive.
+Use the first entry for collection covers. See docs/patch-4.0/BS.md.
+Rename a Links BULL entry via its revision and index. Save the name in
+the file and keep the original member's display name in sync for unpack.
 Remove only verified completed recycle stages through their owned handles.
 Retain incomplete, unfamiliar and historical recovery data.
 

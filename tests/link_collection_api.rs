@@ -195,7 +195,7 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     assert_eq!(merged["merged"], true);
     let card = &merged["event"];
     let card_id = id(card);
-    let of = || card["revision"].as_str().unwrap().to_owned();
+    let original_revision = card["revision"].as_str().unwrap();
     let entries =
         links::read(std::fs::File::open(card["path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(entries[0], rich);
@@ -203,6 +203,45 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     assert!(entries[1].title.is_empty());
     assert_eq!(entries[2].url, urls[0]);
     assert_eq!(entries[2].title, custom_name);
+
+    let renamed_title = "Новый заголовок 🐳";
+    let rename = finish(
+        &mut api,
+        Command::RenameCollectionLink {
+            id: card_id,
+            revision: original_revision.into(),
+            index: 2,
+            title: format!("  {renamed_title}  "),
+        },
+    );
+    assert_eq!(rename["index"], 2);
+    assert_eq!(rename["title"], renamed_title);
+    assert_ne!(rename["revision"], original_revision);
+    let stale = api.execute(Request {
+        api_version: 1,
+        request_id: "stale-rename".into(),
+        command: Command::RenameCollectionLink {
+            id: card_id,
+            revision: original_revision.into(),
+            index: 0,
+            title: "Wrong revision".into(),
+        },
+    });
+    assert_eq!(stale["ok"], false);
+    let of = || rename["revision"].as_str().unwrap().to_owned();
+    let renamed_page = finish(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: card_id,
+            revision: of(),
+            index: 2,
+        },
+    );
+    assert_eq!(renamed_page["link"]["title"], renamed_title);
+    assert_eq!(renamed_page["link"]["editable"], true);
+    let card = call(&mut api, Command::Get { id: card_id });
+    let mut expected = entries;
+    expected[2].title = renamed_title.into();
     let event: katran::Event = serde_json::from_value(card.clone()).unwrap();
     let whole = katran::copy_out::prepare_with_budget(
         &root.path().join("exports"),
@@ -214,7 +253,7 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     assert_eq!(whole.paths[0].extension().unwrap(), "bull");
     assert_eq!(
         links::read(std::fs::File::open(&whole.paths[0]).unwrap()).unwrap(),
-        entries
+        expected
     );
     assert_eq!(
         shelf(&mut api, ShelfTab::Links)["events"]
@@ -276,7 +315,7 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     );
     assert_eq!(
         call(&mut api, Command::GetPinnedProperties { id: ids[0] })["properties"]["display_name"],
-        custom_name
+        renamed_title
     );
     assert_eq!(
         shelf(&mut api, ShelfTab::Links)["events"]

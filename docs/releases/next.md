@@ -37,6 +37,8 @@ Links uses portable BULL v2 for ordered URLs with saved titles, descriptions
 and optional previews. The same shelf action packs, merges and unpacks.
 Custom link names appear as titles and travel with newly packed collections.
 Existing local collections display names from their original shelf cards.
+The Links BULL viewer can rename the current entry and save its title
+inside the collection.
 Ctrl+C copies the visible URL and Alt+Enter opens it in the default browser.
 The current Windows QuickLook adapter supports image BULL v1. Katran's own
 viewer handles Links BULL v2.
@@ -52,8 +54,10 @@ entry uses the standard previous-window paste flow for images, Links and Text.
 Files and Folder use one rebindable collection action. It selects BULL for
 compatible files and BS for a mix. Raw file preview centers a thumbnail or
 Windows file icon with the name. Shelf Delete removes the selected collection
-and its hidden member cards. Folder packs beside originals and unpacks into
-a new directory. Verified completed recycle stages are cleaned up automatically.
+and its hidden member cards. Folder packs replace the selected files after
+archive verification, preserve the original names and bytes inside the
+archive, and show a first-entry cover. Unpack creates a new directory and
+keeps the archive. Verified completed recycle stages are cleaned up automatically.
 
 ## Local follow-up · Google Lens
 

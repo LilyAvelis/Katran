@@ -1,10 +1,14 @@
 use crate::{
     ApiError, Event, Result, bs_collection, collection,
     collection_kind::{self, Kind},
+    delete_selection,
     domain_jobs::Cancellation,
-    folder_collection, image_collection, media_service, open_file,
+    downloads::Trash,
+    folder_collection, image_collection, media_service, open_file, preview, safe_recycle,
 };
 use baloh_collection::bs::FileEntry;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -18,6 +22,15 @@ pub(crate) struct Prepared {
     pub(crate) count: usize,
     pub(crate) merged: bool,
     pub(crate) unpacked: bool,
+    archive_hash: Option<String>,
+    locked_sources: Vec<LockedSource>,
+}
+
+struct LockedSource {
+    event: Event,
+    stamp: media_service::Stamp,
+    hash: String,
+    locked: delete_selection::LockedOriginal,
 }
 
 pub(crate) fn prepare(
@@ -57,10 +70,35 @@ pub(crate) fn prepare(
         }
         kind
     } else {
-        collection_kind::choose_files(&events)
+        collection_kind::choose_folder_files(&events)
     };
 
     let unpacked = archives && events.len() == 1;
+    // For replacement, lock the exact verified sources before reading any of
+    // their bytes into the archive and hold those handles through recycle.
+    let mut locked_sources = Vec::new();
+    if !unpacked {
+        let root = folder.canonicalize()?;
+        for (event, stamp) in &sources {
+            cancel.check()?;
+            let hash = preview::content_hash(&event.path)?;
+            let locked = delete_selection::prepare_locked_original(&event.path, &root, &hash)?;
+            open_file::validate(event)?;
+            if media_service::stamp(&event.path)? != *stamp {
+                return Err(ApiError::new(
+                    "source_changed",
+                    "Folder file changed before packing",
+                ));
+            }
+            locked_sources.push(LockedSource {
+                event: event.clone(),
+                stamp: stamp.clone(),
+                hash,
+                locked,
+            });
+        }
+    }
+    let mut archive_hash = None;
     let (output, count) = if unpacked {
         let event = &events[0];
         let entries = entries(event, &kind, cancel)?;
@@ -116,6 +154,7 @@ pub(crate) fn prepare(
                 "Collection exceeds the size budget",
             ));
         }
+        archive_hash = Some(format!("{:x}", Sha256::digest(&bytes)));
         (
             folder_collection::prepare(&folder, kind.extension(), &bytes)?,
             count,
@@ -130,7 +169,97 @@ pub(crate) fn prepare(
         count,
         merged: archives && !unpacked,
         unpacked,
+        archive_hash,
+        locked_sources,
     })
+}
+
+/// Publish first. A verified locked archive is required before any source is
+/// recycled; every failed or recoverable item remains explicit in the receipt.
+/// The caller must check current folder, selection and pinned paths immediately
+/// before authorizing this irreversible phase.
+pub(crate) fn finish(prepared: Prepared, trash: &dyn Trash) -> Result<Value> {
+    let Prepared {
+        folder,
+        output,
+        kind,
+        count,
+        merged,
+        unpacked,
+        archive_hash,
+        locked_sources,
+        ..
+    } = prepared;
+    let path = output.publish()?;
+    if unpacked {
+        return Ok(
+            json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
+            "unpacked":true,"kind":kind.extension(),"original_removal":[],"sources_preserved":true}),
+        );
+    }
+    let expected = archive_hash.unwrap_or_default();
+    let archive_guard = folder.canonicalize().and_then(|root| {
+        delete_selection::prepare_locked_original(&path, &root, &expected)
+            .map_err(|error| std::io::Error::other(error.message))
+    });
+    let archive_guard = match archive_guard {
+        Ok(guard) => guard,
+        Err(error) => {
+            let items: Vec<_> = locked_sources.iter().map(|source| json!({
+                "id":source.event.id,"path":source.event.path,"ok":false,"status":"retained",
+                "original_removed":false,"recovery_path":null,"error":"Archive verification failed"
+            })).collect();
+            let remaining = items.len();
+            return Ok(
+                json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
+                "unpacked":false,"kind":kind.extension(),"archive_verified":false,
+                "verification_error":error.to_string(),"original_removal":items,"sources_remaining":remaining}),
+            );
+        }
+    };
+    let mut items = Vec::with_capacity(locked_sources.len());
+    let mut remaining = 0usize;
+    for source in locked_sources {
+        let result = (|| -> Result<_> {
+            open_file::validate(&source.event)?;
+            if media_service::stamp(&source.event.path)? != source.stamp {
+                return Err(ApiError::new(
+                    "source_changed",
+                    "Folder file changed before recycling",
+                ));
+            }
+            safe_recycle::recycle_locked(
+                source.locked,
+                &source.event.path,
+                &folder,
+                &source.hash,
+                trash,
+            )
+        })();
+        match result {
+            Ok(receipt) => {
+                if !receipt.recycled {
+                    remaining += 1;
+                }
+                items.push(
+                    json!({"id":source.event.id,"path":source.event.path,"ok":receipt.recycled,
+                    "status":receipt.status,"original_removed":receipt.original_removed,
+                    "recovery_path":receipt.recovery_path,"recycle":receipt}),
+                );
+            }
+            Err(error) => {
+                remaining += 1;
+                items.push(json!({"id":source.event.id,"path":source.event.path,"ok":false,
+                    "status":"retained","original_removed":false,"recovery_path":null,"error":error}));
+            }
+        }
+    }
+    drop(archive_guard);
+    Ok(
+        json!({"folder_collection":true,"path":path,"count":count,"merged":merged,
+        "unpacked":false,"kind":kind.extension(),"archive_verified":true,
+        "original_removal":items,"sources_remaining":remaining}),
+    )
 }
 
 fn too_many() -> ApiError {

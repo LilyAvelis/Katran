@@ -73,6 +73,9 @@ pub fn render_with_provider(
             "max_edge must be 32..512 for file visuals",
         ));
     }
+    if crate::collection_kind::external(event) || crate::bs_collection::is_managed(event) {
+        return collection_cover(root, event, edge, provider);
+    }
     if !event.revision.starts_with("ref:") {
         validate_source(event)?;
     }
@@ -161,6 +164,133 @@ pub fn render_with_provider(
     }
     trim_cache(&directory);
     Ok(serde_json::to_value(visual).expect("visual serialization"))
+}
+
+/// Folder and Files collections use their first member as the card visual.
+/// The archive and, for Shell, its private snapshot are never opened as apps.
+fn collection_cover(
+    root: &Path,
+    event: &Event,
+    edge: u32,
+    provider: &dyn Provider,
+) -> Result<serde_json::Value> {
+    use crate::collection_kind::{self, Kind};
+    crate::open_file::validate(event)?;
+    let mut reasons = Vec::new();
+    let mut selected = None;
+    if fs::metadata(&event.path)?.len() <= baloh_collection::bs::MAX_TOTAL_BYTES as u64 + 64 {
+        match collection_kind::probe(event) {
+            Ok(Kind::Images) => match crate::image_collection::cover(&event.path) {
+                Ok(image) => selected = Some((image.thumbnail(edge, edge).to_rgba8(), "image")),
+                Err(_) => reasons.push("collection: invalid_image_cover".to_owned()),
+            },
+            Ok(kind @ (Kind::Bs | Kind::Files(_))) => {
+                let first = fs::File::open(&event.path).ok().and_then(|file| {
+                    collection_kind::read_raw_cover(file, &kind, 16 * 1024 * 1024).ok()
+                });
+                if let Some((first, retained)) = first {
+                    if let Some(image) = decode_member_image(&first.bytes, edge) {
+                        selected = Some((image, "image"));
+                    } else if let Some(visual) =
+                        shell_member(root, &first, retained, edge, provider)
+                    {
+                        selected = Some(visual);
+                    }
+                } else {
+                    reasons.push("collection: invalid_file_cover".to_owned());
+                }
+            }
+            Ok(Kind::Links | Kind::Text) => reasons.push("collection: no_image_cover".to_owned()),
+            Err(_) => reasons.push("collection: invalid_header".to_owned()),
+        }
+    } else {
+        reasons.push("collection: too_large".to_owned());
+    }
+    // Reject source changes even when decoding or a Shell handler failed.
+    crate::open_file::validate(event)?;
+    let (image, kind) = selected.unwrap_or_else(|| (generic_icon(edge.min(96)), "generic_icon"));
+    Ok(serde_json::to_value(Visual {
+        width: image.width(),
+        height: image.height(),
+        revision: event.revision.clone(),
+        visual_kind: kind.into(),
+        fallback_reasons: reasons,
+        rgba_base64: base64::engine::general_purpose::STANDARD.encode(image.into_raw()),
+        cache_hit: false,
+    })
+    .expect("visual serialization"))
+}
+
+fn decode_member_image(bytes: &[u8], edge: u32) -> Option<RgbaImage> {
+    use image::ImageDecoder;
+    use std::io::Cursor;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    if !matches!(
+        reader.format(),
+        Some(
+            image::ImageFormat::Png
+                | image::ImageFormat::Jpeg
+                | image::ImageFormat::WebP
+                | image::ImageFormat::Bmp
+                | image::ImageFormat::Gif
+        )
+    ) {
+        return None;
+    }
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(48 * 1024 * 1024);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder().ok()?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 8_000_000 {
+        return None;
+    }
+    let orientation = decoder.orientation().ok()?;
+    let mut image = image::DynamicImage::from_decoder(decoder).ok()?;
+    image.apply_orientation(orientation);
+    Some(image.thumbnail(edge, edge).to_rgba8())
+}
+
+fn shell_member(
+    root: &Path,
+    entry: &baloh_collection::bs::FileEntry,
+    retained: bool,
+    edge: u32,
+    provider: &dyn Provider,
+) -> Option<(RgbaImage, &'static str)> {
+    let plan = crate::copy_out::prepare_bs_entry(
+        &root.join("collection-visuals"),
+        entry,
+        32 * 1024 * 1024,
+    )
+    .ok()?;
+    let path = plan.paths.first()?;
+    let kinds: &[(ShellVisual, &str)] = if !retained {
+        &[(ShellVisual::Icon, "shell_icon")]
+    } else {
+        &[
+            (ShellVisual::Thumbnail, "shell_thumbnail"),
+            (ShellVisual::Icon, "shell_icon"),
+        ]
+    };
+    for &(kind, label) in kinds {
+        if let Ok(image) = provider.extract(path, edge, kind)
+            && image.width() > 0
+            && image.height() > 0
+            && image.width() <= edge
+            && image.height() <= edge
+        {
+            return Some((image, label));
+        }
+    }
+    None
 }
 
 fn read_cache(path: &Path, event: &Event, edge: u32) -> Option<Visual> {
@@ -419,5 +549,150 @@ mod native {
             }
         }
         RgbaImage::from_raw(width, height, bytes).ok_or_else(|| "invalid_bitmap_buffer".into())
+    }
+}
+
+#[cfg(test)]
+mod collection_cover_tests {
+    use super::*;
+    use std::{cell::RefCell, io::Cursor};
+
+    struct Fake {
+        calls: RefCell<Vec<(String, ShellVisual)>>,
+    }
+    impl Provider for Fake {
+        fn extract(
+            &self,
+            path: &Path,
+            edge: u32,
+            kind: ShellVisual,
+        ) -> std::result::Result<RgbaImage, String> {
+            self.calls.borrow_mut().push((
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                kind,
+            ));
+            Ok(RgbaImage::from_pixel(
+                edge / 2,
+                edge / 2,
+                image::Rgba([3, 6, 9, 255]),
+            ))
+        }
+    }
+    fn folder_event(path: &Path) -> Event {
+        Event {
+            kind: crate::EventKind::FileReference,
+            text_preview: None,
+            delete_policy: crate::source_policy::DeletePolicy::ShelfOnly,
+            revision: format!("ref:{}", crate::preview::content_hash(path).unwrap()),
+            origin: crate::origin::Origin::default(),
+            id: -1,
+            detected_at_ms: 0,
+            modified_at_ms: None,
+            source: "work_folder".into(),
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            storage: "reference".into(),
+            path: path.into(),
+            size: fs::metadata(path).unwrap().len(),
+            available: true,
+        }
+    }
+    fn png(rgba: [u8; 4]) -> Vec<u8> {
+        let mut result = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(RgbaImage::from_pixel(12, 6, image::Rgba(rgba)))
+            .write_to(&mut result, image::ImageFormat::Png)
+            .unwrap();
+        result.into_inner()
+    }
+    #[test]
+    fn first_image_is_used_for_external_bs_and_image_bull() {
+        let root = tempfile::tempdir().unwrap();
+        let first = png([200, 30, 10, 255]);
+        let second = png([10, 30, 200, 255]);
+        let bs = root.path().join("mixed.bs");
+        let mut bytes = Vec::new();
+        baloh_collection::bs::write(
+            &mut bytes,
+            &[
+                baloh_collection::bs::FileEntry {
+                    name: "first.png".into(),
+                    bytes: first.clone(),
+                },
+                baloh_collection::bs::FileEntry {
+                    name: "second.png".into(),
+                    bytes: second.clone(),
+                },
+            ],
+        )
+        .unwrap();
+        fs::write(&bs, bytes).unwrap();
+        let bull = root.path().join("images.bull");
+        let mut bytes = Vec::new();
+        baloh_collection::codec::write(&mut bytes, &[first, second]).unwrap();
+        fs::write(&bull, bytes).unwrap();
+        let fake = Fake {
+            calls: RefCell::new(Vec::new()),
+        };
+        for path in [&bs, &bull] {
+            let result = render_with_provider(root.path(), &folder_event(path), 64, &fake).unwrap();
+            assert_eq!(result["visual_kind"], "image");
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(result["rgba_base64"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(&data[..4], &[200, 30, 10, 255]);
+        }
+        assert!(fake.calls.borrow().is_empty());
+    }
+    #[test]
+    fn first_file_shell_visual_and_invalid_collection_are_bounded() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("files.bs");
+        let mut bytes = Vec::new();
+        baloh_collection::bs::write(
+            &mut bytes,
+            &[
+                baloh_collection::bs::FileEntry {
+                    name: "first.txt".into(),
+                    bytes: b"first".to_vec(),
+                },
+                baloh_collection::bs::FileEntry {
+                    name: "second.txt".into(),
+                    bytes: b"second".to_vec(),
+                },
+            ],
+        )
+        .unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let event = folder_event(&path);
+        let fake = Fake {
+            calls: RefCell::new(Vec::new()),
+        };
+        let result = render_with_provider(root.path(), &event, 64, &fake).unwrap();
+        assert_eq!(result["visual_kind"], "shell_thumbnail");
+        assert_eq!(fake.calls.borrow()[0].0, "first.txt");
+        let bull = root.path().join("files.bull");
+        let mut typed = Vec::new();
+        crate::collection_kind::write_raw(
+            &mut typed,
+            &[baloh_collection::bs::FileEntry {
+                name: "typed.txt".into(),
+                bytes: b"typed".to_vec(),
+            }],
+            &crate::collection_kind::Kind::Files("ext-txt".into()),
+        )
+        .unwrap();
+        fs::write(&bull, typed).unwrap();
+        let result = render_with_provider(root.path(), &folder_event(&bull), 64, &fake).unwrap();
+        assert_eq!(result["visual_kind"], "shell_thumbnail");
+        assert_eq!(fake.calls.borrow()[1].0, "typed.txt");
+        fs::write(&path, b"corrupt").unwrap();
+        assert_eq!(
+            render_with_provider(root.path(), &event, 64, &fake)
+                .unwrap_err()
+                .code,
+            "source_changed"
+        );
+        let result = render_with_provider(root.path(), &folder_event(&path), 64, &fake).unwrap();
+        assert_eq!(result["visual_kind"], "generic_icon");
+        assert_eq!(fake.calls.borrow().len(), 2);
     }
 }

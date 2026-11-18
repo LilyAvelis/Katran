@@ -33,8 +33,11 @@ The same collection jobs support the Links shelf with typed BULL v2 and reuse
 v15 membership and pin/tag state. Pack snapshots custom display names as
 portable titles. `TranslationCollectionPage` also uses surviving member names
 for older local collections. `CopyCollectionPage` publishes its URL through
-the owned text Clipboard path. `OpenCollectionLink` sends the validated URL to the default
-browser. Packing commits the URL collection first and returns a detached
+the owned text Clipboard path. `OpenCollectionLink` sends the validated URL
+to the default browser. `RenameCollectionLink` edits a single title by revision and index,
+publishes the replacement file, and updates the original member's display
+name in the same transaction for future unpacking.
+Packing commits the URL collection first and returns a detached
 `metadata_job_id`. Poll that job independently of the foreground workflow.
 `favicon_fetch` requests only public HTTPS HTML for missing titles/descriptions.
 The dispatcher swaps a verified blob in place only if the original Links
@@ -53,10 +56,12 @@ DIBV5 bytes and Katran marker after owner teardown before authorizing input.
 as well. `collection_kind` chooses BULL or BS and handles file BULL framing.
 `baloh_collection::bs` stores the raw files. `OpenBsEntry` reuses the guarded
 snapshot cache to open one raw file. The viewer requests a Windows thumbnail
-or type icon. Folder publication checks the current context and input
-revisions, then publishes a new file or unpacked directory without replacing
-anything. Shelf Delete removes the hidden member rows before retiring the
-card. Successful recycling now clears its verified completed staging data.
+or type icon. Folder pack checks the current context, revisions and pinned
+aliases before authorizing the worker. The worker publishes and verifies a
+lossless archive, then recycles its source files with per-item receipts.
+Folder unpack publishes a new directory. Shelf Delete removes the hidden
+member rows before retiring the card. Successful recycling now clears its
+verified completed staging data.
 
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded

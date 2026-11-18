@@ -428,6 +428,12 @@ pub enum Command {
         revision: String,
         index: usize,
     },
+    RenameCollectionLink {
+        id: i64,
+        revision: String,
+        index: usize,
+        title: String,
+    },
     OpenBsEntry {
         id: i64,
         revision: String,

@@ -83,9 +83,17 @@ pub(crate) struct FolderExportBatch {
 pub(crate) enum PreparedWork {
     PackImageCollection(storage::CollectionPack),
     FolderBundle { prepared: folder_bundle_service::Prepared, generation: u64 },
+    FolderBundlePublished { folder: PathBuf, receipt: Value },
     LinkCollectionMetadata {
         event: Event,
         blob: Option<storage::PreparedBlob>,
+    },
+    RenameCollectionLink {
+        event: Event,
+        stamp: media_service::Stamp,
+        blob: storage::PreparedBlob,
+        index: usize,
+        title: String,
     },
     OpenBsEntry {
         event: Event,
@@ -1594,6 +1602,7 @@ impl Service {
                         collection_kind::Kind::Links => collection::link_page(&event,index,display_name.as_deref(),&cancel),
                         collection_kind::Kind::Text => collection::text_page(&event,index,&cancel),
                         collection_kind::Kind::Images => image_translation_batch::page(&event,index,&cancel),
+                        collection_kind::Kind::Files(family) if family == "images" => bs_collection::raw_image_page(&event,index,&cancel),
                         _ => bs_collection::page(&event,index,&root,quota,&cancel),
                     }?;
                     Ok(PreparedWork::Value(page))
@@ -1613,9 +1622,27 @@ impl Service {
                         let text = read(&event, index, &cancel)?;
                         return Ok(PreparedWork::CollectionString { event, stamp, text, sequence: Some(sequence), index });
                     }
-                    if kind!=collection_kind::Kind::Images { return Err(ApiError::new("invalid_collection", "Copy the entire collection from the shelf")); }
-                    let pixels = image_collection::prepare_page_copy(&event, index, &cancel)?;
+                    let pixels = match kind {
+                        collection_kind::Kind::Images => image_collection::prepare_page_copy(&event, index, &cancel)?,
+                        collection_kind::Kind::Files(family) if family == "images" => bs_collection::raw_image_page_copy(&event, index, &cancel)?,
+                        _ => return Err(ApiError::new("invalid_collection", "Copy the entire collection from the shelf")),
+                    };
                     Ok(PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index })
+                })?
+            }
+            Command::RenameCollectionLink { id, revision, index, title } => {
+                let event = self.saved_collection(id, &revision)?;
+                if !collection::is_link_collection(&event) {
+                    return Err(ApiError::new("invalid_collection", "Select a managed Links BULL"));
+                }
+                let title = pinned::normalize_display_name(&title)?;
+                let root = self.root.clone();
+                let quota = self.quota;
+                let references = self.reference_paths()?;
+                self.jobs.submit(Lane::Foreground, move |cancel| {
+                    let stamp = media_service::stamp(&event.path)?;
+                    let blob = collection::prepare_link_rename(&event, index, &title, &root, quota, &references, &cancel)?;
+                    Ok(PreparedWork::RenameCollectionLink { event, stamp, blob, index, title })
                 })?
             }
             Command::OpenCollectionLink { id, revision, index } => {
@@ -2337,6 +2364,37 @@ impl Service {
                     }
                     continue;
                 }
+                Ok(PreparedWork::FolderBundle { prepared, generation }) => {
+                    let continued = (|| {
+                        let folder = prepared.folder.clone();
+                        if self.interaction.tab != interaction::ShelfTab::All
+                            || self.interaction.view_generation != generation
+                            || self.work_folder.current() != Some(folder.as_path())
+                        {
+                            return Err(ApiError::new("stale_folder", "Folder changed before publication"));
+                        }
+                        for (event, stamp) in &prepared.sources {
+                            let current = self.get(event.id)?;
+                            if current.path != event.path || current.revision != event.revision || media_service::stamp(&current.path)? != *stamp {
+                                return Err(ApiError::new("source_changed", "Folder file changed before publication"));
+                            }
+                            if !prepared.unpacked && self.folder_path_pinned(&event.path)? {
+                                return Err(ApiError::new("skipped_pinned", "A selected Folder file has a pinned shelf reference"));
+                            }
+                        }
+                        let trash = std::sync::Arc::clone(&self.trash);
+                        self.jobs.authorize_claimed_effect(ready)?;
+                        self.jobs.continue_claimed(ready, move |_cancel| {
+                            let trash = trash.lock().map_err(|_| ApiError::new("recycle_failed", "Trash adapter lock poisoned"))?;
+                            let receipt = folder_bundle_service::finish(prepared, trash.as_ref())?;
+                            Ok(PreparedWork::FolderBundlePublished { folder, receipt })
+                        })
+                    })();
+                    if let Err(error) = continued {
+                        self.jobs.finish(ready, Err(error))?;
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::DeletePrepared(prepared)) => {
                     let authorized = self.authorize_delete(prepared);
                     let trash = std::sync::Arc::clone(&self.trash);
@@ -2355,20 +2413,16 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
-                PreparedWork::FolderBundle { prepared, generation } => {
-                    if self.interaction.tab != interaction::ShelfTab::All || self.interaction.view_generation != generation || self.work_folder.current() != Some(prepared.folder.as_path()) {
-                        return Err(ApiError::new("stale_folder", "Folder changed before publication"));
+                PreparedWork::FolderBundlePublished { folder, receipt } => {
+                    if self.interaction.tab == interaction::ShelfTab::All && self.work_folder.current() == Some(folder.as_path()) {
+                        let removed: Vec<_> = receipt["original_removal"].as_array().into_iter().flatten()
+                            .filter(|item| item["original_removed"] == true)
+                            .filter_map(|item| item["id"].as_i64()).collect();
+                        self.interaction.replace_collection_rows(&removed, None);
                     }
-                    for (event, stamp) in &prepared.sources {
-                        let current=self.get(event.id)?;
-                        if current.path != event.path || current.revision != event.revision || media_service::stamp(&current.path)? != *stamp {
-                            return Err(ApiError::new("source_changed", "Folder file changed before publication"));
-                        }
-                    }
-                    self.jobs.authorize_claimed_effect(ready)?;
-                    let path=prepared.output.publish()?;
-                    Ok(json!({"folder_collection":true,"path":path,"count":prepared.count,"merged":prepared.merged,"unpacked":prepared.unpacked,"kind":prepared.kind.extension()}))
+                    Ok(receipt)
                 },
+                PreparedWork::FolderBundle { .. } => Err(ApiError::new("invalid_job_phase", "Folder publication must be authorized before effect")),
                 PreparedWork::OpenBsEntry { event, stamp, plan, operation, index } => {
                     let current = self.saved_collection(event.id, &event.revision)?;
                     if current.path != event.path || media_service::stamp(&event.path)? != stamp {
@@ -2437,11 +2491,24 @@ impl Service {
                         return Ok(json!({"link_metadata_updated":false}));
                     };
                     self.jobs.authorize_claimed_effect(ready)?;
-                    if !storage::replace_link_collection_blob(&mut self.db, &self.root, self.quota, event.id, &event.revision, blob)? {
+                    if !storage::replace_link_collection_blob(&mut self.db, &self.root, self.quota, event.id, &event.revision, blob, None)? {
                         return Ok(json!({"link_metadata_updated":false}));
                     }
                     self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
                     Ok(json!({"link_metadata_updated":true,"event":self.get(event.id)?}))
+                },
+                PreparedWork::RenameCollectionLink { event, stamp, blob, index, title } => {
+                    let current = self.saved_collection(event.id, &event.revision)?;
+                    if current.path != event.path || media_service::stamp(&event.path)? != stamp {
+                        return Err(ApiError::new("stale_selection", "The collection changed before the link name was saved"));
+                    }
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    if !storage::replace_link_collection_blob(&mut self.db, &self.root, self.quota, event.id, &event.revision, blob, Some((index, &title)))? {
+                        return Err(ApiError::new("stale_selection", "The collection changed before the link name was saved"));
+                    }
+                    self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+                    let current = self.get(event.id)?;
+                    Ok(json!({"id":current.id,"revision":current.revision,"index":index,"title":title}))
                 },
                 PreparedWork::UnpackImageCollection { event, stamp, members, pages, newest_first, tab, preserved_sources } => {
                     self.validate_job_events(std::slice::from_ref(&event))?;

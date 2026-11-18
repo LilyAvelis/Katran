@@ -553,6 +553,7 @@ impl Service {
             command @ Command::CreateBsCollection => self.begin_job(command),
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
+            command @ Command::RenameCollectionLink { .. } => self.begin_job(command),
             command @ Command::CopyCollectionPage { .. } => self.begin_job(command),
             command @ Command::OpenCollectionLink { .. } => self.begin_job(command),
             command @ Command::OpenBsEntry { .. } => self.begin_job(command),
