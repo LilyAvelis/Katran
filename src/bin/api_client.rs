@@ -1495,6 +1495,22 @@ impl Shelf {
             };
             return;
         }
+        if result["image_collection"] == true {
+            let count = result["count"].as_u64().unwrap_or(0);
+            self.message = if result["unpacked"] == true {
+                format!(
+                    "{}: {count}",
+                    tr("Извлечено изображений", "Images unpacked")
+                )
+            } else {
+                format!(
+                    "{}: {count}",
+                    tr("Изображений собрано в BULL", "Images packed into BULL")
+                )
+            };
+            self.refresh();
+            return;
+        }
         if result["google_lens_requested"] == true {
             self.message = tr(
                 "Google Lens открывается в браузере",
@@ -2005,6 +2021,19 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "create_image_collection" {
+            if self.start_job(Command::CreateImageCollection, false, ctx.clone()) {
+                self.actions = false;
+                self.message = tr("Обработка BULL…", "Processing BULL…").into();
+            } else if self.job.is_some() {
+                self.message = tr(
+                    "Дождитесь завершения текущей операции",
+                    "Wait for the current operation to finish",
+                )
+                .into();
+            }
+            return;
+        }
         if id == "search_image_google_lens" {
             if self.start_job(
                 Command::SearchSelectedImageWithGoogleLens,
@@ -2030,8 +2059,10 @@ impl Shelf {
             let interaction = self.call(Command::Interaction);
             if let Some(event_id) = interaction["cursor"].as_i64() {
                 let event = self.call(Command::Get { id: event_id });
-                if event["source"] == "image_translation_collection"
-                    && let Some(revision) = event["revision"].as_str()
+                if matches!(
+                    event["source"].as_str(),
+                    Some("image_translation_collection" | "image_collection")
+                ) && let Some(revision) = event["revision"].as_str()
                 {
                     self.actions = false;
                     self.open_translation_collection(event_id, revision.to_owned(), ctx);

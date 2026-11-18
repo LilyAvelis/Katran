@@ -51,6 +51,12 @@ Keep the collection viewport stable while a page is pending. Retain the last
 ready texture with its own index until the requested page is ready. Wheel
 zoom anchors at the pointer, and Ctrl+wheel anchors at the viewport center.
 
+Standalone BULL uses one rebindable shelf action for packing selected images
+and unpacking one saved collection. Reuse BULL v1 and the ordered selection.
+Ordinary BULL cards belong to Images and use its pin/tag scope. Preserve the
+originals and the portable collection, and publish extracted PNGs on the
+collection's shelf in one transaction. Repeated extraction reuses its pages.
+
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.
 Use a one-shot loopback handoff to the default Windows browser so its

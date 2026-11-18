@@ -101,7 +101,7 @@ impl Service {
             }
             ShelfTab::Images => format!(
                 "{} AND NOT {} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
-                file_types::sql_image_predicate(),
+                crate::catalogue_query::image_shelf_predicate(),
                 crate::catalogue_query::TRANSLATION_MEMBERSHIP
             ),
         }

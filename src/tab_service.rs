@@ -23,6 +23,7 @@ pub(crate) struct BackgroundActions {
     image: bool,
     video: bool,
     translate: bool,
+    unpack_bull: bool,
 }
 
 // The Actions catalogue is presentation metadata. Resolve at most one event;
@@ -65,6 +66,7 @@ fn background_actions(
         image,
         video,
         translate: image,
+        unpack_bull: crate::image_collection::is_managed(&event),
     }
 }
 
@@ -120,6 +122,9 @@ impl Service {
                 background.translate
             }
             "search_image_google_lens" => background.image,
+            "create_image_collection" => {
+                self.interaction.tab != ShelfTab::All && (background.translate || background.unpack_bull)
+            }
             "use_as_background" => background.image,
             "use_as_desktop_wallpaper" => background.image,
             "use_as_video_background" => background.video,
@@ -140,8 +145,16 @@ impl Service {
         }
     }
 
-    pub(crate) fn action_label(&self, id: &str, fallback: &str) -> String {
+    pub(crate) fn action_label(&self, id: &str, fallback: &str, background: BackgroundActions) -> String {
         let english = self.settings.language == crate::settings::Language::English;
+        if id == "create_image_collection" {
+            return match (background.unpack_bull, english) {
+                (true, true) => "Unpack BULL",
+                (true, false) => "Разобрать BULL",
+                (false, true) => "Pack images into BULL",
+                (false, false) => "Собрать изображения в BULL",
+            }.into();
+        }
         let tab = match id {
             "toggle_images" => Some(ShelfTab::Images),
             "toggle_screenshots" => Some(ShelfTab::Screenshots),

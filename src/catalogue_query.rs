@@ -506,7 +506,7 @@ fn slice_projection(
         ShelfTab::Translate => translated_image_predicate(),
         ShelfTab::Links => "EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
-        ShelfTab::Images => format!("{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",crate::file_types::sql_image_predicate()),
+        ShelfTab::Images => format!("{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",image_shelf_predicate()),
     };
     // Literal quoting is restricted to this optional tag value; all search and
     // cursor values remain bound parameters in the shared SQL pipeline.
@@ -543,7 +543,7 @@ fn projection_sql(
             "AND e.legacy_source_ref=0",
             &format!(
                 "AND e.legacy_source_ref=0 AND NOT {}",
-                crate::file_types::sql_image_predicate()
+                image_shelf_predicate()
             ),
         );
     }
@@ -595,6 +595,11 @@ fn projection_sql(
 
 pub(crate) const TRANSLATION_MEMBERSHIP: &str =
     "EXISTS(SELECT 1 FROM translated_images t WHERE t.event_id=e.id)";
+
+/// Ordinary image collections share the Images shelf, but remain managed blobs.
+pub(crate) fn image_shelf_predicate() -> String {
+    format!("({} OR (e.blob_hash IS NOT NULL AND e.source='image_collection' AND lower(substr(e.name,-5))='.bull'))", crate::file_types::sql_image_predicate())
+}
 
 pub(crate) fn translated_image_predicate() -> String {
     format!(
@@ -658,7 +663,7 @@ fn sql() -> String {
             {downloads}
         ORDER BY id DESC LIMIT ?6
     "#,
-        image = crate::file_types::sql_image_predicate(),
+        image = image_shelf_predicate(),
         ordinary_search = search_predicate(
             "CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END",
             "",

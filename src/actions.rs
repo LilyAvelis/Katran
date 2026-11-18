@@ -26,6 +26,7 @@ pub fn palette_order(id: &str) -> usize {
         "quicklook",
         "reveal",
         "search_image_google_lens",
+        "create_image_collection",
         "save",
         "delete",
         "video_pause",
@@ -91,6 +92,7 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "quicklook"
         | "reveal"
         | "search_image_google_lens"
+        | "create_image_collection"
         | "save"
         | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -139,6 +141,9 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
         "extract_video_audio" => "видео звук аудио дорожка извлечь video audio track extract",
+        "create_image_collection" => {
+            "собрать разобрать коллекция изображения картинки bull pack unpack collection images"
+        }
         "search_image_google_lens" => {
             "google lens поиск изображение картинка фото search image reverse visual"
         }
@@ -222,6 +227,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "files" => "Files tab",
         "desktop" => "Desktop tab",
         "translate" => "Translate tab",
+        "create_image_collection" => "Pack / unpack BULL",
         "search_image_google_lens" => "Search image with Google Lens",
         "translate_image_ja" => "Translate image from Japanese",
         "translate_image_zh" => "Translate image from Simplified Chinese",
@@ -277,6 +283,14 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "create_image_collection",
+        label: "Собрать / разобрать BULL",
+        default_binding: "",
+        rebindable: true,
+        group: "Выбранное",
+        in_palette: true,
+    },
     Definition {
         id: "search_image_google_lens",
         label: "Найти изображение в Google Lens",
@@ -1248,6 +1262,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "capture" => command(Command::SetCaptureEnabled { enabled: !capture }),
         "refresh" => command(Command::List { limit: 1000 }),
         "transfer_copy" => command(Command::CopySelection),
+        "create_image_collection" => command(Command::CreateImageCollection),
         "search_image_google_lens" => command(Command::SearchSelectedImageWithGoogleLens),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),

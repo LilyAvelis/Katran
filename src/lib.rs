@@ -44,6 +44,7 @@ pub mod interaction;
 mod jobs_service;
 mod image_upscale;
 mod image_translate;
+mod image_collection;
 mod image_translation_batch;
 mod upscale_components;
 mod translate_components;
@@ -543,6 +544,7 @@ impl Service {
             command @ Command::ExtractVideoAudio { .. } => self.begin_job(command),
             command @ Command::UpscaleSelectedImage { .. } => self.begin_job(command),
             command @ Command::SearchSelectedImageWithGoogleLens => self.begin_job(command),
+            command @ Command::CreateImageCollection => self.begin_job(command),
             command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
@@ -1455,8 +1457,8 @@ impl Service {
             }
             Command::PreviewExternal { id } => {
                 let event = self.get(id)?;
-                if event.source == "image_translation_collection" && event.storage == "cached" {
-                    self.begin_job(Command::PreviewPublishedTranslation { id, revision: event.revision })
+                if image_collection::is_managed(&event) {
+                    self.begin_job(Command::PreviewExternal { id })
                 } else {
                     self.preview_external(id)
                 }
@@ -1925,7 +1927,7 @@ impl Service {
                     });
                     serde_json::json!({
                         "id": d.id,
-                        "label": self.action_label(d.id, if self.settings.language == settings::Language::English { actions::english_label(d.id, d.label) } else { actions::palette_label(d.id, d.label) }),
+                        "label": self.action_label(d.id, if self.settings.language == settings::Language::English { actions::english_label(d.id, d.label) } else { actions::palette_label(d.id, d.label) }, background.unwrap_or_default()),
                         "group": if self.settings.language == settings::Language::English { actions::english_group(d.id, d.group) } else { actions::palette_group(d.id, d.group) },
                         "shortcut": self.shortcuts.binding(d.id),
                         "search_terms": actions::palette_terms(d.id),

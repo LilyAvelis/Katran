@@ -25,6 +25,10 @@ recognition pass and enabling oneDNN for detection. See the separate
 warm/cold and renderer measurements in the Translate contract.
 See [Translate](../patch-4.0/TRANSLATE.md).
 
+Ctrl+K now offers one rebindable action to pack selected images into BULL
+and unpack a selected BULL back onto its shelf. Ordinary collections appear
+in Images, support pins and tags, and open in the existing page viewer.
+
 ## Local follow-up · Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one

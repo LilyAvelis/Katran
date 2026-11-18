@@ -1,5 +1,9 @@
 # Katran 4.0 run · 2026-11-18
 
+For the standalone BULL shelf follow-up, Fenna owned the rebindable action and
+preview wiring, Nemi owned Images and its pin/tag catalogue projection, and
+Polly owned the command, pack/unpack jobs, storage and local verification.
+
 Polly leads the current session and owns the shared Rust command, dispatcher,
 integration, verification and installation. The Notion 4.0 card owns the run
 order. The installed baseline is `09244a0440d7` (source `5eb3f93`), with local

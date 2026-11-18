@@ -16,6 +16,10 @@ On the approved complex Japanese page, a warm translation fell from 21.6 s
 to 3.7 s, about 5.8× faster. See [Translate and performance](docs/patch-4.0/TRANSLATE.md)
 and [the BULL format](docs/patch-4.0/BULL.md).
 
+Ctrl+K can pack selected shelf images into a portable BULL. Select that
+collection to unpack it with the same rebindable action. Collections can be
+pinned and tagged like other shelf cards.
+
 For one selected image, Ctrl+K → **Search image with Google Lens** opens
 the default browser, which submits an image copy to Google Lens.
 

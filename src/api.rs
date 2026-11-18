@@ -401,6 +401,7 @@ pub enum Command {
         operation: UpscaleOperation,
     },
     TranslateSelectedImage,
+    CreateImageCollection,
     SearchSelectedImageWithGoogleLens,
     TranslateSelectedImageFrom {
         source: ImageTranslationSource,

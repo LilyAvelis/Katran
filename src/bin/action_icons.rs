@@ -17,6 +17,7 @@ pub fn icon(id: &str) -> Lucide {
         "density_more" => Lucide::ZoomOut,
         "density_less" => Lucide::ZoomIn,
         "all" => Lucide::LayoutGrid,
+        "create_image_collection" => Lucide::Package,
         "search_image_google_lens" => Lucide::Search,
         "use_as_background" => Lucide::Image,
         "search_with_ai" => Lucide::Sparkles,

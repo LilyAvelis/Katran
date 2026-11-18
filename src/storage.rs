@@ -1,6 +1,6 @@
 //! Crash recovery owns only validated SHA-256 filenames inside the cache directory.
 use crate::{ApiError, Event, Result, origin::Origin};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -451,6 +451,66 @@ fn commit_blob(
     prepared: PreparedBlob,
     translated: bool,
 ) -> Result<i64> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let id = commit_blob_in(&tx, root, quota, prepared, translated)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+pub(crate) fn commit_extracted_collection_pages(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    pages: Vec<PreparedBlob>,
+    translated: bool,
+    newest_first: bool,
+) -> Result<Vec<i64>> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut additions = std::collections::HashSet::new();
+    let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| row.get(0))?;
+    for page in &pages {
+        if page.source != "image_collection_page" || page.text.is_some() || !page.name.ends_with(".png") {
+            return Err(ApiError::new("invalid_collection", "Expected an extracted PNG page"));
+        }
+        if additions.insert(page.hash.as_str()) && !tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)", [&page.hash], |row| row.get::<_, bool>(0)
+        )? {
+            required = required.saturating_add(page.size);
+        }
+    }
+    if required > quota {
+        return Err(ApiError::new("quota_exceeded", "The collection pages do not fit in the cache"));
+    }
+    drop(additions);
+    let mut pages = pages;
+    if newest_first {
+        pages.reverse();
+    }
+    let mut items = Vec::with_capacity(pages.len());
+    for page in pages {
+        let existing: Option<i64> = tx.query_row(
+            "SELECT id FROM events WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 ORDER BY id LIMIT 1",
+            params![page.name, page.hash], |row| row.get(0)
+        ).optional()?;
+        items.push(match existing {
+            Some(id) => id,
+            None => commit_blob_in(&tx, root, quota, page, translated)?,
+        });
+    }
+    if newest_first {
+        items.reverse();
+    }
+    tx.commit()?;
+    Ok(items)
+}
+
+fn commit_blob_in(
+    tx: &rusqlite::Transaction<'_>,
+    root: &Path,
+    quota: u64,
+    prepared: PreparedBlob,
+    translated: bool,
+) -> Result<i64> {
     if prepared.directory != directory(root)? {
         return Err(ApiError::new(
             "integrity_error",
@@ -458,7 +518,6 @@ fn commit_blob(
         ));
     }
     let path = prepared.directory.join(&prepared.hash);
-    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let exists: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)",
         [&prepared.hash],
@@ -519,7 +578,6 @@ fn commit_blob(
             params![prepared.hash, content], |row| row.get(0),
         ).optional()?;
         if let Some(id) = existing {
-            tx.commit()?;
             return Ok(id);
         }
     }
@@ -563,9 +621,8 @@ fn commit_blob(
         )?;
     }
     if prepared.text.is_none() {
-        crate::classification_runtime::enqueue(&tx, id)?;
+        crate::classification_runtime::enqueue(tx, id)?;
     }
-    tx.commit()?;
     Ok(id)
 }
 

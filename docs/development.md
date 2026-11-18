@@ -18,6 +18,12 @@ retains its last ready page while loading and shares the image-preview zoom
 geometry. See [Translate](patch-4.0/TRANSLATE.md) and
 [the local BULL contract](patch-4.0/BULL.md).
 
+`CreateImageCollection` is a contextual job for packing selected images or
+unpacking a single managed BULL. It reuses the ordered selection and v1 codec.
+Ordinary BULL cards use the Images catalogue and standard pin/tag paths.
+Unpacking validates the collection before a single catalogue transaction and
+reuses existing extracted page rows when repeated.
+
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
 JPEG copy to the default browser through a short-lived loopback address.
