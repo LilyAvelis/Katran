@@ -31,7 +31,7 @@ function Invoke-KatranInstall {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][scriptblock]$Build, [Parameter(Mandatory)][scriptblock]$Register)
     $Root = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     $rustc = (& rustc -vV | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $rustc -notmatch '(?m)^host: (\S+)$') { throw 'Cannot determine Rust toolchain and host target' }
+    if ($LASTEXITCODE -ne 0 -or $rustc -notmatch '(?m)^host: (\S+)\r?$') { throw 'Cannot determine Rust toolchain and host target' }
     $targetOverride = $env:CARGO_BUILD_TARGET
     $target = if ($targetOverride) { $targetOverride } else { $Matches[1] }
     $cargoVersion = (& cargo --version | Out-String).Trim()
