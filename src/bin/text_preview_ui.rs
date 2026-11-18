@@ -4,7 +4,23 @@ use super::*;
 use crate::theme_ui::{Role, color as theme_color};
 use std::sync::{Arc, Condvar, Mutex};
 
-type Key = (i64, String, u64);
+type Key = (
+    i64,
+    String,
+    u64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    u64,
+);
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Identity {
+    id: i64,
+    revision: String,
+    kind: Option<String>,
+    source: Option<String>,
+    path: Option<String>,
+}
 struct Queue {
     next: Option<(Key, Option<PathBuf>, egui::Context)>,
     closed: bool,
@@ -19,7 +35,10 @@ pub(super) struct TextPreview {
     worker: Option<Worker>,
     wanted: Option<Key>,
     context: String,
+    namespace: String,
+    identity: Option<Identity>,
     context_epoch: u64,
+    request_serial: u64,
     content: Option<Result<String, String>>,
     document: Option<katran::markdown::Document>,
     rendered: bool,
@@ -32,7 +51,10 @@ impl TextPreview {
             worker: None,
             wanted: None,
             context: String::new(),
+            namespace: String::new(),
+            identity: None,
             context_epoch: 0,
+            request_serial: 0,
             content: None,
             document: None,
             rendered: true,
@@ -98,17 +120,28 @@ impl TextPreview {
             }
         }
         self.wanted = None;
+        self.identity = None;
         self.content = None;
         self.document = None;
     }
     pub fn set_context(&mut self, state: &Value) {
         let context = super::images::preview_context(state);
         if self.context != context {
+            let namespace =
+                serde_json::json!([state["tab"], state["folder_path"], state["emoji_catalogue"]])
+                    .to_string();
+            let retain_ready = self.namespace == namespace
+                && self.identity.is_some()
+                && matches!(self.content, Some(Ok(_)));
             self.context = context;
+            self.namespace = namespace;
             self.context_epoch = self.context_epoch.wrapping_add(1);
             self.wanted = None;
-            self.content = None;
-            self.document = None;
+            if !retain_ready {
+                self.identity = None;
+                self.content = None;
+                self.document = None;
+            }
             if let Some(worker) = &self.worker
                 && let Ok(mut queue) = worker.queue.0.lock()
             {
@@ -183,11 +216,44 @@ impl TextPreview {
             return;
         }
         let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
+            self.wanted = None;
+            self.identity = None;
+            self.content = None;
+            self.document = None;
             return;
         };
-        let key = (id, revision.to_owned(), self.context_epoch);
+        let identity = Identity {
+            id,
+            revision: revision.to_owned(),
+            kind: event["kind"].as_str().map(str::to_owned),
+            source: event["source"].as_str().map(str::to_owned),
+            path: event["path"].as_str().map(str::to_owned),
+        };
+        let same_ready =
+            self.identity.as_ref() == Some(&identity) && matches!(self.content, Some(Ok(_)));
+        if self.identity.as_ref() != Some(&identity) {
+            self.request_serial = self.request_serial.wrapping_add(1);
+            self.wanted = None;
+            self.content = None;
+            self.document = None;
+            self.rendered = true;
+        }
+        let key = (
+            id,
+            revision.to_owned(),
+            self.context_epoch,
+            identity.kind.clone(),
+            identity.source.clone(),
+            identity.path.clone(),
+            self.request_serial,
+        );
+        self.identity = Some(identity);
         let path = if event["source"] == "work_folder" {
             let Some(path) = event["path"].as_str() else {
+                self.wanted = None;
+                self.identity = None;
+                self.content = None;
+                self.document = None;
                 return;
             };
             Some(PathBuf::from(path))
@@ -198,12 +264,14 @@ impl TextPreview {
         self.start();
         if self.wanted.as_ref() != Some(&key) {
             self.wanted = Some(key.clone());
-            self.content = None;
-            self.document = None;
-            self.rendered = true;
-            let (lock, wake) = &*self.worker.as_ref().unwrap().queue;
-            lock.lock().unwrap().next = Some((key, path, ui.ctx().clone()));
-            wake.notify_one();
+            if !same_ready {
+                self.content = None;
+                self.document = None;
+                self.rendered = true;
+                let (lock, wake) = &*self.worker.as_ref().unwrap().queue;
+                lock.lock().unwrap().next = Some((key, path, ui.ctx().clone()));
+                wake.notify_one();
+            }
         }
         while let Ok((key, result)) = self.worker.as_ref().unwrap().rx.try_recv() {
             if self.wanted.as_ref() == Some(&key) {
@@ -478,6 +546,232 @@ mod tests {
         );
     }
     #[test]
+    fn ready_content_survives_generation_only_and_rejects_changed_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let mut preview = TextPreview::new(root.path().into());
+        preview.enabled = true;
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                next: None,
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        preview.worker = Some(Worker {
+            queue: queue.clone(),
+            rx,
+        });
+        let context = |generation, folder: &str| serde_json::json!({"tab":"folder","folder_path":folder,"emoji_catalogue":false,"view_generation":generation});
+        preview.set_context(&context(1, "a"));
+        let mut event = serde_json::json!({"id":1,"revision":"r","kind":"text_fragment","source":"work_folder","path":"a/one.md"});
+        let ctx = egui::Context::default();
+        let paint = |preview: &mut TextPreview, event: &Value| {
+            let mut output = ctx.run_ui(Default::default(), |ui| preview.show(ui, event));
+            output.textures_delta.clear();
+        };
+        paint(&mut preview, &event);
+        let old = preview.wanted.clone().unwrap();
+        tx.send((
+            old.clone(),
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"original"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &event);
+        assert_eq!(
+            preview.content.as_ref().unwrap().as_ref().unwrap(),
+            "original"
+        );
+        preview.rendered = false;
+        preview.set_context(&context(2, "a"));
+        let epoch = preview.context_epoch;
+        paint(&mut preview, &event);
+        assert_eq!(
+            preview.content.as_ref().unwrap().as_ref().unwrap(),
+            "original"
+        );
+        assert!(!preview.rendered);
+        assert_ne!(old.2, epoch);
+        queue.0.lock().unwrap().next = None;
+        event["path"] = "a/two.md".into();
+        tx.send((
+            old,
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"stale"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &event);
+        assert!(preview.content.is_none());
+        let path_key = preview.wanted.clone().unwrap();
+        tx.send((
+            path_key.clone(),
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"new"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &event);
+        assert_eq!(preview.content.as_ref().unwrap().as_ref().unwrap(), "new");
+        event["kind"] = "link_fragment".into();
+        tx.send((
+            path_key,
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"old path"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &event);
+        assert!(preview.content.is_none());
+        for (field, value) in [
+            ("source", "other"),
+            ("revision", "new-revision"),
+            ("id", "2"),
+        ] {
+            let previous = preview.wanted.clone().unwrap();
+            tx.send((previous.clone(), serde_json::json!({"ok":true,"result":{"revision":previous.1,"text":"ready before change"}}))).unwrap();
+            paint(&mut preview, &event);
+            assert!(matches!(preview.content, Some(Ok(_))));
+            if field == "id" {
+                event[field] = 2.into();
+            } else {
+                event[field] = value.into();
+            }
+            tx.send((
+                previous.clone(),
+                serde_json::json!({"ok":true,"result":{"revision":previous.1,"text":"obsolete"}}),
+            ))
+            .unwrap();
+            paint(&mut preview, &event);
+            assert!(
+                preview.content.is_none(),
+                "old content survived {field} change"
+            );
+        }
+        let current = preview.wanted.clone().unwrap();
+        tx.send((current.clone(), serde_json::json!({"ok":true,"result":{"revision":current.1,"text":"ready before namespace change"}}))).unwrap();
+        paint(&mut preview, &event);
+        assert!(matches!(preview.content, Some(Ok(_))));
+        preview.set_context(&context(3, "b"));
+        assert!(preview.content.is_none());
+        preview.set_context(&context(4, "a"));
+        assert!(preview.content.is_none());
+        preview.stop();
+        assert!(preview.identity.is_none() && preview.content.is_none());
+    }
+
+    #[test]
+    fn old_reply_cannot_reappear_after_a_b_a_in_same_context() {
+        let root = tempfile::tempdir().unwrap();
+        let mut preview = TextPreview::new(root.path().into());
+        preview.enabled = true;
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                next: None,
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
+        let (tx, rx) = mpsc::channel();
+        preview.worker = Some(Worker { queue, rx });
+        preview.set_context(&serde_json::json!({"tab":"links","view_generation":1}));
+        let a = serde_json::json!({"id":1,"revision":"r","kind":"link_fragment","source":"test"});
+        let b = serde_json::json!({"id":2,"revision":"r","kind":"link_fragment","source":"test"});
+        let ctx = egui::Context::default();
+        let paint = |preview: &mut TextPreview, event: &Value| {
+            let mut output = ctx.run_ui(Default::default(), |ui| preview.show(ui, event));
+            output.textures_delta.clear();
+        };
+        paint(&mut preview, &a);
+        let old = preview.wanted.clone().unwrap();
+        paint(&mut preview, &b);
+        paint(&mut preview, &a);
+        let current = preview.wanted.clone().unwrap();
+        assert_ne!(old, current);
+        tx.send((
+            old,
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"obsolete"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &a);
+        assert!(preview.content.is_none());
+        tx.send((
+            current,
+            serde_json::json!({"ok":true,"result":{"revision":"r","text":"current"}}),
+        ))
+        .unwrap();
+        paint(&mut preview, &a);
+        assert_eq!(
+            preview.content.as_ref().unwrap().as_ref().unwrap(),
+            "current"
+        );
+    }
+
+    #[test]
+    fn real_pinned_view_toggle_keeps_painted_link_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Links,
+            enabled: true,
+        });
+        let url = "https://example.test/synthetic-ready-link";
+        let id = app.call(Command::IngestLink {
+            url: url.into(),
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Links,
+        });
+        app.call(Command::SetView {
+            view: katran::interaction::View::Details,
+        });
+        app.call(Command::TogglePins { ids: vec![id] });
+        app.refresh();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.state = app.call(Command::Select {
+            id,
+            mode: katran::interaction::SelectionMode::Replace,
+        });
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(940.0, 680.0),
+            )),
+            ..Default::default()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.text_preview.test_has_text(url) {
+            let mut output = ctx.run_ui(input(), |ui| app.render(ui));
+            output.textures_delta.clear();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "synthetic link did not load"
+            );
+            std::thread::yield_now();
+        }
+        let old_epoch = app.text_preview.context_epoch;
+        app.state = app.call(Command::TogglePinnedView);
+        app.refresh();
+        let mut output = ctx.run_ui(input(), |ui| app.render(ui));
+        assert_eq!(app.state["cursor"], id);
+        fn contains(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.job.text.contains(expected),
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, expected)),
+                _ => false,
+            }
+        }
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|shape| contains(&shape.shape, url)),
+            "URL disappeared immediately after pinned view toggle"
+        );
+        output.textures_delta.clear();
+        assert!(app.text_preview.context_epoch > old_epoch);
+    }
+
+    #[test]
     fn late_response_from_other_context_is_not_rendered() {
         let root = tempfile::tempdir().unwrap();
         let mut preview = TextPreview::new(root.path().into());
@@ -494,10 +788,26 @@ mod tests {
         let a = serde_json::json!({"tab":"folder", "folder_path":"a", "view_generation":1});
         let b = serde_json::json!({"tab":"folder", "folder_path":"b", "view_generation":2});
         preview.set_context(&a);
-        let old = (1, "revision".to_owned(), preview.context_epoch);
+        let old = (
+            1,
+            "revision".to_owned(),
+            preview.context_epoch,
+            Some("text_fragment".into()),
+            None,
+            None,
+            preview.request_serial,
+        );
         preview.set_context(&b);
         preview.set_context(&a);
-        let current = (1, "revision".to_owned(), preview.context_epoch);
+        let current = (
+            1,
+            "revision".to_owned(),
+            preview.context_epoch,
+            Some("text_fragment".into()),
+            None,
+            None,
+            preview.request_serial + 1,
+        );
         preview.wanted = Some(current.clone());
         tx.send((
             old,
@@ -525,13 +835,32 @@ mod tests {
         let a = serde_json::json!({"tab":"folder", "folder_path":"a", "view_generation":1});
         let b = serde_json::json!({"tab":"folder", "folder_path":"b", "view_generation":2});
         preview.set_context(&a);
-        let old = (1, "same-revision".to_owned(), preview.context_epoch);
+        let old = (
+            1,
+            "same-revision".to_owned(),
+            preview.context_epoch,
+            None,
+            None,
+            None,
+            preview.request_serial,
+        );
         preview.wanted = Some(old.clone());
         preview.content = Some(Err("old content".into()));
         preview.set_context(&b);
         assert!(preview.wanted.is_none() && preview.content.is_none());
         preview.set_context(&a);
-        assert_ne!(old, (1, "same-revision".to_owned(), preview.context_epoch));
+        assert_ne!(
+            old,
+            (
+                1,
+                "same-revision".to_owned(),
+                preview.context_epoch,
+                None,
+                None,
+                None,
+                preview.request_serial
+            )
+        );
         let epoch = preview.context_epoch;
         preview.set_context(&a);
         assert_eq!(epoch, preview.context_epoch);

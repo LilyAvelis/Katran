@@ -1,5 +1,12 @@
 # Developer and agent entry point
 
+TextPreview separates ready content identity from async request lifetime.
+A filter/generation transition still invalidates pending requests; an unchanged
+successful preview can remain visible after exact identity/namespace validation.
+Revision, path/kind/source, tab/folder/catalogue and explicit stop/disable remain
+invalidation boundaries. See the Mini stream investigation/follow-up for the
+blank-preview trap and regression evidence; do not remove epochs as a shortcut.
+
 Mini stream geometry is owned by details_view_ui.rs: reserve the exact preview
 slot in the parent, then draw providers inside a clipped child. Egui child
 max_rect is not reserved space; short async content must not collapse the slot

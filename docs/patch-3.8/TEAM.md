@@ -486,3 +486,11 @@ is reused because that behavior is unchanged. No team expansion/publication.
 Mini stream sourceb8f34f1 integrated and staged in primary runtimee884d5e4b9e4.
 Fenna area frozen; Polly completed targeted31/31, Clippy, one build/install and
 backup/hash evidence. Owner visual acceptance pending; no public publication.
+
+## Residual Link preview blink · 2026-11-18
+
+Owner explicitly requested fixing the residual blink before handing off to 4.0.
+Same sessions: Fenna (/root/fenna, gpt-6.1-terra/high) owns text_preview_ui.rs;
+Nemi (/root/nemi, gpt-6.1-terra/high) reviews identity/late-reply safety read-only.
+Polly integrates docs/tests/one local build/primary installation. No new roster,
+provider rewrite, domain/schema/player changes or public publication.

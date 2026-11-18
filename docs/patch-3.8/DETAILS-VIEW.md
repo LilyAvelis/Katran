@@ -62,3 +62,12 @@ metadata below the same preview slot during loading and cursor changes.
 The metadata ScrollArea fills the remaining viewport even for short field sets.
 See MINI-STREAM-LAYOUT-INVESTIGATION.md for measured cause and verification;
 native owner acceptance of the local fix remains separate.
+
+## Ready preview retention
+
+Browse filters can advance the view generation without changing the selected
+object's content. Do not clear a successful ready Link/Text merely for that
+presentation change. Retention must match exact content/source identity and
+namespace, while old asynchronous replies remain invalid. Changing the item or
+its revision/source clears the old content before painting the next item.
+See the investigation/follow-up for evidence and acceptance status.

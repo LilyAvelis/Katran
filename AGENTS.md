@@ -1,5 +1,17 @@
 # Katran development rules
 
+## Ready text preview retention · 2026-11-18
+
+Owner authorized closing the residual Links blink after accepting the Mini stream
+geometry fix. Presentation-only browse-generation changes must advance async
+request epochs and reject obsolete replies, but may retain successful ready
+text/parsed document/view mode for the same validated content identity in the
+same tab/folder/catalogue namespace. Never reuse by row ID alone: revision and
+source identity (path/kind/source) matter. Clear on item/source/revision/namespace
+change, errors, stop or disable. Do not remove late-response guards to hide a
+blank preview. Document this distinction for the next team; no schema/player/
+public-release changes are authorized by this UI follow-up.
+
 ## Mini stream preview slot stability · 2026-11-18
 
 Owner authorized fixing the investigated metadata jump. details_view_ui reserves

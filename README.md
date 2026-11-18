@@ -1,5 +1,10 @@
 # Katran
 
+Preview handoff for the next team: changing a browse filter must not briefly
+blank an already loaded, unchanged Link/Text preview. Keep ready content separate
+from async request generations; retain it only for matching item/revision/source
+in the same namespace, while rejecting old replies. See the [Mini stream follow-up](docs/patch-3.8/MINI-STREAM-LAYOUT-INVESTIGATION.md).
+
 Local video Actions: Ctrl+K → Video offers Pause/Resume (P by default,
 rebindable) and Extract current frame. Pause the video first: the source-size
 PNG goes to Images and the image is copied to Clipboard without leaving playback.

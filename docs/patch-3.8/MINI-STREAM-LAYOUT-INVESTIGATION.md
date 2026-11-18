@@ -41,3 +41,34 @@ changes before asynchronous reload (TogglePinnedView resets browse context).
 A later bounded retention fix must preserve request epochs and stale-reply rejection;
 do not relax those guards just to hide the blank frame. Not reproduced natively
 or implemented in this feedback turn; primary installation is unchanged.
+
+## Authorized residual blink correction · 2026-11-18
+
+Lilia subsequently requested fixing the residual Link blink now. TextPreview
+retains only successful ready content, parsed document and display mode across
+browse-generation changes within the same tab/folder/catalogue namespace. Before
+painting, show must match id, revision, kind, source and path exactly. Different
+identity/namespace, errors, stop or disable clear old content; no LRU/prefetch or
+cross-object stale placeholder is introduced. A new/cold object still loads async.
+
+Request epoch always advances on browse-context changes and pending work is
+invalidated. Review also found the pre-existing A→B→A-in-one-context reply collision:
+request keys now include complete source identity and a monotonically advanced
+serial per identity transition, so an old A reply cannot satisfy a later A visit.
+Ready-content retention does not authorize old in-flight replies.
+
+Fenna implemented text_preview_ui.rs; Nemi's narrow read-only review confirmed no
+blocking findings after serial/source guards. API/storage/player unchanged.
+Text checks14/14 passed across aggregate plus targeted reruns; Details5/5 passed.
+The first real-toggle fixture incorrectly asserted cursor before normal rendering
+restored it; corrected to assert after the first actual frame, without a warmup.
+That first frame still paints the URL immediately after real TogglePinnedView.
+Controlled tests cover generation-only carry, exact source/revision changes,
+ready-content namespace changes and delayed A→B→A replies within/between contexts.
+Clippy UI/tests -D warnings passed4.18s; fmt/diff checks passed. Raw evidence under
+target/build/link-preview-retain-{text,toggle,identity,details,clippy}.log.
+
+Handoff lesson for4.0: presentation/filter invalidation and content invalidation
+are distinct. Advance request identity to reject stale work; do not blank a
+validated resident preview merely because the shelf's browse generation changed.
+Conversely, never remove epoch/source checks just to conceal a visual reload.

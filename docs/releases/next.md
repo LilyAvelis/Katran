@@ -217,3 +217,10 @@ Reserve the preview slot before async provider rendering, preventing arriving
 content from shifting the metadata panel. This targets the reproduced Links
 first/next-frame jump; provider/data/playback semantics are retained. No schema
 change or public release. Owner check follows primary installation.
+
+## Local residual Link-preview blink correction · 2026-11-18
+
+Keep a successful unchanged Link/Text preview visible across browse-generation
+changes such as switching pinned view, while retaining strict request/source
+invalidation. This follows the separately accepted Mini stream geometry fix.
+Local owner acceptance remains separate from automated checks; no public release.

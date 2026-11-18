@@ -1,5 +1,24 @@
 # Katran 3.8 verification handoff
 
+## Ready Link/Text preview retention · 2026-11-18
+
+Owner requested closing the residual blink after accepting the geometry fix.
+Only text_preview_ui.rs changes production behavior: successful ready content /
+parsed document / mode survive generation-only changes in the same namespace
+when the next event has identical id/revision/kind/source/path. Namespace/identity
+change, errors, stop/disable still clear. Epoch + complete source request key +
+identity-transition serial reject old replies, including same-context A→B→A.
+Fenna implements, Nemi read-only boundary review has no blocking findings.
+Text14/14 and Details5/5 passed (aggregate13 + corrected real-toggle1 + strengthened
+identity case rerun); no production change was required after first test execution.
+The initial failed cursor assertion was a fixture timing error: normal render
+restores SetVisible/cursor. Corrected test checks the first actual painted frame,
+without warmup, and verifies URL survives real TogglePinnedView. Other tests cover
+ready namespace clearing, source/path/revision changes and delayed old replies.
+Clippy UI/tests -D warnings passed4.18s; formatting/diff checks passed. Logs:
+target/build/link-preview-retain-{text,toggle,identity,details,clippy}.log.
+Previous API/native/media/layout evidence is reused for unchanged inputs.
+
 ## Mini stream layout correction · 2026-11-18
 
 Owner accepted the geometry correction in runtimee884d5e4b9e4 («Да, всё исправлено»).
