@@ -7,8 +7,9 @@ Translate uses the normal catalogue shelf with an internal membership relation
 and an independent tag scope, introduced by schema v14. The in-memory ordered
 collection belongs to `crates/baloh-collection`. `TranslateSelectedImage`
 captures the Japanese source and English target at submission. The explicit
-`TranslateSelectedImageFrom` command also supports Simplified Chinese and
-Korean. All use Qwen3 4B Instruct with full GPU placement. Managed PNG storage and
+`TranslateSelectedImageFrom` command also supports Simplified Chinese,
+Traditional Chinese and Korean. Both Chinese routes share the warm Paddle
+recognizer. All use Qwen3 4B Instruct with full GPU placement. Managed PNG storage and
 Translate membership commit in the same transaction. Translated PNGs appear
 only in Translate, including under tag sorting and in tab snapshots. The
 translation service owns warm OCR workers and a private Ollama process. One
@@ -28,7 +29,8 @@ image BULLs. Validate its revision and file stamp before reading and before
 publication. Reuse the same progress, cancellation and per-page receipts for
 loose multi-selection. Derived BULLs are independent cards, with no ownership
 of the source cards. Translate uses translation membership and Upscale uses
-the Images collection source.
+the Images collection source. A partial BULL translation retains original
+pages in the failed positions and records their indices and stage errors.
 
 `CreateImageCollection` packs selected images, flattens selected BULLs into
 one ordered collection, or unpacks a single BULL on its shelf. It reuses the

@@ -17,7 +17,7 @@ reads image BULL v1. See [BULL](docs/patch-4.0/BULL.md) and
 [BS](docs/patch-4.0/BS.md).
 
 Translate publishes one PNG or one ordered batch BULL in Translate. The
-accepted source languages are Japanese, Simplified Chinese and Korean, with
+accepted source languages are Japanese, Simplified Chinese, Traditional Chinese and Korean, with
 English output. Keep local workers warm across pages and send one request
 with region IDs per page. See [Translate](docs/patch-4.0/TRANSLATE.md) for
 performance evidence and component requirements. Keep implementation and
@@ -31,6 +31,10 @@ Upscale and Translate process the stored pages of an image BULL and publish
 an independent result BULL. Preserve the source archive and member rows.
 Keep one shared order, progress, cancellation and per-page error contract
 for loose multi-selection and BULL input.
+For a partially translated input BULL, retain the original image at each
+failed position. Keep the failure in the receipt and show it before preview.
+Both Chinese commands reuse the PP-OCRv5 Chinese recognizer. Traditional
+Chinese has an independent action and translation prompt.
 
 Keep one rebindable pack/unpack action. Loose files use image BULL for
 supported images, file BULL for a common file family, and BS for mixed files.

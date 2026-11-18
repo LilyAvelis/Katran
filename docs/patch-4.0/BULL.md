@@ -65,8 +65,10 @@ show the source, and Ctrl+C copies the exact current source in either mode.
 An image BULL is an ordered selection for Upscale and Translate. The same
 rebindable commands also accept loose images. A BULL input always yields
 a separate BULL, even with one page. Upscale saves to Images and Translate
-saves to Translate. Successful pages retain their order. A failed page is
-reported by original index and is omitted from the output. Cancelling
+saves to Translate. In a partial BULL translation, the original page fills
+its original position wherever translation failed. The completion dialog
+shows the failed page numbers and reasons. Upscale and translation of loose
+selections keep their per-page failure receipts and save successful pages. Cancelling
 before publication leaves the source collection and shelf intact.
 Image BULLs in Folder can also use the lossless file framing with the
 `images` family. Both framings use the image jobs without unpacking the

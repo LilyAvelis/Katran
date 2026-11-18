@@ -582,7 +582,7 @@ impl Service {
                 });
                 let translation = translate_components::discover(&self.root, translate_components::MODEL);
                 let mut sources = serde_json::Map::new();
-                for source in [ImageTranslationSource::Japanese, ImageTranslationSource::Chinese, ImageTranslationSource::Korean] {
+                for source in [ImageTranslationSource::Japanese, ImageTranslationSource::Chinese, ImageTranslationSource::TraditionalChinese, ImageTranslationSource::Korean] {
                     let availability = match &translation {
                         Ok(status) => status.resolve(source).err().map(|error| error.message),
                         Err(error) => Some(error.message.clone()),
@@ -594,7 +594,7 @@ impl Service {
                 status["image_translate"] = serde_json::json!({
                     "ready": sources["ja"]["ready"],
                     "model": translate_components::MODEL,
-                    "recognizes": ["ja", "zh", "ko"],
+                    "recognizes": ["ja", "zh", "zh-hant", "ko"],
                     "error": sources["ja"]["message"],
                     "sources": sources,
                 });

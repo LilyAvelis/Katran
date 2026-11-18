@@ -155,7 +155,7 @@ fn read_output(path: &Path) -> Result<Vec<u8>> {
 
 enum Page {
     File(Event),
-    Embedded(Vec<u8>),
+    Embedded { bytes: Vec<u8>, already_png: bool },
 }
 
 fn read_bull(event: &Event) -> Result<Vec<Page>> {
@@ -170,7 +170,11 @@ fn read_bull(event: &Event) -> Result<Vec<Page>> {
             .collect(),
         _ => return Err(ApiError::new("invalid_image", "Select a BULL of images")),
     };
-    Ok(bytes.into_iter().map(Page::Embedded).collect())
+    let already_png = kind == Kind::Images;
+    Ok(bytes
+        .into_iter()
+        .map(|bytes| Page::Embedded { bytes, already_png })
+        .collect())
 }
 
 fn transform(
@@ -184,6 +188,8 @@ fn transform(
     mut render: impl FnMut(&[u8]) -> Result<Vec<u8>>,
 ) -> Result<Prepared> {
     cancel.check()?;
+    let preserve_pages =
+        source == "image_translation_collection" && matches!(&input, Input::Bull(_));
     let mut validated_sources = Vec::new();
     let pages = match input {
         Input::Selection(events) => events.into_iter().map(Page::File).collect(),
@@ -200,12 +206,14 @@ fn transform(
     let mut included = Vec::with_capacity(total);
     let mut receipt = Vec::with_capacity(total);
     let mut bytes_count = 16usize;
+    let mut succeeded = 0;
     cancel.report_progress(0, total as u32);
     for (index, page) in pages.into_iter().enumerate() {
         cancel.check()?;
+        let mut fallback = None;
         let result: Result<_> = (|| {
-            let (bytes, source) = match page {
-                Page::Embedded(bytes) => (bytes, None),
+            let (bytes, source, already_png) = match page {
+                Page::Embedded { bytes, already_png } => (bytes, None, already_png),
                 Page::File(event) => {
                     let stamp = media_service::stamp(&event.path)?;
                     let path = crate::wallpaper_engine::validate(root, &event)?;
@@ -213,32 +221,32 @@ fn transform(
                     File::open(&path)?
                         .take(MAX_SOURCE as u64 + 1)
                         .read_to_end(&mut bytes)?;
-                    (bytes, Some((event, stamp)))
+                    (bytes, Some((event, stamp)), false)
                 }
             };
-            if bytes.len() > MAX_SOURCE {
-                return Err(ApiError::new("invalid_image", "Page exceeds 32 MiB"));
+            let rendered = (|| {
+                if bytes.len() > MAX_SOURCE {
+                    return Err(ApiError::new("invalid_image", "Page exceeds 32 MiB"));
+                }
+                if let Some((event, stamp)) = &source {
+                    check_stamp(event, stamp)?;
+                }
+                let png = render(&bytes)?;
+                let new_total = page_budget(bytes_count, png.len(), quota)?;
+                if let Some((event, stamp)) = &source {
+                    check_stamp(event, stamp)?;
+                }
+                Ok((png, new_total, source))
+            })();
+            if preserve_pages && rendered.is_err() {
+                fallback = Some((bytes, already_png));
             }
-            if let Some((event, stamp)) = &source {
-                check_stamp(event, stamp)?;
-            }
-            let png = render(&bytes)?;
-            let new_total = bytes_count.saturating_add(36).saturating_add(png.len());
-            if png.len() > MAX_PAGE_BYTES || new_total > MAX_TOTAL_BYTES || new_total as u64 > quota
-            {
-                return Err(ApiError::new(
-                    "collection_size_limit",
-                    "This page exceeds the collection size limit",
-                ));
-            }
-            if let Some((event, stamp)) = &source {
-                check_stamp(event, stamp)?;
-            }
-            Ok((png, new_total, source))
+            rendered
         })();
         cancel.check()?;
         match result {
             Ok((png, new_total, source)) => {
+                succeeded += 1;
                 bytes_count = new_total;
                 if let Some(source) = source {
                     validated_sources.push(source);
@@ -246,16 +254,54 @@ fn transform(
                 receipt.push(json!({"index":index, "ok":true, "page":included.len()}));
                 included.push(png);
             }
-            Err(error) => receipt.push(json!({"index":index, "ok":false,
-                "error":{"code":error.code,"message":error.message}})),
+            Err(error) => {
+                let mut outcome = json!({"index":index, "ok":false,
+                    "error":{"code":error.code,"message":error.message}});
+                if let Some((bytes, already_png)) = fallback {
+                    let png = if already_png {
+                        bytes
+                    } else {
+                        crate::image_collection::png_page(&bytes).map_err(|failure| {
+                            ApiError::new(
+                                "collection_original_unavailable",
+                                format!(
+                                    "Page {} could not be kept in the result: {}",
+                                    index + 1,
+                                    failure.message
+                                ),
+                            )
+                        })?
+                    };
+                    bytes_count =
+                        page_budget(bytes_count, png.len(), quota).map_err(|failure| {
+                            ApiError::new(
+                                &failure.code,
+                                format!(
+                                    "Page {} could not be kept in the result: {}",
+                                    index + 1,
+                                    failure.message
+                                ),
+                            )
+                        })?;
+                    outcome["page"] = json!(included.len());
+                    outcome["preserved_original"] = json!(true);
+                    included.push(png);
+                }
+                receipt.push(outcome);
+            }
         }
         cancel.report_progress((index + 1) as u32, total as u32);
     }
-    if included.is_empty() {
+    if succeeded == 0 {
         let detail = receipt
-            .first()
-            .and_then(|item| item["error"]["message"].as_str())
-            .unwrap_or("No page could be processed");
+            .iter()
+            .filter_map(|page| {
+                let index = page["index"].as_u64()?;
+                let message = page["error"]["message"].as_str()?;
+                Some(format!("#{} — {message}", index + 1))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         return Err(ApiError::new("collection_empty", detail));
     }
     let mut portable = Vec::with_capacity(bytes_count);
@@ -278,6 +324,17 @@ fn transform(
         validated_sources,
         receipt: json!({"collection":true, "total":total, "pages":receipt}),
     })
+}
+
+fn page_budget(current: usize, len: usize, quota: u64) -> Result<usize> {
+    let total = current.saturating_add(36).saturating_add(len);
+    if len > MAX_PAGE_BYTES || total > MAX_TOTAL_BYTES || total as u64 > quota {
+        return Err(ApiError::new(
+            "collection_size_limit",
+            "This page exceeds the collection size limit",
+        ));
+    }
+    Ok(total)
 }
 
 fn check_stamp(event: &Event, stamp: &media_service::Stamp) -> Result<()> {

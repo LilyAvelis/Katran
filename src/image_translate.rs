@@ -351,6 +351,16 @@ fn bounded_file(path: &Path, max: u64) -> Result<()> {
     Ok(())
 }
 
+fn check_recognized_regions(path: &Path) -> Result<()> {
+    bounded_file(path, 1_000_000)?;
+    let regions: Vec<serde_json::Value> = serde_json::from_slice(&fs::read(path)?)
+        .map_err(|_| error("Invalid OCR response"))?;
+    if regions.is_empty() {
+        return Err(ApiError::new("no_text_recognized", "OCR found no text on this page"));
+    }
+    Ok(())
+}
+
 impl Session {
     /// Prepares one local image translation. Source bytes are immutable.
     pub(crate) fn translate(
@@ -449,7 +459,7 @@ impl Session {
             "Text detection or recognition",
             cancel,
         )?;
-        bounded_file(&ocr, 1_000_000)?;
+        check_recognized_regions(&ocr)?;
         let japanese = language == ImageTranslationSource::Japanese;
         if japanese {
             let model = runtime
@@ -476,7 +486,7 @@ impl Session {
                 "Japanese text recognition",
                 cancel,
             )?;
-            bounded_file(&grouped, 1_000_000)?;
+            check_recognized_regions(&grouped)?;
         }
         let port = runtime.translation_port(cancel)?;
         let mut cmd = Command::new(&runtime.components.manga_python);

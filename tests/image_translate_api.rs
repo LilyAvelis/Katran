@@ -18,6 +18,90 @@ fn call(service: &mut Service, command: Command) -> Value {
 }
 
 #[test]
+#[ignore = "requires local OCR/Ollama components and a synthetic Traditional Chinese PNG"]
+fn traditional_chinese_bull_keeps_untranslated_pages_in_place() {
+    use std::io::Cursor;
+
+    let fixture = std::env::var_os("KATRAN_TRANSLATE_TEST_TRADITIONAL_PNG").unwrap();
+    let text_page = std::fs::read(fixture).unwrap();
+    let blank_png = |width| {
+        let mut output = Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(width, 360, image::Rgb([255, 255, 255]))
+            .write_to(&mut output, image::ImageFormat::Png)
+            .unwrap();
+        output.into_inner()
+    };
+    let blank1 = blank_png(352);
+    let blank2 = blank_png(376);
+    let profile = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let source = folder.path().join("four-pages.bull");
+    let mut original = Vec::new();
+    baloh_collection::codec::write(
+        &mut original,
+        &[
+            text_page.clone(),
+            blank1.clone(),
+            text_page.clone(),
+            blank2.clone(),
+        ],
+    )
+    .unwrap();
+    std::fs::write(&source, &original).unwrap();
+    let mut service = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    let mut settings: Settings =
+        serde_json::from_value(call(&mut service, Command::GetSettings)).unwrap();
+    settings.translation_numbered_only = true;
+    call(&mut service, Command::SetSettings { settings });
+    let status = call(&mut service, Command::AiComponentsStatus);
+    assert_eq!(
+        status["image_translate"]["sources"]["zh-hant"]["ready"], true,
+        "{status}"
+    );
+    call(
+        &mut service,
+        Command::ChooseFolder {
+            path: folder.path().to_owned(),
+        },
+    );
+    let id = browse(&mut service)["events"][0]["id"].as_i64().unwrap();
+    call(&mut service, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut service,
+        Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let queued = call(
+        &mut service,
+        Command::RunAction {
+            id: "translate_image_zh_hant".into(),
+        },
+    );
+    let result = wait_for_job(&mut service, queued);
+    assert_eq!(result["source_language"], "zh-hant");
+    assert_eq!(result["total"], 4);
+    assert_eq!(result["translated"], 2, "{result}");
+    let output = std::fs::File::open(result["event"]["path"].as_str().unwrap()).unwrap();
+    let pages = baloh_collection::codec::read(output).unwrap();
+    assert_eq!(pages.len(), 4);
+    for (i, blank) in [(1, blank1), (3, blank2)] {
+        assert_eq!(result["pages"][i]["index"], i);
+        assert_eq!(result["pages"][i]["page"], i);
+        assert_eq!(result["pages"][i]["preserved_original"], true);
+        assert_eq!(result["pages"][i]["error"]["code"], "no_text_recognized");
+        assert_eq!(pages[i], blank);
+    }
+    for i in [0, 2] {
+        assert_eq!(result["pages"][i]["page"], i);
+        assert_eq!(result["pages"][i]["ok"], true);
+        assert_ne!(pages[i], text_page);
+    }
+    assert_eq!(std::fs::read(source).unwrap(), original);
+}
+
+#[test]
 fn target_follows_interface_and_explicit_choice_persists() {
     let profile = tempfile::tempdir().unwrap();
     let mut service = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();

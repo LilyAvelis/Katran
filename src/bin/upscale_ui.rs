@@ -16,6 +16,7 @@ pub(super) struct State {
     collection_title: String,
     link_rename: Option<LinkRename>,
     progress: Option<(u64, u64)>,
+    partial_translation: Option<PartialTranslation>,
 }
 
 struct Collection {
@@ -58,6 +59,49 @@ impl Collection {
             self.ready_target()
         }
     }
+}
+
+struct PartialTranslation {
+    event: Value,
+    failures: Vec<String>,
+}
+
+fn partial_translation_failures(result: &Value) -> Vec<String> {
+    result["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|page| page["ok"] == false)
+        .map(|page| {
+            let number = page["index"].as_u64().and_then(|n| n.checked_add(1));
+            let label = number
+                .map(|n| format!("{} {n}", tr("Страница", "Page")))
+                .unwrap_or_else(|| tr("Страница", "Page").into());
+            let message: String = page["error"]["message"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(tr("Не удалось перевести", "Translation failed"))
+                .chars()
+                .take(512)
+                .collect();
+            let preserved = if page["preserved_original"] == true {
+                tr(" · оригинал сохранён", " · original preserved")
+            } else {
+                ""
+            };
+            format!("{label}: {message}{preserved}")
+        })
+        .collect()
+}
+
+fn translation_is_partial(result: &Value) -> bool {
+    result["pages"]
+        .as_array()
+        .is_some_and(|pages| pages.iter().any(|page| page["ok"] == false))
+        || result["translated"]
+            .as_u64()
+            .zip(result["total"].as_u64())
+            .is_some_and(|(done, total)| done < total)
 }
 
 struct FilePage {
@@ -109,6 +153,7 @@ pub(super) fn translation_source(id: &str) -> Option<katran::api::ImageTranslati
     match id {
         "translate_image_ja" => Some(Japanese),
         "translate_image_zh" => Some(Chinese),
+        "translate_image_zh_hant" => Some(TraditionalChinese),
         "translate_image_ko" => Some(Korean),
         _ => None,
     }
@@ -1208,6 +1253,13 @@ impl Shelf {
                     "Image translation from Simplified Chinese",
                 ),
             ),
+            TraditionalChinese => (
+                Command::TranslateSelectedImageFrom { source },
+                tr(
+                    "Перевод изображения с традиционного китайского",
+                    "Image translation from Traditional Chinese",
+                ),
+            ),
             Korean => (
                 Command::TranslateSelectedImageFrom { source },
                 tr(
@@ -1248,6 +1300,7 @@ impl Shelf {
             collection_title: String::new(),
             link_rename: None,
             progress: None,
+            partial_translation: None,
             label,
             kind,
             status: if job.is_some() {
@@ -1367,6 +1420,22 @@ impl Shelf {
                         }
                     } else if matches!(self.upscale.kind, ImageJob::Translate)
                         && result["collection"] == true
+                        && translation_is_partial(result)
+                    {
+                        let translated = result["translated"].as_u64().unwrap_or(0);
+                        let total = result["total"].as_u64().unwrap_or(0);
+                        self.upscale.status = format!(
+                            "{} {translated}/{total} · {}",
+                            tr("Переведено страниц:", "Pages translated:"),
+                            tr("BULL сохранён в Translate", "BULL saved in Translate")
+                        );
+                        self.upscale.partial_translation = Some(PartialTranslation {
+                            event: result["event"].clone(),
+                            failures: partial_translation_failures(result),
+                        });
+                        self.upscale.open = true;
+                    } else if matches!(self.upscale.kind, ImageJob::Translate)
+                        && result["collection"] == true
                     {
                         self.upscale.open = false;
                         let event = &result["event"];
@@ -1461,6 +1530,7 @@ impl Shelf {
         }
         let mut cancel = false;
         let mut close = false;
+        let mut open_partial = false;
         let modal = egui::Modal::new(egui::Id::new("image-upscale")).show(ctx, |ui| {
             ui.heading(self.upscale.label);
             if self.upscale.job.is_some() {
@@ -1475,6 +1545,26 @@ impl Shelf {
                 cancel = ui.button(tr("Отменить", "Cancel")).clicked();
             } else {
                 ui.label(&self.upscale.status);
+                if let Some(partial) = self.upscale.partial_translation.as_ref() {
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .show(ui, |ui| {
+                            for failure in &partial.failures {
+                                ui.label(failure);
+                            }
+                        });
+                    let valid =
+                        partial.event["id"].is_i64() && partial.event["revision"].is_string();
+                    open_partial = ui
+                        .add_enabled(valid, egui::Button::new(tr("Открыть BULL", "Open BULL")))
+                        .clicked();
+                    if !valid {
+                        ui.weak(tr(
+                            "Не удалось открыть коллекцию",
+                            "Could not open collection",
+                        ));
+                    }
+                }
                 close = ui.button(tr("Закрыть", "Close")).clicked();
             }
         });
@@ -1484,7 +1574,17 @@ impl Shelf {
             }
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        if self.upscale.job.is_none() && (close || modal.should_close()) {
+        if open_partial {
+            let event = self
+                .upscale
+                .partial_translation
+                .as_ref()
+                .map(|partial| partial.event.clone());
+            self.upscale.open = false;
+            if let Some(event) = event {
+                self.open_translation_collection(&event, ctx);
+            }
+        } else if self.upscale.job.is_none() && (close || modal.should_close()) {
             self.upscale.open = false;
         }
     }
@@ -1593,6 +1693,23 @@ mod tests {
         assert_eq!(collection.index, 2);
         assert_eq!(collection.ready_index, Some(1));
         assert_eq!(collection.link.as_ref().unwrap().title, "old title");
+    }
+
+    #[test]
+    fn partial_translation_reports_original_one_based_numbers() {
+        let result = serde_json::json!({"total":3,"translated":2,"pages":[
+            {"index":0,"ok":true,"page":0},
+            {"index":1,"ok":false,"error":{"message":"OCR failed"},"page":1,"preserved_original":true},
+            {"index":2,"ok":true,"page":2}
+        ]});
+        assert!(translation_is_partial(&result));
+        let failures = partial_translation_failures(&result);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("2"));
+        assert!(failures[0].contains("OCR failed"));
+        assert!(!translation_is_partial(
+            &serde_json::json!({"total":1,"translated":1,"pages":[{"index":0,"ok":true}]})
+        ));
     }
 
     #[test]
@@ -1986,6 +2103,10 @@ mod tests {
         use katran::api::ImageTranslationSource::*;
         assert_eq!(translation_source("translate_image_ja"), Some(Japanese));
         assert_eq!(translation_source("translate_image_zh"), Some(Chinese));
+        assert_eq!(
+            translation_source("translate_image_zh_hant"),
+            Some(TraditionalChinese)
+        );
         assert_eq!(translation_source("translate_image_ko"), Some(Korean));
         assert_eq!(translation_source("translate_image"), None);
     }

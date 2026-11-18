@@ -611,6 +611,10 @@ impl State {
                             "zh",
                             super::i18n::tr("Китайский (упрощённый)", "Simplified Chinese"),
                         ),
+                        (
+                            "zh-hant",
+                            super::i18n::tr("Китайский (традиционный)", "Traditional Chinese"),
+                        ),
                         ("ko", super::i18n::tr("Корейский", "Korean")),
                     ] {
                         let source = &status["sources"][code];

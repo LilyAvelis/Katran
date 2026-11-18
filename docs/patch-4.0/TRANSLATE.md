@@ -42,7 +42,10 @@ OCR and inpainting translation pipeline has been verified. Select the
 translation backend and explicit optional component setup after the fixtures.
 
 Select an image and open Ctrl+K → AI Commands → Translate image from Japanese,
-Simplified Chinese or Korean. Each action is independently rebindable.
+Simplified Chinese, Traditional Chinese or Korean. Each action is independently
+rebindable. Both forms of Chinese use the installed `PP-OCRv5_server_rec`.
+Traditional Chinese uses its own translation prompt and groups adjacent
+vertical columns from right to left.
 Settings → AI → Image translation reports local availability by language and the English
 output language. Output is a separate, managed PNG in Translate. The renderer
 keeps text placements disjoint and uses readable spacing and a minimum font
@@ -70,8 +73,10 @@ same translation command accepts an image BULL and uses its saved page
 order. The action steps through that order with progress and cancellation.
 Once published, the collection appears as one card in Translate and opens
 in the Katran page viewer. The original BULL remains available, and even a
-BULL with one page produces a new BULL. The separate QuickLook action uses its collection
-viewer when installed.
+BULL with one page produces a new BULL. A partially translated BULL keeps
+failed pages as originals at their existing positions and reports stage
+errors in the completion dialog. If every page fails, nothing is published.
+The separate QuickLook action uses its collection viewer when installed.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
 Use the dedicated Instruct variant to avoid generating reasoning tokens.

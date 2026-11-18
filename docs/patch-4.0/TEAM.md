@@ -25,6 +25,13 @@ and verification. See [development and agent map](../development.md).
 
 ## Session history and ownership
 
+For Traditional Chinese and partial translation, Fenna owned Settings and
+the result dialog. Polly wired the command, reused the Chinese Paddle
+recognizer, added vertical grouping and preserved failed BULL pages.
+A local OCR and Qwen run translated pages 1 and 3 of a four-page synthetic
+BULL. Pages 2 and 4 contained no text and remained exact PNG copies at their
+original positions. The source BULL was unchanged.
+
 For BULL as batch input, Fenna owned the Upscale completion UI and Polly
 owned ordered input preparation, domain routing, publication and verification.
 The local Real-ESRGAN ×2 API fixture transformed a two-page synthetic BULL,

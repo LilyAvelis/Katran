@@ -14,8 +14,8 @@ details and rollback.
 The local Translate tab is restricted to internally published managed image
 results. The independent Rust collection preserves page order. This change
 introduces catalogue schema v14. Rollback to a v13 binary requires the
-pre-migration profile backup. The three local actions for Japanese, Simplified
-Chinese and Korean use Qwen3 4B Instruct on the GPU and save an English PNG
+pre-migration profile backup. The local actions for Japanese, Simplified Chinese,
+Traditional Chinese and Korean use Qwen3 4B Instruct on the GPU and save an English PNG
 in Translate. OCR and Ollama keep
 their models loaded between pages until Katran exits. Translate shows results
 under tag sorting. One request translates every recognized region on the
@@ -23,6 +23,8 @@ page. Readable black-on-white placements can appear near a recognition region
 or in the closest available page margin. Matching colored numbers link the
 source regions to margin cards. Single-page output opens in QuickLook;
 multiple selected pages share one collection and a built-in page viewer.
+Failed pages in a partially translated input BULL keep their original images
+in place. The completion dialog shows which pages failed and why.
 The viewer keeps its page frame stable and supports the same anchored zoom
 as image preview. Page turns retain the previous image without a loading
 label. BULL cards show a BK badge. Image translation settings

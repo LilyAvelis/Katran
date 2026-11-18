@@ -212,7 +212,8 @@ impl Status {
             ImageTranslationSource::Japanese if self.manga_model.is_none() => {
                 return Err(missing("Manga OCR model is missing"));
             }
-            ImageTranslationSource::Chinese if !self.chinese_model => {
+            ImageTranslationSource::Chinese | ImageTranslationSource::TraditionalChinese
+                if !self.chinese_model => {
                 return Err(missing("Chinese OCR model PP-OCRv5_server_rec is missing"));
             }
             ImageTranslationSource::Korean if !self.korean_model => {

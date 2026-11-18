@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 MAX_REGIONS = 128
-SOURCE_NAMES = {"ja": "Japanese manga", "zh": "Simplified Chinese", "ko": "Korean"}
+SOURCE_NAMES = {"ja": "Japanese manga", "zh": "Simplified Chinese", "zh-hant": "Traditional Chinese", "ko": "Korean"}
 
 
 def bounds(polygon):
@@ -20,7 +20,7 @@ def bounds(polygon):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def group_regions(regions, manga):
+def group_regions(regions, manga, traditional=False):
     """Join adjacent vertical columns. Panel order on complex pages is provisional."""
     if not 0 < len(regions) <= MAX_REGIONS:
         raise ValueError("Expected 1–128 recognized text regions")
@@ -30,7 +30,7 @@ def group_regions(regions, manga):
         group = [regions.pop(0)]
         pending = []
         for candidate in regions:
-            if manga and any(adjacent_columns(candidate[0], item[0]) for item in group):
+            if (manga or traditional) and any(adjacent_columns(candidate[0], item[0]) for item in group):
                 group.append(candidate)
             else:
                 pending.append(candidate)
@@ -50,7 +50,10 @@ def group_regions(regions, manga):
         })
     groups.sort(key=lambda item: (
         min(bounds(p)[1] for p in item["polygons"]),
-        (-1 if manga else 1) * min(bounds(p)[0] for p in item["polygons"]),
+        (-1 if manga or (traditional and all(
+            (box[3] - box[1]) >= 2 * (box[2] - box[0])
+            for box in map(bounds, item["polygons"])
+        )) else 1) * min(bounds(p)[0] for p in item["polygons"]),
     ))
     return groups
 
@@ -163,7 +166,7 @@ def main():
     if len(data) > 1_000_000:
         raise ValueError("OCR input is too large")
     regions = json.loads(data)
-    grouped = regions if args.ordered else group_regions(regions, args.manga)
+    grouped = regions if args.ordered else group_regions(regions, args.manga, args.source == "zh-hant")
     result = translate(grouped, args.source, args.target, args.model, args.port)
     with args.output.open("x", encoding="utf-8") as output:
         json.dump(result, output, ensure_ascii=False, indent=2)

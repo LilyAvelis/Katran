@@ -52,7 +52,7 @@ fn decoded_page(bytes: &[u8]) -> Result<image::DynamicImage> {
     Ok(image)
 }
 
-fn png_page(bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn png_page(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut output = Cursor::new(Vec::new());
     decoded_page(bytes)?
         .write_to(&mut output, image::ImageFormat::Png)

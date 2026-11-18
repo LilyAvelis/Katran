@@ -24,7 +24,7 @@ Select an image BULL and run Upscale or Translate to process its pages in
 order. The command creates a new BULL and keeps the source collection.
 You can also run either command on a selection of loose images.
 
-**Translate** turns selected Japanese, Simplified Chinese and Korean images
+**Translate** turns selected Japanese, Simplified Chinese, Traditional Chinese and Korean images
 into English. The commands are independently bindable under Ctrl+K → AI
 Commands. A single PNG opens in QuickLook and is saved to Translate. A batch
 of 2–32 pages becomes one BULL in selection order. In Settings → AI → Image

@@ -147,7 +147,7 @@ impl Service {
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
             | "upscale_realesrgan_x4" => background.image_batch,
-            "translate_image_ja" | "translate_image_zh" | "translate_image_ko" => {
+            "translate_image_ja" | "translate_image_zh" | "translate_image_zh_hant" | "translate_image_ko" => {
                 background.image_batch
             }
             "search_image_google_lens" => background.image,

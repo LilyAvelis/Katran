@@ -139,10 +139,10 @@ def main():
             value = json.loads(line)
             if (not isinstance(value, dict) or set(value) != {"dir", "language"}
                     or not isinstance(value["dir"], str) or not Path(value["dir"]).is_absolute()
-                    or value["language"] not in ("ja", "zh", "ko")):
-                raise ValueError("worker request must contain an absolute dir and language ja, zh or ko")
+                    or value["language"] not in ("ja", "zh", "zh-hant", "ko")):
+                raise ValueError("worker request must contain an absolute dir and language ja, zh, zh-hant or ko")
             staging = Path(value["dir"])
-            language = value["language"]
+            language = {"zh-hant": "zh"}.get(value["language"], value["language"])
             if language == "ja":
                 if detector is None:
                     detector = load_detector(False, parser)

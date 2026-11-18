@@ -13,6 +13,7 @@ pub const DEFAULT_QUOTA: u64 = 2 * 1024 * 1024 * 1024;
 pub enum ImageTranslationSource {
     Japanese,
     Chinese,
+    TraditionalChinese,
     Korean,
 }
 
@@ -21,6 +22,7 @@ impl ImageTranslationSource {
         match self {
             Self::Japanese => "ja",
             Self::Chinese => "zh",
+            Self::TraditionalChinese => "zh-hant",
             Self::Korean => "ko",
         }
     }
