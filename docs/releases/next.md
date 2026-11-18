@@ -25,6 +25,8 @@ source regions to margin cards. Single-page output opens in QuickLook;
 multiple selected pages share one collection and a built-in page viewer.
 Failed pages in a partially translated input BULL keep their original images
 in place. The completion dialog shows which pages failed and why.
+It also shows skipped lettering regions by original page number. Both Chinese
+commands apply the same geometry-based vertical reading order.
 The viewer keeps its page frame stable and supports the same anchored zoom
 as image preview. Page turns retain the previous image without a loading
 label. BULL cards show a BK badge. Image translation settings
@@ -45,6 +47,9 @@ Ctrl+C in the BULL viewer copies the single displayed page at its stored
 resolution. It stays out of clipboard capture and the Images shelf.
 
 ### BULL and BS collections
+
+Reingesting Text or Links and unpacking portable collections resolve only
+visible shelf cards when deduplicating. Hidden members keep their ownership.
 
 Upscale and Translate can take one image BULL or an ordered selection of
 loose images. Both produce a separate BULL for batch inputs and retain the

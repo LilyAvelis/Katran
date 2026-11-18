@@ -25,6 +25,14 @@ and verification. See [development and agent map](../development.md).
 
 ## Session history and ownership
 
+Polly closed Astra's two P2 findings with Nemi on Text/Links identity and
+Fenna on batch translation feedback. Synthetic pack/reingest/unpack tests
+verify visible cards and retained ownership. A synthetic renderer receipt
+and a headless UI test cover successful pages with skipped lettering
+regions. Polly also verified both Chinese commands on the owner-supplied
+visible manga excerpt. The dense screen tone remained in the input. Both
+routes published a PNG with two rendered groups and zero skipped regions.
+
 For Traditional Chinese and partial translation, Fenna owned Settings and
 the result dialog. Polly wired the command, reused the Chinese Paddle
 recognizer, added vertical grouping and preserved failed BULL pages.

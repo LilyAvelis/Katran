@@ -168,3 +168,155 @@ fn text_bull_packages_exact_sources_and_copies_only_the_visible_entry() {
     assert_eq!(finish(&mut api, action())["items"], json!([ids[1], ids[0]]));
     assert_eq!(visible_texts(&mut api).as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn reingesting_packed_text_creates_a_visible_independent_event() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), katran::DEFAULT_QUOTA).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Text,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Text,
+        },
+    );
+    let ingest = |api: &mut Service, text: &str| {
+        call(
+            api,
+            Command::IngestText {
+                text: text.into(),
+                source: "synthetic".into(),
+            },
+        )["id"]
+            .as_i64()
+            .unwrap()
+    };
+    let first = ingest(&mut api, "Packed text A");
+    let second = ingest(&mut api, "Packed text B");
+    call(
+        &mut api,
+        Command::SetVisible {
+            ids: vec![first, second],
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: first,
+            mode: SelectionMode::Replace,
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: second,
+            mode: SelectionMode::Toggle,
+        },
+    );
+    let collection = finish(
+        &mut api,
+        Command::RunAction {
+            id: "create_image_collection".into(),
+        },
+    );
+    let collection_id = collection["event"]["id"].as_i64().unwrap();
+    let mut portable = Vec::new();
+    baloh_collection::text::write(
+        &mut portable,
+        &["Packed text A".into(), "Portable text C".into()],
+    )
+    .unwrap();
+    let fixture = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "portable.bull".into(),
+            source: "text_collection".into(),
+            bytes: portable,
+        },
+    );
+    let fixture_id = fixture["id"].as_i64().unwrap();
+    call(
+        &mut api,
+        Command::SetVisible {
+            ids: vec![fixture_id],
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: fixture_id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let portable_unpacked = finish(
+        &mut api,
+        Command::RunAction {
+            id: "create_image_collection".into(),
+        },
+    );
+    assert!(
+        !portable_unpacked["items"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(first))
+    );
+    let reingested = ingest(&mut api, "Packed text A");
+    assert!(
+        portable_unpacked["items"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(reingested))
+    );
+    assert_ne!(reingested, first);
+    assert_eq!(
+        ingest(&mut api, "Packed text A"),
+        reingested,
+        "visible dedup remains active"
+    );
+    let visible = visible_texts(&mut api);
+    let ids: Vec<_> = visible
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["id"].as_i64().unwrap())
+        .collect();
+    assert!(ids.contains(&collection_id));
+    assert!(ids.contains(&reingested));
+    assert!(!ids.contains(&first));
+    call(
+        &mut api,
+        Command::SetVisible {
+            ids: vec![collection_id],
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: collection_id,
+            mode: SelectionMode::Replace,
+        },
+    );
+    let unpacked = finish(
+        &mut api,
+        Command::RunAction {
+            id: "create_image_collection".into(),
+        },
+    );
+    let restored = unpacked["items"].as_array().unwrap();
+    assert!(restored.contains(&json!(first)));
+    assert!(restored.contains(&json!(second)));
+    let visible = visible_texts(&mut api);
+    let ids: Vec<_> = visible
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["id"].as_i64().unwrap())
+        .collect();
+    assert!(ids.contains(&first) && ids.contains(&reingested));
+}

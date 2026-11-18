@@ -31,6 +31,8 @@ loose multi-selection. Derived BULLs are independent cards, with no ownership
 of the source cards. Translate uses translation membership and Upscale uses
 the Images collection source. A partial BULL translation retains original
 pages in the failed positions and records their indices and stage errors.
+Successful translation pages carry render counts in their receipts, so the
+client can show skipped lettering regions separately from page failures.
 
 `CreateImageCollection` packs selected images, flattens selected BULLs into
 one ordered collection, or unpacks a single BULL on its shelf. It reuses the

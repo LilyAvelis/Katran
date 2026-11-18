@@ -1,7 +1,11 @@
 //! Ordered single-page jobs collected into one portable artifact.
 use crate::{
-    ApiError, Event, ImageTranslationSource, Result, domain_jobs::Cancellation,
-    image_translate::Session, media_service, origin::Origin, storage, translate_components,
+    ApiError, Event, ImageTranslationSource, Result,
+    domain_jobs::Cancellation,
+    image_translate::{RenderReport, Session},
+    media_service,
+    origin::Origin,
+    storage, translate_components,
 };
 use base64::Engine;
 use serde_json::{Value, json};
@@ -82,7 +86,10 @@ pub(crate) fn prepare(
                 numbered_only,
                 cancel,
             )?;
-            read_output(rendered.path())
+            Ok(RenderedPage {
+                png: read_output(rendered.path())?,
+                report: Some(rendered.report),
+            })
         },
     )?;
     prepared.receipt["translated"] = json!(prepared.included());
@@ -135,7 +142,10 @@ pub(crate) fn prepare_upscale(
                 operation.factor(),
                 cancel,
             )?;
-            read_output(output.path())
+            Ok(RenderedPage {
+                png: read_output(output.path())?,
+                report: None,
+            })
         },
     )?;
     prepared.receipt["upscaled"] = json!(prepared.included());
@@ -156,6 +166,11 @@ fn read_output(path: &Path) -> Result<Vec<u8>> {
 enum Page {
     File(Event),
     Embedded { bytes: Vec<u8>, already_png: bool },
+}
+
+struct RenderedPage {
+    png: Vec<u8>,
+    report: Option<RenderReport>,
 }
 
 fn read_bull(event: &Event) -> Result<Vec<Page>> {
@@ -185,7 +200,7 @@ fn transform(
     name: &str,
     source: &str,
     cancel: &Cancellation,
-    mut render: impl FnMut(&[u8]) -> Result<Vec<u8>>,
+    mut render: impl FnMut(&[u8]) -> Result<RenderedPage>,
 ) -> Result<Prepared> {
     cancel.check()?;
     let preserve_pages =
@@ -231,12 +246,12 @@ fn transform(
                 if let Some((event, stamp)) = &source {
                     check_stamp(event, stamp)?;
                 }
-                let png = render(&bytes)?;
-                let new_total = page_budget(bytes_count, png.len(), quota)?;
+                let page = render(&bytes)?;
+                let new_total = page_budget(bytes_count, page.png.len(), quota)?;
                 if let Some((event, stamp)) = &source {
                     check_stamp(event, stamp)?;
                 }
-                Ok((png, new_total, source))
+                Ok((page, new_total, source))
             })();
             if preserve_pages && rendered.is_err() {
                 fallback = Some((bytes, already_png));
@@ -245,14 +260,21 @@ fn transform(
         })();
         cancel.check()?;
         match result {
-            Ok((png, new_total, source)) => {
+            Ok((page, new_total, source)) => {
                 succeeded += 1;
                 bytes_count = new_total;
                 if let Some(source) = source {
                     validated_sources.push(source);
                 }
-                receipt.push(json!({"index":index, "ok":true, "page":included.len()}));
-                included.push(png);
+                let mut outcome = json!({"index":index, "ok":true, "page":included.len()});
+                if let Some(report) = page.report {
+                    outcome["rendered_blocks"] = json!(report.rendered);
+                    outcome["skipped_blocks"] = json!(report.skipped);
+                    outcome["fallback_blocks"] = json!(report.fallback);
+                    outcome["side_blocks"] = json!(report.side);
+                }
+                receipt.push(outcome);
+                included.push(page.png);
             }
             Err(error) => {
                 let mut outcome = json!({"index":index, "ok":false,
@@ -376,4 +398,81 @@ pub(crate) fn page(event: &Event, index: usize, cancel: &Cancellation) -> Result
     Ok(
         json!({"index":index,"count":pages.len(),"png":base64::engine::general_purpose::STANDARD.encode(output.into_inner())}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Command, Service,
+        domain_jobs::{DomainJobs, Lane},
+    };
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn batch_retains_render_report_without_marking_the_page_failed() {
+        let profile = tempfile::tempdir().unwrap();
+        let root = profile.path().to_owned();
+        let mut service = Service::open(&root, crate::DEFAULT_QUOTA).unwrap();
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 2)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let png = png.into_inner();
+        let mut archive = Vec::new();
+        baloh_collection::codec::write(&mut archive, &[png.clone(), png]).unwrap();
+        let source = service
+            .dispatch(Command::IngestBytes {
+                name: "fixture.bull".into(),
+                bytes: archive,
+                source: "synthetic".into(),
+            })
+            .unwrap();
+        let event = service.get(source["id"].as_i64().unwrap()).unwrap();
+        let (send, receive) = mpsc::channel();
+        let mut jobs = DomainJobs::<()>::new();
+        jobs.submit(Lane::ImageTranslate, move |cancel| {
+            let mut skipped = 3;
+            let prepared = transform(
+                Input::Bull(event),
+                &root,
+                crate::DEFAULT_QUOTA,
+                &[],
+                "translated.bull",
+                "image_translation_collection",
+                &cancel,
+                |bytes| {
+                    let report = RenderReport {
+                        rendered: 2,
+                        skipped,
+                        fallback: 1,
+                        side: 1,
+                        left_pad: 0,
+                    };
+                    skipped = 0;
+                    Ok(RenderedPage {
+                        png: bytes.to_vec(),
+                        report: Some(report),
+                    })
+                },
+            );
+            send.send(prepared).unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let prepared = receive
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.included(), 2);
+        assert_eq!(
+            prepared.receipt["pages"],
+            json!([
+                {"index":0,"ok":true,"page":0,"rendered_blocks":2,"skipped_blocks":3,
+                    "fallback_blocks":1,"side_blocks":1},
+                {"index":1,"ok":true,"page":1,"rendered_blocks":2,"skipped_blocks":0,
+                    "fallback_blocks":1,"side_blocks":1}
+            ])
+        );
+    }
 }

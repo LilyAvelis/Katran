@@ -73,6 +73,101 @@ fn bull_action(api: &mut Service) -> Value {
     )
 }
 
+#[test]
+fn reingesting_packed_link_creates_a_visible_independent_event() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), katran::DEFAULT_QUOTA).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Links,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Links,
+        },
+    );
+    let ingest = |api: &mut Service, url: &str| {
+        id(&call(
+            api,
+            Command::IngestLink {
+                url: url.into(),
+                source: "synthetic".into(),
+            },
+        ))
+    };
+    let first = ingest(&mut api, "https://example.test/packed-a");
+    let second = ingest(&mut api, "https://example.test/packed-b");
+    select(&mut api, &[first, second]);
+    let packed = bull_action(&mut api);
+    let collection_id = id(&packed["event"]);
+    let mut portable = Vec::new();
+    let links = [
+        "https://example.test/packed-a",
+        "https://example.test/portable-c",
+    ]
+    .map(|url| Link {
+        url: url.into(),
+        title: String::new(),
+        description: String::new(),
+        preview_png: None,
+    });
+    baloh_collection::links::write(&mut portable, &links).unwrap();
+    let fixture = call(
+        &mut api,
+        Command::IngestBytes {
+            name: "portable.bull".into(),
+            source: "link_collection".into(),
+            bytes: portable,
+        },
+    );
+    select(&mut api, &[id(&fixture)]);
+    let portable_unpacked = bull_action(&mut api);
+    assert!(
+        !portable_unpacked["items"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(first))
+    );
+    let reingested = ingest(&mut api, "https://example.test/packed-a");
+    assert!(
+        portable_unpacked["items"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(reingested))
+    );
+    assert_ne!(reingested, first);
+    assert_eq!(
+        ingest(&mut api, "https://example.test/packed-a"),
+        reingested,
+        "visible dedup remains active"
+    );
+    let visible = shelf(&mut api, ShelfTab::Links);
+    let ids: Vec<_> = visible["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(id)
+        .collect();
+    assert!(ids.contains(&collection_id) && ids.contains(&reingested));
+    assert!(!ids.contains(&first));
+    select(&mut api, &[collection_id]);
+    let unpacked = bull_action(&mut api);
+    let restored = unpacked["items"].as_array().unwrap();
+    assert!(restored.contains(&json!(first)) && restored.contains(&json!(second)));
+    let visible = shelf(&mut api, ShelfTab::Links);
+    let ids: Vec<_> = visible["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(id)
+        .collect();
+    assert!(ids.contains(&first) && ids.contains(&reingested));
+}
+
 #[derive(Clone, Default)]
 struct Sink(Arc<Mutex<Vec<String>>>);
 impl katran::text_fragments::ClipboardSink for Sink {

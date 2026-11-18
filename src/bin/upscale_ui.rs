@@ -71,37 +71,70 @@ fn partial_translation_failures(result: &Value) -> Vec<String> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|page| page["ok"] == false)
-        .map(|page| {
+        .filter_map(|page| {
             let number = page["index"].as_u64().and_then(|n| n.checked_add(1));
             let label = number
                 .map(|n| format!("{} {n}", tr("Страница", "Page")))
                 .unwrap_or_else(|| tr("Страница", "Page").into());
-            let message: String = page["error"]["message"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .unwrap_or(tr("Не удалось перевести", "Translation failed"))
-                .chars()
-                .take(512)
-                .collect();
-            let preserved = if page["preserved_original"] == true {
-                tr(" · оригинал сохранён", " · original preserved")
+            if page["ok"] == false {
+                let message: String = page["error"]["message"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(tr("Не удалось перевести", "Translation failed"))
+                    .chars()
+                    .take(512)
+                    .collect();
+                let preserved = if page["preserved_original"] == true {
+                    tr(" · оригинал сохранён", " · original preserved")
+                } else {
+                    ""
+                };
+                Some(format!(
+                    "{label}: {}: {message}{preserved}",
+                    tr("ошибка страницы", "page failed")
+                ))
+            } else if page["ok"] == true {
+                page["skipped_blocks"]
+                    .as_u64()
+                    .filter(|count| *count > 0)
+                    .map(|count| {
+                        format!(
+                            "{label}: {} {count}",
+                            tr("непереведённых областей:", "untranslated regions:")
+                        )
+                    })
             } else {
-                ""
-            };
-            format!("{label}: {message}{preserved}")
+                None
+            }
         })
         .collect()
 }
 
 fn translation_is_partial(result: &Value) -> bool {
-    result["pages"]
+    result["pages"].as_array().is_some_and(|pages| {
+        pages.iter().any(|page| {
+            page["ok"] == false
+                || (page["ok"] == true && page["skipped_blocks"].as_u64().is_some_and(|n| n > 0))
+        })
+    }) || result["translated"]
+        .as_u64()
+        .zip(result["total"].as_u64())
+        .is_some_and(|(done, total)| done < total)
+}
+
+fn partial_translation_status(result: &Value) -> String {
+    let translated = result["translated"].as_u64().unwrap_or(0);
+    let total = result["total"].as_u64().unwrap_or(0);
+    let saved = result["pages"]
         .as_array()
-        .is_some_and(|pages| pages.iter().any(|page| page["ok"] == false))
-        || result["translated"]
-            .as_u64()
-            .zip(result["total"].as_u64())
-            .is_some_and(|(done, total)| done < total)
+        .map(|pages| pages.iter().filter(|page| page["page"].is_u64()).count() as u64)
+        .unwrap_or(translated);
+    format!(
+        "{} {saved}/{total} · {} {translated}/{total} · {}",
+        tr("Сохранено страниц:", "Pages saved:"),
+        tr("Переведено:", "Translated:"),
+        tr("BULL сохранён в Translate", "BULL saved in Translate")
+    )
 }
 
 struct FilePage {
@@ -1422,13 +1455,7 @@ impl Shelf {
                         && result["collection"] == true
                         && translation_is_partial(result)
                     {
-                        let translated = result["translated"].as_u64().unwrap_or(0);
-                        let total = result["total"].as_u64().unwrap_or(0);
-                        self.upscale.status = format!(
-                            "{} {translated}/{total} · {}",
-                            tr("Переведено страниц:", "Pages translated:"),
-                            tr("BULL сохранён в Translate", "BULL saved in Translate")
-                        );
+                        self.upscale.status = partial_translation_status(result);
                         self.upscale.partial_translation = Some(PartialTranslation {
                             event: result["event"].clone(),
                             failures: partial_translation_failures(result),
@@ -1709,6 +1736,31 @@ mod tests {
         assert!(failures[0].contains("OCR failed"));
         assert!(!translation_is_partial(
             &serde_json::json!({"total":1,"translated":1,"pages":[{"index":0,"ok":true}]})
+        ));
+    }
+
+    #[test]
+    fn batch_skipped_regions_are_reported_separately_from_failed_pages() {
+        let result = serde_json::json!({"total":4,"translated":3,"pages":[
+            {"index":0,"ok":true,"page":0,"skipped_blocks":0},
+            {"index":1,"ok":true,"page":1,"skipped_blocks":5},
+            {"index":2,"ok":false,"page":2,"preserved_original":true,"error":{"message":"OCR failed"}},
+            {"index":3,"ok":true,"page":3,"skipped_blocks":0}
+        ]});
+        assert!(translation_is_partial(&result));
+        let lines = partial_translation_failures(&result);
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines[0].contains("2") && lines[0].contains("5") && !lines[0].contains("OCR failed")
+        );
+        assert!(lines[1].contains("3") && lines[1].contains("OCR failed"));
+        let status = partial_translation_status(&result);
+        assert!(status.contains("4/4") && status.contains("3/4"));
+        assert!(translation_is_partial(
+            &serde_json::json!({"total":1,"translated":1,"pages":[{"index":0,"page":0,"ok":true,"skipped_blocks":1}]})
+        ));
+        assert!(!translation_is_partial(
+            &serde_json::json!({"total":1,"translated":1,"pages":[{"index":0,"page":0,"ok":true,"skipped_blocks":0}]})
         ));
     }
 

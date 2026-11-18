@@ -44,8 +44,9 @@ translation backend and explicit optional component setup after the fixtures.
 Select an image and open Ctrl+K → AI Commands → Translate image from Japanese,
 Simplified Chinese, Traditional Chinese or Korean. Each action is independently
 rebindable. Both forms of Chinese use the installed `PP-OCRv5_server_rec`.
-Traditional Chinese uses its own translation prompt and groups adjacent
-vertical columns from right to left.
+Both Chinese routes use the same geometry to group adjacent vertical columns
+and read them from right to left. Horizontal lines keep their reading order.
+The commands retain separate translation prompts.
 Settings → AI → Image translation reports local availability by language and the English
 output language. Output is a separate, managed PNG in Translate. The renderer
 keeps text placements disjoint and uses readable spacing and a minimum font
@@ -76,6 +77,8 @@ in the Katran page viewer. The original BULL remains available, and even a
 BULL with one page produces a new BULL. A partially translated BULL keeps
 failed pages as originals at their existing positions and reports stage
 errors in the completion dialog. If every page fails, nothing is published.
+When a page saved successfully but some regions could not be lettered, the
+same dialog reports their count and the original page number separately.
 The separate QuickLook action uses its collection viewer when installed.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.

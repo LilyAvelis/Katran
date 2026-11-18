@@ -33,8 +33,11 @@ Keep one shared order, progress, cancellation and per-page error contract
 for loose multi-selection and BULL input.
 For a partially translated input BULL, retain the original image at each
 failed position. Keep the failure in the receipt and show it before preview.
-Both Chinese commands reuse the PP-OCRv5 Chinese recognizer. Traditional
-Chinese has an independent action and translation prompt.
+Both Chinese commands reuse the PP-OCRv5 Chinese recognizer and geometry-based
+vertical reading order. Traditional Chinese has an independent action and
+translation prompt. Batch receipts retain skipped-region counts on successful
+pages. Text and Link deduplication may share bytes with hidden BULL members
+but must use visible shelf identities for successful ingest and unpack.
 
 Keep one rebindable pack/unpack action. Loose files use image BULL for
 supported images, file BULL for a common file family, and BS for mixed files.
