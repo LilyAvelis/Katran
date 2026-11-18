@@ -13,6 +13,7 @@ pub(super) struct State {
     status: String,
     kind: ImageJob,
     collection: Option<Collection>,
+    collection_title: String,
     link_rename: Option<LinkRename>,
     progress: Option<(u64, u64)>,
 }
@@ -207,8 +208,10 @@ fn collection_modal_layer() -> egui::LayerId {
     )
 }
 
+const COLLECTION_INTRO: Duration = Duration::from_millis(300);
+
 fn collection_intro_transform(elapsed: Duration, center: egui::Pos2) -> egui::emath::TSTransform {
-    let t = (elapsed.as_secs_f32() / 0.3).clamp(0.0, 1.0);
+    let t = (elapsed.as_secs_f32() / COLLECTION_INTRO.as_secs_f32()).clamp(0.0, 1.0);
     let remaining = (1.0 - t).powi(3);
     let scale = 1.0 - 0.025 * remaining;
     egui::emath::TSTransform::new(
@@ -292,16 +295,25 @@ impl Shelf {
         }
     }
 
-    pub(super) fn open_translation_collection(
-        &mut self,
-        id: i64,
-        revision: String,
-        ctx: &egui::Context,
-    ) {
+    pub(super) fn open_translation_collection(&mut self, event: &Value, ctx: &egui::Context) {
+        let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
+            return;
+        };
+        let title = self
+            .events
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(id))
+            .and_then(|row| row["properties"]["display_name"].as_str())
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| event["name"].as_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(tr("Коллекция", "Collection"))
+            .to_owned();
         self.close_translation_collection(ctx);
+        self.upscale.collection_title = title;
         self.upscale.collection = Some(Collection {
             id,
-            revision,
+            revision: revision.into(),
             index: 0,
             count: None,
             pending: None,
@@ -730,11 +742,11 @@ impl Shelf {
             .then(|| self.collection_media_target())
             .flatten();
         let collection = self.upscale.collection.as_mut().unwrap();
+        let title = &self.upscale.collection_title;
         let edit = &mut self.upscale.link_rename;
         let mut previous = previous_key;
         let mut next = next_key;
         let mut close = close_key;
-        let mut open_file = false;
         let mut save_name = false;
         let mut cancel_rename = false;
         let canvas_size = collection_canvas_size(ctx.content_rect().size());
@@ -750,41 +762,88 @@ impl Shelf {
             0.0,
             egui::Color32::from_black_alpha(100),
         );
-        if elapsed < Duration::from_millis(300) {
+        let entering = elapsed < COLLECTION_INTRO;
+        if entering {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
         let dialog = egui::Modal::new(layer.id).backdrop_color(egui::Color32::TRANSPARENT);
         let modal = dialog.show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
-            ui.heading(tr("Коллекция", "Collection"));
-            ui.horizontal(|ui| {
-                previous |= ui
-                    .add_enabled(
-                        !editing && collection.index > 0,
-                        egui::Button::new(tr("Назад", "Previous")),
-                    )
-                    .clicked();
-                let shown = collection
-                    .ready_index
-                    .map(|n| (n + 1).to_string())
-                    .unwrap_or_else(|| "…".into());
-                let total = collection
-                    .count
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "…".into());
-                ui.add_sized(
-                    [90.0, ui.spacing().interact_size.y],
-                    egui::Label::new(format!("{shown} / {total}")),
+            let row_height = ui.spacing().interact_size.y.max(30.0);
+            let row_size = egui::vec2(canvas_size.x, row_height);
+            let (heading, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
+            let title_rect =
+                heading.shrink2(egui::vec2(row_height.min(heading.width() * 0.25), 0.0));
+            ui.place(
+                title_rect,
+                egui::Label::new(egui::RichText::new(title).heading())
+                    .halign(egui::Align::Center)
+                    .truncate(),
+            )
+            .on_hover_text(title);
+            let close_rect = egui::Rect::from_min_max(
+                heading.right_top() - egui::vec2(row_height.min(heading.width() * 0.25), 0.0),
+                heading.right_bottom(),
+            );
+            close |= ui
+                .place(
+                    close_rect,
+                    egui::Button::new("×").frame(false).sense(if editing {
+                        egui::Sense::hover()
+                    } else {
+                        egui::Sense::click()
+                    }),
+                )
+                .on_hover_text(tr("Закрыть · Space", "Close · Space"))
+                .clicked()
+                && !editing;
+
+            let (pager, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
+            let counter_width = (pager.width() * 0.4).min(72.0);
+            let button_width = (pager.width() * 0.25).min(row_height);
+            let offset = (counter_width + button_width) / 2.0
+                + ui.spacing().item_spacing.x.min(pager.width() * 0.05);
+            let nav = |ui: &mut egui::Ui, x, label, hint, enabled| {
+                let rect = egui::Rect::from_center_size(
+                    pager.center() + egui::vec2(x, 0.0),
+                    egui::vec2(button_width, row_height),
                 );
-                next |= ui
-                    .add_enabled(
-                        !editing && collection.count.is_some_and(|n| collection.index + 1 < n),
-                        egui::Button::new(tr("Далее", "Next")),
-                    )
-                    .clicked();
-                if collection.file.is_some() {
-                    open_file |= ui.button(tr("Открыть", "Open")).clicked();
-                }
+                ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                ))
+                .add_enabled(enabled, egui::Button::new(label))
+                .on_hover_text(hint)
+                .clicked()
+            };
+            previous |= nav(
+                ui,
+                -offset,
+                "←",
+                tr("Назад", "Previous"),
+                !editing && collection.index > 0,
+            );
+            let shown = collection
+                .ready_index
+                .map(|n| (n + 1).to_string())
+                .unwrap_or_else(|| "…".into());
+            let total = collection
+                .count
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "…".into());
+            let counter =
+                egui::Rect::from_center_size(pager.center(), egui::vec2(counter_width, row_height));
+            ui.place(
+                counter,
+                egui::Label::new(format!("{shown} / {total}")).halign(egui::Align::Center),
+            );
+            next |= nav(
+                ui,
+                offset,
+                "→",
+                tr("Далее", "Next"),
+                !editing && collection.count.is_some_and(|n| collection.index + 1 < n),
+            );
+            ui.vertical_centered(|ui| {
                 if let Some(link) = collection.link.as_ref().filter(|link| link.editable)
                     && !editing
                     && ui
@@ -802,9 +861,6 @@ impl Shelf {
                         error: String::new(),
                     });
                 }
-                close |= ui
-                    .add_enabled(!editing, egui::Button::new(tr("Закрыть", "Close")))
-                    .clicked();
             });
             if let Some(edit) = edit {
                 let idle = edit.job.is_none();
@@ -1058,7 +1114,10 @@ impl Shelf {
                     }
                 }
             }
-            if let Some(target) = media_target.as_ref()
+            // Prepare the page during the entrance. Start the decoder after
+            // the dialog reaches its final position.
+            if !entering
+                && let Some(target) = media_target.as_ref()
                 && let Some(api) = self.api.as_mut()
             {
                 self.media_preview
@@ -1090,9 +1149,6 @@ impl Shelf {
         });
         let current = collection.index;
         let count = collection.count;
-        if open_file && !self.overlay_ui.pending {
-            self.open_ready_collection_entry(ctx);
-        }
         if cancel_rename {
             self.upscale.link_rename = None;
         } else if save_name {
@@ -1179,6 +1235,7 @@ impl Shelf {
             job,
             preview_job: None,
             collection: None,
+            collection_title: String::new(),
             link_rename: None,
             progress: None,
             label,
@@ -1284,16 +1341,14 @@ impl Shelf {
                     {
                         self.upscale.open = false;
                         let event = &result["event"];
-                        if let (Some(id), Some(revision)) =
-                            (event["id"].as_i64(), event["revision"].as_str())
-                        {
+                        if event["id"].is_i64() && event["revision"].is_string() {
                             let total = result["total"].as_u64().unwrap_or(0);
                             let translated = result["translated"].as_u64().unwrap_or(0);
                             self.message = format!(
                                 "{} {translated}/{total}",
                                 tr("Сохранено страниц:", "Pages saved:")
                             );
-                            self.open_translation_collection(id, revision.to_owned(), ctx);
+                            self.open_translation_collection(event, ctx);
                         } else {
                             self.message = tr(
                                 "Коллекция сохранена, но её не удалось открыть.",
@@ -1432,9 +1487,9 @@ mod tests {
             source: "link_collection".into(),
             bytes,
         });
-        let id = event["id"].as_i64().unwrap();
         let revision = event["revision"].as_str().unwrap();
-        app.open_translation_collection(id, revision.into(), &ctx);
+        app.open_translation_collection(&event, &ctx);
+        assert_eq!(app.upscale.collection_title, "test.bull");
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while app.upscale.collection.as_ref().unwrap().pending.is_some() {
             assert!(std::time::Instant::now() < deadline);

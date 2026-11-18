@@ -2294,11 +2294,9 @@ impl Shelf {
             let interaction = self.call(Command::Interaction);
             if let Some(event_id) = interaction["cursor"].as_i64() {
                 let event = self.call(Command::Get { id: event_id });
-                if is_collection_preview(&event, event_id)
-                    && let Some(revision) = event["revision"].as_str()
-                {
+                if is_collection_preview(&event, event_id) && event["revision"].is_string() {
                     self.actions = false;
-                    self.open_translation_collection(event_id, revision.to_owned(), ctx);
+                    self.open_translation_collection(&event, ctx);
                     return;
                 }
             }

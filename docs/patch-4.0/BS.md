@@ -48,5 +48,8 @@ on disk and preserves its suffix.
 Folder and Files display the first entry's thumbnail or file-type icon.
 Video entries in file BULL and BS open directly in Katran's shared player.
 The viewer plays the current video page; changing pages stops the old clip.
-The collection viewer animates its entrance for 300 ms. During a video page
-turn it keeps the last frame until the next page is ready to display.
+The viewer centers the collection name and page controls. Space or the top-right
+close button dismisses it, and Alt+Enter opens the current entry.
+The first page prepares during the 300 ms entrance. The player opens once the
+entrance ends. During a video page turn the viewer keeps the last frame until
+the next page is ready to display.
