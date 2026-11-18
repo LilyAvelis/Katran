@@ -30,9 +30,10 @@ then publishes pixels through the owned clipboard path. It neither writes a
 shelf row nor ingests its own clipboard publication.
 
 The same collection jobs support the Links shelf with typed BULL v2 and reuse
-v15 membership and pin/tag state. `TranslationCollectionPage` returns one
-link record. `CopyCollectionPage` publishes its URL through the owned text
-Clipboard path. `OpenCollectionLink` sends the validated URL to the default
+v15 membership and pin/tag state. Pack snapshots custom display names as
+portable titles. `TranslationCollectionPage` also uses surviving member names
+for older local collections. `CopyCollectionPage` publishes its URL through
+the owned text Clipboard path. `OpenCollectionLink` sends the validated URL to the default
 browser. Packing commits the URL collection first and returns a detached
 `metadata_job_id`. Poll that job independently of the foreground workflow.
 `favicon_fetch` requests only public HTTPS HTML for missing titles/descriptions.

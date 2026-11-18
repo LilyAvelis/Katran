@@ -879,9 +879,14 @@ impl Service {
                     if !events.iter().all(packable) && !events.iter().all(managed) {
                         return Err(ApiError::new("invalid_selection", "Select loose items or collections of the same kind"));
                     }
+                    let link_titles = if tab == ShelfTab::Links {
+                        events.iter().map(|event| collection::link_titles(&self.db, event)).collect::<Result<Vec<_>>>()?
+                    } else {
+                        Vec::new()
+                    };
                     self.jobs.submit(Lane::Foreground, move |cancel| {
                         let packed = match tab {
-                            ShelfTab::Links => collection::pack_links(events, &root, quota, &references, &cancel),
+                            ShelfTab::Links => collection::pack_links(events.into_iter().zip(link_titles).collect(), &root, quota, &references, &cancel),
                             ShelfTab::Text => collection::pack_text(events, &root, quota, &references, &cancel),
                             ShelfTab::Files => {
                                 let kind = if managed(&events[0]) {
@@ -1577,11 +1582,16 @@ impl Service {
             Command::PreviewExternal { id } => return self.begin_preview_job(id),
             Command::TranslationCollectionPage { id, revision, index } => {
                 let event = self.saved_collection(id, &revision)?;
+                let display_name = if collection::is_link_collection(&event) {
+                    collection::link_titles(&self.db, &event)?.remove(&index)
+                } else {
+                    None
+                };
                 let root=self.root.clone();
                 let quota=self.quota;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let page = match collection_kind::probe(&event)? {
-                        collection_kind::Kind::Links => collection::link_page(&event,index,&cancel),
+                        collection_kind::Kind::Links => collection::link_page(&event,index,display_name.as_deref(),&cancel),
                         collection_kind::Kind::Text => collection::text_page(&event,index,&cancel),
                         collection_kind::Kind::Images => image_translation_batch::page(&event,index,&cancel),
                         _ => bs_collection::page(&event,index,&root,quota,&cancel),

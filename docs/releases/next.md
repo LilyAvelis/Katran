@@ -35,6 +35,8 @@ resolution. It stays out of clipboard capture and the Images shelf.
 
 Links uses portable BULL v2 for ordered URLs with saved titles, descriptions
 and optional previews. The same shelf action packs, merges and unpacks.
+Custom link names appear as titles and travel with newly packed collections.
+Existing local collections display names from their original shelf cards.
 Ctrl+C copies the visible URL and Alt+Enter opens it in the default browser.
 The current Windows QuickLook adapter supports image BULL v1. Katran's own
 viewer handles Links BULL v2.

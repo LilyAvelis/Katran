@@ -29,10 +29,13 @@ are UTF-8 with respective limits of 8 KiB, 4 KiB and 16 KiB. The preview is
 at most 2 MiB, with length zero representing an absent image. Empty title
 and description represent absent metadata. The file budget is 256 MiB.
 
-Packing selected Links writes and publishes the URLs locally. A separate job
-gets titles and descriptions for public HTTPS pages, then writes them into
-the same visible collection if its revision still matches. Saved previews
-stay in the file. Link enrichment makes no preview image requests. Viewing
+Packing selected Links writes the URLs and any custom card names into the
+portable file. Custom names take precedence as the displayed title. Existing
+local collections can recover those names from their original shelf records
+when viewed or merged. A separate job fills missing titles and descriptions
+for public HTTPS pages and saves them if the collection revision still
+matches. Saved previews stay in the file. Link enrichment makes no preview
+image requests. Viewing
 uses the saved bytes locally. Ctrl+C copies only
 the visible URL and bypasses clipboard capture. Alt+Enter opens that URL in
 the default browser. Copy the shelf card to send the whole BULL. The external
@@ -40,7 +43,7 @@ QuickLook adapter currently opens v1 image BULLs. Katran also browses Links
 and Text collections.
 
 The background HTML deadline is 7 seconds, independent of packing. Merge
-reuses stored metadata and may enrich entries with blank title and description.
+reuses stored metadata and may enrich entries with a blank title or description.
 A copy made before enrichment remains a valid independent snapshot. A later
 copy includes the metadata applied by then. Unpack or deletion takes precedence
 over a pending replacement. Incomplete enrichment leaves the URLs usable.

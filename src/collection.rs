@@ -9,6 +9,7 @@ use baloh_collection::{
 };
 use base64::Engine;
 use std::{
+    collections::BTreeMap,
     fs::File,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -16,6 +17,29 @@ use std::{
 
 pub(crate) const LINK_SOURCE: &str = "link_collection";
 pub(crate) const TEXT_SOURCE: &str = "text_collection";
+
+pub(crate) type LinkTitles = BTreeMap<usize, String>;
+
+pub(crate) fn link_titles(db: &rusqlite::Connection, event: &Event) -> Result<LinkTitles> {
+    if packable_link(event) {
+        return Ok(crate::pinned::properties(db, event.id)?
+            .display_name
+            .map(|name| (0, name))
+            .into_iter()
+            .collect());
+    }
+    if !is_link_collection(event) {
+        return Ok(LinkTitles::new());
+    }
+    let mut titles = db.prepare(
+        "SELECT m.position, p.display_name FROM bull_members m
+         JOIN katran_properties p ON p.event_id=m.member_id
+         WHERE m.collection_id=?1 AND p.display_name IS NOT NULL",
+    )?;
+    Ok(titles
+        .query_map([event.id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?)
+}
 
 pub(crate) fn is_link_collection(event: &Event) -> bool {
     is_typed_collection(event, LINK_SOURCE)
@@ -72,6 +96,7 @@ pub(crate) fn link_url(event: &Event, index: usize, cancel: &Cancellation) -> Re
 pub(crate) fn link_page(
     event: &Event,
     index: usize,
+    display_name: Option<&str>,
     cancel: &Cancellation,
 ) -> Result<serde_json::Value> {
     let (link, count) = link_at(event, index, cancel)?;
@@ -79,26 +104,33 @@ pub(crate) fn link_page(
         .preview_png
         .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
     Ok(serde_json::json!({ "index":index, "count":count, "link":{
-        "url":link.url, "title":link.title, "description":link.description, "preview_png":preview,
+        "url":link.url, "title":display_name.unwrap_or(&link.title), "description":link.description, "preview_png":preview,
     }}))
 }
 
 pub(crate) fn pack_links(
-    events: Vec<Event>,
+    events: Vec<(Event, LinkTitles)>,
     root: &Path,
     quota: u64,
     references: &[PathBuf],
     cancel: &Cancellation,
 ) -> Result<storage::CollectionPack> {
-    let merge = events.first().is_some_and(is_link_collection);
+    let merge = events
+        .first()
+        .is_some_and(|(event, _)| is_link_collection(event));
     let mut entries = Vec::with_capacity(events.len());
     let mut inputs = Vec::with_capacity(events.len());
-    for event in events {
+    for (event, titles) in events {
         cancel.check()?;
         let stamp = media_service::stamp(&event.path)?;
         let offset = entries.len();
         if merge {
-            entries.extend(read_links(&event)?);
+            for (index, mut entry) in read_links(&event)?.into_iter().enumerate() {
+                if let Some(title) = titles.get(&index) {
+                    entry.title.clone_from(title);
+                }
+                entries.push(entry);
+            }
         } else {
             let url = link_fragments::read_event(&event)?;
             if url.len() > links::MAX_URL_BYTES {
@@ -109,7 +141,7 @@ pub(crate) fn pack_links(
             }
             entries.push(Link {
                 url,
-                title: String::new(),
+                title: titles.into_values().next().unwrap_or_default(),
                 description: String::new(),
                 preview_png: None,
             });
@@ -196,7 +228,7 @@ fn enrich_links(
 ) -> bool {
     let pending: Vec<_> = entries
         .iter_mut()
-        .filter(|entry| entry.title.is_empty() && entry.description.is_empty())
+        .filter(|entry| entry.title.is_empty() || entry.description.is_empty())
         .collect();
     if pending.is_empty() {
         return false;
@@ -213,9 +245,14 @@ fn enrich_links(
                         break;
                     }
                     if let Some(metadata) = fetch(&link.url, deadline) {
-                        changed.store(true, std::sync::atomic::Ordering::Relaxed);
-                        link.title = metadata.title;
-                        link.description = metadata.description;
+                        if link.title.is_empty() && !metadata.title.is_empty() {
+                            link.title = metadata.title;
+                            changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        if link.description.is_empty() && !metadata.description.is_empty() {
+                            link.description = metadata.description;
+                            changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
                 }
             });
@@ -323,6 +360,16 @@ fn link_metadata_wait_does_not_block_pack_or_read_and_commits_in_place() {
         },
     );
     let id = item["id"].as_i64().unwrap();
+    let custom_name = "Saved subject";
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    call(
+        &mut api,
+        Command::SetPinnedProperties {
+            id,
+            display_name: Some(custom_name.into()),
+            opener: None,
+        },
+    );
     call(&mut api, Command::SetVisible { ids: vec![id] });
     call(
         &mut api,
@@ -377,7 +424,7 @@ fn link_metadata_wait_does_not_block_pack_or_read_and_commits_in_place() {
         finish(&mut api, JobId(page["job_id"].as_u64().unwrap()))["link"]["url"],
         url
     );
-    assert!(read_links(&event).unwrap()[0].title.is_empty());
+    assert_eq!(read_links(&event).unwrap()[0].title, custom_name);
 
     permit.send(event.clone()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -391,16 +438,44 @@ fn link_metadata_wait_does_not_block_pack_or_read_and_commits_in_place() {
     assert_eq!(receipt["link_metadata_updated"], true);
     let enriched = api.get(event.id).unwrap();
     assert_ne!(enriched.revision, event.revision);
-    let entries = read_links(&enriched).unwrap();
+    let mut entries = read_links(&enriched).unwrap();
     assert_eq!(
         (
             &entries[0].url[..],
             &entries[0].title[..],
             &entries[0].description[..]
         ),
-        (url, "Title", "Description")
+        (url, custom_name, "Description")
     );
     assert!(entries[0].preview_png.is_none());
+
+    // Reproduce a collection packed before custom names were saved to the file.
+    entries[0].title = "Website title".into();
+    let old_blob =
+        prepare_links(&entries, &event.name, &api.root, crate::DEFAULT_QUOTA, &[]).unwrap();
+    assert!(
+        storage::replace_link_collection_blob(
+            &mut api.db,
+            &api.root,
+            api.quota,
+            enriched.id,
+            &enriched.revision,
+            old_blob,
+        )
+        .unwrap()
+    );
+    let older = api.get(event.id).unwrap();
+    let page = call(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: older.id,
+            revision: older.revision,
+            index: 0,
+        },
+    );
+    let page = finish(&mut api, JobId(page["job_id"].as_u64().unwrap()));
+    assert_eq!(page["link"]["title"], custom_name);
+    assert_eq!(page["link"]["description"], "Description");
 }
 
 pub(crate) fn packable_text(event: &Event) -> bool {

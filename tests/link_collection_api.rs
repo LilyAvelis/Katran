@@ -125,6 +125,16 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
             ))
         })
         .collect();
+    let custom_name = "Мои заметки 🐳";
+    call(&mut api, Command::TogglePins { ids: vec![ids[0]] });
+    call(
+        &mut api,
+        Command::SetPinnedProperties {
+            id: ids[0],
+            display_name: Some(custom_name.into()),
+            opener: None,
+        },
+    );
     select(&mut api, &[ids[1], ids[0]]);
     assert!(
         call(&mut api, Command::Actions)
@@ -137,6 +147,15 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     let packed = &actual["event"];
     assert_eq!(actual["link_collection"], true);
     assert_eq!(actual["count"], 2);
+    let packed_page = finish(
+        &mut api,
+        Command::TranslationCollectionPage {
+            id: id(packed),
+            revision: packed["revision"].as_str().unwrap().to_owned(),
+            index: 1,
+        },
+    );
+    assert_eq!(packed_page["link"]["title"], custom_name);
     assert_eq!(
         shelf(&mut api, ShelfTab::Links)["events"]
             .as_array()
@@ -181,7 +200,9 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
         links::read(std::fs::File::open(card["path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(entries[0], rich);
     assert_eq!(entries[1].url, urls[1]);
+    assert!(entries[1].title.is_empty());
     assert_eq!(entries[2].url, urls[0]);
+    assert_eq!(entries[2].title, custom_name);
     let event: katran::Event = serde_json::from_value(card.clone()).unwrap();
     let whole = katran::copy_out::prepare_with_budget(
         &root.path().join("exports"),
@@ -252,6 +273,10 @@ fn links_pack_merge_browse_copy_one_open_one_and_unpack() {
     assert_eq!(
         &unpacked["items"].as_array().unwrap()[1..],
         &[json!(ids[1]), json!(ids[0])]
+    );
+    assert_eq!(
+        call(&mut api, Command::GetPinnedProperties { id: ids[0] })["properties"]["display_name"],
+        custom_name
     );
     assert_eq!(
         shelf(&mut api, ShelfTab::Links)["events"]
