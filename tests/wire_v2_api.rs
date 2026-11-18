@@ -205,3 +205,25 @@ fn tab_summon_decodes_lossless_window_identity() {
         _ => panic!("unexpected command"),
     }
 }
+
+#[test]
+fn video_actions_decode_optional_lossless_session() {
+    for command in ["capture_media_frame", "toggle_media_pause"] {
+        for session in [serde_json::Value::Null, json!(u64::MAX.to_string())] {
+            let request = wire_v2::decode(json!({"api_version":2,"request_id":"video","command":{"type":command,"session":session}})).unwrap();
+            let actual = match request.command {
+                katran::Command::CaptureMediaFrame { session }
+                | katran::Command::ToggleMediaPause { session } => session,
+                _ => panic!("unexpected command"),
+            };
+            assert_eq!(actual, (!session.is_null()).then_some(u64::MAX));
+        }
+        assert!(wire_v2::decode(json!({"api_version":2,"request_id":"video","command":{"type":command,"session":u64::MAX}})).is_err());
+        assert!(
+            wire_v2::decode(
+                json!({"api_version":2,"request_id":"video","command":{"type":command}})
+            )
+            .is_ok()
+        );
+    }
+}

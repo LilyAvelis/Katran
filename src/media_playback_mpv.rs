@@ -4,7 +4,10 @@
 mod gpu;
 use crate::{
     ApiError, Result,
-    media_playback::{Acceleration, Action, Backend, Frame, PlaybackState, Snapshot, Source},
+    media_playback::{
+        Acceleration, Action, Backend, CaptureTask, CapturedFrame, Frame, PlaybackState, Snapshot,
+        Source,
+    },
 };
 use libloading::{
     Library,
@@ -65,6 +68,35 @@ struct EndFile {
     reason: c_int,
     error: c_int,
 }
+#[repr(C)]
+struct Node {
+    value: NodeValue,
+    format: c_int,
+}
+#[repr(C)]
+union NodeValue {
+    integer: i64,
+    string: *const c_char,
+    list: *const NodeList,
+    bytes: *const ByteArray,
+}
+#[repr(C)]
+struct NodeList {
+    count: c_int,
+    values: *const Node,
+    keys: *const *const c_char,
+}
+#[repr(C)]
+struct ByteArray {
+    data: *const u8,
+    size: usize,
+}
+#[repr(C)]
+struct CommandResult {
+    result: Node,
+}
+const CAPTURE_REPLY: u64 = u64::MAX;
+const MAX_CAPTURE_BYTES: usize = 256 * 1024 * 1024;
 struct Api {
     create: unsafe extern "C" fn() -> Handle,
     initialize: unsafe extern "C" fn(Handle) -> c_int,
@@ -177,9 +209,12 @@ struct Shared {
     snapshot: Snapshot,
     frame: Option<Frame>,
     last_poll: Instant,
+    seek_pending: bool,
+    capture_pending: bool,
 }
 enum Command {
     Control(Action, SyncSender<std::result::Result<(), String>>),
+    Capture(SyncSender<Result<CapturedFrame>>),
     Close,
 }
 #[derive(Default)]
@@ -258,6 +293,8 @@ impl Backend for MpvBackend {
             },
             frame: None,
             last_poll: Instant::now(),
+            seek_pending: false,
+            capture_pending: false,
         }));
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::sync_channel(8);
@@ -288,6 +325,20 @@ impl Backend for MpvBackend {
         if let Some(s) = &self.shared {
             let mut s = s.lock().map_err(|e| err("media_unavailable", e))?;
             s.last_poll = Instant::now();
+            if s.capture_pending
+                && matches!(
+                    action,
+                    Action::StepFrame { .. } | Action::Play | Action::Seek { .. }
+                )
+            {
+                return Err(err("media_capture_busy", "A frame capture is in progress"));
+            }
+            if s.seek_pending && matches!(action, Action::StepFrame { .. }) {
+                return Err(err(
+                    "media_seek_busy",
+                    "Wait for the current seek to finish",
+                ));
+            }
             if s.snapshot.step_pending
                 && matches!(
                     action,
@@ -309,6 +360,10 @@ impl Backend for MpvBackend {
             Ok(Err(e)) if e == "media_step_busy" => {
                 Err(err("media_step_busy", "A frame step is already pending"))
             }
+            Ok(Err(e)) if e == "media_seek_busy" => Err(err(
+                "media_seek_busy",
+                "Wait for the current seek to finish",
+            )),
             Ok(Err(e)) => Err(err("media_control_failed", e)),
             Err(e) => {
                 let shared = self.shared.clone();
@@ -331,6 +386,9 @@ impl Backend for MpvBackend {
             }
             None => Ok(empty()),
         }
+    }
+    fn request_capture(&mut self) -> Result<Box<dyn CaptureTask>> {
+        Ok(Box::new(self.request_capture_inner()?))
     }
     fn frame(&mut self, after_serial: u64) -> Result<Option<Frame>> {
         match &self.shared {
@@ -357,6 +415,82 @@ impl Backend for MpvBackend {
             let _ = w.join();
         }
         self.shared = None;
+    }
+}
+impl MpvBackend {
+    fn request_capture_inner(&mut self) -> Result<PendingCapture> {
+        let shared = self
+            .shared
+            .as_ref()
+            .ok_or_else(|| err("media_stopped", "No active playback"))?;
+        let mut s = shared.lock().map_err(|e| err("media_unavailable", e))?;
+        if !matches!(
+            s.snapshot.state,
+            PlaybackState::Paused | PlaybackState::Ended
+        ) {
+            return Err(err(
+                "media_capture_requires_pause",
+                "Pause the video before capturing its frame",
+            ));
+        }
+        if s.snapshot.step_pending || s.seek_pending || s.capture_pending {
+            return Err(err(
+                "media_capture_busy",
+                "Wait for the current video operation to finish",
+            ));
+        }
+        let pixels = u64::from(s.snapshot.width) * u64::from(s.snapshot.height);
+        if s.frame.is_none() || pixels == 0 || pixels > MAX_CAPTURE_BYTES as u64 / 4 {
+            return Err(err(
+                "media_capture_unavailable",
+                "Video frame unavailable or exceeds the capture limit",
+            ));
+        }
+        let tx = self
+            .tx
+            .as_ref()
+            .ok_or_else(|| err("media_stopped", "No active playback"))?;
+        let (reply, receiver) = mpsc::sync_channel(1);
+        s.capture_pending = true;
+        if tx.try_send(Command::Capture(reply)).is_err() {
+            s.capture_pending = false;
+            return Err(err("media_busy", "Playback worker is busy or stopped"));
+        }
+        Ok(PendingCapture { receiver })
+    }
+}
+struct PendingCapture {
+    receiver: Receiver<Result<CapturedFrame>>,
+}
+impl CaptureTask for PendingCapture {
+    fn wait(self: Box<Self>, cancel: &crate::domain_jobs::Cancellation) -> Result<CapturedFrame> {
+        let until = Instant::now() + Duration::from_secs(15);
+        loop {
+            cancel.check()?;
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(err(
+                    "media_capture_timeout",
+                    "Video frame capture timed out",
+                ));
+            }
+            match self
+                .receiver
+                .recv_timeout(remaining.min(Duration::from_millis(50)))
+            {
+                Ok(result) => {
+                    cancel.check()?;
+                    return result;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(err(
+                        "media_capture_cancelled",
+                        "Video capture was interrupted",
+                    ));
+                }
+            }
+        }
     }
 }
 impl Drop for MpvBackend {
@@ -391,13 +525,120 @@ unsafe extern "C" fn render_notify(data: Handle) {
     }
 }
 fn issue(api: &Api, handle: Handle, parts: &[&str]) -> std::result::Result<(), String> {
+    issue_id(api, handle, 1, parts)
+}
+fn issue_id(api: &Api, handle: Handle, id: u64, parts: &[&str]) -> std::result::Result<(), String> {
     let args: Vec<CString> = parts
         .iter()
         .map(|s| CString::new(*s).map_err(|e| e.to_string()))
         .collect::<std::result::Result<_, _>>()?;
     let mut ptrs: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
     ptrs.push(std::ptr::null());
-    api.check(unsafe { (api.command)(handle, 1, ptrs.as_ptr()) })
+    api.check(unsafe { (api.command)(handle, id, ptrs.as_ptr()) })
+}
+// mpv owns node pointers until the next wait_event; validate all sizes and copy now.
+unsafe fn decode_capture(event: &Event, position_ms: u64) -> Result<CapturedFrame> {
+    if event.data.is_null() {
+        return Err(err(
+            "media_capture_failed",
+            "Video engine returned no frame",
+        ));
+    }
+    let result = unsafe { &*event.data.cast::<CommandResult>() };
+    if result.result.format != 8 {
+        return Err(err("media_capture_failed", "Invalid video frame result"));
+    }
+    let list = unsafe { result.result.value.list };
+    if list.is_null() {
+        return Err(err("media_capture_failed", "Invalid video frame map"));
+    }
+    let list = unsafe { &*list };
+    if list.count < 0 || list.count > 32 || list.values.is_null() || list.keys.is_null() {
+        return Err(err("media_capture_failed", "Invalid video frame fields"));
+    }
+    let mut width = None;
+    let mut height = None;
+    let mut stride = None;
+    let mut format = None;
+    let mut bytes = None;
+    for i in 0..list.count as usize {
+        let key = unsafe { *list.keys.add(i) };
+        if key.is_null() {
+            return Err(err("media_capture_failed", "Invalid video frame key"));
+        }
+        let key = unsafe { CStr::from_ptr(key) }.to_bytes();
+        let node = unsafe { &*list.values.add(i) };
+        match (key, node.format) {
+            (b"w", 4) => width = Some(unsafe { node.value.integer }),
+            (b"h", 4) => height = Some(unsafe { node.value.integer }),
+            (b"stride", 4) => stride = Some(unsafe { node.value.integer }),
+            (b"format", 1) => {
+                let p = unsafe { node.value.string };
+                if !p.is_null() {
+                    format = Some(unsafe { CStr::from_ptr(p) }.to_bytes() == b"rgba")
+                }
+            }
+            (b"data", 9) => {
+                let p = unsafe { node.value.bytes };
+                if !p.is_null() {
+                    bytes = Some(unsafe { &*p })
+                }
+            }
+            _ => {}
+        }
+    }
+    let (w, h, stride) = (width.unwrap_or(0), height.unwrap_or(0), stride.unwrap_or(0));
+    if w <= 0
+        || h <= 0
+        || w > u32::MAX as i64
+        || h > u32::MAX as i64
+        || stride <= 0
+        || format != Some(true)
+    {
+        return Err(err(
+            "media_capture_failed",
+            "Unsupported video frame layout",
+        ));
+    }
+    let (w, h, stride) = (w as usize, h as usize, stride as usize);
+    let row = w
+        .checked_mul(4)
+        .ok_or_else(|| err("media_capture_failed", "Video frame size overflow"))?;
+    let output = row
+        .checked_mul(h)
+        .filter(|n| *n <= MAX_CAPTURE_BYTES)
+        .ok_or_else(|| err("media_capture_failed", "Video frame exceeds capture limit"))?;
+    let required = stride
+        .checked_mul(h - 1)
+        .and_then(|n| n.checked_add(row))
+        .filter(|n| *n <= MAX_CAPTURE_BYTES)
+        .ok_or_else(|| {
+            err(
+                "media_capture_failed",
+                "Video frame stride exceeds capture limit",
+            )
+        })?;
+    let bytes = bytes.ok_or_else(|| err("media_capture_failed", "Video frame data missing"))?;
+    if stride < row
+        || bytes.data.is_null()
+        || bytes.size < required
+        || bytes.size > MAX_CAPTURE_BYTES
+    {
+        return Err(err("media_capture_failed", "Invalid video frame data"));
+    }
+    let mut rgba = Vec::new();
+    rgba.try_reserve_exact(output)
+        .map_err(|_| err("media_capture_failed", "Not enough memory for video frame"))?;
+    for y in 0..h {
+        let row = unsafe { std::slice::from_raw_parts(bytes.data.add(y * stride), row) };
+        rgba.extend_from_slice(row)
+    }
+    Ok(CapturedFrame {
+        width: w as u32,
+        height: h as u32,
+        rgba,
+        position_ms,
+    })
 }
 struct PendingStep {
     backwards: bool,
@@ -426,6 +667,8 @@ fn run(
     if let Ok(mut s) = shared.lock() {
         s.frame = None;
         s.snapshot.step_pending = false;
+        s.capture_pending = false;
+        s.seek_pending = false;
         match result {
             Ok(()) => {
                 s.snapshot.state = PlaybackState::Stopped;
@@ -592,6 +835,9 @@ fn worker(
         let mut ended = false;
         let mut frame_pending = false;
         let mut step: Option<PendingStep> = None;
+        let mut seeking: Option<(Instant, bool, Option<u64>)> = None;
+        let mut deferred_seek: Option<u64> = None;
+        let mut capture: Option<(SyncSender<Result<CapturedFrame>>, u64, Instant)> = None;
         while !cancel.load(Ordering::Acquire) {
             let expired = shared
                 .lock()
@@ -605,8 +851,42 @@ fn worker(
             if expired {
                 break;
             }
+            if seeking
+                .as_ref()
+                .is_some_and(|(started, _, _)| started.elapsed() > Duration::from_secs(5))
+            {
+                return Err("Video seek did not complete".into());
+            }
+            if capture
+                .as_ref()
+                .is_some_and(|(_, _, started)| started.elapsed() > Duration::from_secs(15))
+            {
+                return Err("Video frame capture did not complete".into());
+            }
             match rx.recv_timeout(Duration::from_millis(if step.is_some() { 4 } else { 12 })) {
                 Ok(Command::Close) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Ok(Command::Capture(reply)) => {
+                    let position = shared
+                        .lock()
+                        .map_err(|_| "Playback state unavailable")?
+                        .snapshot
+                        .position_ms;
+                    match issue_id(
+                        &core.api,
+                        handle,
+                        CAPTURE_REPLY,
+                        &["screenshot-raw", "video", "rgba"],
+                    ) {
+                        Ok(()) => capture = Some((reply, position, Instant::now())),
+                        Err(e) => {
+                            let _ = reply.send(Err(err("media_capture_failed", e)));
+                            shared
+                                .lock()
+                                .map_err(|_| "Playback state unavailable")?
+                                .capture_pending = false;
+                        }
+                    }
+                }
                 Ok(Command::Control(action, reply)) => {
                     let result = match action {
                         Action::Play if step.is_some() => Err("media_step_busy".into()),
@@ -635,15 +915,37 @@ fn worker(
                         }
                         Action::Play => issue(&core.api, handle, &["set", "pause", "no"]),
                         Action::Pause => issue(&core.api, handle, &["set", "pause", "yes"]),
-                        Action::Seek { position_ms } => issue(
-                            &core.api,
-                            handle,
-                            &[
-                                "seek",
-                                &(position_ms as f64 / 1000.0).to_string(),
-                                "absolute+exact",
-                            ],
-                        ),
+                        Action::Seek { position_ms } => {
+                            let current = shared
+                                .lock()
+                                .map_err(|_| "Playback state unavailable")?
+                                .snapshot
+                                .position_ms;
+                            if seeking.is_some() {
+                                deferred_seek = Some(position_ms);
+                                Ok(())
+                            } else if paused && position_ms == current {
+                                Ok(())
+                            } else {
+                                let result = issue(
+                                    &core.api,
+                                    handle,
+                                    &[
+                                        "seek",
+                                        &(position_ms as f64 / 1000.0).to_string(),
+                                        "absolute+exact",
+                                    ],
+                                );
+                                if result.is_ok() {
+                                    seeking = Some((Instant::now(), false, None));
+                                    shared
+                                        .lock()
+                                        .map_err(|_| "Playback state unavailable")?
+                                        .seek_pending = true;
+                                }
+                                result
+                            }
+                        }
                         Action::SetVolume { volume } => issue(
                             &core.api,
                             handle,
@@ -665,6 +967,34 @@ fn worker(
                 }
                 if event.id == 24 {
                     return Err("Video engine event queue overflow".into());
+                }
+                if event.id == 20
+                    && let Some((_, seen, _)) = seeking.as_mut()
+                {
+                    *seen = true;
+                }
+                if event.id == 21
+                    && let Some((_, true, restarted)) = seeking.as_mut()
+                {
+                    *restarted = Some(serial);
+                }
+                if event.id == 5 && event.userdata == CAPTURE_REPLY {
+                    if let Some((reply, position, _)) = capture.take() {
+                        let result = if event.error < 0 {
+                            Err(err(
+                                "media_capture_failed",
+                                core.api.check(event.error).unwrap_err(),
+                            ))
+                        } else {
+                            decode_capture(event, position)
+                        };
+                        let _ = reply.send(result);
+                        shared
+                            .lock()
+                            .map_err(|_| "Playback state unavailable")?
+                            .capture_pending = false;
+                    }
+                    continue;
                 }
                 if event.id == 5 && event.error < 0 {
                     return Err(format!(
@@ -757,6 +1087,33 @@ fn worker(
                 };
                 (s.snapshot.width, s.snapshot.height)
             };
+            if seeking.as_ref().is_some_and(|(_, _, restart_serial)| {
+                restart_serial.is_some_and(|before| serial > before)
+            }) {
+                let current = shared
+                    .lock()
+                    .map_err(|_| "Playback state unavailable")?
+                    .snapshot
+                    .position_ms;
+                if let Some(target) = deferred_seek.take().filter(|target| *target != current) {
+                    issue(
+                        &core.api,
+                        handle,
+                        &[
+                            "seek",
+                            &(target as f64 / 1000.0).to_string(),
+                            "absolute+exact",
+                        ],
+                    )?;
+                    seeking = Some((Instant::now(), false, None));
+                } else {
+                    seeking = None;
+                    shared
+                        .lock()
+                        .map_err(|_| "Playback state unavailable")?
+                        .seek_pending = false;
+                }
+            }
             if let Some(pending) = step.as_mut() {
                 if pending.start_ms.is_none() && paused {
                     let mut s = shared.lock().map_err(|_| "Playback state unavailable")?;
@@ -889,6 +1246,121 @@ fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires full-resolution synthetic fixture and real GPU"]
+    fn synthetic_mpv_current_frame_capture() {
+        let source = PathBuf::from(
+            std::env::var_os("KATRAN_MEDIA_FULLRES_MP4").expect("synthetic fullres fixture"),
+        );
+        let target = std::fs::canonicalize("target").unwrap();
+        let source = std::fs::canonicalize(source).unwrap();
+        assert!(source.starts_with(&target));
+        let temp = tempfile::tempdir_in(&target).unwrap();
+        let path = temp.path().join("Полный кадр.mp4");
+        std::fs::copy(source, path.clone()).unwrap();
+        for use_gpu in [false, true] {
+            let mut backend = MpvBackend::with_gpu(use_gpu);
+            backend.open(Source { path: path.clone() }).unwrap();
+            backend.control(Action::SetVolume { volume: 0.0 }).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.duration_ms.is_some() && s.width > 0,
+                "capture metadata",
+            );
+            backend.control(Action::Play).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Playing && s.position_ms > 200,
+                "capture playing",
+            );
+            assert_eq!(
+                backend.request_capture_inner().err().unwrap().code,
+                "media_capture_requires_pause"
+            );
+            backend.control(Action::Pause).unwrap();
+            wait_for(
+                &mut backend,
+                |s| s.state == PlaybackState::Paused,
+                "capture pause",
+            );
+            for position_ms in [1000, 2000, 1500] {
+                backend.control(Action::Seek { position_ms }).unwrap();
+            }
+            let deadline = Instant::now() + Duration::from_secs(12);
+            loop {
+                let s = backend.snapshot().unwrap();
+                assert_ne!(s.state, PlaybackState::Error, "{:?}", s.error);
+                let pending = backend
+                    .shared
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .seek_pending;
+                if !pending {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "seek timeout: {s:?}");
+                thread::sleep(Duration::from_millis(20));
+            }
+            let before = backend.snapshot().unwrap();
+            assert!(
+                (1400..=1600).contains(&before.position_ms),
+                "latest coalesced seek: {before:?}"
+            );
+            let received = backend
+                .request_capture_inner()
+                .unwrap()
+                .receiver
+                .recv_timeout(Duration::from_secs(15))
+                .unwrap()
+                .unwrap();
+            assert_eq!((received.width, received.height), (1920, 1080));
+            assert_eq!(received.rgba.len(), 1920 * 1080 * 4);
+            assert_eq!(received.position_ms, before.position_ms);
+            let preview = backend.frame(0).unwrap().unwrap();
+            assert!(preview.width <= 1280);
+            let wait = Instant::now() + Duration::from_secs(2);
+            while backend
+                .shared
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .capture_pending
+            {
+                assert!(Instant::now() < wait);
+                thread::sleep(Duration::from_millis(5));
+            }
+            backend
+                .control(Action::StepFrame { backwards: false })
+                .unwrap();
+            wait_for(&mut backend, |s| !s.step_pending, "capture step");
+            let after = backend.snapshot().unwrap();
+            assert!(after.position_ms > before.position_ms);
+            let next = backend
+                .request_capture_inner()
+                .unwrap()
+                .receiver
+                .recv_timeout(Duration::from_secs(15))
+                .unwrap()
+                .unwrap();
+            assert_eq!((next.width, next.height), (1920, 1080));
+            assert_eq!(next.position_ms, after.position_ms);
+            assert_ne!(
+                received.rgba, next.rgba,
+                "captured frame did not change after step"
+            );
+            let accel = after.acceleration.unwrap();
+            assert_eq!(
+                accel.renderer,
+                if use_gpu { "gpu" } else { "cpu" },
+                "{:?}",
+                accel.fallback_reason
+            );
+            backend.close();
+        }
+    }
     #[test]
     #[ignore = "requires 24fps synthetic fixture and real GPU"]
     fn synthetic_mpv_frame_steps() {

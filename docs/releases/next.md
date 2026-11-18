@@ -200,3 +200,13 @@ installed editions. Final integrated validation and release remain open.
 - Desktop background Actions now recognize managed files by their actual path even when their saved display name has no extension. Desktop browsing and selection read bounded metadata rather than decoding and hashing every stored image on each request; applying or deleting still validates content.
 - Desktop now supports durable pins, pinned filtering/order and tag slots. Managed backgrounds also follow the shared multi-object copy, drag-out and Folder transfer paths; an unpinned inactive copy can move to Folder, while pinned or active copies remain in Desktop and are copied. Applying a background still requires exactly one selected image or video.
 - Avilon actions now includes host-neutral command palette filtering/selection and stable-ID navigation over a visible list, extracted from the local Telegram Glass experiment. Katran and Telegram UI adapters are unchanged; this does not alter the 3.4.1 binary.
+
+## Local Video actions / extract frame · 2026-11-18
+
+Owner accepted the Alt-step panel stability fix. Ctrl+K now offers contextual
+Video commands: rebindable Pause/Resume (default P), and Extract current frame
+(no default). On a ready paused/ended video, capture saves a source-size PNG in
+Images and copies actual image pixels without changing the current preview.
+Clipboard failure preserves Images and reports partial success. Normal managed
+storage/copy_out and immutable session/source guards are reused; no schema
+migration or new public release. See the video contract and verification ledger.

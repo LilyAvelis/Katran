@@ -54,6 +54,13 @@ fn command(value: &mut Value) -> Result<(), String> {
         .ok_or("Expected command type")?
         .to_owned();
     match kind.as_str() {
+        "capture_media_frame" | "toggle_media_pause" => {
+            if let Some(value) = object.get_mut("session")
+                && !value.is_null()
+            {
+                unsigned_id(value)?;
+            }
+        }
         "control_media" | "media_frame" => {
             if let Some(value) = object.get_mut("session") {
                 unsigned_id(value)?;

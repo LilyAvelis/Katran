@@ -68,6 +68,15 @@ pub struct Frame {
     pub height: u32,
     pub rgba: Vec<u8>,
 }
+pub struct CapturedFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub position_ms: u64,
+}
+pub trait CaptureTask: Send {
+    fn wait(self: Box<Self>, cancel: &crate::domain_jobs::Cancellation) -> Result<CapturedFrame>;
+}
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Session {
     pub token: u64,
@@ -83,6 +92,12 @@ pub trait Backend: Send {
     fn snapshot(&mut self) -> Result<Snapshot>;
     fn frame(&mut self, after_serial: u64) -> Result<Option<Frame>>;
     fn close(&mut self);
+    fn request_capture(&mut self) -> Result<Box<dyn CaptureTask>> {
+        Err(ApiError::new(
+            "media_capture_unsupported",
+            "Frame capture is unavailable for this backend",
+        ))
+    }
 }
 
 /// Explicit unsupported platform; constructing it has no side effects.
@@ -256,6 +271,10 @@ impl Player {
         }
         self.backend.control(action)?;
         self.state()
+    }
+    pub fn request_capture(&mut self, token: u64) -> Result<Box<dyn CaptureTask>> {
+        self.require(token)?;
+        self.backend.request_capture()
     }
     pub fn frame(&mut self, token: u64, after_serial: u64) -> Result<Option<Frame>> {
         self.require(token)?;

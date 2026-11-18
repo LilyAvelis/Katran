@@ -1,5 +1,15 @@
 # Developer and agent entry point
 
+Current-frame capture: media_capture.rs prepares source-resolution RGBA/PNG in a
+background job; media_service.rs owns immutable capture leases and normal image
+Clipboard publication; jobs_service.rs commits through managed storage, then
+continues the same job for copy_out preparation. MediaCapture uses screenshot-raw
+on the existing MPV decoder, never the bounded UI texture. Native seek completion
+is fenced by seek/restart/new frame, and repeated seek requests coalesce to the
+latest target before capture is allowed. Contextual Actions expose enabled/reason
+metadata; the existing shortcut recorder owns both video actions, including P.
+No catalogue schema change; see [capture contract](video-preview.md).
+
 Native video preview is API-first: `media_playback.rs` owns session/control/frame
 policy, `media_service.rs` binds source revisions and active preview context,
 and `media_playback_mpv.rs` owns libmpv audio/frame lifecycle. The first Windows

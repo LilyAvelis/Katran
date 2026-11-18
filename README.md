@@ -1,5 +1,10 @@
 # Katran
 
+Local video Actions: Ctrl+K → Video offers Pause/Resume (P by default,
+rebindable) and Extract current frame. Pause the video first: the source-size
+PNG goes to Images and the image is copied to Clipboard without leaving playback.
+If copying fails, the saved image is retained and the message explains the failure.
+
 Local follow-up: [video with sound](docs/video-preview.md) inside Space preview
 and Mini stream, with Play/Pause, seeking and volume overlaid on the video.
 Space starts playback immediately; Mini stream waits for Play. Closing or changing

@@ -18,6 +18,21 @@ mod folder_page_tests {
     }
 
     #[test]
+    fn frame_capture_result_preserves_video_context_and_reports_clipboard_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.state = serde_json::json!({"tab":"folder","view":"details","cursor":7,"preview":7});
+        let before = app.state.clone();
+        let event = serde_json::json!({"id":99});
+        app.apply_job_reply(serde_json::json!({"ok":true,"result":{"event":event,"width":1920,"height":1080,"position_ms":123,"clipboard":{"ok":false,"error":{"message":"synthetic failure"},"warnings":[]}}}), false);
+        assert_eq!(app.state, before);
+        assert!(app.message.contains("synthetic failure"));
+        app.apply_job_reply(serde_json::json!({"ok":true,"result":{"event":{"id":99},"width":1920,"height":1080,"position_ms":123,"clipboard":{"ok":true,"error":null,"warnings":[]}}}), false);
+        assert_eq!(app.state, before);
+        assert!(!app.message.contains("synthetic failure"));
+    }
+
+    #[test]
     fn checked_style_update_retains_loaded_page_and_rebuilds_cursor_on_demand() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
@@ -1454,6 +1469,32 @@ impl Shelf {
             return;
         }
         let result = &reply["result"];
+        if !capture
+            && result.get("event").is_some()
+            && result.get("width").is_some()
+            && result.get("clipboard").is_some()
+        {
+            self.message = if result["clipboard"]["ok"] == true {
+                tr(
+                    "Кадр сохранён в Images и скопирован",
+                    "Frame saved to Images and copied",
+                )
+                .into()
+            } else {
+                let error = result["clipboard"]["error"]["message"]
+                    .as_str()
+                    .or_else(|| result["clipboard"]["error"].as_str())
+                    .unwrap_or(tr("ошибка буфера обмена", "clipboard error"));
+                format!(
+                    "{}: {error}",
+                    tr(
+                        "Кадр сохранён в Images, но не скопирован",
+                        "Frame saved to Images but not copied"
+                    )
+                )
+            };
+            return;
+        }
         if result["backend"] == "quicklook" {
             self.action_result(result.clone());
             self.state = self.call(Command::Interaction);
@@ -1956,6 +1997,19 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "video_pause" {
+            self.call(Command::RunAction { id });
+            self.actions = false;
+            ctx.request_repaint();
+            return;
+        }
+        if id == "capture_video_frame" {
+            if self.start_job(Command::RunAction { id }, false, ctx.clone()) {
+                self.actions = false;
+                self.message = tr("Сохранение кадра…", "Saving frame…").into();
+            }
+            return;
+        }
         if id == "search_with_ai" {
             if self.state["tab"] == "pods"
                 && self.state["emoji_catalogue"] == true

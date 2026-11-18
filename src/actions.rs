@@ -27,6 +27,8 @@ pub fn palette_order(id: &str) -> usize {
         "reveal",
         "save",
         "delete",
+        "video_pause",
+        "capture_video_frame",
         "transfer_copy",
         "transfer_selection",
         "add_to_katran",
@@ -63,6 +65,7 @@ pub fn palette_order(id: &str) -> usize {
 
 pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
     match id {
+        "video_pause" | "capture_video_frame" => "Видео",
         "paste_previous" | "copy" | "copy_text" | "preview" | "open" | "open_with"
         | "quicklook" | "reveal" | "save" | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -110,6 +113,9 @@ pub fn palette_label(id: &str, fallback: &'static str) -> &'static str {
 
 pub fn palette_terms(id: &str) -> &'static str {
     match id {
+        "video_pause" | "capture_video_frame" => {
+            "видео кадр пауза продолжить буфер images video frame pause resume snapshot clipboard"
+        }
         "copy" | "copy_text" | "paste_previous" => "буфер clipboard копия вставить",
         "transfer_copy" | "transfer_selection" | "add_to_katran" | "save" => {
             "папка folder импорт перенос копия"
@@ -140,12 +146,15 @@ pub fn english_group(id: &str, fallback: &'static str) -> &'static str {
         "Приложение" => "Application",
         "Сортировка" => "Sorting",
         "Вкладки" => "Tabs",
+        "Видео" => "Video",
         other => other,
     }
 }
 
 pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     match id {
+        "video_pause" => "Pause / Resume video",
+        "capture_video_frame" => "Extract current frame",
         "pinned_move_up" => "Move pinned item earlier",
         "pinned_move_down" => "Move pinned item later",
         "select_all" => "Select all",
@@ -222,6 +231,22 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "video_pause",
+        label: "Пауза / Продолжить видео",
+        default_binding: "P",
+        rebindable: true,
+        group: "Видео",
+        in_palette: true,
+    },
+    Definition {
+        id: "capture_video_frame",
+        label: "Извлечь текущий кадр",
+        default_binding: "",
+        rebindable: true,
+        group: "Видео",
+        in_palette: true,
+    },
     Definition {
         id: "pinned_move_up",
         label: "Поднять закреплённый объект",
@@ -1076,6 +1101,8 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "transfer_copy" => command(Command::CopySelection),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),
+        "video_pause" => command(Command::ToggleMediaPause { session: None }),
+        "capture_video_frame" => command(Command::CaptureMediaFrame { session: None }),
         "use_as_video_background" => command(Command::UseSelectedVideoAsBackground),
         "use_as_video_desktop_wallpaper" => command(Command::UseSelectedVideoAsDesktopWallpaper),
         "use_as_video_desktop_wallpaper_silent" => {

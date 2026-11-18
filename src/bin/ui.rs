@@ -120,25 +120,6 @@ const BUILD_LABEL: &str = if cfg!(feature = "clipboard-events-test") {
 fn clipboard_changed(result: &Value) -> bool {
     result["captured"].as_u64().is_some_and(|count| count > 0)
 }
-/// Reserve physical P for an active video surface; autorepeat never toggles.
-/// Called only after modal/text ownership has been checked.
-fn take_video_pause_key(ctx: &egui::Context) -> bool {
-    ctx.input_mut(|input| {
-        let matches = |event: &egui::Event| matches!(event,
-            egui::Event::Key { key, physical_key, pressed: true, modifiers, .. }
-            if modifiers.is_none() && physical_key.unwrap_or(*key) == egui::Key::P);
-        if !input.events.iter().any(matches) {
-            return false;
-        }
-        let fresh = input.events.iter().any(|event| {
-            matches(event) && matches!(event, egui::Event::Key { repeat: false, .. })
-        });
-        input.events.retain(|event| {
-            !matches(event) && !matches!(event, egui::Event::Text(text) if matches!(text.as_str(), "p" | "P" | "з" | "З"))
-        });
-        fresh
-    })
-}
 fn video_arrow_modifiers(modifiers: egui::Modifiers) -> bool {
     !modifiers.mac_cmd
         && ((modifiers.ctrl && !modifiers.shift && !modifiers.alt)
@@ -658,10 +639,22 @@ impl Shelf {
             self.media_preview.cancel_frame_hold();
             return;
         }
-        let pause = take_video_pause_key(ctx);
+        let video_shortcuts: Vec<_> = self
+            .shortcuts
+            .iter()
+            .filter(|shortcut| {
+                matches!(shortcut.id.as_str(), "video_pause" | "capture_video_frame")
+            })
+            .cloned()
+            .collect();
+        let video_action = shortcuts_ui::take_action_with_editing(ctx, &video_shortcuts, false);
         let seek = take_video_seek_keys(ctx);
         let hold = video_frame_hold_direction(ctx);
         self.media_preview_lifecycle(ctx);
+        if let Some(id) = video_action.as_ref() {
+            self.media_preview.cancel_frame_hold();
+            self.run(id.clone(), ctx);
+        }
         if let Some(api) = self.api.as_mut() {
             let mut call = |command| {
                 api.execute(Request {
@@ -670,9 +663,8 @@ impl Shelf {
                     command,
                 })
             };
-            if pause {
+            if video_action.is_some() {
                 self.media_preview.cancel_frame_hold();
-                self.media_preview.toggle_pause(&mut call);
             } else if let Some(delta) = seek {
                 self.media_preview.cancel_frame_hold();
                 self.media_preview.seek_by(delta, &mut call);
@@ -680,7 +672,7 @@ impl Shelf {
                 self.media_preview.handle_frame_hold(ctx, hold, &mut call);
             }
         }
-        if pause || seek.is_some() || hold.is_some() {
+        if video_action.is_some() || seek.is_some() || hold.is_some() {
             ctx.request_repaint();
         }
     }
@@ -1231,7 +1223,11 @@ impl Shelf {
                         (!self.actions || s.id == "settings")
                             && !matches!(
                                 s.id.as_str(),
-                                "folder_favorites" | "folder_history" | "folder_standard"
+                                "folder_favorites"
+                                    | "folder_history"
+                                    | "folder_standard"
+                                    | "video_pause"
+                                    | "capture_video_frame"
                             )
                             && (!self.open_apps.open || s.id == "open_with")
                             && (s.id != "toggle_pinned_view"
@@ -2608,6 +2604,7 @@ mod tests {
     fn video_p_does_not_capture_search_or_modal_input() {
         let profile = tempfile::tempdir().unwrap();
         let mut app = test_shelf(profile.path());
+        app.shortcuts = serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
         app.video_visible = true;
         app.state = serde_json::json!({"preview":1,"view":"gallery","tab":"folder"});
         app.events = vec![
@@ -2650,48 +2647,69 @@ mod tests {
                 },
             );
             output.textures_delta.clear();
+            let mut release = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::P,
+                        physical_key: Some(egui::Key::P),
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            release.textures_delta.clear();
         }
     }
     #[test]
-    fn video_pause_key_uses_physical_p_and_does_not_repeat_or_consume_other_input() {
+    fn video_shortcut_respects_rebinding() {
+        let profile = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(profile.path());
+        app.call(Command::SetShortcut {
+            id: "video_pause".into(),
+            binding: Some("Q".into()),
+            replace: false,
+            reset: false,
+        });
+        app.shortcuts = serde_json::from_value(app.call(Command::Shortcuts)).unwrap();
+        app.video_visible = true;
+        app.state = serde_json::json!({"preview":1,"view":"gallery","tab":"folder"});
+        app.events = vec![
+            serde_json::json!({"id":1,"revision":"r","kind":"file_reference","path":"C:/synthetic.mp4","name":"synthetic.mp4"}),
+        ];
         let ctx = egui::Context::default();
-        for (repeat, modifiers, expected) in [
-            (false, egui::Modifiers::NONE, true),
-            (true, egui::Modifiers::NONE, false),
-            (false, egui::Modifiers::CTRL, false),
-        ] {
-            let mut output =
-                ctx.run_ui(
-                    egui::RawInput {
-                        events: vec![
-                            egui::Event::Key {
-                                key: egui::Key::Z,
-                                physical_key: Some(egui::Key::P),
-                                pressed: true,
-                                repeat,
-                                modifiers,
-                            },
-                            egui::Event::Text("з".into()),
-                            egui::Event::Text("x".into()),
-                        ],
-                        ..Default::default()
-                    },
-                    |_| {
-                        assert_eq!(take_video_pause_key(&ctx), expected);
-                        ctx.input(|input| {
-                            assert!(input.events.iter().any(
-                                |event| matches!(event, egui::Event::Text(text) if text == "x")
-                            ));
-                            let remaining = input.events.iter().any(
-                                |event| matches!(event, egui::Event::Text(text) if text == "з"),
-                            );
-                            assert_eq!(remaining, modifiers.ctrl);
-                        });
-                    },
-                );
+        for (key, captured) in [(egui::Key::P, false), (egui::Key::Q, true)] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::Key {
+                            key,
+                            physical_key: Some(key),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                        egui::Event::Text(key.name().to_lowercase()),
+                    ],
+                    ..Default::default()
+                },
+                |_| {
+                    app.media_pause_input(&ctx);
+                    assert_eq!(
+                        ctx.input(|input| input
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, egui::Event::Text(_)))),
+                        !captured
+                    );
+                },
+            );
             output.textures_delta.clear();
         }
     }
+
     pub(super) fn drain_folder(app: &mut Shelf) {
         let deadline = Instant::now() + Duration::from_secs(10);
         while app.folder_page_job.is_some() {

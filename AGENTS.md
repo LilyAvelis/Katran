@@ -1,5 +1,21 @@
 # Katran development rules
 
+## Local video actions and frame capture · 2026-11-18
+
+Owner accepted the Alt-step UI stability fix in runtime5c01f6c1060f. The next
+local follow-up adds contextual Ctrl+K Video actions: rebindable video_pause
+(default P) and capture_video_frame (no default). Do not hardcode P outside the
+shortcut catalogue or add seek commands to this section. CaptureMediaFrame and
+ToggleMediaPause accept an optional exact session token. Capture requires a ready
+Paused/Ended session, reserves the native frame and uses screenshot-raw video rgba
+at source resolution. Do not save the scaled UI texture or reopen/seek a decoder.
+The background job validates session/context/source/timeline before saving a
+ManagedImage through normal storage, even if Images is hidden, then uses normal
+copy_out image publication. Clipboard failure/change preserves the saved image
+and returns explicit partial success. Existing playback/cursor/tab stay intact.
+Read docs/video-preview.md for bounds and verification. No schema change or
+public publication is authorized by this local work.
+
 ## Local native video preview · 2026-11-18
 
 Post-v3.8.0 local follow-up: Space and Mini stream use one explicit video/audio

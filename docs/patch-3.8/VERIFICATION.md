@@ -1,5 +1,29 @@
 # Katran 3.8 verification handoff
 
+## Video actions and frame extraction · 2026-11-18
+
+Owner accepted frame-step stability in runtime5c01f6c1060f («Все работает»).
+Native muted full-size capture passed1/1 on CPU and GPU (compile16.77s/test5.16s):
+1920×1080 capture with≤1280 preview, playing rejection, rapid seek final target,
+and a different frame after step. Raw log: target/build/media-frame-capture-native.log.
+API21/21 passed: capture5, playback5, policy5, wire6. Initial test-only language
+assumption and image::open on extensionless blobs were corrected. Separate new
+optional-session wire-v2 regression1/1 passed (null/omitted/u64::MAX strings,
+unsafe JSON number rejection). Logs: media-frame-capture-api.log and
+media-frame-capture-wire.log under target/build. Tests use synthetic files/fake
+Clipboard; native recipient paste and new appearance remain owner acceptance.
+UI aggregate285/286 initially passed; its remaining P fixture lacked KeyUp,
+so egui correctly treated the next press as ignored repeat. Corrected fixture
+and video-focused tests12/12 passed. New palette regression exposed disabled
+click not selecting its row for recorder; fixed and the full headless click /
+Enter / recorder regression1/1 passed (media-frame-capture-palette.log).
+Capture-result UI preserves current context for Clipboard success/failure.
+All-targets/UI Clippy passed27.28s after two equivalent collapsible-if style
+fixes; final palette UI Clippy passed2.23s. Formatting/diff checks passed.
+Native/API evidence reused: no semantic native/domain changes after their gate.
+Initial UI and focused logs are media-frame-capture-ui.log and
+media-frame-capture-ui-targeted.log. No real Clipboard or desktop automation used.
+
 ## Frame-step panel/time stability · 2026-11-18
 
 Installed source6fcc9f3, one optimized UI build28.88s, Windows x64/Rust1.95.0/

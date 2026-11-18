@@ -128,7 +128,10 @@ impl Shelf {
                             let hint=sorting_ui::sequence_hint(a["id"].as_str().unwrap_or(""));
                             let display=if shortcut.is_empty(){hint.unwrap_or("")}else{crate::action_row::primary_shortcut(shortcut)};
                             let tooltip=hint.map(|hint|if is_english() { format!("Sequence: {hint} · comma first, then the key") } else { format!("Последовательность: {hint} · сначала запятая, затем клавиша") }).unwrap_or_else(||shortcut.to_owned());
-                            let response = crate::action_row::ActionRow::new(
+                            let enabled = a["enabled"] != false;
+                            let response = ui.scope(|ui| {
+                            if !enabled { ui.visuals_mut().override_text_color = Some(theme_ui::color(ctx,theme_ui::Role::Muted,Color32::from_gray(185))); }
+                            crate::action_row::ActionRow::new(
                                 crate::action_row::ActionPresentation {
                                     label: a["label"].as_str().unwrap_or(""),
                                     icon: action_icons::icon(a["id"].as_str().unwrap_or("")),
@@ -136,13 +139,20 @@ impl Shelf {
                                     full_shortcut_tooltip: &tooltip,
                                 },
                             )
-                            .show(ui, index == self.action_selected);
+                            .show(ui, index == self.action_selected)
+                            }).inner;
+                            let response = if !enabled { response.on_hover_text(a["disabled_reason"].as_str().unwrap_or(tr("Недоступно", "Unavailable"))) } else { response };
+                            #[cfg(test)]
+                            ctx.data_mut(|data| data.insert_temp(egui::Id::new(("test-action-row", a["id"].as_str().unwrap_or(""))), response.rect));
                             if index == self.action_selected && self.scroll_actions {
                                 response.scroll_to_me(None);
                                 self.scroll_actions = false;
                             }
                             if response.clicked() {
-                                picked = a["id"].as_str().map(str::to_owned);
+                                self.action_selected = index;
+                                if enabled {
+                                    picked = a["id"].as_str().map(str::to_owned);
+                                }
                             }
                         }
                         if actions.is_empty() {
@@ -167,6 +177,7 @@ impl Shelf {
         if enter && picked.is_none() {
             picked = actions
                 .get(self.action_selected)
+                .filter(|a| a["enabled"] != false)
                 .and_then(|a| a["id"].as_str())
                 .map(str::to_owned);
         }
@@ -267,5 +278,108 @@ mod search_tests {
         let sort = serde_json::json!({"id":"sort_name","label":"Сортировать по имени","group":"Сортировка","search_terms":""});
         assert!(!action_matches(&sort, ""));
         assert!(action_matches(&sort, "сортировка"));
+    }
+}
+
+#[cfg(test)]
+mod video_action_tests {
+    use super::*;
+    use katran::interaction::SelectionMode;
+
+    #[test]
+    fn disabled_video_action_does_not_run_but_allows_shortcut_recording() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("synthetic.mp4"), b"synthetic video").unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        app.call(Command::ChooseFolder {
+            path: folder.path().into(),
+        });
+        let page = app.call(Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        });
+        let id = page["events"][0]["id"].as_i64().unwrap();
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.call(Command::Select {
+            id,
+            mode: SelectionMode::Replace,
+        });
+        let catalogue = app.call(Command::Actions);
+        let action = catalogue
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "capture_video_frame")
+            .unwrap();
+        assert_eq!(action["enabled"], false);
+        app.actions = true;
+        app.action_query = "snapshot".into();
+        app.action_selected = 0;
+        let ctx = egui::Context::default();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(input(vec![]), |_| app.palette(&ctx));
+            out.textures_delta.clear();
+        }
+        let rect: egui::Rect = ctx.data(|data| {
+            data.get_temp(egui::Id::new(("test-action-row", "capture_video_frame")))
+                .unwrap()
+        });
+        for pressed in [true, false] {
+            let mut out = ctx.run_ui(
+                input(vec![
+                    egui::Event::PointerMoved(rect.center()),
+                    egui::Event::PointerButton {
+                        pos: rect.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]),
+                |_| app.palette(&ctx),
+            );
+            out.textures_delta.clear();
+        }
+        assert!(app.actions && app.job.is_none());
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let mut out = ctx.run_ui(
+            input(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]),
+            |_| app.palette(&ctx),
+        );
+        out.textures_delta.clear();
+        assert!(app.actions && app.job.is_none());
+        let mut out = ctx.run_ui(
+            input(vec![key(
+                egui::Key::Comma,
+                egui::Modifiers {
+                    ctrl: true,
+                    shift: true,
+                    ..Default::default()
+                },
+            )]),
+            |_| app.palette(&ctx),
+        );
+        out.textures_delta.clear();
+        assert_eq!(
+            app.shortcut_editor
+                .as_ref()
+                .map(|editor| editor.id.as_str()),
+            Some("capture_video_frame")
+        );
     }
 }

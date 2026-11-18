@@ -22,7 +22,7 @@ content session. Ordinary image/Text/Pods interactions retain their routes.
 The owner confirmed playback/navigation in Folder and Desktop. Follow-up UI
 corrections size the overlay from actual widgets with a bottom inset for large
 controls. Seek holds the requested position until observed confirmation or a
-bounded timeout/error. Physical P pauses/resumes only on a video surface; text
+bounded timeout/error. Default P (rebindable) pauses/resumes only on a video surface; text
 editing and modals retain input, and autorepeat does not toggle.
 
 Video-only modified arrows: Ctrl+Left/Right seeks by1second; Shift+Left/Right by
@@ -148,3 +148,44 @@ Primary references:
 - https://github.com/mpv-player/mpv/tree/master/include/mpv
 - https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261107
 - https://github.com/mpv-player/mpv/blob/master/Copyright
+
+## Contextual Video actions and full-size frame capture · 2026-11-18
+
+Ctrl+K includes Video only for a video item. Pause/Resume has default P through
+the standard rebindable shortcut catalogue. Extract current frame has no default
+binding; the same recorder can assign one. Seeking remains on the existing
+modified arrows, not additional palette commands. Disabled capture stays visible
+with a reason and can still be selected for shortcut recording.
+
+Capture is available only on the current ready Paused/Ended video in Space or
+Mini stream. It does not pause automatically. CaptureMediaFrame{session?:u64}
+and ToggleMediaPause{session?:u64} use the current session when omitted; an
+explicit stale token is rejected. RunAction resolves the same commands. Both
+commands support lossless wire-v2 session strings. Opening the palette performs
+metadata/state checks only, without opening another player or decoding a file.
+
+The existing MPV worker reserves one screenshot-raw video rgba request, copies
+its native reply before the next event and validates dimensions, stride and
+length. At most64Mp/256MiB raw RGBA, 8-bit output; this is a source-resolution
+PNG, not an HDR/color-fidelity promise. A bounded task waits for the reply without
+blocking UI. Cancellation cannot release a pending native reply to a later
+request; timeout stops that worker. Capture/step are blocked during pending seeks;
+rapid seeks coalesce to the last target and settle only after native seek/restart
+and a newly rendered frame. CPU/GPU both use the same full-size capture path.
+
+The domain job stages/encodes off-thread and checks immutable session, active
+surface/context, source revision/stamp, timeline and cancellation before commit.
+The normal managed storage path saves video-frame.png as ManagedImage in Images,
+including when that tab is hidden. It does not switch tab, cursor or playback.
+Then the same job prepares normal copy_out image publication. A changed Clipboard
+sequence or failed image publication leaves the image saved and reports explicit
+partial success. Native publication uses DIB pixels plus ordinary file formats;
+the existing32Mp Clipboard pixel limit can yield a saved image without pixels
+copied. Normal export lifetime/receipts/listener suppression apply; no paste
+injection, temporary screenshot files or personal-file changes are added.
+
+Synthetic API tests cover hidden Images, PNG bytes/dimensions, stale source and
+session/context, late control, partial Clipboard failure, contextual Actions and
+pause. Native muted CPU/GPU capture tests use1920×1080 source versus≤1280 preview,
+last-of-rapid-seeks and a frame after native stepping. They do not prove native
+recipient paste or appearance; Lilia performs those checks in the installed app.

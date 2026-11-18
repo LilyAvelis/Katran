@@ -81,6 +81,15 @@ pub(crate) struct FolderExportBatch {
     lock_specs: std::collections::HashMap<i64, (PathBuf, PathBuf, String)>,
 }
 pub(crate) enum PreparedWork {
+    MediaCapture {
+        lease: media_service::CaptureLease,
+        prepared: media_capture::PreparedCapture,
+    },
+    MediaCaptureCopy {
+        result: Value,
+        clipboard_sequence: u32,
+        prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String>,
+    },
     Media(crate::media_service::PreparedMedia),
     EmojiAi {
         value: Value,
@@ -627,6 +636,7 @@ impl Service {
             };
         }
         let id = match command {
+            Command::CaptureMediaFrame { session } => return self.capture_media_frame(session),
             Command::OpenMedia { id, revision } => {
                 let (event, identity, epoch, desktop_digest) =
                     self.start_media_prepare(id, revision)?;
@@ -1407,6 +1417,58 @@ impl Service {
     pub(crate) fn poll_job(&mut self, id: JobId) -> Result<Value> {
         for (ready, result) in self.jobs.take_ready(8) {
             let result = match result {
+                Ok(PreparedWork::MediaCapture { lease, prepared }) => {
+                    let clipboard_sequence = lease.clipboard_sequence;
+                    let saved = self
+                        .validate_media_capture(&lease)
+                        .and_then(|()| self.jobs.authorize_claimed_effect(ready))
+                        .and_then(|()| self.commit_media_capture(prepared));
+                    let mut saved = match saved {
+                        Ok(value) => value,
+                        Err(error) => {
+                            self.jobs.finish(ready, Err(error))?;
+                            continue;
+                        }
+                    };
+                    let event: Event = match serde_json::from_value(saved["event"].clone()) {
+                        Ok(event) => event,
+                        Err(error) => {
+                            saved["clipboard"] = json!({"ok":false,"error":error.to_string()});
+                            self.jobs.finish(ready, Ok(saved))?;
+                            continue;
+                        }
+                    };
+                    let references = match self.reference_paths() {
+                        Ok(value) => value,
+                        Err(error) => {
+                            saved["clipboard"] = json!({"ok":false,"error":error.message});
+                            self.jobs.finish(ready, Ok(saved))?;
+                            continue;
+                        }
+                    };
+                    let root = self.root.clone();
+                    let quota = self.quota;
+                    let fallback = saved.clone();
+                    let continued = self.jobs.continue_claimed(ready, move |_cancel| {
+                        let prepared = (|| {
+                            let mut plan = copy_out::prepare_with_budget(&root, &[event], quota)?;
+                            plan.protect_references(&references)?;
+                            let sink = copy_out::PreparedNativeClipboard::prepare(&plan.paths);
+                            Ok((plan, sink))
+                        })();
+                        Ok(PreparedWork::MediaCaptureCopy {
+                            result: saved,
+                            clipboard_sequence,
+                            prepared,
+                        })
+                    });
+                    if let Err(error) = continued {
+                        let mut result = fallback;
+                        result["clipboard"] = json!({"ok":false,"error":error.message});
+                        self.jobs.finish(ready, Ok(result))?;
+                    }
+                    continue;
+                }
                 Ok(PreparedWork::VideoWallpaper {
                     event,
                     path,
@@ -1748,6 +1810,8 @@ impl Service {
                 result => result,
             };
             let result=result.and_then(|prepared|match prepared {
+                PreparedWork::MediaCapture{..}=>Err(ApiError::new("invalid_job_phase", "Media capture requires continuation")),
+                PreparedWork::MediaCaptureCopy{result,clipboard_sequence,prepared}=>Ok(self.publish_media_capture(result,prepared,clipboard_sequence)),
                 PreparedWork::Media(prepared)=>{self.jobs.authorize_claimed_effect(ready)?;self.commit_media(prepared)},
                 PreparedWork::ExternalPasteReady{..} | PreparedWork::ExternalPasteFinished{..} => Err(ApiError::new("invalid_job_phase", "External paste requires continuation")),
                 PreparedWork::FolderExportReady(_) | PreparedWork::FolderExportCopied{..} => Err(ApiError::new("invalid_job_phase", "Folder export requires continuation")),

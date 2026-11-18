@@ -346,6 +346,14 @@ pub enum Command {
         action: crate::media_playback::Action,
     },
     MediaState,
+    CaptureMediaFrame {
+        #[serde(default)]
+        session: Option<u64>,
+    },
+    ToggleMediaPause {
+        #[serde(default)]
+        session: Option<u64>,
+    },
     MediaFrame {
         session: u64,
         after_serial: u64,

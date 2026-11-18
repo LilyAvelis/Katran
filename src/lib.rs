@@ -44,6 +44,7 @@ pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
 pub mod markdown;
+mod media_capture;
 pub mod media_playback;
 #[cfg(windows)]
 pub mod media_playback_mpv;
@@ -528,6 +529,8 @@ impl Service {
             Command::OpenMedia { id, revision } => self.open_media(id, revision),
             Command::ControlMedia { session, action } => self.control_media(session, action),
             Command::MediaState => self.media_state(),
+            Command::CaptureMediaFrame { session } => self.capture_media_frame(session),
+            Command::ToggleMediaPause { session } => self.toggle_media_pause(session),
             Command::MediaFrame {
                 session,
                 after_serial,
@@ -1824,6 +1827,18 @@ impl Service {
             Command::Actions | Command::SortActions => {
                 let sort_only = matches!(command, Command::SortActions);
                 let background = (!sort_only).then(|| self.background_action_availability());
+                let video = background
+                    .is_some_and(|availability| self.action_available("video_pause", availability));
+                let video_pause = if video {
+                    self.media_pause_availability()
+                } else {
+                    serde_json::Value::Null
+                };
+                let video_capture = if video {
+                    self.media_capture_availability()
+                } else {
+                    serde_json::Value::Null
+                };
                 let mut definitions: Vec<_> = actions::DEFS
                     .iter()
                     .filter(|d| {
@@ -1839,12 +1854,27 @@ impl Service {
                     .collect();
                 definitions.sort_by_key(|d| actions::palette_order(d.id));
                 Ok(serde_json::Value::Array(definitions.into_iter().map(|d| {
+                    let availability= match d.id { "video_pause"=>Some(&video_pause), "capture_video_frame"=>Some(&video_capture), _=>None };
+                    let enabled=availability.is_none_or(|value|value["ready"]==true);
+                    let reason=availability.filter(|_|!enabled).map(|value| {
+                        if self.settings.language==settings::Language::English {
+                            value["error"]["message"].as_str().unwrap_or("Open a video preview first")
+                        } else {
+                            match value["error"]["code"].as_str() {
+                                Some("media_capture_requires_pause")=>"Поставьте видео на паузу",
+                                Some("media_capture_busy"|"media_busy")=>"Дождитесь завершения текущего кадра",
+                                _=>"Откройте видео в плеере",
+                            }
+                        }
+                    });
                     serde_json::json!({
                         "id": d.id,
                         "label": self.action_label(d.id, if self.settings.language == settings::Language::English { actions::english_label(d.id, d.label) } else { actions::palette_label(d.id, d.label) }),
                         "group": if self.settings.language == settings::Language::English { actions::english_group(d.id, d.group) } else { actions::palette_group(d.id, d.group) },
                         "shortcut": self.shortcuts.binding(d.id),
                         "search_terms": actions::palette_terms(d.id),
+                        "enabled":enabled,
+                        "disabled_reason":reason,
                     })
                 }).collect()))
             }

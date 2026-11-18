@@ -458,3 +458,14 @@ unchanged. Polly completed guarded maintenance/tooling directly, without team
 expansion. Automatic post-install budget hook and manual batch instructions are
 in docs/devops.md. No Rust rebuild/push/tag/release. Native Tags/cache acceptance
 was supplied by Lilia («Всё работает»).
+
+## Video capture follow-up · 2026-11-18
+
+Polly reused /root/mira, /root/nemi and /root/fenna (gpt-6.1-terra/high).
+Mira owns media_playback_mpv.rs native raw capture and seek settlement; Nemi owns
+media_capture.rs, media_service.rs capture methods, jobs_service.rs and API tests;
+Polly integrates shared command/action/wire declarations and pause semantics.
+After API/native gates, Fenna owns ui.rs, api_client.rs, palette.rs and icons.
+Each area is frozen before shared integration. No new masks or public publication.
+Native CPU/GPU1/1 and API21/21 passed before frontend implementation; UI gate and
+primary installation evidence are maintained in VERIFICATION.md.
