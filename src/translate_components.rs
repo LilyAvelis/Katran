@@ -255,4 +255,4 @@ mod tests {
         assert_eq!(find_ollama_models(profile.path(), &manifest), Some(store));
     }
 }
-pub(crate) const MODEL: &str = "qwen3:4b";
+pub(crate) const MODEL: &str = "qwen3:4b-instruct";

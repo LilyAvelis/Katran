@@ -23,7 +23,7 @@ translation membership. Keep generic ordered collections in the independent
 languages; OCR should also cover Japanese, Korean and Chinese. Keep .bull
 serialization and QuickLook after the one-page and batch translation gates.
 The local one-page command recognizes Japanese and outputs English with
-Qwen3 4B on the GPU. Reject incomplete output and partial GPU placement.
+Qwen3 4B Instruct on the GPU. Reject incomplete output and partial GPU placement.
 It publishes a separate PNG and Translate membership together. Invoke only
 detected local components, without implicit model downloads.
 

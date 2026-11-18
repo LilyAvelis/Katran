@@ -92,7 +92,7 @@ def translate(blocks, source, target, model, port):
             raise ValueError("Translation response is too large")
         return json.loads(raw)
 
-    options = {"num_gpu": 99, "num_predict": 6144, "num_ctx": 8192,
+    options = {"num_gpu": 99, "num_predict": 384, "num_ctx": 8192,
                "temperature": 0, "seed": 42}
     preload = Request(base + "/api/generate", data=json.dumps({
         "model": model, "stream": False, "keep_alive": "2m", "options": options,
@@ -113,7 +113,7 @@ def translate(blocks, source, target, model, port):
             f"lines. Preserve the meaning.\n{lines}"
         )
         payload = {
-            "model": model, "think": True, "stream": False, "keep_alive": "2m",
+            "model": model, "stream": False, "keep_alive": "2m",
             "options": options,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -139,7 +139,7 @@ def main():
     parser.add_argument("--target", choices=("en",), default="en")
     parser.add_argument("--manga", action="store_true")
     parser.add_argument("--ordered", action="store_true", help="Use pre-grouped regions for diagnostics")
-    parser.add_argument("--model", default="qwen3:4b")
+    parser.add_argument("--model", default="qwen3:4b-instruct")
     parser.add_argument("--port", type=int, default=11434)
     args = parser.parse_args()
     with args.ocr.open("rb") as source:

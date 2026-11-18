@@ -40,7 +40,8 @@ Image translation reports the locally detected components and the English
 output language. Output is a separate, managed PNG in Translate.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
-The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b` tag.
+The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
+Use the dedicated Instruct variant to avoid generating reasoning tokens.
 Japanese is the only exposed recognition language for this integration.
 The translator requires full GPU placement and a complete English answer.
 The English-only rollout follows the owner's acceptance scope for this stage.
@@ -57,6 +58,14 @@ If the active profile has the model under `translate-ollama`, Katran uses
 that store first and passes its exact path to its private Ollama process.
 This avoids dependence on environment variables inherited from the launcher.
 
+On the approved simple page, separate cold workers spent 7.6 s in Paddle
+detection and recognition, 9.6 s in Manga OCR, and 0.5 s rendering. The earlier
+Qwen3 4B reasoning run spent 14.8 s generating 4,578 tokens. With the same OCR
+input on RTX 5090, Instruct returned both numbered translations in 2.2 s,
+including weight load. On the complex page it returned all 19 recognized
+blocks in 1.7 s with the model already loaded. Grouping and transcription on
+that page still need work. These measurements cover separate stages.
+
 ## Local one-page probe
 
 The standalone probe lives in `scripts/image-translate`. Test images, model packs,
@@ -70,9 +79,9 @@ intermediate JSON and generated previews stay outside Git.
    Japanese dialogue with `kha-white/manga-ocr-base` at revision
    `aa6573bd10b0d446cbf622e29c3e084914df9741`. The model pack is opened
    offline, with weights-only loading. It does not infer panel order.
-3. `translate_page.py` uses an already
-   downloaded model over the local Ollama interface. The test uses the installed
-   `qwen3:30b` tag, with cloud disabled and the service bound to loopback.
+3. `translate_page.py` uses the already downloaded
+   `qwen3:4b-instruct` model over the local Ollama interface, with cloud
+   disabled and the service bound to loopback.
    It accepts a known transcript (`--ordered`) for separating translation and
    lettering defects from recognition errors.
 4. `render_page.py` erases detected lettering and draws the translated blocks
