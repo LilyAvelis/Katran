@@ -20,7 +20,10 @@ pub trait ClipboardSink: Send {
     fn write(&self, text: &str) -> Result<u32>;
     fn write_if_current(&self, text: &str, expected: u32) -> Result<u32> {
         if crate::capture::sequence_number() != expected {
-            return Err(ApiError::new("clipboard_changed", "Clipboard changed while preparing the text"));
+            return Err(ApiError::new(
+                "clipboard_changed",
+                "Clipboard changed while preparing the text",
+            ));
         }
         self.write(text)
     }

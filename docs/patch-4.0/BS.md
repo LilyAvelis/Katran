@@ -7,7 +7,7 @@ travel together. The format stores no source paths or Katran catalogue state.
 | --- | --- |
 | Magic | `BALOHBS` followed by one NUL byte |
 | Version | Unsigned 32-bit little-endian integer `1` |
-| File count | Unsigned 32-bit little-endian integer, 1–32 |
+| File count | Unsigned 32-bit little-endian integer, 1–1,024 |
 | Each record | Name length and data length as unsigned 32-bit little-endian integers, 32 SHA-256 bytes, UTF-8 name, exact file data |
 
 The record digest covers both encoded lengths, the name bytes, and the file

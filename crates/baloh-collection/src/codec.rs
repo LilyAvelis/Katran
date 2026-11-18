@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 
 pub const MAGIC: &[u8; 8] = b"BALOHCOL";
 pub const VERSION: u32 = 1;
-pub const MAX_PAGES: usize = 32;
+pub const MAX_PAGES: usize = crate::MAX_ENTRIES;
 pub const MAX_PAGE_BYTES: usize = 64 * 1024 * 1024;
 /// Complete encoded file budget, including framing and checksums.
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
@@ -160,6 +160,15 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn roundtrips_large_collections_up_to_shared_limit() {
+        for count in [33, MAX_PAGES] {
+            let pages = vec![page(); count];
+            let mut encoded = Vec::new();
+            write(&mut encoded, &pages).unwrap();
+            assert_eq!(read(encoded.as_slice()).unwrap(), pages);
+        }
+    }
     fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], bytes: &[u8]) {
         out.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
         let start = out.len();
@@ -206,7 +215,7 @@ mod tests {
         bad[12] = 0;
         assert!(read(&bad[..]).is_err());
         let mut bad = encoded.clone();
-        bad[12] = 33;
+        bad[12..16].copy_from_slice(&((MAX_PAGES + 1) as u32).to_le_bytes());
         assert!(read(&bad[..]).is_err());
         let mut bad = encoded.clone();
         bad[16..20].copy_from_slice(&(MAX_PAGE_BYTES as u32 + 1).to_le_bytes());
@@ -235,7 +244,7 @@ mod tests {
             assert!(out.is_empty());
         }
         assert!(write(Vec::new(), &[]).is_err());
-        assert!(write(Vec::new(), &vec![page(); 33]).is_err());
+        assert!(write(Vec::new(), &vec![page(); MAX_PAGES + 1]).is_err());
     }
     #[test]
     fn total_budget_includes_record_overhead() {

@@ -96,6 +96,7 @@ jobs:
           python tests/test_third_party_notices.py
           if ($LASTEXITCODE -ne 0) { throw 'Notice tests failed' }
       - run: cargo +1.95.0 test --locked --no-fail-fast --features ui,clipboard-events --target-dir target/build
+      - run: cargo +1.95.0 test --locked -p baloh-collection --target-dir target/build
       - run: cargo +1.95.0 clippy --locked --all-targets --features ui,clipboard-events --target-dir target/build -- -D warnings
       - name: Save checks cache
         if: always() && !cancelled() && github.event_name != 'pull_request' && steps.checks-cache.outcome == 'success' && steps.checks-cache.outputs.cache-hit != 'true'

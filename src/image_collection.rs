@@ -189,10 +189,13 @@ pub(crate) fn encode(
             )
         })?;
         let offset = pages.len();
-        if offset + input_pages.len() > baloh_collection::codec::MAX_PAGES {
+        if offset.saturating_add(input_pages.len()) > baloh_collection::MAX_ENTRIES {
             return Err(ApiError::new(
                 "collection_size_limit",
-                "BULL supports up to 32 pages",
+                format!(
+                    "BULL supports up to {} pages",
+                    baloh_collection::MAX_ENTRIES
+                ),
             ));
         }
         for png in &input_pages {

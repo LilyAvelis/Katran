@@ -162,7 +162,7 @@ fn read_regular(event: &Event, cancel: &Cancellation) -> Result<(FileEntry, medi
         if n == 0 {
             break;
         }
-        if bytes.len().saturating_add(n) > MAX_FILE_BYTES as usize {
+        if bytes.len().saturating_add(n) > MAX_FILE_BYTES {
             return Err(ApiError::new(
                 "collection_size_limit",
                 "File exceeds the BS per-file limit",
@@ -268,7 +268,7 @@ pub(crate) fn encode(
         let (items, stamp) = result
             .map_err(|e| ApiError::new(&e.code, format!("Item {} · {}", index + 1, e.message)))?;
         let offset = entries.len();
-        if offset.saturating_add(items.len()) > MAX_FILES as usize {
+        if offset.saturating_add(items.len()) > MAX_FILES {
             return Err(ApiError::new(
                 "collection_size_limit",
                 "Too many files for BS",
@@ -281,7 +281,7 @@ pub(crate) fn encode(
                 .and_then(|n| n.checked_add(item.name.len() as u64))
                 .and_then(|n| n.checked_add(40))
                 .ok_or_else(|| ApiError::new("collection_size_limit", "BS size overflow"))?;
-            if item.bytes.len() > MAX_FILE_BYTES as usize
+            if item.bytes.len() > MAX_FILE_BYTES
                 || bytes_count > MAX_TOTAL_BYTES as u64
                 || bytes_count > quota
             {
@@ -302,7 +302,7 @@ pub(crate) fn encode(
     cancel.check()?;
     let mut portable = Vec::new();
     collection_kind::write_raw(&mut portable, &entries, kind)?;
-    if portable.len() > MAX_TOTAL_BYTES as usize || portable.len() as u64 > quota {
+    if portable.len() > MAX_TOTAL_BYTES || portable.len() as u64 > quota {
         return Err(ApiError::new(
             "collection_size_limit",
             "BS exceeds the collection or cache size limit",

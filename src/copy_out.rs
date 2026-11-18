@@ -285,7 +285,11 @@ pub fn prepare_with_budget(
 }
 
 /// Materialize one verified named file in the normal bounded open snapshot cache.
-pub(crate) fn prepare_bs_entry(root: &Path, entry: &baloh_collection::bs::FileEntry, quota: u64) -> Result<Plan, String> {
+pub(crate) fn prepare_bs_entry(
+    root: &Path,
+    entry: &baloh_collection::bs::FileEntry,
+    quota: u64,
+) -> Result<Plan, String> {
     use std::io::Write;
     crate::validate_name(&entry.name).map_err(|error| error.message)?;
     let (mut plan, used) = prepare_batch(root, quota)?;
@@ -293,11 +297,20 @@ pub(crate) fn prepare_bs_entry(root: &Path, entry: &baloh_collection::bs::FileEn
         return Err("Open snapshot quota exceeded".into());
     }
     let destination = plan.directory.join(&entry.name);
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&destination)
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
         .map_err(|error| error.to_string())?;
-    file.write_all(&entry.bytes).and_then(|_| file.sync_all()).map_err(|error| error.to_string())?;
+    file.write_all(&entry.bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| error.to_string())?;
     drop(file);
-    plan.paths.push(destination.canonicalize().map_err(|error| error.to_string())?);
+    plan.paths.push(
+        destination
+            .canonicalize()
+            .map_err(|error| error.to_string())?,
+    );
     Ok(plan)
 }
 
@@ -368,7 +381,13 @@ fn prepare_batch(root: &Path, quota: u64) -> Result<(Plan, u64), String> {
     Ok((plan, used))
 }
 
-fn prepare_events(plan: &mut Plan, directory: &Path, events: &[crate::Event], quota: u64, mut used: u64) -> Result<(), String> {
+fn prepare_events(
+    plan: &mut Plan,
+    directory: &Path,
+    events: &[crate::Event],
+    quota: u64,
+    mut used: u64,
+) -> Result<(), String> {
     for (index, event) in events.iter().enumerate() {
         let mut attempted_path = None;
         let result = (|| -> Result<PathBuf, String> {
@@ -703,7 +722,13 @@ fn accepted_formats(formats: &[u32], marker: u32, effect: Option<u32>, pixels: b
 }
 
 #[cfg(any(windows, test))]
-fn accepted_payload_formats(formats: &[u32], marker: u32, effect: Option<u32>, files: bool, pixels: bool) -> bool {
+fn accepted_payload_formats(
+    formats: &[u32],
+    marker: u32,
+    effect: Option<u32>,
+    files: bool,
+    pixels: bool,
+) -> bool {
     if marker == 0 || (files && !formats.contains(&15)) || !formats.contains(&marker) {
         return false;
     }
@@ -732,9 +757,27 @@ fn same_bounded_payload(expected: &[u8], observed: &[u8], allocation: usize) -> 
 #[test]
 fn owned_image_paste_requires_pixels_and_marker_without_file_payload() {
     let marker = 500;
-    assert!(accepted_payload_formats(&[17, 8, marker], marker, None, false, true));
-    assert!(!accepted_payload_formats(&[17, 15, marker], marker, None, false, true));
-    assert!(!accepted_payload_formats(&[8, marker], marker, None, false, true));
+    assert!(accepted_payload_formats(
+        &[17, 8, marker],
+        marker,
+        None,
+        false,
+        true
+    ));
+    assert!(!accepted_payload_formats(
+        &[17, 15, marker],
+        marker,
+        None,
+        false,
+        true
+    ));
+    assert!(!accepted_payload_formats(
+        &[8, marker],
+        marker,
+        None,
+        false,
+        true
+    ));
     assert!(!accepted_payload_formats(&[17], marker, None, false, true));
 }
 
@@ -1019,7 +1062,13 @@ mod native_publication {
         let formats_valid = if files.is_some() {
             accepted_formats(&formats, marker_format, effect_format, pixels.is_some())
         } else {
-            accepted_payload_formats(&formats, marker_format, effect_format, false, pixels.is_some())
+            accepted_payload_formats(
+                &formats,
+                marker_format,
+                effect_format,
+                false,
+                pixels.is_some(),
+            )
         };
         if !formats_valid {
             return Err("formats_changed");

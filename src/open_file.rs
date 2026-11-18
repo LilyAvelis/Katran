@@ -13,15 +13,20 @@ pub enum Operation {
 }
 
 pub(crate) fn bs_entry_operation(name: &str) -> Operation {
-    let extension = Path::new(name).extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match extension.as_str() {
-        "exe" | "com" | "bat" | "cmd" | "msi" | "msp" | "scr" | "dll" | "cpl" | "lnk" | "url" | "pif"
-        | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta" | "reg" | "chm" | "jar"
-        | "desktop" | "application" | "appref-ms" | "gadget" | "scf" | "sct" | "inf" | "ins" | "isp" => Operation::Reveal,
-        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "ico" | "heic" | "avif"
-        | "pdf" | "txt" | "rtf" | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" | "csv"
-        | "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "mp4" | "mkv" | "mov" | "webm"
-        | "zip" | "7z" | "rar" | "tar" | "gz" => Operation::Open,
+        "exe" | "com" | "bat" | "cmd" | "msi" | "msp" | "scr" | "dll" | "cpl" | "lnk" | "url"
+        | "pif" | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta" | "reg" | "chm"
+        | "jar" | "desktop" | "application" | "appref-ms" | "gadget" | "scf" | "sct" | "inf"
+        | "ins" | "isp" => Operation::Reveal,
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "ico" | "heic"
+        | "avif" | "pdf" | "txt" | "rtf" | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp"
+        | "csv" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "mp4" | "mkv"
+        | "mov" | "webm" | "zip" | "7z" | "rar" | "tar" | "gz" => Operation::Open,
         _ => Operation::OpenWith,
     }
 }
@@ -44,7 +49,10 @@ pub(crate) fn execute_link(event: &Event, launcher: &dyn Launcher) -> Result<Val
 
 pub(crate) fn open_url(url: &str, launcher: &dyn Launcher) -> Result<()> {
     if crate::link_fragments::recognize(url).is_none() {
-        return Err(ApiError::new("invalid_link", "Expected a valid HTTP(S) URL"));
+        return Err(ApiError::new(
+            "invalid_link",
+            "Expected a valid HTTP(S) URL",
+        ));
     }
     launcher.authorize()?;
     launcher.launch(Path::new(url), Operation::Open)

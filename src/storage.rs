@@ -425,7 +425,10 @@ pub(crate) fn commit_translated_png(
     prepared: PreparedBlob,
 ) -> Result<i64> {
     if !prepared.name.ends_with(".png") || prepared.text.is_some() {
-        return Err(ApiError::new("invalid_translation", "Expected a translated PNG"));
+        return Err(ApiError::new(
+            "invalid_translation",
+            "Expected a translated PNG",
+        ));
     }
     commit_blob(db, root, quota, prepared, true)
 }
@@ -436,10 +439,14 @@ pub(crate) fn commit_translation_collection(
     quota: u64,
     prepared: PreparedBlob,
 ) -> Result<i64> {
-    if !prepared.name.ends_with(".bull") || prepared.text.is_some()
+    if !prepared.name.ends_with(".bull")
+        || prepared.text.is_some()
         || prepared.source != "image_translation_collection"
     {
-        return Err(ApiError::new("invalid_translation", "Expected a portable translation collection"));
+        return Err(ApiError::new(
+            "invalid_translation",
+            "Expected a portable translation collection",
+        ));
     }
     commit_blob(db, root, quota, prepared, true)
 }
@@ -455,12 +462,23 @@ pub(crate) fn replace_link_collection_blob(
     prepared: PreparedBlob,
     rename: Option<(usize, &str)>,
 ) -> Result<bool> {
-    if prepared.source != "link_collection" || !prepared.name.to_ascii_lowercase().ends_with(".bull")
-        || prepared.text.is_some() || prepared.link || prepared.table {
-        return Err(ApiError::new("invalid_collection", "Expected a prepared Links collection"));
+    if prepared.source != "link_collection"
+        || !prepared.name.to_ascii_lowercase().ends_with(".bull")
+        || prepared.text.is_some()
+        || prepared.link
+        || prepared.table
+    {
+        return Err(ApiError::new(
+            "invalid_collection",
+            "Expected a prepared Links collection",
+        ));
     }
-    let Some(expected_hash) = expected_revision.strip_prefix("blob:") else { return Ok(false); };
-    if !is_hash(expected_hash) { return Ok(false); }
+    let Some(expected_hash) = expected_revision.strip_prefix("blob:") else {
+        return Ok(false);
+    };
+    if !is_hash(expected_hash) {
+        return Ok(false);
+    }
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let old: Option<String> = tx.query_row(
         "SELECT e.blob_hash FROM events e WHERE e.id=?1 AND e.blob_hash=?2 AND e.source='link_collection'
@@ -470,17 +488,26 @@ pub(crate) fn replace_link_collection_blob(
          AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
         params![id, expected_hash], |row| row.get(0),
     ).optional()?;
-    let Some(old) = old else { return Ok(false); };
+    let Some(old) = old else {
+        return Ok(false);
+    };
     if old != prepared.hash {
         let target = prepared.directory.join(&prepared.hash);
-        let encoded = target.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+        let encoded = target
+            .to_str()
+            .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
         publish_blob_in(&tx, root, quota, &prepared)?;
         let changed = tx.execute(
             "UPDATE events SET path=?1,blob_hash=?2,size=?3 WHERE id=?4 AND blob_hash=?5
              AND source='link_collection' AND NOT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?4)",
             params![encoded, prepared.hash, prepared.size, id, old],
         )?;
-        if changed != 1 { return Err(ApiError::new("source_changed", "Collection changed during replacement")); }
+        if changed != 1 {
+            return Err(ApiError::new(
+                "source_changed",
+                "Collection changed during replacement",
+            ));
+        }
     }
     if let Some((index, title)) = rename {
         // Keep legacy-name lookup and eventual unpack in sync with the file.
@@ -529,12 +556,18 @@ pub(crate) struct CollectionInput {
 }
 
 pub(crate) fn collection_members(db: &Connection, id: i64) -> Result<CollectionMembers> {
-    let mut statement = db.prepare("SELECT position,member_id FROM bull_members WHERE collection_id=?1")?;
-    Ok(statement.query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let mut statement =
+        db.prepare("SELECT position,member_id FROM bull_members WHERE collection_id=?1")?;
+    Ok(statement
+        .query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 
-pub(crate) fn visible_collection_input(db: &Connection, id: i64, tab: crate::interaction::ShelfTab) -> Result<bool> {
+pub(crate) fn visible_collection_input(
+    db: &Connection,
+    id: i64,
+    tab: crate::interaction::ShelfTab,
+) -> Result<bool> {
     let membership = crate::catalogue_query::TRANSLATION_MEMBERSHIP;
     use crate::interaction::ShelfTab;
     let category = match tab {
@@ -542,15 +575,25 @@ pub(crate) fn visible_collection_input(db: &Connection, id: i64, tab: crate::int
         ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
         ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
         ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
-        ShelfTab::Images => format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate()),
+        ShelfTab::Images => format!(
+            "{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
+            crate::catalogue_query::image_shelf_predicate()
+        ),
         _ => return Ok(false),
     };
     Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM events e WHERE e.id=?1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id))"), [id], |row| row.get(0))?)
 }
 
-fn require_collection_input(db: &Connection, id: i64, tab: crate::interaction::ShelfTab) -> Result<()> {
+fn require_collection_input(
+    db: &Connection,
+    id: i64,
+    tab: crate::interaction::ShelfTab,
+) -> Result<()> {
     if !visible_collection_input(db, id, tab)? {
-        return Err(ApiError::new("stale_selection", "Select visible cards from the same shelf"));
+        return Err(ApiError::new(
+            "stale_selection",
+            "Select visible cards from the same shelf",
+        ));
     }
     Ok(())
 }
@@ -570,8 +613,10 @@ pub(crate) fn commit_shelf_collection(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let scope = crate::tag_service::scope(packed.tab)?;
     let first = packed.inputs[0].event.id;
-    let slot = |id| crate::tag_slots::visible_slot(&tx, scope, id)
-        .map_err(|error| ApiError::new("storage_error", error));
+    let slot = |id| {
+        crate::tag_slots::visible_slot(&tx, scope, id)
+            .map_err(|error| ApiError::new("storage_error", error))
+    };
     let first_slot = slot(first)?;
     let first_tags = crate::pinned::tags(&tx, first)?;
     let mut pinned = false;
@@ -579,19 +624,34 @@ pub(crate) fn commit_shelf_collection(
     for input in &packed.inputs {
         let id = input.event.id;
         require_collection_input(&tx, id, packed.tab)?;
-        if (crate::collection::is_managed(&input.event) || crate::bs_collection::is_managed(&input.event)) && tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM bull_members WHERE collection_id=?1 AND position>=?2)",
-            params![id, input.count], |row| row.get::<_, bool>(0),
-        )? {
-            return Err(ApiError::new("invalid_collection", "Saved collection membership is out of range"));
+        if (crate::collection::is_managed(&input.event)
+            || crate::bs_collection::is_managed(&input.event))
+            && tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM bull_members WHERE collection_id=?1 AND position>=?2)",
+                params![id, input.count],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            return Err(ApiError::new(
+                "invalid_collection",
+                "Saved collection membership is out of range",
+            ));
         }
         pinned |= crate::pinned::properties(&tx, id)?.pinned;
-        same_tags &= slot(id)? == first_slot
-            && crate::pinned::tags(&tx, id)? == first_tags;
+        same_tags &= slot(id)? == first_slot && crate::pinned::tags(&tx, id)? == first_tags;
     }
-    let id = commit_blob_in(&tx, root, quota, packed.blob, packed.tab == crate::interaction::ShelfTab::Translate)?;
+    let id = commit_blob_in(
+        &tx,
+        root,
+        quota,
+        packed.blob,
+        packed.tab == crate::interaction::ShelfTab::Translate,
+    )?;
     if pinned {
-        tx.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)", [id])?;
+        tx.execute(
+            "INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)",
+            [id],
+        )?;
         tx.execute("UPDATE katran_pinned_order SET position=(SELECT MIN(position)-1 FROM katran_pinned_order) WHERE event_id=?1", [id])?;
         if same_tags {
             if let Some(slot) = first_slot {
@@ -602,26 +662,42 @@ pub(crate) fn commit_shelf_collection(
     }
     let mut obsolete = HashSet::new();
     for input in packed.inputs {
-        if crate::collection::is_managed(&input.event) || crate::bs_collection::is_managed(&input.event) {
+        if crate::collection::is_managed(&input.event)
+            || crate::bs_collection::is_managed(&input.event)
+        {
             tx.execute("UPDATE bull_members SET collection_id=?1,position=position+?2 WHERE collection_id=?3", params![id, input.offset, input.event.id])?;
             obsolete.insert(retire_collection(&tx, input.event.id)?);
         } else {
-            tx.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,?3)", params![id, input.event.id, input.offset])?;
+            tx.execute(
+                "INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,?3)",
+                params![id, input.event.id, input.offset],
+            )?;
         }
     }
     tx.commit()?;
-    Ok((id, crate::delete_shelf::prune_unused_blobs(db, root, obsolete)))
+    Ok((
+        id,
+        crate::delete_shelf::prune_unused_blobs(db, root, obsolete),
+    ))
+}
+
+pub(crate) struct CollectionUnpackTarget {
+    pub(crate) id: i64,
+    pub(crate) tab: crate::interaction::ShelfTab,
+    pub(crate) newest_first: bool,
 }
 
 pub(crate) fn commit_extracted_collection_pages(
     db: &mut Connection,
     root: &Path,
     quota: u64,
-    collection_id: i64,
     expected_members: &CollectionMembers,
     pages: Vec<Option<PreparedBlob>>,
-    tab: crate::interaction::ShelfTab,
-    newest_first: bool,
+    CollectionUnpackTarget {
+        id: collection_id,
+        tab,
+        newest_first,
+    }: CollectionUnpackTarget,
 ) -> Result<(Vec<i64>, Vec<String>)> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     require_collection_input(&tx, collection_id, tab)?;
@@ -630,31 +706,51 @@ pub(crate) fn commit_extracted_collection_pages(
     let files = tab == crate::interaction::ShelfTab::Files;
     let translated = tab == crate::interaction::ShelfTab::Translate;
     if collection_members(&tx, collection_id)? != *expected_members {
-        return Err(ApiError::new("stale_selection", "Collection membership changed"));
+        return Err(ApiError::new(
+            "stale_selection",
+            "Collection membership changed",
+        ));
     }
     let mut additions = std::collections::HashSet::new();
-    let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| row.get(0))?;
+    let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| {
+        row.get(0)
+    })?;
     for page in pages.iter().flatten() {
         let valid = if files {
             page.source == "bs_extracted_file" && page.text.is_none()
         } else if links {
             page.link && page.source == "link_collection_page"
         } else if text {
-            page.text.is_some() && !page.link && !page.table && page.source == "text_collection_page"
+            page.text.is_some()
+                && !page.link
+                && !page.table
+                && page.source == "text_collection_page"
         } else {
-            page.source == "image_collection_page" && page.text.is_none() && page.name.ends_with(".png")
+            page.source == "image_collection_page"
+                && page.text.is_none()
+                && page.name.ends_with(".png")
         };
         if !valid {
-            return Err(ApiError::new("invalid_collection", "Unexpected extracted collection entry"));
+            return Err(ApiError::new(
+                "invalid_collection",
+                "Unexpected extracted collection entry",
+            ));
         }
-        if additions.insert(page.hash.as_str()) && !tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)", [&page.hash], |row| row.get::<_, bool>(0)
-        )? {
+        if additions.insert(page.hash.as_str())
+            && !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)",
+                [&page.hash],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
             required = required.saturating_add(page.size);
         }
     }
     if required > quota {
-        return Err(ApiError::new("quota_exceeded", "The collection pages do not fit in the cache"));
+        return Err(ApiError::new(
+            "quota_exceeded",
+            "The collection pages do not fit in the cache",
+        ));
     }
     drop(additions);
     let mut pages: Vec<_> = pages.into_iter().enumerate().collect();
@@ -665,23 +761,34 @@ pub(crate) fn commit_extracted_collection_pages(
     let mut obsolete = Vec::new();
     for (index, page) in pages {
         let Some(page) = page else {
-            items.push(*expected_members.get(&index).ok_or_else(|| ApiError::new("invalid_collection", "Collection page is missing"))?);
+            items.push(*expected_members.get(&index).ok_or_else(|| {
+                ApiError::new("invalid_collection", "Collection page is missing")
+            })?);
             continue;
         };
         if files && let Some(&id) = expected_members.get(&index) {
-            let previous: Option<String> = tx.query_row("SELECT blob_hash FROM events WHERE id=?1", [id], |row| row.get(0))?;
+            let previous: Option<String> =
+                tx.query_row("SELECT blob_hash FROM events WHERE id=?1", [id], |row| {
+                    row.get(0)
+                })?;
             let path = publish_blob_in(&tx, root, quota, &page)?;
-            let path = path.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+            let path = path
+                .to_str()
+                .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
             tx.execute("DELETE FROM files_pointers WHERE event_id=?1", [id])?;
             tx.execute("UPDATE events SET source=?1,name=?2,path=?3,size=?4,blob_hash=?5,reference_hash=NULL,delete_policy_json=json_object('kind','shelf_only'),modified_at_ms=detected_at_ms WHERE id=?6", params![page.source,page.name,path,page.size,page.hash,id])?;
             obsolete.extend(previous);
             items.push(id);
             continue;
         }
-        let existing: Option<i64> = if links || text || files { None } else { tx.query_row(
+        let existing: Option<i64> = if links || text || files {
+            None
+        } else {
+            tx.query_row(
             "SELECT id FROM events e WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY id LIMIT 1",
             params![page.name, page.hash], |row| row.get(0)
-        ).optional()? };
+        ).optional()?
+        };
         items.push(match existing {
             Some(id) => id,
             None => commit_blob_in(&tx, root, quota, page, translated)?,
@@ -692,7 +799,10 @@ pub(crate) fn commit_extracted_collection_pages(
     }
     obsolete.push(retire_collection(&tx, collection_id)?);
     tx.commit()?;
-    Ok((items, crate::delete_shelf::prune_unused_blobs(db, root, obsolete)))
+    Ok((
+        items,
+        crate::delete_shelf::prune_unused_blobs(db, root, obsolete),
+    ))
 }
 
 fn commit_blob_in(
@@ -766,7 +876,10 @@ fn commit_blob_in(
 
 /// Publish the verified prepared digest while holding the SQLite writer lock.
 fn publish_blob_in(
-    tx: &rusqlite::Transaction<'_>, root: &Path, quota: u64, prepared: &PreparedBlob,
+    tx: &rusqlite::Transaction<'_>,
+    root: &Path,
+    quota: u64,
+    prepared: &PreparedBlob,
 ) -> Result<PathBuf> {
     if prepared.directory != directory(root)? {
         return Err(ApiError::new(
@@ -985,7 +1098,12 @@ mod prepared_tests {
     use super::*;
     fn collection_input(bytes: &[u8]) -> ByteIngest<'_> {
         static ORIGIN: std::sync::OnceLock<Origin> = std::sync::OnceLock::new();
-        ByteIngest { name: "links.bull", source: "link_collection", bytes, origin: ORIGIN.get_or_init(Default::default) }
+        ByteIngest {
+            name: "links.bull",
+            source: "link_collection",
+            bytes,
+            origin: ORIGIN.get_or_init(Default::default),
+        }
     }
     fn input(bytes: &[u8]) -> ByteIngest<'_> {
         static ORIGIN: std::sync::OnceLock<Origin> = std::sync::OnceLock::new();
@@ -1054,16 +1172,52 @@ mod prepared_tests {
     fn replace_link_collection_preserves_identity_membership_and_shared_blob() {
         let temp = tempfile::tempdir().unwrap();
         let mut s = crate::Service::open(temp.path(), 1000).unwrap();
-        let id = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"old collection")).unwrap();
-        let shared = ingest_bytes(&mut s.db, &s.root, 1000, collection_input(b"old collection")).unwrap();
+        let id = ingest_bytes(
+            &mut s.db,
+            &s.root,
+            1000,
+            collection_input(b"old collection"),
+        )
+        .unwrap();
+        let shared = ingest_bytes(
+            &mut s.db,
+            &s.root,
+            1000,
+            collection_input(b"old collection"),
+        )
+        .unwrap();
         let member = ingest_bytes(&mut s.db, &s.root, 1000, input(b"member")).unwrap();
-        s.db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![id, member]).unwrap();
-        s.db.execute("INSERT INTO katran_properties(event_id,pinned,display_name) VALUES(?1,1,'Custom')", [id]).unwrap();
-        s.db.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'tag','Tag')", [id]).unwrap();
+        s.db.execute(
+            "INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)",
+            params![id, member],
+        )
+        .unwrap();
+        s.db.execute(
+            "INSERT INTO katran_properties(event_id,pinned,display_name) VALUES(?1,1,'Custom')",
+            [id],
+        )
+        .unwrap();
+        s.db.execute(
+            "INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'tag','Tag')",
+            [id],
+        )
+        .unwrap();
         let before = get_event(&s.db, id).unwrap();
         let old_path = before.path.clone();
-        let staged = prepare_bytes(&s.root, 1000, collection_input(b"new collection"), &[]).unwrap();
-        assert!(replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged, None).unwrap());
+        let staged =
+            prepare_bytes(&s.root, 1000, collection_input(b"new collection"), &[]).unwrap();
+        assert!(
+            replace_link_collection_blob(
+                &mut s.db,
+                &s.root,
+                1000,
+                id,
+                &before.revision,
+                staged,
+                None
+            )
+            .unwrap()
+        );
         let after = get_event(&s.db, id).unwrap();
         assert_eq!(after.id, id);
         assert_eq!(after.name, before.name);
@@ -1071,10 +1225,15 @@ mod prepared_tests {
         assert_eq!(fs::read(&after.path).unwrap(), b"new collection");
         assert_eq!(fs::read(old_path).unwrap(), b"old collection");
         assert_eq!(get_event(&s.db, shared).unwrap().revision, before.revision);
-        assert_eq!(collection_members(&s.db, id).unwrap().get(&0), Some(&member));
+        assert_eq!(
+            collection_members(&s.db, id).unwrap().get(&0),
+            Some(&member)
+        );
         assert!(crate::pinned::properties(&s.db, id).unwrap().pinned);
         assert_eq!(crate::pinned::tags(&s.db, id).unwrap().len(), 1);
-        let count: i64 = s.db.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0)).unwrap();
+        let count: i64 =
+            s.db.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+                .unwrap();
         assert_eq!(count, 3);
     }
     #[test]
@@ -1086,11 +1245,37 @@ mod prepared_tests {
         let before = get_event(&s.db, id).unwrap();
         let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
         let target = staged.directory.join(&staged.hash);
-        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, "blob:0000000000000000000000000000000000000000000000000000000000000000", staged, None).unwrap());
+        assert!(
+            !replace_link_collection_blob(
+                &mut s.db,
+                &s.root,
+                1000,
+                id,
+                "blob:0000000000000000000000000000000000000000000000000000000000000000",
+                staged,
+                None
+            )
+            .unwrap()
+        );
         assert!(!target.exists());
-        s.db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![parent,id]).unwrap();
+        s.db.execute(
+            "INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)",
+            params![parent, id],
+        )
+        .unwrap();
         let staged = prepare_bytes(&s.root, 1000, collection_input(b"new"), &[]).unwrap();
-        assert!(!replace_link_collection_blob(&mut s.db, &s.root, 1000, id, &before.revision, staged, None).unwrap());
+        assert!(
+            !replace_link_collection_blob(
+                &mut s.db,
+                &s.root,
+                1000,
+                id,
+                &before.revision,
+                staged,
+                None
+            )
+            .unwrap()
+        );
         assert!(!target.exists());
         assert_eq!(get_event(&s.db, id).unwrap().revision, before.revision);
     }

@@ -548,7 +548,10 @@ fn projection_sql(
         );
     }
     if tab == ShelfTab::Text {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", text_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND {}", text_shelf_predicate()),
+        );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Pods {
@@ -556,15 +559,27 @@ fn projection_sql(
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Files {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", files_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND {}", files_shelf_predicate()),
+        );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     } else {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND NOT {}", files_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!(
+                "AND e.legacy_source_ref=0 AND NOT {}",
+                files_shelf_predicate()
+            ),
+        );
     }
     if tab == ShelfTab::Translate {
         sql = sql.replace(
             "AND e.legacy_source_ref=0",
-            &format!("AND e.legacy_source_ref=0 AND {}", translated_image_predicate()),
+            &format!(
+                "AND e.legacy_source_ref=0 AND {}",
+                translated_image_predicate()
+            ),
         );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     } else if tab == ShelfTab::Images {
@@ -574,11 +589,20 @@ fn projection_sql(
         );
     }
     if tab == ShelfTab::Links {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", link_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND {}", link_shelf_predicate()),
+        );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if !links_enabled {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND NOT {}", link_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!(
+                "AND e.legacy_source_ref=0 AND NOT {}",
+                link_shelf_predicate()
+            ),
+        );
     }
     if tab == ShelfTab::Tables {
         sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM table_fragments t WHERE t.event_id=e.id)");
@@ -610,7 +634,10 @@ pub(crate) fn text_shelf_predicate() -> &'static str {
 
 /// Ordinary image collections share the Images shelf, but remain managed blobs.
 pub(crate) fn image_shelf_predicate() -> String {
-    format!("({} OR (e.blob_hash IS NOT NULL AND e.source='image_collection' AND lower(substr(e.name,-5))='.bull'))", crate::file_types::sql_image_predicate())
+    format!(
+        "({} OR (e.blob_hash IS NOT NULL AND e.source='image_collection' AND lower(substr(e.name,-5))='.bull'))",
+        crate::file_types::sql_image_predicate()
+    )
 }
 
 pub(crate) fn translated_image_predicate() -> String {
@@ -762,10 +789,20 @@ mod tests {
                 bytes: b"synthetic managed image",
                 origin: &crate::origin::Origin::default(),
             },
-        ).unwrap();
+        )
+        .unwrap();
         assert!(ids(&service.db, ShelfTab::Translate, "", 10, None).is_empty());
-        service.db.execute("INSERT INTO translated_images VALUES (?1), (?2)", [source, result]).unwrap();
-        assert_eq!(ids(&service.db, ShelfTab::Translate, "", 10, None), vec![result]);
+        service
+            .db
+            .execute(
+                "INSERT INTO translated_images VALUES (?1), (?2)",
+                [source, result],
+            )
+            .unwrap();
+        assert_eq!(
+            ids(&service.db, ShelfTab::Translate, "", 10, None),
+            vec![result]
+        );
         assert!(ids(&service.db, ShelfTab::Translate, "unmatched", 10, None).is_empty());
     }
     #[test]
@@ -775,16 +812,47 @@ mod tests {
         let visible = ordinary(db, "visible.png", "fixture");
         let member = ordinary(db, "hidden.png", "fixture");
         let collection = ordinary(db, "album.bull", "fixture");
-        db.execute("INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)", params![collection,member]).unwrap();
-        db.execute("INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)", [member]).unwrap();
-        db.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'hidden','hidden')", [member]).unwrap();
+        db.execute(
+            "INSERT INTO bull_members(collection_id,member_id,position) VALUES(?1,?2,0)",
+            params![collection, member],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO katran_properties(event_id,pinned) VALUES(?1,1)",
+            [member],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO katran_tags(event_id,tag_key,tag_display) VALUES(?1,'hidden','hidden')",
+            [member],
+        )
+        .unwrap();
         assert_eq!(ids(db, ShelfTab::Images, "", 1, None), vec![visible]);
         assert_eq!(service.get(member).unwrap().id, member);
-        let (pinned, _) = query_sorted_slice(db, ShelfTab::Images, "", 10, None,
-            crate::sorting::SortSpec::default(), true, None, None, 0, (true,true,true,true)).unwrap();
+        let (pinned, _) = query_sorted_slice(
+            db,
+            ShelfTab::Images,
+            "",
+            10,
+            None,
+            crate::sorting::SortSpec::default(),
+            true,
+            None,
+            None,
+            0,
+            (true, true, true, true),
+        )
+        .unwrap();
         assert!(pinned.is_empty());
-        db.execute("DELETE FROM bull_members WHERE collection_id=?1", [collection]).unwrap();
-        assert_eq!(ids(db, ShelfTab::Images, "", 2, None), vec![member, visible]);
+        db.execute(
+            "DELETE FROM bull_members WHERE collection_id=?1",
+            [collection],
+        )
+        .unwrap();
+        assert_eq!(
+            ids(db, ShelfTab::Images, "", 2, None),
+            vec![member, visible]
+        );
     }
     #[test]
     fn membership_is_current_projection_not_provenance_or_path_and_never_stats_live_paths() {

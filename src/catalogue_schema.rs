@@ -194,12 +194,14 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         )?;
     }
     if version < 15 {
-        tx.execute_batch("CREATE TABLE bull_members(
+        tx.execute_batch(
+            "CREATE TABLE bull_members(
             collection_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             member_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
             position INTEGER NOT NULL,
             PRIMARY KEY(collection_id,position)
-        ); PRAGMA user_version=15;")?;
+        ); PRAGMA user_version=15;",
+        )?;
     }
     tx.commit()?;
     Ok(())
@@ -215,19 +217,40 @@ mod tests {
         drop(crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap());
         let database = profile.path().join("index.sqlite3");
         let legacy = Connection::open(&database).unwrap();
-        legacy.execute_batch("DROP TABLE bull_members; PRAGMA user_version=14;").unwrap();
+        legacy
+            .execute_batch("DROP TABLE bull_members; PRAGMA user_version=14;")
+            .unwrap();
         drop(legacy);
         let reopened = crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
-        let version: i64 = reopened.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: i64 = reopened
+            .db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, 15);
         assert!(reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bull_members')", [], |row| row.get::<_, bool>(0)).unwrap());
-        let backup = std::fs::read_dir(profile.path().join("backups")).unwrap()
+        let backup = std::fs::read_dir(profile.path().join("backups"))
+            .unwrap()
             .map(|entry| entry.unwrap().path())
-            .find(|path| path.file_name().unwrap().to_string_lossy().starts_with("index-before-v15"))
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("index-before-v15")
+            })
             .unwrap();
         let backup = Connection::open(backup).unwrap();
-        assert_eq!(backup.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 14);
-        assert_eq!(backup.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0)).unwrap(), "ok");
+        assert_eq!(
+            backup
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            14
+        );
+        assert_eq!(
+            backup
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
     }
 
     #[test]

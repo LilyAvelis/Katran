@@ -213,7 +213,8 @@ impl Status {
                 return Err(missing("Manga OCR model is missing"));
             }
             ImageTranslationSource::Chinese | ImageTranslationSource::TraditionalChinese
-                if !self.chinese_model => {
+                if !self.chinese_model =>
+            {
                 return Err(missing("Chinese OCR model PP-OCRv5_server_rec is missing"));
             }
             ImageTranslationSource::Korean if !self.korean_model => {
@@ -243,6 +244,8 @@ impl Status {
     })
     }
 }
+pub(crate) const MODEL: &str = "qwen3:4b-instruct";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,4 +276,3 @@ mod tests {
         assert_eq!(find_ollama_models(profile.path(), &manifest), Some(store));
     }
 }
-pub(crate) const MODEL: &str = "qwen3:4b-instruct";

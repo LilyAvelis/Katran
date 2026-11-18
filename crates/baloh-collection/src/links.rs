@@ -235,6 +235,23 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<Link>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn roundtrips_large_collections_up_to_shared_limit() {
+        for count in [33, codec::MAX_PAGES] {
+            let entries: Vec<_> = (0..count)
+                .map(|i| {
+                    let mut value = link();
+                    value.url = format!("https://example.org/{i}");
+                    value
+                })
+                .collect();
+            let mut encoded = Vec::new();
+            write(&mut encoded, &entries).unwrap();
+            assert_eq!(read(encoded.as_slice()).unwrap(), entries);
+            encoded[16..20].copy_from_slice(&((codec::MAX_PAGES + 1) as u32).to_le_bytes());
+            assert!(read(encoded.as_slice()).is_err());
+        }
+    }
     fn link() -> Link {
         Link {
             url: "https://example.org/страница?q=1".into(),
@@ -304,7 +321,7 @@ mod tests {
         entry.preview_png = Some(b"bad".to_vec());
         assert!(write(Vec::new(), &[entry]).is_err());
         assert!(write(Vec::new(), &[]).is_err());
-        assert!(write(Vec::new(), &vec![link(); 33]).is_err());
+        assert!(write(Vec::new(), &vec![link(); codec::MAX_PAGES + 1]).is_err());
     }
     #[test]
     fn reject_corruption_truncation_and_trailing() {

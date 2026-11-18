@@ -476,10 +476,10 @@ impl Shelf {
         if let Some(job_id) = self.upscale.link_rename.take().and_then(|edit| edit.job) {
             self.call(Command::CancelJob { job_id });
         }
-        if let Some(collection) = self.upscale.collection.take() {
-            if let Some((job_id, _)) = collection.pending {
-                self.call(Command::CancelJob { job_id });
-            }
+        if let Some(collection) = self.upscale.collection.take()
+            && let Some((job_id, _)) = collection.pending
+        {
+            self.call(Command::CancelJob { job_id });
         }
     }
 
@@ -619,18 +619,18 @@ impl Shelf {
                             let returned =
                                 page["index"].as_u64().and_then(|v| usize::try_from(v).ok());
                             if returned == Some(expected)
-                                && count.is_some_and(|n| n > expected && n <= 32)
+                                && count.is_some_and(|n| {
+                                    n > expected && n <= baloh_collection::MAX_ENTRIES
+                                })
                             {
                                 collection.count = count;
                                 if let Some(file) = page["file"].as_object() {
                                     let name =
                                         file.get("name").and_then(Value::as_str).unwrap_or("");
-                                    let size = file.get("size").and_then(Value::as_u64);
-                                    if name.is_empty() || name.len() > 4096 || size.is_none() {
-                                        collection.error =
-                                            tr("Некорректная запись файла", "Invalid file entry")
-                                                .into();
-                                    } else {
+                                    if let Some(size) = file.get("size").and_then(Value::as_u64)
+                                        && !name.is_empty()
+                                        && name.len() <= 4096
+                                    {
                                         let extension = file
                                             .get("extension")
                                             .and_then(Value::as_str)
@@ -658,7 +658,7 @@ impl Shelf {
                                         }
                                         collection.file = Some(FilePage {
                                             name: name.to_owned(),
-                                            size: size.unwrap(),
+                                            size,
                                             extension,
                                             video,
                                         });
@@ -667,6 +667,10 @@ impl Shelf {
                                         collection.texture = texture;
                                         collection.ready_index = Some(expected);
                                         collection.zoom = katran::preview_view::State::default();
+                                    } else {
+                                        collection.error =
+                                            tr("Некорректная запись файла", "Invalid file entry")
+                                                .into();
                                     }
                                 } else if let Some(link) = page["link"].as_object() {
                                     let url = link.get("url").and_then(Value::as_str).unwrap_or("");
@@ -812,8 +816,8 @@ impl Shelf {
                     .collection
                     .as_ref()
                     .and_then(Collection::ready_transfer_target);
-                if let Some((id, revision, index)) = target {
-                    if !self.start_job(
+                if let Some((id, revision, index)) = target
+                    && !self.start_job(
                         Command::CopyCollectionPage {
                             id,
                             revision,
@@ -821,14 +825,14 @@ impl Shelf {
                         },
                         false,
                         ctx.clone(),
-                    ) && self.job.is_some()
-                    {
-                        self.message = tr(
-                            "Дождитесь завершения текущей операции",
-                            "Wait for the current operation to finish",
-                        )
-                        .into();
-                    }
+                    )
+                    && self.job.is_some()
+                {
+                    self.message = tr(
+                        "Дождитесь завершения текущей операции",
+                        "Wait for the current operation to finish",
+                    )
+                    .into();
                 }
             }
             let open_requested = ctx.input_mut(|input| {
@@ -1272,24 +1276,24 @@ impl Shelf {
                     );
                     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
-                if let Ok(geometry) = collection.zoom.geometry(viewport, size) {
-                    if let (Some(left), Some(top), Some(width), Some(height)) = (
+                if let Ok(geometry) = collection.zoom.geometry(viewport, size)
+                    && let (Some(left), Some(top), Some(width), Some(height)) = (
                         geometry["left"].as_f64(),
                         geometry["top"].as_f64(),
                         geometry["width"].as_f64(),
                         geometry["height"].as_f64(),
-                    ) {
-                        let rect = egui::Rect::from_min_size(
-                            canvas.min + egui::vec2(left as f32, top as f32),
-                            egui::vec2(width as f32, height as f32),
-                        );
-                        painter.image(
-                            texture.id(),
-                            rect,
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
+                    )
+                {
+                    let rect = egui::Rect::from_min_size(
+                        canvas.min + egui::vec2(left as f32, top as f32),
+                        egui::vec2(width as f32, height as f32),
+                    );
+                    painter.image(
+                        texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
                 }
             }
             // Prepare the page during the entrance. Start the decoder after
@@ -1332,7 +1336,7 @@ impl Shelf {
         } else if save_name {
             self.submit_link_rename(ctx);
         } else if self.upscale.link_rename.is_some() {
-            return;
+            // The inline editor owns the preview until it closes.
         } else if close || (accepts_input && !fullscreen && modal.should_close()) {
             self.close_translation_collection(ctx);
         } else if previous && current > 0 {

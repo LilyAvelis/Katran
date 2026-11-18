@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 mod ai_component_bundle;
 pub mod ai_components;
 mod audio_extract;
+mod bs_collection;
 pub mod capture;
 pub mod capture_events;
 mod catalogue_query;
@@ -10,6 +11,9 @@ mod catalogue_snapshot;
 mod classification_runtime;
 pub mod clipboard_files;
 pub mod clipboard_listener;
+mod collection;
+mod collection_kind;
+mod collection_rename;
 pub mod compact_layout;
 pub mod copy_out;
 mod delete_jobs;
@@ -28,6 +32,8 @@ pub mod file_visual;
 mod files_pointer;
 mod files_service;
 mod files_store;
+mod folder_bundle_service;
+mod folder_collection;
 mod folder_commit;
 mod folder_cpu_runtime;
 mod folder_delete;
@@ -40,20 +46,12 @@ pub mod folder_transfer;
 pub mod folder_watch;
 mod foreground_windows;
 mod google_lens;
+mod image_collection;
+mod image_translate;
+mod image_translation_batch;
+mod image_upscale;
 pub mod interaction;
 mod jobs_service;
-mod image_upscale;
-mod image_translate;
-mod image_collection;
-mod collection;
-mod collection_kind;
-mod collection_rename;
-mod folder_collection;
-mod folder_bundle_service;
-mod bs_collection;
-mod image_translation_batch;
-mod upscale_components;
-mod translate_components;
 pub mod known_folders;
 pub mod link_fragments;
 mod link_visual;
@@ -91,6 +89,8 @@ pub mod tag_slots;
 pub mod text_fragments;
 mod text_service;
 mod transfer_service;
+mod translate_components;
+mod upscale_components;
 pub mod work_folder;
 mod workspace_service;
 use interaction::Interaction;
@@ -553,7 +553,8 @@ impl Service {
             command @ Command::SearchSelectedImageWithGoogleLens => self.begin_job(command),
             command @ Command::CreateImageCollection => self.begin_job(command),
             command @ Command::CreateBsCollection => self.begin_job(command),
-            command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
+            command @ (Command::TranslateSelectedImage
+            | Command::TranslateSelectedImageFrom { .. }) => self.begin_job(command),
             command @ Command::TranslationCollectionPage { .. } => self.begin_job(command),
             command @ Command::RenameCollectionLink { .. } => self.begin_job(command),
             Command::CollectionRenameInfo { id } => self.collection_rename_info(id),
@@ -568,28 +569,41 @@ impl Service {
             } => self.media_frame(session, after_serial),
             Command::AiComponentsStatus => {
                 let mut status = self.ai_components.status(&self.root)?;
-                let models = [UpscaleOperation::RemacriX4, UpscaleOperation::RealEsrganX2, UpscaleOperation::RealEsrganX4]
-                    .into_iter()
-                    .map(|operation| {
-                        let filename = operation.weights();
-                        let found = upscale_components::discover(&self.root, filename)?;
-                        Ok(serde_json::json!({"filename": filename, "found": found.model.is_some()}))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+                let models = [
+                    UpscaleOperation::RemacriX4,
+                    UpscaleOperation::RealEsrganX2,
+                    UpscaleOperation::RealEsrganX4,
+                ]
+                .into_iter()
+                .map(|operation| {
+                    let filename = operation.weights();
+                    let found = upscale_components::discover(&self.root, filename)?;
+                    Ok(serde_json::json!({"filename": filename, "found": found.model.is_some()}))
+                })
+                .collect::<Result<Vec<_>>>()?;
                 status["image_upscale"] = serde_json::json!({
                     "runtime_found": upscale_components::resolve_python().is_some(),
                     "models": models,
                 });
-                let translation = translate_components::discover(&self.root, translate_components::MODEL);
+                let translation =
+                    translate_components::discover(&self.root, translate_components::MODEL);
                 let mut sources = serde_json::Map::new();
-                for source in [ImageTranslationSource::Japanese, ImageTranslationSource::Chinese, ImageTranslationSource::TraditionalChinese, ImageTranslationSource::Korean] {
+                for source in [
+                    ImageTranslationSource::Japanese,
+                    ImageTranslationSource::Chinese,
+                    ImageTranslationSource::TraditionalChinese,
+                    ImageTranslationSource::Korean,
+                ] {
                     let availability = match &translation {
                         Ok(status) => status.resolve(source).err().map(|error| error.message),
                         Err(error) => Some(error.message.clone()),
                     };
-                    sources.insert(source.code().into(), serde_json::json!({
-                        "ready": availability.is_none(), "message": availability,
-                    }));
+                    sources.insert(
+                        source.code().into(),
+                        serde_json::json!({
+                            "ready": availability.is_none(), "message": availability,
+                        }),
+                    );
                 }
                 status["image_translate"] = serde_json::json!({
                     "ready": sources["ja"]["ready"],
@@ -903,8 +917,19 @@ impl Service {
             } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
-            Command::BeginPasteCollectionPage { owner_window, id, revision, index } =>
-                self.begin_paste_with_copy(owner_window, Command::CopyCollectionPage { id, revision, index }),
+            Command::BeginPasteCollectionPage {
+                owner_window,
+                id,
+                revision,
+                index,
+            } => self.begin_paste_with_copy(
+                owner_window,
+                Command::CopyCollectionPage {
+                    id,
+                    revision,
+                    index,
+                },
+            ),
             Command::CompletePastePrevious { owner_window } => {
                 self.complete_paste_previous(owner_window)
             }

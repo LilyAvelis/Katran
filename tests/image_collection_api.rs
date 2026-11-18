@@ -373,10 +373,7 @@ fn merging_a_legacy_bull_restores_its_pngs_and_the_local_original() {
     assert_eq!(item["source"], "image_collection_page");
     let bytes = std::fs::read(item["path"].as_str().unwrap()).unwrap();
     let restored = image::load_from_memory(&bytes).unwrap();
-    assert_eq!(
-        (restored.width(), restored.height()),
-        (51, 22)
-    );
+    assert_eq!((restored.width(), restored.height()), (51, 22));
     assert_eq!(
         snapshot(&mut service, ShelfTab::Images)["events"]
             .as_array()

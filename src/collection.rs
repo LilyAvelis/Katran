@@ -166,10 +166,13 @@ pub(crate) fn pack_links(
                 preview_png: None,
             });
         }
-        if entries.len() > baloh_collection::codec::MAX_PAGES {
+        if entries.len() > baloh_collection::MAX_ENTRIES {
             return Err(ApiError::new(
                 "collection_size_limit",
-                "BULL supports up to 32 entries",
+                format!(
+                    "BULL supports up to {} entries",
+                    baloh_collection::MAX_ENTRIES
+                ),
             ));
         }
         if media_service::stamp(&event.path)? != stamp {
@@ -551,10 +554,13 @@ pub(crate) fn pack_text(
         } else {
             entries.push(crate::text_fragments::read_text_event(&event)?);
         }
-        if entries.len() > baloh_collection::codec::MAX_PAGES {
+        if entries.len() > baloh_collection::MAX_ENTRIES {
             return Err(ApiError::new(
                 "collection_size_limit",
-                "BULL supports up to 32 entries",
+                format!(
+                    "BULL supports up to {} entries",
+                    baloh_collection::MAX_ENTRIES
+                ),
             ));
         }
         if media_service::stamp(&event.path)? != stamp {

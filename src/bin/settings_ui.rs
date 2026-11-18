@@ -582,7 +582,7 @@ impl State {
         }
         ui.heading(super::i18n::tr("AI", "AI"));
         ui.label(super::i18n::tr("Компоненты необязательны и устанавливаются только по вашему запросу. Обычный поиск работает без них.", "Components are optional and installed only when you request them. Ordinary search works without them."));
-        ui.weak(super::i18n::tr("Установка и проверка открываются в отдельном терминале. Он остаётся открытым с результатом; журнал можно передать другому ИИ для диагностики.", "Installation and verification open a separate terminal. It stays open with the result; you can share its log with another assistant for troubleshooting."));
+        ui.weak(super::i18n::tr("Для Emoji и Folder кнопки установки и проверки открывают отдельный терминал. Перевод и увеличение изображений настраиваются вручную по инструкциям ниже.", "The Emoji and Folder install and verify buttons open a separate terminal. Image translation and upscaling are set up manually using the guides below."));
         if ui
             .button(super::i18n::tr("Обновить статусы", "Refresh status"))
             .clicked()
@@ -601,6 +601,17 @@ impl State {
             ui,
             super::i18n::tr("Перевод изображений", "Image translation"),
             |ui| {
+                ui.weak(super::i18n::tr(
+                    "Для перевода установите компоненты вручную по инструкции.",
+                    "Set up the translation components manually using the guide.",
+                ));
+                ui.hyperlink_to(
+                    super::i18n::tr(
+                        "Инструкция по настройке перевода",
+                        "Translation setup guide",
+                    ),
+                    "https://github.com/LilyAvelis/Katran/blob/v4.0.0/docs/ai-setup.md#translate",
+                );
                 if let Some(status) = translate.as_ref() {
                     if let Some(model) = status["model"].as_str() {
                         ui.label(format!("{}: {model}", super::i18n::tr("Модель", "Model")));
@@ -654,15 +665,26 @@ impl State {
                 }
             },
         );
-        if let Some(upscale) = self
+        let upscale = self
             .ai_components
             .as_ref()
-            .and_then(|v| v.get("image_upscale"))
-        {
-            SettingsSection::group(
-                ui,
-                super::i18n::tr("Увеличение изображений", "Image upscaling"),
-                |ui| {
+            .and_then(|v| v.get("image_upscale"));
+        SettingsSection::group(
+            ui,
+            super::i18n::tr("Увеличение изображений", "Image upscaling"),
+            |ui| {
+                ui.weak(super::i18n::tr(
+                    "Для увеличения изображений установите компоненты вручную по инструкции.",
+                    "Set up the image upscaling components manually using the guide.",
+                ));
+                ui.hyperlink_to(
+                    super::i18n::tr(
+                        "Инструкция по настройке увеличения",
+                        "Upscaling setup guide",
+                    ),
+                    "https://github.com/LilyAvelis/Katran/blob/v4.0.0/docs/ai-setup.md#upscale",
+                );
+                if let Some(upscale) = upscale {
                     let found = |value: bool| {
                         if value {
                             super::i18n::tr("Найден", "Found")
@@ -690,9 +712,11 @@ impl State {
                         "Наличие файлов не подтверждает успешную работу модели.",
                         "File presence does not verify inference.",
                     ));
-                },
-            );
-        }
+                } else {
+                    ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
+                }
+            },
+        );
         let components = self.ai_components.clone();
         let mut requested = None;
         for (component, title, description) in [

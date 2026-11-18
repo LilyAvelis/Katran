@@ -49,10 +49,16 @@ fn background_actions(
         return BackgroundActions::default();
     };
     if crate::collection::packable_link(&event) {
-        return BackgroundActions { pack_links: true, ..Default::default() };
+        return BackgroundActions {
+            pack_links: true,
+            ..Default::default()
+        };
     }
     if crate::collection::packable_text(&event) {
-        return BackgroundActions { pack_text: true, ..Default::default() };
+        return BackgroundActions {
+            pack_text: true,
+            ..Default::default()
+        };
     }
     if matches!(
         event.kind,
@@ -92,9 +98,18 @@ fn background_actions(
 
 impl Service {
     fn current_archive_selection(&self) -> bool {
-        let ids = if self.interaction.selected.is_empty() { self.interaction.cursor.as_slice() } else { self.interaction.selected.as_slice() };
+        let ids = if self.interaction.selected.is_empty() {
+            self.interaction.cursor.as_slice()
+        } else {
+            self.interaction.selected.as_slice()
+        };
         (1..=baloh_collection::bs::MAX_FILES).contains(&ids.len())
-            && ids.iter().all(|&id| self.get(id).is_ok_and(|event| crate::collection_kind::external(&event) || crate::collection::is_managed(&event)))
+            && ids.iter().all(|&id| {
+                self.get(id).is_ok_and(|event| {
+                    crate::collection_kind::external(&event)
+                        || crate::collection::is_managed(&event)
+                })
+            })
     }
 
     pub(crate) fn navigate_tab(&mut self, delta: i8) -> Result<Value> {
@@ -119,16 +134,31 @@ impl Service {
     pub(crate) fn background_action_availability(&self) -> BackgroundActions {
         let selected = &self.interaction.selected;
         if (2..=crate::image_translation_batch::MAX_PAGES).contains(&selected.len()) {
-            let events = selected.iter().map(|id| self.get(*id)).collect::<Result<Vec<_>>>();
-            let images = events.as_ref().is_ok_and(|events| events.iter().all(crate::image_collection::is_image));
+            let events = selected
+                .iter()
+                .map(|id| self.get(*id))
+                .collect::<Result<Vec<_>>>();
+            let images = events
+                .as_ref()
+                .is_ok_and(|events| events.iter().all(crate::image_collection::is_image));
             return BackgroundActions {
                 image_batch: images,
                 pack_images: images,
-                merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
-                pack_links: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
-                pack_text: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_text)),
-                pack_bs: events.as_ref().is_ok_and(|events| events.iter().all(crate::bs_collection::is_packable_file)),
-                merge_bs: events.as_ref().is_ok_and(|events| events.iter().all(crate::bs_collection::is_managed)),
+                merge_bull: events
+                    .as_ref()
+                    .is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
+                pack_links: events
+                    .as_ref()
+                    .is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
+                pack_text: events
+                    .as_ref()
+                    .is_ok_and(|events| events.iter().all(crate::collection::packable_text)),
+                pack_bs: events
+                    .as_ref()
+                    .is_ok_and(|events| events.iter().all(crate::bs_collection::is_packable_file)),
+                merge_bs: events
+                    .as_ref()
+                    .is_ok_and(|events| events.iter().all(crate::bs_collection::is_managed)),
                 ..Default::default()
             };
         }
@@ -147,17 +177,23 @@ impl Service {
             | "upscale_remacri_x4"
             | "upscale_realesrgan_x2"
             | "upscale_realesrgan_x4" => background.image_batch,
-            "translate_image_ja" | "translate_image_zh" | "translate_image_zh_hant" | "translate_image_ko" => {
-                background.image_batch
-            }
+            "translate_image_ja"
+            | "translate_image_zh"
+            | "translate_image_zh_hant"
+            | "translate_image_ko" => background.image_batch,
             "search_image_google_lens" => background.image,
             "create_image_collection" => {
                 let supported = match self.interaction.tab {
                     ShelfTab::Images | ShelfTab::Translate => background.pack_images,
                     ShelfTab::Links => background.pack_links,
                     ShelfTab::Text => background.pack_text,
-                    ShelfTab::Files => return background.pack_bs || background.unpack_bs || background.merge_bs
-                        || background.unpack_bull || background.merge_bull,
+                    ShelfTab::Files => {
+                        return background.pack_bs
+                            || background.unpack_bs
+                            || background.merge_bs
+                            || background.unpack_bull
+                            || background.merge_bull;
+                    }
                     ShelfTab::All => return background.pack_bs || self.current_archive_selection(),
                     _ => return false,
                 };
@@ -183,9 +219,16 @@ impl Service {
         }
     }
 
-    pub(crate) fn action_label(&self, id: &str, fallback: &str, background: BackgroundActions) -> String {
+    pub(crate) fn action_label(
+        &self,
+        id: &str,
+        fallback: &str,
+        background: BackgroundActions,
+    ) -> String {
         let english = self.settings.language == crate::settings::Language::English;
-        if id == "create_image_collection" && matches!(self.interaction.tab, ShelfTab::Files | ShelfTab::All) {
+        if id == "create_image_collection"
+            && matches!(self.interaction.tab, ShelfTab::Files | ShelfTab::All)
+        {
             return match (background.unpack_bs, background.merge_bs, english) {
                 (true, _, true) => "Unpack collection",
                 (true, _, false) => "Разобрать коллекцию",
@@ -193,24 +236,41 @@ impl Service {
                 (_, true, false) => "Объединить коллекции",
                 (_, _, true) => "Pack / unpack collection",
                 (_, _, false) => "Собрать / разобрать коллекцию",
-            }.into();
+            }
+            .into();
         }
         if id == "create_image_collection" {
             if background.merge_bull {
-                return if english { "Merge BULL collections" } else { "Объединить BULL" }.into();
+                return if english {
+                    "Merge BULL collections"
+                } else {
+                    "Объединить BULL"
+                }
+                .into();
             }
             if background.pack_links {
-                return if english { "Pack links into BULL" } else { "Собрать ссылки в BULL" }.into();
+                return if english {
+                    "Pack links into BULL"
+                } else {
+                    "Собрать ссылки в BULL"
+                }
+                .into();
             }
             if background.pack_text {
-                return if english { "Pack texts into BULL" } else { "Собрать тексты в BULL" }.into();
+                return if english {
+                    "Pack texts into BULL"
+                } else {
+                    "Собрать тексты в BULL"
+                }
+                .into();
             }
             return match (background.unpack_bull, english) {
                 (true, true) => "Unpack BULL",
                 (true, false) => "Разобрать BULL",
                 (false, true) => "Pack images into BULL",
                 (false, false) => "Собрать изображения в BULL",
-            }.into();
+            }
+            .into();
         }
         let tab = match id {
             "toggle_images" => Some(ShelfTab::Images),

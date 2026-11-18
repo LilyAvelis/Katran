@@ -28,8 +28,7 @@ in place. The completion dialog shows which pages failed and why.
 It also shows skipped lettering regions by original page number. Both Chinese
 commands apply the same geometry-based vertical reading order.
 Japanese and Chinese translation can combine fragments from one enclosed
-bubble. Side cards follow their reading numbers, and a short text-based
-summary appears below the page.
+bubble. Side cards follow their reading numbers.
 The viewer keeps its page frame stable and supports the same anchored zoom
 as image preview. Page turns retain the previous image without a loading
 label. BULL cards show a BK badge. Image translation settings

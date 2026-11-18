@@ -100,6 +100,17 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<String>> {
 mod tests {
     use super::*;
     #[test]
+    fn roundtrips_large_collections_up_to_shared_limit() {
+        for count in [33, codec::MAX_PAGES] {
+            let entries: Vec<_> = (0..count).map(|i| format!("entry-{i}")).collect();
+            let mut encoded = Vec::new();
+            write(&mut encoded, &entries).unwrap();
+            assert_eq!(read(encoded.as_slice()).unwrap(), entries);
+            encoded[16..20].copy_from_slice(&((codec::MAX_PAGES + 1) as u32).to_le_bytes());
+            assert!(read(encoded.as_slice()).is_err());
+        }
+    }
+    #[test]
     fn roundtrip_preserves_exact_bytes_and_order() {
         let entries = vec![
             "  Привет\r\nмир\t \n".to_owned(),
@@ -124,7 +135,7 @@ mod tests {
     #[test]
     fn reject_limits_nul_and_invalid_framing() {
         assert!(write(Vec::new(), &[]).is_err());
-        assert!(write(Vec::new(), &vec![String::new(); 33]).is_err());
+        assert!(write(Vec::new(), &vec![String::from("x"); codec::MAX_PAGES + 1]).is_err());
         for text in [
             String::new(),
             "a\0b".to_owned(),

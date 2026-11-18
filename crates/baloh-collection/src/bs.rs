@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 
 pub const MAGIC: &[u8; 8] = b"BALOHBS\0";
 pub const VERSION: u32 = 1;
-pub const MAX_FILES: usize = 32;
+pub const MAX_FILES: usize = crate::MAX_ENTRIES;
 pub const MAX_FILE_BYTES: usize = 128 * 1024 * 1024;
 /// Maximum complete encoded file size, including all framing.
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
@@ -195,6 +195,17 @@ pub fn read<R: Read>(mut input: R) -> io::Result<Vec<FileEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn roundtrips_large_collections_up_to_shared_limit() {
+        for count in [33, MAX_FILES] {
+            let entries: Vec<_> = (0..count)
+                .map(|i| entry(&format!("{i:04}.txt"), &(i as u32).to_le_bytes()))
+                .collect();
+            let mut encoded = Vec::new();
+            write(&mut encoded, &entries).unwrap();
+            assert_eq!(read(encoded.as_slice()).unwrap(), entries);
+        }
+    }
     fn entry(name: &str, bytes: &[u8]) -> FileEntry {
         FileEntry {
             name: name.into(),
@@ -269,7 +280,7 @@ mod tests {
         bad[12] = 0;
         assert!(read(&bad[..]).is_err());
         let mut bad = encoded.clone();
-        bad[12] = 33;
+        bad[12..16].copy_from_slice(&((MAX_FILES + 1) as u32).to_le_bytes());
         assert!(read(&bad[..]).is_err());
         let mut bad = encoded.clone();
         bad[16..20].copy_from_slice(&256u32.to_le_bytes());
@@ -287,7 +298,7 @@ mod tests {
         bad.push(0);
         assert!(read(&bad[..]).is_err());
         assert!(write(Vec::new(), &[]).is_err());
-        assert!(write(Vec::new(), &vec![entry("a", b""); 33]).is_err());
+        assert!(write(Vec::new(), &vec![entry("a", b""); MAX_FILES + 1]).is_err());
     }
     #[test]
     fn total_budget_includes_names_and_framing() {

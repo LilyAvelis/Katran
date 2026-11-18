@@ -9,8 +9,15 @@ use std::{collections::HashSet, path::Path};
 /// stored path and its canonical form so a missing/replaced file at the same
 /// name remains protected. Owned blob paths are not original-file aliases.
 pub(crate) fn protected_by_pin(db: &Connection, id: i64) -> Result<bool> {
-    if db.query_row("SELECT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?1)", [id], |row| row.get::<_, bool>(0))? {
-        return Err(ApiError::new("packed_member", "Unpack the BULL before removing this image"));
+    if db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM bull_members WHERE member_id=?1)",
+        [id],
+        |row| row.get::<_, bool>(0),
+    )? {
+        return Err(ApiError::new(
+            "packed_member",
+            "Unpack the BULL before removing this image",
+        ));
     }
     let event: Option<(String, Option<String>, bool)> = db.query_row(
         "SELECT e.path,e.blob_hash,COALESCE(p.pinned,0) FROM events e LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.id=?1",

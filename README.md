@@ -27,7 +27,8 @@ You can also run either command on a selection of loose images.
 **Translate** turns selected Japanese, Simplified Chinese, Traditional Chinese and Korean images
 into English. The commands are independently bindable under Ctrl+K → AI
 Commands. A single PNG opens in QuickLook and is saved to Translate. A batch
-of 2–32 pages becomes one BULL in selection order. In Settings → AI → Image
+of up to 1,024 pages becomes one BULL in selection order, within the archive
+size limit. In Settings → AI → Image
 translation, choose numbered annotations to preserve the original lettering
 and read the translations on matching cards. On the tested complex Japanese
 page, a warm end-to-end run fell from **21.6 s to 3.7 s** (about **5.8×**).
@@ -40,9 +41,8 @@ browser. [Upscale](docs/patch-4.0/IMAGE-UPSCALE.md) ·
 [Audio extraction](docs/patch-4.0/AUDIO-EXTRACTION.md) ·
 [Google Lens](docs/releases/next.md#google-lens)
 
-4.0 is the accepted local feature set. See the
-[local release notes](docs/releases/next.md#katran-40--accepted-local-build)
-for the verified build and distribution status.
+See the [4.0.0 release notes](docs/releases/4.0.0.md) and
+[AI setup guide](docs/ai-setup.md) for component requirements and upgrade details.
 
 Preview handoff for the next team: changing a browse filter must not briefly
 blank an already loaded, unchanged Link/Text preview. Keep ready content separate

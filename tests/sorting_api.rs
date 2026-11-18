@@ -221,8 +221,20 @@ fn selection_range_follows_gesture_direction_and_toggle_is_click_order() {
         },
     );
     assert_eq!(selected["selected"], json!([ids[2], ids[1], ids[0]]));
-    call(&mut api, Command::Select { id: ids[0], mode: SelectionMode::Replace });
-    let selected = call(&mut api, Command::Select { id: ids[2], mode: SelectionMode::Range });
+    call(
+        &mut api,
+        Command::Select {
+            id: ids[0],
+            mode: SelectionMode::Replace,
+        },
+    );
+    let selected = call(
+        &mut api,
+        Command::Select {
+            id: ids[2],
+            mode: SelectionMode::Range,
+        },
+    );
     assert_eq!(selected["selected"], json!(ids));
     call(
         &mut api,

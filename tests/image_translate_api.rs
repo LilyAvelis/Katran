@@ -193,7 +193,7 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let mut results = vec![first, warm];
     let complex = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE");
     if let Some(complex) = complex.as_ref() {
-        let result = translate_page(&mut service, &complex, ImageTranslationSource::Japanese);
+        let result = translate_page(&mut service, complex, ImageTranslationSource::Japanese);
         assert!(result["side_blocks"].as_u64().unwrap() > 0);
         assert_eq!(result["skipped_blocks"], 0);
         results.push(result);

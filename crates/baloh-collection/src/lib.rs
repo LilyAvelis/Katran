@@ -3,10 +3,13 @@
 //! Keys identify entries independently of their positions. The caller defines
 //! the payload and key types. Storage and interchange belong to the caller.
 
-pub mod codec;
 pub mod bs;
+pub mod codec;
 pub mod links;
 pub mod text;
+
+/// Maximum number of entries in a collection, independent of its kind.
+pub const MAX_ENTRIES: usize = 1024;
 
 use std::collections::BTreeMap;
 

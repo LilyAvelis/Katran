@@ -8,9 +8,11 @@ pub fn icon(id: &str) -> Lucide {
         "video_pause" => Lucide::Pause,
         "capture_video_frame" => Lucide::Camera,
         "extract_video_audio" => Lucide::Volume2,
-        "translate" | "translate_image_ja" | "translate_image_zh" | "translate_image_zh_hant" | "translate_image_ko" => {
-            Lucide::Languages
-        }
+        "translate"
+        | "translate_image_ja"
+        | "translate_image_zh"
+        | "translate_image_zh_hant"
+        | "translate_image_ko" => Lucide::Languages,
         "upscale_remacri_x2"
         | "upscale_remacri_x4"
         | "upscale_realesrgan_x2"

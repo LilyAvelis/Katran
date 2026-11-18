@@ -21,7 +21,7 @@ const MAX_SOURCE: usize = 32 * 1024 * 1024;
 
 pub(crate) enum Input {
     Selection(Vec<Event>),
-    Bull(Event),
+    Bull(Box<Event>),
 }
 
 impl Input {
@@ -58,8 +58,7 @@ pub(crate) fn prepare(
     root: &Path,
     quota: u64,
     references: &[PathBuf],
-    language: ImageTranslationSource,
-    numbered_only: bool,
+    (language, numbered_only): (ImageTranslationSource, bool),
     session: &mut Session,
     cancel: &Cancellation,
 ) -> Result<Prepared> {
@@ -73,8 +72,7 @@ pub(crate) fn prepare(
         root,
         quota,
         references,
-        &name,
-        "image_translation_collection",
+        (&name, "image_translation_collection"),
         cancel,
         |bytes| {
             let rendered = session.translate(
@@ -82,7 +80,6 @@ pub(crate) fn prepare(
                 &staging,
                 components.clone(),
                 language,
-                "en",
                 numbered_only,
                 cancel,
             )?;
@@ -130,8 +127,7 @@ pub(crate) fn prepare_upscale(
         root,
         quota,
         references,
-        &name,
-        crate::image_collection::SOURCE,
+        (&name, crate::image_collection::SOURCE),
         cancel,
         |bytes| {
             let output = crate::image_upscale::upscale(
@@ -164,7 +160,7 @@ fn read_output(path: &Path) -> Result<Vec<u8>> {
 }
 
 enum Page {
-    File(Event),
+    File(Box<Event>),
     Embedded { bytes: Vec<u8>, already_png: bool },
 }
 
@@ -197,8 +193,7 @@ fn transform(
     root: &Path,
     quota: u64,
     references: &[PathBuf],
-    name: &str,
-    source: &str,
+    (name, source): (&str, &str),
     cancel: &Cancellation,
     mut render: impl FnMut(&[u8]) -> Result<RenderedPage>,
 ) -> Result<Prepared> {
@@ -207,13 +202,16 @@ fn transform(
         source == "image_translation_collection" && matches!(&input, Input::Bull(_));
     let mut validated_sources = Vec::new();
     let pages = match input {
-        Input::Selection(events) => events.into_iter().map(Page::File).collect(),
+        Input::Selection(events) => events
+            .into_iter()
+            .map(|event| Page::File(Box::new(event)))
+            .collect(),
         Input::Bull(event) => {
             let stamp = media_service::stamp(&event.path)?;
             crate::open_file::validate(&event)?;
             let pages = read_bull(&event)?;
             check_stamp(&event, &stamp)?;
-            validated_sources.push((event, stamp));
+            validated_sources.push((*event, stamp));
             pages
         }
     };
@@ -236,7 +234,7 @@ fn transform(
                     File::open(&path)?
                         .take(MAX_SOURCE as u64 + 1)
                         .read_to_end(&mut bytes)?;
-                    (bytes, Some((event, stamp)), false)
+                    (bytes, Some((*event, stamp)), false)
                 }
             };
             let rendered = (|| {
@@ -272,7 +270,6 @@ fn transform(
                     outcome["skipped_blocks"] = json!(report.skipped);
                     outcome["fallback_blocks"] = json!(report.fallback);
                     outcome["side_blocks"] = json!(report.side);
-                    outcome["summary_rendered"] = json!(report.summary_rendered);
                 }
                 receipt.push(outcome);
                 included.push(page.png);
@@ -435,12 +432,11 @@ mod tests {
         jobs.submit(Lane::ImageTranslate, move |cancel| {
             let mut skipped = 3;
             let prepared = transform(
-                Input::Bull(event),
+                Input::Bull(Box::new(event)),
                 &root,
                 crate::DEFAULT_QUOTA,
                 &[],
-                "translated.bull",
-                "image_translation_collection",
+                ("translated.bull", "image_translation_collection"),
                 &cancel,
                 |bytes| {
                     let report = RenderReport {
@@ -449,7 +445,6 @@ mod tests {
                         fallback: 1,
                         side: 1,
                         left_pad: 0,
-                        summary_rendered: true,
                     };
                     skipped = 0;
                     Ok(RenderedPage {
@@ -471,9 +466,9 @@ mod tests {
             prepared.receipt["pages"],
             json!([
                 {"index":0,"ok":true,"page":0,"rendered_blocks":2,"skipped_blocks":3,
-                    "fallback_blocks":1,"side_blocks":1,"summary_rendered":true},
+                    "fallback_blocks":1,"side_blocks":1},
                 {"index":1,"ok":true,"page":1,"rendered_blocks":2,"skipped_blocks":0,
-                    "fallback_blocks":1,"side_blocks":1,"summary_rendered":true}
+                    "fallback_blocks":1,"side_blocks":1}
             ])
         );
     }

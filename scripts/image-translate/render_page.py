@@ -3,8 +3,7 @@
 Input JSON is an ordered list of objects with ``text`` and either ``polygon`` or
 ``polygons`` (each polygon is a list of image-space [x, y] points). An optional
 ``text_box`` [left, top, right, bottom] selects a larger safe placement rectangle;
-it is intended for diagnostics and does not expand the inpainting mask. An object
-containing ``blocks`` and an optional ``summary`` is also accepted.
+it is intended for diagnostics and does not expand the inpainting mask.
 """
 import argparse
 import json
@@ -181,7 +180,7 @@ def _panel_wrap(text, font, draw, width):
     return lines or None
 
 
-def render(source, blocks, output, font, numbered_only=False, summary=None):
+def render(source, blocks, output, font, numbered_only=False):
     original = Image.open(source).convert("RGBA")
     alpha = original.getchannel("A")
     rgb = np.asarray(original.convert("RGB"))
@@ -516,19 +515,8 @@ def render(source, blocks, output, font, numbered_only=False, summary=None):
     if not active and not near and not fallback:
         raise ValueError("No text blocks could be rendered safely")
     base_height = height + panel_height + 8 if panel_items else height
-    # Do not sacrifice translations for a summary; report omission explicitly.
-    normalized_summary = " ".join(summary.split()) if isinstance(summary, str) else ""
-    summary_lines = None
-    summary_height = 0
-    if normalized_summary and len(normalized_summary) <= 1000:
-        lines = _panel_wrap(normalized_summary, panel_font, panel_draw, output_width - 24)
-        if lines:
-            candidate_height = 24 + (len(lines) + 1) * line_height
-            if base_height + candidate_height <= max_height:
-                summary_lines = lines
-                summary_height = candidate_height
-    output_height = base_height + summary_height
-    if side_items or panel_items or summary_lines:
+    output_height = base_height
+    if side_items or panel_items:
         canvas = Image.new("RGBA", (output_width, output_height), "white")
         canvas.paste(result_image, (left_pad, 0))
         canvas_draw = ImageDraw.Draw(canvas)
@@ -561,20 +549,12 @@ def render(source, blocks, output, font, numbered_only=False, summary=None):
                 canvas_draw.text((44 if line_index == 0 else 12, y), line, font=panel_font, fill=(0, 0, 0, 255))
                 y += line_height
             y += 10
-        if summary_lines:
-            y = base_height + 12
-            canvas_draw.text((12, y), "Page summary", font=panel_font, fill=(40, 40, 40, 255))
-            y += line_height
-            for line in summary_lines:
-                canvas_draw.text((12, y), line, font=panel_font, fill=(0, 0, 0, 255))
-                y += line_height
         result_image = canvas
     with open(output, "xb") as target:
         result_image.save(target, format="PNG")
     return {"rendered": len(active) + len(near) + fallback,
             "skipped": len(records) - len(active) - len(near) - fallback,
-            "fallback": fallback, "side": len(side_items), "left_pad": left_pad,
-            "summary_rendered": bool(summary_lines)}
+            "fallback": fallback, "side": len(side_items), "left_pad": left_pad}
 
 
 def main():
@@ -587,12 +567,8 @@ def main():
     parser.add_argument("--numbered-only", action="store_true", help="Keep the page intact and put every translation on numbered cards")
     args = parser.parse_args()
     with open(args.blocks_json, encoding="utf-8") as stream:
-        document = json.load(stream)
-    if isinstance(document, dict):
-        blocks, summary = document.get("blocks"), document.get("summary")
-    else:
-        blocks, summary = document, None
-    report = render(args.source, blocks, args.output, args.font, numbered_only=args.numbered_only, summary=summary)
+        blocks = json.load(stream)
+    report = render(args.source, blocks, args.output, args.font, numbered_only=args.numbered_only)
     if args.report:
         with open(args.report, "x", encoding="utf-8") as receipt:
             json.dump(report, receipt)

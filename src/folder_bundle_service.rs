@@ -124,7 +124,7 @@ pub(crate) fn prepare(
                 for event in &events {
                     cancel.check()?;
                     values.extend(collection::read_texts(event)?);
-                    if values.len() > 32 {
+                    if values.len() > baloh_collection::MAX_ENTRIES {
                         return Err(too_many());
                     }
                 }
@@ -137,7 +137,7 @@ pub(crate) fn prepare(
                 for event in &events {
                     cancel.check()?;
                     values.extend(collection::read_links(event)?);
-                    if values.len() > 32 {
+                    if values.len() > baloh_collection::MAX_ENTRIES {
                         return Err(too_many());
                     }
                 }
@@ -291,7 +291,10 @@ pub(crate) fn finish(prepared: Prepared, trash: &dyn Trash) -> Result<Value> {
 fn too_many() -> ApiError {
     ApiError::new(
         "collection_size_limit",
-        "A collection can hold up to 32 entries",
+        format!(
+            "A collection can hold up to {} entries",
+            baloh_collection::MAX_ENTRIES
+        ),
     )
 }
 

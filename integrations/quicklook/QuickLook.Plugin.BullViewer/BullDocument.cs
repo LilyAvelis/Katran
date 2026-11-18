@@ -8,6 +8,7 @@ namespace QuickLook.Plugin.BullViewer
 {
     internal sealed class BullDocument : IDisposable
     {
+        private const uint MaxPages = 1024;
         private const long MaxTotal = 256L * 1024 * 1024;
         private const int MaxPage = 64 * 1024 * 1024;
         private readonly FileStream stream;
@@ -33,7 +34,7 @@ namespace QuickLook.Plugin.BullViewer
                 if (Encoding.ASCII.GetString(ReadExact(reader, 8)) != "BALOHCOL") throw Invalid("Invalid collection magic");
                 if (reader.ReadUInt32() != 1) throw Invalid("Unsupported collection version");
                 uint count = reader.ReadUInt32();
-                if (count < 1 || count > 32) throw Invalid("Invalid page count");
+                if (count < 1 || count > MaxPages) throw Invalid("Invalid page count");
                 for (int i = 0; i < count; i++)
                 {
                     uint length = reader.ReadUInt32();

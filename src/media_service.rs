@@ -397,13 +397,13 @@ impl Service {
                 "Media source changed while loading",
             ));
         }
-        if let Some((path, expected)) = &prepared.archive {
-            if &current.path != path || stamp(path)? != *expected {
-                return Err(ApiError::new(
-                    "source_changed",
-                    "Collection changed while loading",
-                ));
-            }
+        if let Some((path, expected)) = &prepared.archive
+            && (&current.path != path || stamp(path)? != *expected)
+        {
+            return Err(ApiError::new(
+                "source_changed",
+                "Collection changed while loading",
+            ));
         }
         #[cfg(windows)]
         if let Some(current) = self.media.configured_gpu

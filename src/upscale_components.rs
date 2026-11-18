@@ -34,7 +34,7 @@ fn portable_root() -> Option<PathBuf> {
         let drive = std::env::var_os("SystemDrive")?;
         let mut root = PathBuf::from(drive);
         root.push("\\");
-        return Some(root.join("ComfyUI").join("ComfyUI_windows_portable"));
+        Some(root.join("ComfyUI").join("ComfyUI_windows_portable"))
     }
     #[cfg(not(windows))]
     None

@@ -103,6 +103,60 @@ fn add(api: &mut Service, paths: Vec<PathBuf>) -> Vec<i64> {
         .collect()
 }
 
+#[test]
+fn mixed_collection_packs_and_unpacks_more_than_32_files() {
+    let profile = tempfile::tempdir().unwrap();
+    let originals = tempfile::tempdir().unwrap();
+    let mut api = Service::open(profile.path(), katran::DEFAULT_QUOTA).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Files,
+            enabled: true,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Files,
+        },
+    );
+    let paths: Vec<_> = (0..33)
+        .map(|index| {
+            let name = format!(
+                "item-{index:02}.{}",
+                if index % 2 == 0 { "txt" } else { "bin" }
+            );
+            let path = originals.path().join(name);
+            std::fs::write(&path, format!("fixture-{index:02}")).unwrap();
+            path
+        })
+        .collect();
+    let ids = add(&mut api, paths.clone());
+    select(&mut api, &ids);
+    let packed = action(&mut api);
+    assert_eq!(packed["count"], 33);
+    assert_eq!(packed["bs_collection"], true);
+    let card = &packed["event"];
+    let entries =
+        baloh_collection::bs::read(std::fs::File::open(card["path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(entries.len(), 33);
+    for (index, entry) in entries.iter().enumerate() {
+        assert_eq!(
+            entry.name,
+            paths[index].file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(entry.bytes, format!("fixture-{index:02}").as_bytes());
+    }
+    select(&mut api, &[id(card)]);
+    let unpacked = action(&mut api);
+    assert_eq!(unpacked["items"].as_array().unwrap().len(), 33);
+    for path in paths {
+        assert!(path.exists());
+    }
+}
+
 type Opened = (String, Vec<u8>, Operation);
 struct Launcher(Arc<Mutex<Vec<Opened>>>);
 impl katran::open_file::Launcher for Launcher {
@@ -380,9 +434,11 @@ fn one_action_packs_homogeneous_files_into_bull_and_deletes_hidden_shelf_members
 }
 
 #[cfg(windows)]
+type RecycledFile = (String, Vec<u8>);
+#[cfg(windows)]
 struct SyntheticFolderTrash {
     fail_name: Option<String>,
-    seen: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    seen: Arc<Mutex<Vec<RecycledFile>>>,
 }
 #[cfg(windows)]
 impl katran::downloads::Trash for SyntheticFolderTrash {

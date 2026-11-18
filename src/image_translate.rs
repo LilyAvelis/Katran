@@ -37,8 +37,6 @@ pub(crate) struct RenderReport {
     pub(crate) fallback: u32,
     pub(crate) side: u32,
     pub(crate) left_pad: u32,
-    #[serde(default)]
-    pub(crate) summary_rendered: bool,
 }
 impl StagedTranslation {
     pub(crate) fn path(&self) -> &Path {
@@ -238,10 +236,11 @@ impl Runtime {
     }
 
     fn translation_port(&mut self, cancel: &Cancellation) -> Result<u16> {
-        if let Some((port, process)) = &mut self.ollama {
-            if process.child.try_wait()?.is_none() && reachable(*port) {
-                return Ok(*port);
-            }
+        if let Some((port, process)) = &mut self.ollama
+            && process.child.try_wait()?.is_none()
+            && reachable(*port)
+        {
+            return Ok(*port);
         }
         drop(self.ollama.take());
         let (port, process) = server(
@@ -264,10 +263,10 @@ fn recognize(
     cancel: &Cancellation,
 ) -> Result<()> {
     cancel.check()?;
-    if let Some(process) = worker {
-        if process.child.try_wait()?.is_some() {
-            drop(worker.take());
-        }
+    if let Some(process) = worker
+        && process.child.try_wait()?.is_some()
+    {
+        drop(worker.take());
     }
     if worker.is_none() {
         hidden(&mut command);
@@ -374,16 +373,12 @@ impl Session {
         staging_root: &Path,
         components: Components,
         language: ImageTranslationSource,
-        target: &str,
         numbered_only: bool,
         cancel: &Cancellation,
     ) -> Result<StagedTranslation> {
         cancel.check()?;
         if source.is_empty() || source.len() > MAX_BYTES {
             return Err(error("Image exceeds input size limit"));
-        }
-        if target != "en" {
-            return Err(error("Local image translation outputs English"));
         }
         let font = std::env::var_os("WINDIR")
             .map(PathBuf::from)
@@ -502,7 +497,7 @@ impl Session {
                 "--source",
                 language.code(),
                 "--target",
-                target,
+                "en",
                 "--model",
                 MODEL,
                 "--port",
@@ -559,8 +554,7 @@ impl Session {
             || output_height < height
             || (output_width > width) != (report.side > 0)
             || report.left_pad > output_width.saturating_sub(width)
-            || (output_height > height)
-                != (report.fallback > report.side || report.summary_rendered)
+            || (output_height > height) != (report.fallback > report.side)
             || output_width > 8192
             || output_height > 8192
             || u64::from(output_width) * u64::from(output_height) > MAX_PIXELS

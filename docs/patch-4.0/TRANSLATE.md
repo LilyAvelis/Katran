@@ -66,16 +66,13 @@ to keep original lettering and put every translation in a numbered card.
 The renderer bypasses letter removal and in-bubble layout in this mode.
 The setting applies to newly submitted single-page and batch jobs. The
 hybrid layout remains the default.
-Qwen returns a short English summary from the recognized text in the same
-request as the translations. It appears below the page when the footer fits
-within the output size limits. The render receipt reports whether it fit.
 Nothing is published if no lettering can be placed safely.
 Cancellation before publication leaves no result. Source bytes stay intact.
 The Katran UI opens a newly saved single-page PNG in QuickLook. QuickLook
 receives a named snapshot of the saved revision and handles Space dismissal.
 If external preview fails, the published result stays in Translate.
 
-For a sequence of 2–32 images, use Ctrl to choose the order by clicking, or
+For a sequence of 2–1,024 images within the BULL size limit, use Ctrl to choose the order by clicking, or
 Shift to select from the first page to the last in either direction. The
 same translation command accepts an image BULL and uses its saved page
 order. The action steps through that order with progress and cancellation.

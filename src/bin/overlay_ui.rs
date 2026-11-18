@@ -387,11 +387,30 @@ impl Shelf {
         }
     }
     pub(super) fn paste_previous(&mut self, ctx: &egui::Context) {
-        self.begin_paste_ui(ctx, Command::BeginPastePrevious { owner_window: self.native_window });
+        self.begin_paste_ui(
+            ctx,
+            Command::BeginPastePrevious {
+                owner_window: self.native_window,
+            },
+        );
     }
 
-    pub(super) fn paste_collection_page(&mut self, ctx: &egui::Context, id: i64, revision: String, index: usize) {
-        self.begin_paste_ui(ctx, Command::BeginPasteCollectionPage { owner_window: self.native_window, id, revision, index });
+    pub(super) fn paste_collection_page(
+        &mut self,
+        ctx: &egui::Context,
+        id: i64,
+        revision: String,
+        index: usize,
+    ) {
+        self.begin_paste_ui(
+            ctx,
+            Command::BeginPasteCollectionPage {
+                owner_window: self.native_window,
+                id,
+                revision,
+                index,
+            },
+        );
     }
 
     fn begin_paste_ui(&mut self, ctx: &egui::Context, command: Command) {

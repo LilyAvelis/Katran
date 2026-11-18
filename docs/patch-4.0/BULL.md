@@ -8,7 +8,7 @@ or Katran catalogue state.
 | --- | --- |
 | Header | Eight ASCII bytes `BALOHCOL` |
 | Version | Unsigned 32-bit little-endian integer `1` |
-| Count | Unsigned 32-bit little-endian integer, 1–32 |
+| Count | Unsigned 32-bit little-endian integer, 1–1,024 |
 | Each page | Unsigned 32-bit little-endian byte length, 32 raw SHA-256 bytes, PNG bytestream |
 
 The file budget is 256 MiB including framing, with up to 64 MiB per PNG.
@@ -21,7 +21,7 @@ author.
 
 Typed Links files start with `BALOHCOL`, unsigned 32-bit little-endian
 version `2`, four ASCII bytes `LINK`, and an unsigned 32-bit little-endian
-count of 1–32. Each entry has a 32-bit little-endian payload length followed
+count of 1–1,024. Each entry has a 32-bit little-endian payload length followed
 by a 32-byte SHA-256 digest and the payload. The payload contains four fields
 in order: exact HTTP(S) URL, title, description, and optional PNG preview.
 Each field starts with a 32-bit little-endian byte length. The first three
@@ -87,7 +87,8 @@ replace the selected cards with one collection. The new card appears first
 in newest-first arrival order, and its cover is the first page in the saved
 selection order. A merge concatenates the pages of the selected BULLs and
 keeps each one's internal page order. Collections merge with the same entry
-type. The combined limit is 32 entries.
+type. The combined limit is 1,024 entries within the existing byte budget.
+Older readers with the 32-entry limit reject larger collections.
 
 A collection is pinned if at least one selected card was pinned. The
 collection receives a tag only if all selected cards have the same assigned

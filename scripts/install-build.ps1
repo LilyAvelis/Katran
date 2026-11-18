@@ -19,6 +19,8 @@ function Get-KatranSources([string]$Root) {
     $files += @(Get-ChildItem -LiteralPath (Join-Path $collectionCrate 'src') -Recurse -File -Filter '*.rs' | ForEach-Object FullName)
     if (Test-Path -LiteralPath $folderSemanticWorker) { $files += $folderSemanticWorker }
     if (Test-Path -LiteralPath $imageUpscaleWorker) { $files += $imageUpscaleWorker }
+    $lensPage = Join-Path $Root 'src/google_lens_handoff.html'
+    if (Test-Path -LiteralPath $lensPage) { $files += $lensPage }
     $translationScripts = Join-Path $Root 'scripts/image-translate'
     if (Test-Path -LiteralPath $translationScripts) {
         $files += @((Get-ChildItem -LiteralPath $translationScripts -File -Filter '*.py').FullName)

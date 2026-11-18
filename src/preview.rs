@@ -94,7 +94,9 @@ pub fn render(root: &Path, event: &Event, edge: u32) -> Result<serde_json::Value
                 let mut limits = image::Limits::default();
                 limits.max_alloc = Some(256 * 1024 * 1024);
                 reader.limits(limits);
-                reader.decode().map_err(|e| ApiError::new("preview_unavailable", e))?
+                reader
+                    .decode()
+                    .map_err(|e| ApiError::new("preview_unavailable", e))?
             };
             let thumb = decoded.thumbnail(edge, edge).to_rgba8();
             let current = if event.revision.starts_with("ref:") {

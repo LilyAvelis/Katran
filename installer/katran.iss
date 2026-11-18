@@ -39,6 +39,7 @@ Source: "{#PackageRoot}\scripts\ai-components\verify.py"; DestDir: "{app}\script
 Source: "{#PackageRoot}\scripts\folder-semantic\setup.ps1"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\folder-semantic\setup-gpu.ps1"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\folder-semantic\worker.py"; DestDir: "{app}\scripts\folder-semantic"; Flags: ignoreversion
+Source: "{#PackageRoot}\scripts\setup-video-player.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\emoji-ai\worker.py"; DestDir: "{app}\scripts\emoji-ai"; Flags: ignoreversion
 Source: "{#PackageRoot}\scripts\emoji-ai\semantic_search.py"; DestDir: "{app}\scripts\emoji-ai"; Flags: ignoreversion
 Source: "{#PackageRoot}\assets\unicode\emoji-test.txt"; DestDir: "{app}\assets\unicode"; Flags: ignoreversion

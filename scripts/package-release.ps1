@@ -39,6 +39,8 @@ foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-a
 }
 $componentInputs = @('scripts/ai-components/terminal.ps1','scripts/ai-components/ensure-python.ps1','scripts/ai-components/verify.py','scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/folder-semantic/worker.py')
 foreach ($file in $componentInputs) { if (!(Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) { throw "Missing AI component installer input: $file" } }
+$videoPlayerSetup = 'scripts/setup-video-player.ps1'
+if (!(Test-Path -LiteralPath (Join-Path $Root $videoPlayerSetup) -PathType Leaf)) { throw 'Missing optional video player setup script' }
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 $utf8 = New-Object Text.UTF8Encoding($false)
 function Write-Json($Path, $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Value -Depth 8) + "`n", $utf8) }
@@ -81,6 +83,7 @@ foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-a
     Copy-Item -LiteralPath (Join-Path $Root $file) -Destination (Join-Path $portable $file)
 }
 foreach ($file in $componentInputs) { Copy-Item -LiteralPath (Join-Path $Root $file) -Destination (Join-Path $portable $file) }
+Copy-Item -LiteralPath (Join-Path $Root $videoPlayerSetup) -Destination (Join-Path $portable $videoPlayerSetup)
 $combinedNotices = (Get-Content -LiteralPath $DependencyNoticesPath -Raw) + "`n`nEverything ES:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/NOTICE.txt') -Raw) + "`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/everything/LICENSE') -Raw)
 $combinedNotices += "`n`nUnicode CLDR annotations:`n" + (Get-Content -LiteralPath (Join-Path $Root 'assets/emoji-ai/cldr/LICENSE') -Raw)
 $combinedNotices += "`n`nOptional separately downloaded emoji search model: intfloat/multilingual-e5-small, MIT license, revision 614241f622f53c4eeff9890bdc4f31cfecc418b3, https://huggingface.co/intfloat/multilingual-e5-small/tree/614241f622f53c4eeff9890bdc4f31cfecc418b3 . The model is not included in this package.`n"
@@ -102,6 +105,11 @@ foreach ($crate in @('avilon-actions','avilon-egui','avilon-media','avilon-windo
 $sourceFiles += @('assets/everything/es.exe','assets/everything/LICENSE','assets/everything/NOTICE.txt')
 $sourceFiles += @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')
 $sourceFiles += $componentInputs
+$sourceFiles += @($videoPlayerSetup,'crates/baloh-collection/Cargo.toml','scripts/image-upscale/worker.py','src/google_lens_handoff.html')
+foreach ($dir in @('crates/baloh-collection/src','scripts/image-translate')) {
+    $pattern = if ($dir.StartsWith('crates/')) { '*.rs' } else { '*.py' }
+    $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $Root $dir) -File -Filter $pattern | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
+}
 foreach ($assetDir in @('assets/branding','assets/themes/lilies','assets/emoji-flags','assets/unicode')) {
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $Root $assetDir) -Recurse -File | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
 }

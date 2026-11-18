@@ -1,5 +1,13 @@
 # Katran development rules
 
+## Katran 4.0.0 public release authorization · 2026-11-18
+
+Lilia accepted the local 4.0 build, requested removal of the page summary,
+and authorized pushing main, creating v4.0.0 and publishing the Windows
+release. Use the existing workflow and preserve its checks, build, package
+and publication boundaries. See [4.0.0 release notes](docs/releases/4.0.0.md)
+and [AI setup](docs/ai-setup.md).
+
 ## Katran 4.0 · Accepted local baseline · 2026-11-18
 
 The sequential run below is closed. Start from the

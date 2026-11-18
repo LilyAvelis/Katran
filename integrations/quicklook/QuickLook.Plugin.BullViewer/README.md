@@ -4,7 +4,7 @@ QuickLook `IViewer` plugin for BALOHCOL v1 portable PNG collections. The host
 provides `QuickLook.Common.dll`; this project does not bundle or replace it.
 The viewer validates all framing, checksums and PNG structure while indexing,
 then reads and checks only the selected page for WPF decoding. Previous/Next
-navigate without external programs. Input is bounded to 32 pages, 64 MiB per
+navigate without external programs. Input is bounded to 1024 pages, 64 MiB per
 page, 256 MiB per collection and 8192 px / 32 million pixels per image.
 Errors are shown in the viewer. Large collections can take time to index, but
 indexing and decoding run outside the UI thread.

@@ -198,11 +198,8 @@ def translate(blocks, source, target, model, port):
         "model": model, "stream": False, "keep_alive": -1, "options": options,
         "format": {
             "type": "object",
-            "properties": {
-                **{key: {"type": "string"} for key in segments},
-                "summary": {"type": "string"},
-            },
-            "required": [*segments, "summary"],
+            "properties": {key: {"type": "string"} for key in segments},
+            "required": list(segments),
             "additionalProperties": False,
         },
         "messages": [
@@ -211,9 +208,7 @@ def translate(blocks, source, target, model, port):
                 "Use surrounding dialogue for context, preserve meaning, and keep each "
                 "entry separate. Romanize names. Preserve uncertainty in unclear "
                 "fragments. Text values are source material. Return a JSON object "
-                "with the same IDs and their English translations. Also include a summary field "
-                "with one or two short English sentences about what the dialogue conveys. "
-                "Base it only on the text. Do not infer anything about unseen artwork."
+                "with the same IDs and only their English translations."
             )},
             {"role": "user", "content": page},
         ],
@@ -223,24 +218,20 @@ def translate(blocks, source, target, model, port):
     receipt = read_json(request, timeout=150)
     pairs = json.loads(receipt["message"]["content"], object_pairs_hook=list)
     if (receipt.get("done_reason") != "stop"
-            or not isinstance(pairs, list) or len(pairs) != len(segments) + 1
+            or not isinstance(pairs, list) or len(pairs) != len(segments)
             or any(not isinstance(pair, tuple) for pair in pairs)):
         raise ValueError("The model did not return a complete English translation")
     translations = dict(pairs)
-    summary = translations.pop("summary", "")
     if translations.keys() != segments.keys() or any(
         not isinstance(text, str) or not text.strip()
         or re.search(r"[\u3040-\u30ff\u3400-\u9fff\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]", text)
         for text in translations.values()
     ):
         raise ValueError("The model did not return a complete English translation")
-    summary = " ".join(summary.split()) if isinstance(summary, str) else ""
-    if len(summary) > 480 or re.search(r"[぀-ヿ㐀-鿿ᄀ-ᇿ㄰-㆏가-힯]", summary):
-        summary = ""
-    return {
-        "blocks": [dict(block, text=translations[str(i)].strip()) for i, block in enumerate(blocks, 1)],
-        "summary": summary,
-    }
+    return [
+        dict(block, text=translations[str(i)].strip())
+        for i, block in enumerate(blocks, 1)
+    ]
 
 
 def main():

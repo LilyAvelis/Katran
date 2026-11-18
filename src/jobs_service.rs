@@ -82,10 +82,23 @@ pub(crate) struct FolderExportBatch {
 }
 pub(crate) enum PreparedWork {
     PackImageCollection(storage::CollectionPack),
-    FolderBundle { prepared: folder_bundle_service::Prepared, generation: u64 },
-    FolderBundlePublished { folder: PathBuf, receipt: Value },
-    RenameShelfCollection { event: Event, tab: interaction::ShelfTab, name: String },
-    RenameFolderCollection { prepared: collection_rename::PreparedFolderRename, generation: u64 },
+    FolderBundle {
+        prepared: folder_bundle_service::Prepared,
+        generation: u64,
+    },
+    FolderBundlePublished {
+        folder: PathBuf,
+        receipt: Value,
+    },
+    RenameShelfCollection {
+        event: Event,
+        tab: interaction::ShelfTab,
+        name: String,
+    },
+    RenameFolderCollection {
+        prepared: collection_rename::PreparedFolderRename,
+        generation: u64,
+    },
     LinkCollectionMetadata {
         event: Event,
         blob: Option<storage::PreparedBlob>,
@@ -155,8 +168,16 @@ pub(crate) enum PreparedWork {
         audio_track: u32,
         clipboard_sequence: u32,
     },
-    AudioReference { result: Value, clipboard_sequence: u32, prepared: Result<files_pointer::Pointer> },
-    AudioCopy { result: Value, clipboard_sequence: u32, prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String> },
+    AudioReference {
+        result: Value,
+        clipboard_sequence: u32,
+        prepared: Result<files_pointer::Pointer>,
+    },
+    AudioCopy {
+        result: Value,
+        clipboard_sequence: u32,
+        prepared: std::result::Result<(copy_out::Plan, copy_out::PreparedNativeClipboard), String>,
+    },
     MediaCapture {
         lease: media_service::CaptureLease,
         prepared: media_capture::PreparedCapture,
@@ -307,7 +328,7 @@ pub(crate) fn prepare_reference(
 }
 
 enum ImageOperationSelection {
-    Single(Event),
+    Single(Box<Event>),
     Batch(image_translation_batch::Input),
 }
 
@@ -328,61 +349,102 @@ impl Service {
         if !(1..=image_translation_batch::MAX_PAGES).contains(&ids.len()) {
             return Err(ApiError::new(
                 "invalid_selection",
-                "Select up to 32 images or one image BULL",
+                format!(
+                    "Select up to {} images or one image BULL",
+                    image_translation_batch::MAX_PAGES
+                ),
             ));
         }
         if let [id] = ids {
             let event = self.get(*id)?;
             if image_translation_batch::is_bull(&event) {
-                return Ok(ImageOperationSelection::Batch(image_translation_batch::Input::Bull(
-                    event,
-                )));
+                return Ok(ImageOperationSelection::Batch(
+                    image_translation_batch::Input::Bull(Box::new(event)),
+                ));
             }
-            return self.selected_background_image().map(ImageOperationSelection::Single);
+            return self
+                .selected_background_image()
+                .map(|event| ImageOperationSelection::Single(Box::new(event)));
         }
-        let events = ids.iter().map(|&id| self.get(id)).collect::<Result<Vec<_>>>()?;
+        let events = ids
+            .iter()
+            .map(|&id| self.get(id))
+            .collect::<Result<Vec<_>>>()?;
         if !events.iter().all(image_collection::is_image) {
             return Err(ApiError::new(
                 "invalid_selection",
                 "Select loose images or one image BULL",
             ));
         }
-        Ok(ImageOperationSelection::Batch(image_translation_batch::Input::Selection(
-            events,
-        )))
+        Ok(ImageOperationSelection::Batch(
+            image_translation_batch::Input::Selection(events),
+        ))
     }
 
-    fn commit_owned_audio_pointer(&mut self, pointer: files_pointer::Pointer, output: &std::path::Path) -> Result<Value> {
+    fn commit_owned_audio_pointer(
+        &mut self,
+        pointer: files_pointer::Pointer,
+        output: &std::path::Path,
+    ) -> Result<Value> {
         let profile = self.root.canonicalize()?;
         let root = profile.join("audio-extractions").canonicalize()?;
         if root.parent() != Some(profile.as_path()) {
-            return Err(ApiError::new("source_changed", "Audio storage path changed"));
+            return Err(ApiError::new(
+                "source_changed",
+                "Audio storage path changed",
+            ));
         }
         let path = std::fs::canonicalize(output)?;
-        let directory = path.parent().ok_or_else(|| ApiError::new("source_changed", "Invalid audio output"))?;
-        if path != pointer.path || directory.parent() != Some(root.as_path())
-            || !directory.file_name().is_some_and(|n| n.to_string_lossy().starts_with("audio-"))
-            || path.file_name().is_none_or(|n| n != "audio.m4a") {
+        let directory = path
+            .parent()
+            .ok_or_else(|| ApiError::new("source_changed", "Invalid audio output"))?;
+        if path != pointer.path
+            || directory.parent() != Some(root.as_path())
+            || !directory
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("audio-"))
+            || path.file_name().is_none_or(|n| n != "audio.m4a")
+        {
             return Err(ApiError::new("source_changed", "Audio output path changed"));
         }
         let meta = std::fs::symlink_metadata(&path)?;
-        if !meta.file_type().is_file() || meta.len() != pointer.size || meta.modified()? != pointer.modified {
-            return Err(ApiError::new("source_changed", "Audio output changed before registration"));
+        if !meta.file_type().is_file()
+            || meta.len() != pointer.size
+            || meta.modified()? != pointer.modified
+        {
+            return Err(ApiError::new(
+                "source_changed",
+                "Audio output changed before registration",
+            ));
         }
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
             if meta.file_attributes() & 0x400 != 0 {
-                return Err(ApiError::new("source_changed", "Audio output became a reparse point"));
+                return Err(ApiError::new(
+                    "source_changed",
+                    "Audio output became a reparse point",
+                ));
             }
         }
-        let path = path.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode audio path"))?;
-        let origin = serde_json::to_string(&Origin::default()).map_err(|e| ApiError::new("invalid_argument", e))?;
-        let id = files_store::insert_or_reuse(&mut self.db, &files_store::PreparedFile {
-            path, path_key: path, name: "audio.m4a", size: pointer.size,
-            reference_hash: &pointer.content_hash, modified_at_ms: sorting::modified_ms(pointer.modified),
-            detected_at_ms: now_ms(), origin_json: &origin,
-        })?;
+        let path = path
+            .to_str()
+            .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode audio path"))?;
+        let origin = serde_json::to_string(&Origin::default())
+            .map_err(|e| ApiError::new("invalid_argument", e))?;
+        let id = files_store::insert_or_reuse(
+            &mut self.db,
+            &files_store::PreparedFile {
+                path,
+                path_key: path,
+                name: "audio.m4a",
+                size: pointer.size,
+                reference_hash: &pointer.content_hash,
+                modified_at_ms: sorting::modified_ms(pointer.modified),
+                detected_at_ms: now_ms(),
+                origin_json: &origin,
+            },
+        )?;
         Ok(json!(self.get(id)?))
     }
     fn begin_folder_semantic(
@@ -791,7 +853,8 @@ impl Service {
             };
         }
         let id = match command {
-            command @ (Command::TranslateSelectedImage | Command::TranslateSelectedImageFrom { .. }) => {
+            command @ (Command::TranslateSelectedImage
+            | Command::TranslateSelectedImageFrom { .. }) => {
                 let source_language = match command {
                     Command::TranslateSelectedImageFrom { source } => source,
                     _ => ImageTranslationSource::Japanese,
@@ -799,7 +862,7 @@ impl Service {
                 let numbered_only = self.settings.translation_numbered_only;
                 let input = self.image_operation_selection()?;
                 let event = match input {
-                    ImageOperationSelection::Single(event) => event,
+                    ImageOperationSelection::Single(event) => *event,
                     ImageOperationSelection::Batch(input) => {
                         let root = self.root.clone();
                         let quota = self.quota;
@@ -807,12 +870,22 @@ impl Service {
                         let session = self.image_translation.clone();
                         let total = input.known_total();
                         let id = self.jobs.submit(Lane::ImageTranslate, move |cancel| {
-                            let mut session = session.lock()
-                                .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?;
+                            let mut session = session.lock().map_err(|_| {
+                                ApiError::new("image_translate_error", "Translation session failed")
+                            })?;
                             let batch = image_translation_batch::prepare(
-                                input, &root, quota, &references, source_language, numbered_only, &mut session, &cancel,
+                                input,
+                                &root,
+                                quota,
+                                &references,
+                                (source_language, numbered_only),
+                                &mut session,
+                                &cancel,
                             )?;
-                            Ok(PreparedWork::ImageBatch { batch, translate: true })
+                            Ok(PreparedWork::ImageBatch {
+                                batch,
+                                translate: true,
+                            })
                         })?;
                         return Ok(image_batch_queued(id, total));
                     }
@@ -826,37 +899,59 @@ impl Service {
                     use std::io::Read;
                     const MAX_SOURCE: u64 = 32 * 1024 * 1024;
                     cancel.check()?;
-                    let components = translate_components::discover(&root, translate_components::MODEL)?
-                        .resolve(source_language)?;
+                    let components =
+                        translate_components::discover(&root, translate_components::MODEL)?
+                            .resolve(source_language)?;
                     let stamp = media_service::stamp(&event.path)?;
                     let path = wallpaper_engine::validate(&root, &event)?;
                     let mut source = Vec::new();
-                    std::fs::File::open(&path)?.take(MAX_SOURCE + 1).read_to_end(&mut source)?;
+                    std::fs::File::open(&path)?
+                        .take(MAX_SOURCE + 1)
+                        .read_to_end(&mut source)?;
                     if source.len() as u64 > MAX_SOURCE {
                         return Err(ApiError::new("invalid_image", "Image exceeds 32 MiB"));
                     }
                     if media_service::stamp(&path)? != stamp {
-                        return Err(ApiError::new("source_changed", "Image changed during preparation"));
+                        return Err(ApiError::new(
+                            "source_changed",
+                            "Image changed during preparation",
+                        ));
                     }
                     let staging = root.join("translate-work");
                     std::fs::create_dir_all(&staging)?;
-                    let language = match target {
-                        settings::Language::English => "en",
-                        settings::Language::Russian => "ru",
-                    };
                     let rendered = session
                         .lock()
-                        .map_err(|_| ApiError::new("image_translate_error", "Translation session failed"))?
-                        .translate(&source, &staging, components, source_language, language, numbered_only, &cancel)?;
+                        .map_err(|_| {
+                            ApiError::new("image_translate_error", "Translation session failed")
+                        })?
+                        .translate(
+                            &source,
+                            &staging,
+                            components,
+                            source_language,
+                            numbered_only,
+                            &cancel,
+                        )?;
                     let bytes = std::fs::read(rendered.path())?;
-                    let name = format!("translation-{language}.png");
+                    let name = "translation-en.png";
                     let blob = storage::prepare_bytes(
-                        &root, quota,
-                        storage::ByteIngest { name: &name, source: "image_translation", bytes: &bytes, origin: &Origin::default() },
+                        &root,
+                        quota,
+                        storage::ByteIngest {
+                            name,
+                            source: "image_translation",
+                            bytes: &bytes,
+                            origin: &Origin::default(),
+                        },
                         &references,
                     )?;
                     cancel.check()?;
-                    Ok(PreparedWork::ImageTranslation { event, stamp, blob, target, source: source_language,
+                    Ok(PreparedWork::ImageTranslation {
+                        event,
+                        stamp,
+                        blob,
+                        target,
+                        source: source_language,
                         dimensions: [rendered.width, rendered.height],
                         report: rendered.report,
                     })
@@ -874,41 +969,75 @@ impl Service {
                 };
                 let maximum = baloh_collection::bs::MAX_FILES;
                 if !(1..=maximum).contains(&ids.len()) {
-                    return Err(ApiError::new("invalid_selection", "Select shelf items or collections of one kind"));
+                    return Err(ApiError::new(
+                        "invalid_selection",
+                        "Select shelf items or collections of one kind",
+                    ));
                 }
-                let events = ids.iter().map(|&id| self.get(id)).collect::<Result<Vec<_>>>()?;
+                let events = ids
+                    .iter()
+                    .map(|&id| self.get(id))
+                    .collect::<Result<Vec<_>>>()?;
                 if tab == ShelfTab::All {
-                    let folder = self.work_folder.current().ok_or_else(|| ApiError::new("folder_not_selected", "Choose a Folder first"))?.to_owned();
+                    let folder = self
+                        .work_folder
+                        .current()
+                        .ok_or_else(|| {
+                            ApiError::new("folder_not_selected", "Choose a Folder first")
+                        })?
+                        .to_owned();
                     let quota = self.quota;
                     let generation = self.interaction.view_generation;
                     let job_id = self.jobs.submit(Lane::Foreground, move |cancel| {
-                        let prepared = folder_bundle_service::prepare(events, folder, quota, &cancel)?;
-                        Ok(PreparedWork::FolderBundle { prepared, generation })
+                        let prepared =
+                            folder_bundle_service::prepare(events, folder, quota, &cancel)?;
+                        Ok(PreparedWork::FolderBundle {
+                            prepared,
+                            generation,
+                        })
                     })?;
                     return Ok(json!({"job_id":job_id,"state":"queued"}));
                 }
                 for event in &events {
                     if !storage::visible_collection_input(&self.db, event.id, tab)? {
-                        return Err(ApiError::new("invalid_selection", "Select visible cards from the same shelf"));
+                        return Err(ApiError::new(
+                            "invalid_selection",
+                            "Select visible cards from the same shelf",
+                        ));
                     }
                 }
                 let root = self.root.clone();
                 let quota = self.quota;
                 let references = self.reference_paths()?;
-                let managed = if files { |event: &Event| bs_collection::is_managed(event) || image_collection::is_managed(event) } else { collection::is_managed };
-                if let [event] = events.as_slice() && managed(event) {
+                let managed = if files {
+                    |event: &Event| {
+                        bs_collection::is_managed(event) || image_collection::is_managed(event)
+                    }
+                } else {
+                    collection::is_managed
+                };
+                if let [event] = events.as_slice()
+                    && managed(event)
+                {
                     let event = event.clone();
                     let members = storage::collection_members(&self.db, event.id)?;
                     let originals = if files {
-                        members.iter().map(|(&index, &id)| self.get(id).map(|event| (index, event))).collect::<Result<Vec<_>>>()?
-                    } else { Vec::new() };
+                        members
+                            .iter()
+                            .map(|(&index, &id)| self.get(id).map(|event| (index, event)))
+                            .collect::<Result<Vec<_>>>()?
+                    } else {
+                        Vec::new()
+                    };
                     let newest_first = !self.interaction.sort.reverse;
                     self.jobs.submit(Lane::Foreground, move |cancel| {
                         let stamp = media_service::stamp(&event.path)?;
                         let unpack = match tab {
                             ShelfTab::Links => collection::unpack_links,
                             ShelfTab::Text => collection::unpack_text,
-                            ShelfTab::Files if !image_collection::is_managed(&event) => bs_collection::unpack,
+                            ShelfTab::Files if !image_collection::is_managed(&event) => {
+                                bs_collection::unpack
+                            }
                             _ => image_collection::unpack,
                         };
                         let mut usable = members.clone();
@@ -916,9 +1045,11 @@ impl Service {
                         for (index, original) in originals {
                             cancel.check()?;
                             if let Ok(before) = media_service::stamp(&original.path)
-                                && std::fs::metadata(&original.path).is_ok_and(|metadata| metadata.len() == original.size)
+                                && std::fs::metadata(&original.path)
+                                    .is_ok_and(|metadata| metadata.len() == original.size)
                                 && open_file::validate(&original).is_ok()
-                                && media_service::stamp(&original.path).is_ok_and(|after| after == before)
+                                && media_service::stamp(&original.path)
+                                    .is_ok_and(|after| after == before)
                             {
                                 preserved_sources.push((original, before));
                             } else {
@@ -926,7 +1057,15 @@ impl Service {
                             }
                         }
                         let pages = unpack(&event, &usable, &root, quota, &references, &cancel)?;
-                        Ok(PreparedWork::UnpackImageCollection { event, stamp, members, pages, newest_first, tab, preserved_sources })
+                        Ok(PreparedWork::UnpackImageCollection {
+                            event,
+                            stamp,
+                            members,
+                            pages,
+                            newest_first,
+                            tab,
+                            preserved_sources,
+                        })
                     })?
                 } else {
                     let packable = match tab {
@@ -936,27 +1075,76 @@ impl Service {
                         _ => image_collection::is_image,
                     };
                     if !events.iter().all(packable) && !events.iter().all(managed) {
-                        return Err(ApiError::new("invalid_selection", "Select loose items or collections of the same kind"));
+                        return Err(ApiError::new(
+                            "invalid_selection",
+                            "Select loose items or collections of the same kind",
+                        ));
                     }
                     let link_titles = if tab == ShelfTab::Links {
-                        events.iter().map(|event| collection::link_titles(&self.db, event)).collect::<Result<Vec<_>>>()?
+                        events
+                            .iter()
+                            .map(|event| collection::link_titles(&self.db, event))
+                            .collect::<Result<Vec<_>>>()?
                     } else {
                         Vec::new()
                     };
                     self.jobs.submit(Lane::Foreground, move |cancel| {
                         let packed = match tab {
-                            ShelfTab::Links => collection::pack_links(events.into_iter().zip(link_titles).collect(), &root, quota, &references, &cancel),
-                            ShelfTab::Text => collection::pack_text(events, &root, quota, &references, &cancel),
+                            ShelfTab::Links => collection::pack_links(
+                                events.into_iter().zip(link_titles).collect(),
+                                &root,
+                                quota,
+                                &references,
+                                &cancel,
+                            ),
+                            ShelfTab::Text => {
+                                collection::pack_text(events, &root, quota, &references, &cancel)
+                            }
                             ShelfTab::Files => {
                                 let kind = if managed(&events[0]) {
                                     let kind = collection_kind::probe(&events[0])?;
-                                    for event in &events[1..] { if collection_kind::probe(event)? != kind { return Err(ApiError::new("invalid_selection", "Merge collections of the same type")); } }
+                                    for event in &events[1..] {
+                                        if collection_kind::probe(event)? != kind {
+                                            return Err(ApiError::new(
+                                                "invalid_selection",
+                                                "Merge collections of the same type",
+                                            ));
+                                        }
+                                    }
                                     kind
-                                } else if force_bs { collection_kind::Kind::Bs } else { collection_kind::choose_files(&events) };
-                                if kind == collection_kind::Kind::Images { image_collection::pack(events, tab, &root, quota, &references, &cancel) }
-                                else { bs_collection::pack(events, kind, &root, quota, &references, &cancel) }
+                                } else if force_bs {
+                                    collection_kind::Kind::Bs
+                                } else {
+                                    collection_kind::choose_files(&events)
+                                };
+                                if kind == collection_kind::Kind::Images {
+                                    image_collection::pack(
+                                        events,
+                                        tab,
+                                        &root,
+                                        quota,
+                                        &references,
+                                        &cancel,
+                                    )
+                                } else {
+                                    bs_collection::pack(
+                                        events,
+                                        kind,
+                                        &root,
+                                        quota,
+                                        &references,
+                                        &cancel,
+                                    )
+                                }
                             }
-                            _ => image_collection::pack(events, tab, &root, quota, &references, &cancel),
+                            _ => image_collection::pack(
+                                events,
+                                tab,
+                                &root,
+                                quota,
+                                &references,
+                                &cancel,
+                            ),
                         }?;
                         Ok(PreparedWork::PackImageCollection(packed))
                     })?
@@ -970,11 +1158,19 @@ impl Service {
                     settings::Language::Russian => "ru",
                 };
                 self.jobs.submit(Lane::Foreground, move |cancel| {
-                    google_lens::search(&event, language, |url| {
-                        launcher.lock()
-                            .map_err(|_| ApiError::new("open_busy", "Could not use the default browser"))?
-                            .launch(std::path::Path::new(url), open_file::Operation::Open)
-                    }, &cancel)?;
+                    google_lens::search(
+                        &event,
+                        language,
+                        |url| {
+                            launcher
+                                .lock()
+                                .map_err(|_| {
+                                    ApiError::new("open_busy", "Could not use the default browser")
+                                })?
+                                .launch(std::path::Path::new(url), open_file::Operation::Open)
+                        },
+                        &cancel,
+                    )?;
                     Ok(PreparedWork::Value(json!({"google_lens_requested":true})))
                 })?
             }
@@ -984,14 +1180,22 @@ impl Service {
                 let quota = self.quota;
                 let references = self.reference_paths()?;
                 let event = match input {
-                    ImageOperationSelection::Single(event) => event,
+                    ImageOperationSelection::Single(event) => *event,
                     ImageOperationSelection::Batch(input) => {
                         let total = input.known_total();
                         let id = self.jobs.submit(Lane::Upscale, move |cancel| {
                             let batch = image_translation_batch::prepare_upscale(
-                                input, &root, quota, &references, operation, &cancel,
+                                input,
+                                &root,
+                                quota,
+                                &references,
+                                operation,
+                                &cancel,
                             )?;
-                            Ok(PreparedWork::ImageBatch { batch, translate: false })
+                            Ok(PreparedWork::ImageBatch {
+                                batch,
+                                translate: false,
+                            })
                         })?;
                         return Ok(image_batch_queued(id, total));
                     }
@@ -1004,30 +1208,56 @@ impl Service {
                     let stamp = media_service::stamp(&event.path)?;
                     let path = wallpaper_engine::validate(&root, &event)?;
                     let mut source = Vec::new();
-                    std::fs::File::open(&path)?.take(MAX_SOURCE + 1).read_to_end(&mut source)?;
+                    std::fs::File::open(&path)?
+                        .take(MAX_SOURCE + 1)
+                        .read_to_end(&mut source)?;
                     if source.len() as u64 > MAX_SOURCE {
                         return Err(ApiError::new("invalid_image", "Image exceeds 32 MiB"));
                     }
                     if media_service::stamp(&path)? != stamp {
-                        return Err(ApiError::new("source_changed", "Image changed during preparation"));
+                        return Err(ApiError::new(
+                            "source_changed",
+                            "Image changed during preparation",
+                        ));
                     }
                     let staging = root.join("upscale-work");
                     std::fs::create_dir_all(&staging)?;
                     let staged = image_upscale::upscale(
-                        &source, &staging, &runtime.python, &runtime.model,
-                        operation.factor(), &cancel,
+                        &source,
+                        &staging,
+                        &runtime.python,
+                        &runtime.model,
+                        operation.factor(),
+                        &cancel,
                     )?;
                     let bytes = std::fs::read(staged.path())?;
-                    let name = format!("{}-{}.png", operation.weights().trim_end_matches(".pth"), operation.factor());
+                    let name = format!(
+                        "{}-{}.png",
+                        operation.weights().trim_end_matches(".pth"),
+                        operation.factor()
+                    );
                     let blob = storage::prepare_bytes(
-                        &root, quota,
-                        storage::ByteIngest { name: &name, source: "image_upscale", bytes: &bytes, origin: &Origin::default() },
+                        &root,
+                        quota,
+                        storage::ByteIngest {
+                            name: &name,
+                            source: "image_upscale",
+                            bytes: &bytes,
+                            origin: &Origin::default(),
+                        },
                         &references,
                     )?;
                     cancel.check()?;
                     Ok(PreparedWork::ImageUpscale {
-                        event, stamp, blob,
-                        dimensions: [staged.input_width, staged.input_height, staged.width, staged.height],
+                        event,
+                        stamp,
+                        blob,
+                        dimensions: [
+                            staged.input_width,
+                            staged.input_height,
+                            staged.width,
+                            staged.height,
+                        ],
                         operation,
                     })
                 })?
@@ -1043,7 +1273,10 @@ impl Service {
                     let (destination, staging) = audio_extract::directories(&root)?;
                     let staged = audio_extract::extract(&path, &staging, audio_track, &cancel)?;
                     if media_service::stamp(&path)? != stamp {
-                        return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
+                        return Err(ApiError::new(
+                            "source_changed",
+                            "Video changed during audio extraction",
+                        ));
                     }
                     cancel.check()?;
                     Ok(PreparedWork::AudioExtraction {
@@ -1067,13 +1300,19 @@ impl Service {
                     Ok(PreparedWork::Media(prepared))
                 })?
             }
-            Command::OpenCollectionMedia { id, revision, index } => {
+            Command::OpenCollectionMedia {
+                id,
+                revision,
+                index,
+            } => {
                 let (event, identity, epoch, index) =
                     self.start_collection_media_prepare(id, revision, index)?;
                 let root = self.root.clone();
                 let quota = self.quota;
                 self.jobs.submit(Lane::Discovery, move |cancel| {
-                    let prepared = media_service::prepare_collection_media(event, identity, epoch, index, &root, quota, &cancel)?;
+                    let prepared = media_service::prepare_collection_media(
+                        event, identity, epoch, index, &root, quota, &cancel,
+                    )?;
                     cancel.check()?;
                     Ok(PreparedWork::Media(prepared))
                 })?
@@ -1663,72 +1902,135 @@ impl Service {
                 })?
             }
             Command::PreviewExternal { id } => return self.begin_preview_job(id),
-            Command::TranslationCollectionPage { id, revision, index } => {
+            Command::TranslationCollectionPage {
+                id,
+                revision,
+                index,
+            } => {
                 let event = self.saved_collection(id, &revision)?;
                 let display_name = if collection::is_link_collection(&event) {
                     collection::link_titles(&self.db, &event)?.remove(&index)
                 } else {
                     None
                 };
-                let root=self.root.clone();
-                let quota=self.quota;
+                let root = self.root.clone();
+                let quota = self.quota;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let page = match collection_kind::probe(&event)? {
-                        collection_kind::Kind::Links => collection::link_page(&event,index,display_name.as_deref(),&cancel),
-                        collection_kind::Kind::Text => collection::text_page(&event,index,&cancel),
-                        collection_kind::Kind::Images => image_translation_batch::page(&event,index,&cancel),
-                        collection_kind::Kind::Files(family) if family == "images" => bs_collection::raw_image_page(&event,index,&cancel),
-                        _ => bs_collection::page(&event,index,&root,quota,&cancel),
+                        collection_kind::Kind::Links => {
+                            collection::link_page(&event, index, display_name.as_deref(), &cancel)
+                        }
+                        collection_kind::Kind::Text => {
+                            collection::text_page(&event, index, &cancel)
+                        }
+                        collection_kind::Kind::Images => {
+                            image_translation_batch::page(&event, index, &cancel)
+                        }
+                        collection_kind::Kind::Files(family) if family == "images" => {
+                            bs_collection::raw_image_page(&event, index, &cancel)
+                        }
+                        _ => bs_collection::page(&event, index, &root, quota, &cancel),
                     }?;
                     Ok(PreparedWork::Value(page))
                 })?
             }
-            Command::CopyCollectionPage { id, revision, index } => {
+            Command::CopyCollectionPage {
+                id,
+                revision,
+                index,
+            } => {
                 let event = self.saved_collection(id, &revision)?;
                 if bs_collection::can_view(&event) {
-                    return Err(ApiError::new("invalid_collection", "Copy the BS collection from the shelf"));
+                    return Err(ApiError::new(
+                        "invalid_collection",
+                        "Copy the BS collection from the shelf",
+                    ));
                 }
                 let sequence = capture::sequence_number();
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let stamp = media_service::stamp(&event.path)?;
-                    let kind=collection_kind::probe(&event)?;
-                    if matches!(kind, collection_kind::Kind::Links | collection_kind::Kind::Text) {
-                        let read = if kind==collection_kind::Kind::Links { collection::link_url } else { collection::text_entry };
+                    let kind = collection_kind::probe(&event)?;
+                    if matches!(
+                        kind,
+                        collection_kind::Kind::Links | collection_kind::Kind::Text
+                    ) {
+                        let read = if kind == collection_kind::Kind::Links {
+                            collection::link_url
+                        } else {
+                            collection::text_entry
+                        };
                         let text = read(&event, index, &cancel)?;
-                        return Ok(PreparedWork::CollectionString { event, stamp, text, sequence: Some(sequence), index });
+                        return Ok(PreparedWork::CollectionString {
+                            event,
+                            stamp,
+                            text,
+                            sequence: Some(sequence),
+                            index,
+                        });
                     }
                     let pixels = match kind {
-                        collection_kind::Kind::Images => image_collection::prepare_page_copy(&event, index, &cancel)?,
-                        collection_kind::Kind::Files(family) if family == "images" => bs_collection::raw_image_page_copy(&event, index, &cancel)?,
-                        _ => return Err(ApiError::new("invalid_collection", "Copy the entire collection from the shelf")),
+                        collection_kind::Kind::Images => {
+                            image_collection::prepare_page_copy(&event, index, &cancel)?
+                        }
+                        collection_kind::Kind::Files(family) if family == "images" => {
+                            bs_collection::raw_image_page_copy(&event, index, &cancel)?
+                        }
+                        _ => {
+                            return Err(ApiError::new(
+                                "invalid_collection",
+                                "Copy the entire collection from the shelf",
+                            ));
+                        }
                     };
-                    Ok(PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index })
+                    Ok(PreparedWork::CopyCollectionPage {
+                        event,
+                        stamp,
+                        pixels,
+                        sequence,
+                        index,
+                    })
                 })?
             }
             Command::RenameCollection { id, revision, name } => {
                 let event = self.collection_rename_target(id)?;
                 if Self::collection_rename_revision(&event) != revision {
-                    return Err(ApiError::new("stale_selection", "Collection name or contents changed"));
+                    return Err(ApiError::new(
+                        "stale_selection",
+                        "Collection name or contents changed",
+                    ));
                 }
                 collection_rename::full_name(&event, &name)?;
                 let tab = self.interaction.tab;
                 let folder = (tab == interaction::ShelfTab::All)
-                    .then(|| self.work_folder.current().map(std::path::Path::to_path_buf)).flatten();
+                    .then(|| self.work_folder.current().map(std::path::Path::to_path_buf))
+                    .flatten();
                 let generation = self.interaction.view_generation;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
                     if let Some(folder) = folder {
-                        let prepared = collection_rename::prepare_folder(event, &folder, &name, &cancel)?;
-                        Ok(PreparedWork::RenameFolderCollection { prepared, generation })
+                        let prepared =
+                            collection_rename::prepare_folder(event, &folder, &name, &cancel)?;
+                        Ok(PreparedWork::RenameFolderCollection {
+                            prepared,
+                            generation,
+                        })
                     } else {
                         Ok(PreparedWork::RenameShelfCollection { event, tab, name })
                     }
                 })?
             }
-            Command::RenameCollectionLink { id, revision, index, title } => {
+            Command::RenameCollectionLink {
+                id,
+                revision,
+                index,
+                title,
+            } => {
                 let event = self.saved_collection(id, &revision)?;
                 if !collection::is_link_collection(&event) {
-                    return Err(ApiError::new("invalid_collection", "Select a managed Links BULL"));
+                    return Err(ApiError::new(
+                        "invalid_collection",
+                        "Select a managed Links BULL",
+                    ));
                 }
                 let title = pinned::normalize_display_name(&title)?;
                 let root = self.root.clone();
@@ -1736,25 +2038,59 @@ impl Service {
                 let references = self.reference_paths()?;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let stamp = media_service::stamp(&event.path)?;
-                    let blob = collection::prepare_link_rename(&event, index, &title, &root, quota, &references, &cancel)?;
-                    Ok(PreparedWork::RenameCollectionLink { event, stamp, blob, index, title })
+                    let blob = collection::prepare_link_rename(
+                        &event,
+                        index,
+                        &title,
+                        &root,
+                        quota,
+                        &references,
+                        &cancel,
+                    )?;
+                    Ok(PreparedWork::RenameCollectionLink {
+                        event,
+                        stamp,
+                        blob,
+                        index,
+                        title,
+                    })
                 })?
             }
-            Command::OpenCollectionLink { id, revision, index } => {
+            Command::OpenCollectionLink {
+                id,
+                revision,
+                index,
+            } => {
                 let event = self.saved_collection(id, &revision)?;
                 if !(collection::is_link_collection(&event) || collection_kind::external(&event)) {
-                    return Err(ApiError::new("invalid_collection", "Select a collection of links"));
+                    return Err(ApiError::new(
+                        "invalid_collection",
+                        "Select a collection of links",
+                    ));
                 }
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let stamp = media_service::stamp(&event.path)?;
                     let text = collection::link_url(&event, index, &cancel)?;
-                    Ok(PreparedWork::CollectionString { event, stamp, text, sequence: None, index })
+                    Ok(PreparedWork::CollectionString {
+                        event,
+                        stamp,
+                        text,
+                        sequence: None,
+                        index,
+                    })
                 })?
             }
-            Command::OpenBsEntry { id, revision, index } => {
+            Command::OpenBsEntry {
+                id,
+                revision,
+                index,
+            } => {
                 let event = self.saved_collection(id, &revision)?;
                 if !(bs_collection::can_view(&event) || collection_kind::external(&event)) {
-                    return Err(ApiError::new("invalid_collection", "Select a BS collection"));
+                    return Err(ApiError::new(
+                        "invalid_collection",
+                        "Select a BS collection",
+                    ));
                 }
                 let root = self.root.join("open-cache");
                 let quota = self.quota;
@@ -1765,17 +2101,27 @@ impl Service {
                     let plan = copy_out::prepare_bs_entry(&root, &entry, quota)
                         .map_err(|error| ApiError::new("open_cache_failed", error))?;
                     cancel.check()?;
-                    Ok(PreparedWork::OpenBsEntry { event, stamp, plan, operation, index })
+                    Ok(PreparedWork::OpenBsEntry {
+                        event,
+                        stamp,
+                        plan,
+                        operation,
+                        index,
+                    })
                 })?
             }
             Command::PreviewPublishedTranslation { id, revision } => {
                 let event = self.get(id)?;
                 let published: bool = self.db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
-                    [id], |row| row.get(0)
+                    [id],
+                    |row| row.get(0),
                 )?;
                 if !published || event.revision != revision {
-                    return Err(ApiError::new("stale_selection", "Saved translation is unavailable"));
+                    return Err(ApiError::new(
+                        "stale_selection",
+                        "Saved translation is unavailable",
+                    ));
                 }
                 self.submit_named_preview(event, false)?
             }
@@ -1930,17 +2276,29 @@ impl Service {
         let event = self.get(id)?;
         let tab = self.interaction.tab;
         if !collection_rename::can_rename(&event) {
-            return Err(ApiError::new("invalid_collection", "Select a BULL or BS collection"));
+            return Err(ApiError::new(
+                "invalid_collection",
+                "Select a BULL or BS collection",
+            ));
         }
         if tab == interaction::ShelfTab::All {
             if event.source != "work_folder" || event.path.parent() != self.work_folder.current() {
-                return Err(ApiError::new("stale_folder", "Select a collection from the current Folder"));
+                return Err(ApiError::new(
+                    "stale_folder",
+                    "Select a collection from the current Folder",
+                ));
             }
             if self.folder_path_pinned(&event.path)? {
-                return Err(ApiError::new("skipped_pinned", "The collection has a pinned shelf reference"));
+                return Err(ApiError::new(
+                    "skipped_pinned",
+                    "The collection has a pinned shelf reference",
+                ));
             }
         } else if id <= 0 || !storage::visible_collection_input(&self.db, id, tab)? {
-            return Err(ApiError::new("stale_selection", "Select a collection from this shelf"));
+            return Err(ApiError::new(
+                "stale_selection",
+                "Select a collection from this shelf",
+            ));
         }
         Ok(event)
     }
@@ -1951,19 +2309,30 @@ impl Service {
 
     pub(crate) fn collection_rename_info(&self, id: i64) -> Result<Value> {
         let event = self.collection_rename_target(id)?;
-        let name = std::path::Path::new(&event.name).file_stem().and_then(|name| name.to_str()).unwrap_or(&event.name);
+        let name = std::path::Path::new(&event.name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&event.name);
         Ok(json!({"id":id,"name":name,"revision":Self::collection_rename_revision(&event)}))
     }
 
     pub(crate) fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
         let event = self.get(id)?;
-        if !(collection::is_managed(&event) || bs_collection::can_view(&event) || collection_kind::external(&event)) || event.revision != revision
-            || (event.source == "image_translation_collection" && !self.db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
-                [id], |row| row.get::<_, bool>(0),
-            )?)
+        if !(collection::is_managed(&event)
+            || bs_collection::can_view(&event)
+            || collection_kind::external(&event))
+            || event.revision != revision
+            || (event.source == "image_translation_collection"
+                && !self.db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM translated_images WHERE event_id=?1)",
+                    [id],
+                    |row| row.get::<_, bool>(0),
+                )?)
         {
-            return Err(ApiError::new("stale_selection", "Saved collection is unavailable"));
+            return Err(ApiError::new(
+                "stale_selection",
+                "Saved collection is unavailable",
+            ));
         }
         Ok(event)
     }
@@ -1972,7 +2341,10 @@ impl Service {
         let event = self.get(id)?;
         if image_collection::is_managed(&event) {
             if event.source == "image_translation_collection" {
-                return self.begin_job(Command::PreviewPublishedTranslation { id, revision: event.revision });
+                return self.begin_job(Command::PreviewPublishedTranslation {
+                    id,
+                    revision: event.revision,
+                });
             }
             let id = self.submit_named_preview(event, true)?;
             return Ok(json!({"job_id":id,"state":"queued"}));
@@ -2041,7 +2413,8 @@ impl Service {
         let quota = self.quota;
         let references = self.reference_paths()?;
         self.jobs.submit(Lane::LinkMetadata, move |cancel| {
-            let blob = collection::prepare_link_metadata(&event, &root, quota, &references, &cancel)?;
+            let blob =
+                collection::prepare_link_metadata(&event, &root, quota, &references, &cancel)?;
             Ok(PreparedWork::LinkCollectionMetadata { event, blob })
         })
     }
@@ -2051,22 +2424,49 @@ impl Service {
         ready_jobs.extend(self.jobs.take_ready_for(id, Lane::LinkMetadata));
         for (ready, result) in ready_jobs {
             let result = match result {
-                Ok(PreparedWork::AudioExtraction {event, stamp, staged, destination, audio_track, clipboard_sequence}) => {
+                Ok(PreparedWork::AudioExtraction {
+                    event,
+                    stamp,
+                    staged,
+                    destination,
+                    audio_track,
+                    clipboard_sequence,
+                }) => {
                     let saved = (|| -> Result<Value> {
-                        let current = self.get(event.id).map_err(|_| ApiError::new("stale_selection", "Video is no longer available"))?;
-                        if current.revision != event.revision || current.path != event.path || current.kind != event.kind || media_service::stamp(&event.path)? != stamp {
-                            return Err(ApiError::new("source_changed", "Video changed during audio extraction"));
+                        let current = self.get(event.id).map_err(|_| {
+                            ApiError::new("stale_selection", "Video is no longer available")
+                        })?;
+                        if current.revision != event.revision
+                            || current.path != event.path
+                            || current.kind != event.kind
+                            || media_service::stamp(&event.path)? != stamp
+                        {
+                            return Err(ApiError::new(
+                                "source_changed",
+                                "Video changed during audio extraction",
+                            ));
                         }
                         self.jobs.authorize_claimed_effect(ready)?;
                         let path = staged.publish(&destination)?;
                         Ok(json!({"path":path,"audio_track":audio_track}))
                     })();
-                    let saved = match saved { Ok(saved) => saved, Err(error) => { self.jobs.finish(ready, Err(error))?; continue; } };
+                    let saved = match saved {
+                        Ok(saved) => saved,
+                        Err(error) => {
+                            self.jobs.finish(ready, Err(error))?;
+                            continue;
+                        }
+                    };
                     let fallback = saved.clone();
                     let path = PathBuf::from(saved["path"].as_str().expect("published path"));
                     if let Err(error) = self.jobs.continue_claimed(ready, move |_| {
-                        let prepared = files_pointer::prepare_pointer(&path).map_err(ApiError::from);
-                        Ok(PreparedWork::AudioReference { result: saved, clipboard_sequence, prepared })
+                        let prepared =
+                            files_pointer::prepare_pointer(&path).map_err(ApiError::from);
+                        Ok(PreparedWork::AudioReference {
+                            result: saved,
+                            clipboard_sequence,
+                            prepared,
+                        })
                     }) {
                         let mut saved = fallback;
                         saved["files"] = json!({"ok":false,"error":error.message});
@@ -2075,7 +2475,11 @@ impl Service {
                     }
                     continue;
                 }
-                Ok(PreparedWork::AudioReference { mut result, clipboard_sequence, prepared }) => {
+                Ok(PreparedWork::AudioReference {
+                    mut result,
+                    clipboard_sequence,
+                    prepared,
+                }) => {
                     let registration = prepared.and_then(|pointer| {
                         let path = PathBuf::from(result["path"].as_str().expect("published path"));
                         self.commit_owned_audio_pointer(pointer, &path)
@@ -2105,7 +2509,11 @@ impl Service {
                             let sink = copy_out::PreparedNativeClipboard::prepare(&plan.paths);
                             Ok((plan, sink))
                         })();
-                        Ok(PreparedWork::AudioCopy { result, clipboard_sequence, prepared })
+                        Ok(PreparedWork::AudioCopy {
+                            result,
+                            clipboard_sequence,
+                            prepared,
+                        })
                     }) {
                         let mut result = fallback;
                         result["clipboard"] = json!({"ok":false,"error":error.message});
@@ -2488,28 +2896,45 @@ impl Service {
                     }
                     continue;
                 }
-                Ok(PreparedWork::FolderBundle { prepared, generation }) => {
+                Ok(PreparedWork::FolderBundle {
+                    prepared,
+                    generation,
+                }) => {
                     let continued = (|| {
                         let folder = prepared.folder.clone();
                         if self.interaction.tab != interaction::ShelfTab::All
                             || self.interaction.view_generation != generation
                             || self.work_folder.current() != Some(folder.as_path())
                         {
-                            return Err(ApiError::new("stale_folder", "Folder changed before publication"));
+                            return Err(ApiError::new(
+                                "stale_folder",
+                                "Folder changed before publication",
+                            ));
                         }
                         for (event, stamp) in &prepared.sources {
                             let current = self.get(event.id)?;
-                            if current.path != event.path || current.revision != event.revision || media_service::stamp(&current.path)? != *stamp {
-                                return Err(ApiError::new("source_changed", "Folder file changed before publication"));
+                            if current.path != event.path
+                                || current.revision != event.revision
+                                || media_service::stamp(&current.path)? != *stamp
+                            {
+                                return Err(ApiError::new(
+                                    "source_changed",
+                                    "Folder file changed before publication",
+                                ));
                             }
                             if self.folder_path_pinned(&event.path)? {
-                                return Err(ApiError::new("skipped_pinned", "A selected Folder file has a pinned shelf reference"));
+                                return Err(ApiError::new(
+                                    "skipped_pinned",
+                                    "A selected Folder file has a pinned shelf reference",
+                                ));
                             }
                         }
                         let trash = std::sync::Arc::clone(&self.trash);
                         self.jobs.authorize_claimed_effect(ready)?;
                         self.jobs.continue_claimed(ready, move |_cancel| {
-                            let trash = trash.lock().map_err(|_| ApiError::new("recycle_failed", "Trash adapter lock poisoned"))?;
+                            let trash = trash.lock().map_err(|_| {
+                                ApiError::new("recycle_failed", "Trash adapter lock poisoned")
+                            })?;
                             let receipt = folder_bundle_service::finish(prepared, trash.as_ref())?;
                             Ok(PreparedWork::FolderBundlePublished { folder, receipt })
                         })
@@ -2672,8 +3097,8 @@ impl Service {
                     }
                     self.jobs.authorize_claimed_effect(ready)?;
                     let (items, cleanup_pending) = storage::commit_extracted_collection_pages(
-                        &mut self.db, &self.root, self.quota, event.id, &members, pages,
-                        tab, newest_first,
+                        &mut self.db, &self.root, self.quota, &members, pages,
+                        storage::CollectionUnpackTarget { id: event.id, tab, newest_first },
                     )?;
                     self.interaction.replace_collection_rows(&[event.id], items.first().copied());
                     let bs = event.source == bs_collection::SOURCE;
@@ -2710,8 +3135,7 @@ impl Service {
                     Ok(json!({"event": self.get(id)?, "source_language": source.code(), "target_language": target,
                         "width": width, "height": height, "rendered_blocks": report.rendered,
                         "skipped_blocks": report.skipped, "fallback_blocks": report.fallback,
-                        "side_blocks": report.side, "source_left": report.left_pad,
-                        "summary_rendered": report.summary_rendered}))
+                        "side_blocks": report.side, "source_left": report.left_pad}))
                 },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {

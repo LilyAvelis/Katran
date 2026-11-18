@@ -14,6 +14,12 @@ try {
     $emojiInputs = @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')
     $emojiInputs += @('scripts/ai-components/terminal.ps1','scripts/ai-components/ensure-python.ps1','scripts/ai-components/verify.py','scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/folder-semantic/worker.py')
     foreach ($file in $emojiInputs) { [IO.File]::WriteAllText((Join-Path $sandbox $file), "synthetic-$file") }
+    $additionalInputs = @('crates/baloh-collection/Cargo.toml','crates/baloh-collection/src/codec.rs','scripts/image-upscale/worker.py','scripts/image-translate/translate_page.py','src/google_lens_handoff.html','scripts/setup-video-player.ps1')
+    foreach ($file in $additionalInputs) {
+        $path = Join-Path $sandbox $file
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        [IO.File]::WriteAllText($path, "synthetic-$file")
+    }
     $out = Join-Path $sandbox 'output'
     & (Join-Path $root 'scripts/package-release.ps1') -Root $sandbox -BinaryDirectory 'binaries' -OutputDirectory $out -Version '2.0.0' -DependencyNoticesPath (Join-Path $sandbox 'THIRD-PARTY-NOTICES.txt')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -22,6 +28,7 @@ try {
         $names = @($zip.Entries.FullName)
         $hash = (Get-FileHash -LiteralPath (Join-Path $sandbox 'binaries/katran-ui.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         $expected = @('AFIO-LICENSE','THIRD-PARTY-NOTICES.txt','Katran.exe','katran-cli.exe','portable.flag','runtime/Katran.exe','runtime/current-version.txt',"runtime/versions/$($hash.Substring(0,12))/katran-ui.exe","runtime/versions/$($hash.Substring(0,12))/build-manifest.json","runtime/versions/$($hash.Substring(0,12))/THIRD-PARTY-NOTICES.txt","runtime/versions/$($hash.Substring(0,12))/es.exe","runtime/versions/$($hash.Substring(0,12))/Everything-ES-LICENSE.txt","runtime/versions/$($hash.Substring(0,12))/Everything-ES-NOTICE.txt") + $emojiInputs
+        $expected += 'scripts/setup-video-player.ps1'
         if (@(Compare-Object ($names | Sort-Object) ($expected | Sort-Object)).Count) { throw 'Portable whitelist differs' }
     } finally { $zip.Dispose() }
     $release = Get-Content -LiteralPath (Join-Path $out 'release.json') -Raw | ConvertFrom-Json
@@ -34,7 +41,7 @@ try {
         $reader = New-Object IO.StreamReader($zip.GetEntry('build-manifest.json').Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $sourcePaths = @($manifest.sources | ForEach-Object { $_.path.Replace('\','/') })
-        foreach ($file in $emojiInputs) {
+        foreach ($file in ($emojiInputs + $additionalInputs)) {
             if ($file -eq 'assets/unicode/emoji-test.txt') { continue }
             $entry = @($manifest.sources | Where-Object { $_.path.Replace('\','/') -eq $file })
             if ($entry.Count -ne 1 -or $entry[0].sha256 -cne (Get-FileHash -LiteralPath (Join-Path $sandbox $file) -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Missing or incorrect emoji input hash: $file" }
