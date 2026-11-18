@@ -469,3 +469,8 @@ After API/native gates, Fenna owns ui.rs, api_client.rs, palette.rs and icons.
 Each area is frozen before shared integration. No new masks or public publication.
 Native CPU/GPU1/1 and API21/21 passed before frontend implementation; UI gate and
 primary installation evidence are maintained in VERIFICATION.md.
+
+Capture integration complete: sourcefb3fdec; primary runtimed615d492be2e.
+Automated API/native/UI/Clippy gates recorded in VERIFICATION.md, including
+focused fixes after aggregate gate. Polly owns native owner feedback and any
+follow-up; all three worker areas are frozen. Owner check pending; no publication.

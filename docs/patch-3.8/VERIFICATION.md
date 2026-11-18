@@ -2,6 +2,19 @@
 
 ## Video actions and frame extraction · 2026-11-18
 
+Installed source **fb3fdec**, one optimized Windows x64 UI build90s, Rust1.95.0,
+locked offline/ui+clipboard-events; pre/post compiled-source hashes matched.
+Primary runtime **d615d492be2e**, executable SHA256
+`d615d492be2e7e47ba4977f3c77ac9fbe7543f5dd94ac8f78c686093876a9810`.
+Pinned libmpv and all copied helpers retained and hash-verified. Previous accepted
+runtime5c01f6c1060f and an integrity-checked schema-v13 backup are preserved in
+runtime/rollback-video-capture.json. Atomic pointer switched; running app untouched.
+Owner must tray-exit/Raycast-relaunch and check Video/rebinding, paused-frame
+Images plus Clipboard paste and preserved playback context. Native owner
+acceptance pending; no public push/tag/release. Post-batch guarded cleanup removed
+1.80GiB, zero failures,35.67→33.87GiB; runtime unchanged. Protected dependency /
+release outputs keep the total above32GiB, without widening cleanup scope.
+
 Owner accepted frame-step stability in runtime5c01f6c1060f («Все работает»).
 Native muted full-size capture passed1/1 on CPU and GPU (compile16.77s/test5.16s):
 1920×1080 capture with≤1280 preview, playing rejection, rapid seek final target,
