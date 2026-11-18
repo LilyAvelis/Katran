@@ -2051,7 +2051,7 @@ impl Service {
                     let id = storage::commit_translated_png(&mut self.db, &self.root, self.quota, blob)?;
                     Ok(json!({"event": self.get(id)?, "source_language": "ja", "target_language": target,
                         "width": width, "height": height, "rendered_blocks": report.rendered,
-                        "skipped_blocks": report.skipped}))
+                        "skipped_blocks": report.skipped, "fallback_blocks": report.fallback}))
                 },
                 PreparedWork::ImageUpscale { event, stamp, blob, dimensions, operation } => {
                     let current = self.get(event.id).map_err(|_| {

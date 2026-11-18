@@ -39,10 +39,13 @@ translation backend and explicit optional component setup after the fixtures.
 Select a Japanese image and open Ctrl+K → AI Commands → Translate image
 from Japanese. The action is independently rebindable. Settings → AI →
 Image translation reports the locally detected components and the English
-output language. Output is a separate, managed PNG in Translate. When some
-regions cannot be erased or lettered safely, the original regions remain and
-the result reports how many were skipped. Nothing is published if no lettering
-can be placed safely.
+output language. Output is a separate, managed PNG in Translate. The renderer
+keeps text placements disjoint and uses readable spacing and a minimum font
+size. If it cannot safely replace a region, it preserves the original and
+adds its numbered translation to a white panel below the artwork. The panel
+can increase PNG height within the same dimension and pixel limits. The
+result reports panel entries and skips separately. Nothing is published if
+no lettering can be placed safely in either location.
 Cancellation before publication leaves no result. Source bytes stay intact.
 
 The action uses PP-OCRv5, Manga OCR and the installed `qwen3:4b-instruct` tag.
@@ -78,28 +81,45 @@ With resident workers, the normal Katran API processed the simple page in
 18.7 s on first use and 4.5 s on immediate repeat. The same session processed
 the complex page in 21.6 s, lettering 14 blocks and leaving 5 original regions.
 
+The subsequent stage probe on the same warm complex page measured Paddle
+15.1 → 0.6 s, Manga OCR 1.3 → 0.8 s, Qwen 1.6 → 1.5 s, and rendering
+1.9 → 0.9 s. The detector and Manga OCR produced equal region geometry and
+transcripts on both test pages. Ollama logged five translation requests for
+the original complex page and one for the updated page. The old five layout
+skips came from three ambiguous text masks, one area too narrow for the
+translation, and one overlapping block. The current output contains five
+in-page placements and fourteen entries in the panel, with zero skips.
+This covers recognized regions. OCR grouping and accuracy on dense artwork
+still limit the result.
+The full API check then measured 15.5 s for the first simple page, 1.3 s
+for the repeated simple page, and 3.9 s for the warm complex page, including
+publication. Both simple translations remained inside their bubbles.
+
 ## Local one-page probe
 
 The standalone probe lives in `scripts/image-translate`. Test images, model packs,
 intermediate JSON and generated previews stay outside Git.
 
 1. `ocr_page.py` uses PaddlePaddle 3.2.2 / PaddleOCR 3.3.3 in a separate Python
-   environment. The cached Japanese PP-OCRv5 server detector and recognizer are
-   read from `target/build/translate-probe/ocr/paddlex/official_models`.
-   `--prepare` explicitly permits first-time model fetching.
+   environment. It reads the PP-OCRv5 server detector from
+   `target/build/translate-probe/ocr/paddlex/official_models`. It uses oneDNN
+   on CPU, falling back to the regular CPU backend if oneDNN is unavailable
+   at inference. `--prepare` explicitly permits first-time model fetching.
 2. `manga_recognize.py` regroups vertical columns and rereads the cropped
    Japanese dialogue with `kha-white/manga-ocr-base` at revision
    `aa6573bd10b0d446cbf622e29c3e084914df9741`. The model pack is opened
-   offline, with weights-only loading. It does not infer panel order.
+   offline, with weights-only loading. Up to four crops from the same page
+   are read together. It does not infer panel order.
 3. `translate_page.py` uses the already downloaded
    `qwen3:4b-instruct` model over the local Ollama interface, with cloud
-   disabled and the service bound to loopback.
+   disabled and the service bound to loopback. A single structured request
+   translates the page, and the worker validates the complete set of IDs.
    It accepts a known transcript (`--ordered`) for separating translation and
    lettering defects from recognition errors.
 4. `render_page.py` erases detected lettering and draws the translated blocks
    with a local font. Preview output is a separate PNG. Its text-mask heuristic
-   targets dark lettering and lighter backgrounds. It expands horizontal
-   text only inside a safely detected enclosed light region.
+   targets dark lettering and lighter backgrounds. In-page placement uses
+   a safe light region and leaves other lettering regions clear.
 
 On the approved simple Japanese page PP-OCRv5 detected five vertical columns,
 and the prototype grouped them into two dialogue regions in reading order.

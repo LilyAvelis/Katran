@@ -178,8 +178,7 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
     let python = root.join("venv/Scripts/python.exe");
     let models = root.join("paddlex/official_models");
     let weights = ["inference.json", "inference.pdiparams", "inference.yml"];
-    let paddle_ok = complete(&models.join("PP-OCRv5_server_det"), &weights)
-        && complete(&models.join("PP-OCRv5_server_rec"), &weights);
+    let paddle_ok = complete(&models.join("PP-OCRv5_server_det"), &weights);
     let manga = root.join("manga-model");
     let manga_ok = complete(
         &manga,

@@ -43,21 +43,31 @@ def recognize(image_path, ocr_path, output_path, processor, model, device, vocab
         raise ValueError("Unsupported image")
     image = image.convert("L").convert("RGB")
     output = []
+    # Fixed-size batches bound accelerator memory and keep page order intact.
+    # Each crop uses the same processor and generation settings as a single run.
+    batch_size = 4
     with torch.inference_mode():
-        for group in groups:
-            rects = [bounds(p) for p in group["polygons"]]
-            x0 = max(0, math.floor(min(r[0] for r in rects)) - 3)
-            y0 = max(0, math.floor(min(r[1] for r in rects)) - 3)
-            x1 = min(image.width, math.ceil(max(r[2] for r in rects)) + 3)
-            y1 = min(image.height, math.ceil(max(r[3] for r in rects)) + 3)
-            if x1 <= x0 or y1 <= y0:
-                raise ValueError("Invalid crop")
-            pixels = processor(image.crop((x0, y0, x1, y1)), return_tensors="pt").pixel_values.to(device)
-            ids = model.generate(pixels, max_length=300)[0].tolist()
-            if any(i < 0 or i >= len(vocab) for i in ids):
-                raise ValueError("Invalid recognition token")
-            text = "".join(vocab[i].removeprefix("##") for i in ids if i not in (0, 2, 3, 4))
-            output.append({"source_text": "".join(text.split()), "polygons": group["polygons"]})
+        for offset in range(0, len(groups), batch_size):
+            batch = groups[offset:offset + batch_size]
+            crops = []
+            for group in batch:
+                rects = [bounds(p) for p in group["polygons"]]
+                x0 = max(0, math.floor(min(r[0] for r in rects)) - 3)
+                y0 = max(0, math.floor(min(r[1] for r in rects)) - 3)
+                x1 = min(image.width, math.ceil(max(r[2] for r in rects)) + 3)
+                y1 = min(image.height, math.ceil(max(r[3] for r in rects)) + 3)
+                if x1 <= x0 or y1 <= y0:
+                    raise ValueError("Invalid crop")
+                crops.append(image.crop((x0, y0, x1, y1)))
+            pixels = processor(crops, return_tensors="pt").pixel_values.to(device)
+            sequences = model.generate(pixels, max_length=300).tolist()
+            if len(sequences) != len(batch):
+                raise ValueError("Recognition returned inconsistent batch size")
+            for group, ids in zip(batch, sequences):
+                if any(i < 0 or i >= len(vocab) for i in ids):
+                    raise ValueError("Invalid recognition token")
+                text = "".join(vocab[i].removeprefix("##") for i in ids if i not in (0, 2, 3, 4))
+                output.append({"source_text": "".join(text.split()), "polygons": group["polygons"]})
     with output_path.open("x", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 

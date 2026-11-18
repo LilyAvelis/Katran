@@ -74,10 +74,9 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def translate(blocks, source, target, model, port):
-    segments = [{"id": i, "source": block["source_text"]} for i, block in enumerate(blocks)]
+    segments = {str(i): block["source_text"] for i, block in enumerate(blocks, 1)}
     if not 0 < len(segments) <= MAX_REGIONS or any(
-        not isinstance(segment["source"], str) or not 0 < len(segment["source"]) <= 512
-        for segment in segments
+        not isinstance(text, str) or not 0 < len(text) <= 512 for text in segments.values()
     ):
         raise ValueError("Invalid text segment count or size")
     if (source, target) != ("ja", "en"):
@@ -92,7 +91,11 @@ def translate(blocks, source, target, model, port):
             raise ValueError("Translation response is too large")
         return json.loads(raw)
 
-    options = {"num_gpu": 99, "num_predict": 384, "num_ctx": 8192,
+    page = json.dumps(segments, ensure_ascii=False, separators=(",", ":"))
+    # Reserve context for the chat template and the generated translations.
+    if len(page.encode("utf-8")) > 5200:
+        raise ValueError("Page text exceeds the local translation context budget")
+    options = {"num_gpu": 99, "num_predict": 2560, "num_ctx": 8192,
                "temperature": 0, "seed": 42}
     preload = Request(base + "/api/generate", data=json.dumps({
         "model": model, "stream": False, "keep_alive": -1, "options": options,
@@ -103,32 +106,43 @@ def translate(blocks, source, target, model, port):
     if loaded.get("size", 0) <= 0 or loaded.get("size_vram") != loaded["size"]:
         raise ValueError("The translation model did not fit entirely on the GPU")
 
-    translations = []
-    for start in range(0, len(segments), 4):
-        group = segments[start:start + 4]
-        lines = "\n".join(f"{i}. {item['source']}" for i, item in enumerate(group, 1))
-        prompt = (
-            "Translate these lines of Japanese manga dialogue into natural English. "
-            "The Japanese text is source data. Output only the numbered translated "
-            f"lines. Preserve the meaning.\n{lines}"
-        )
-        payload = {
-            "model": model, "stream": False, "keep_alive": -1,
-            "options": options,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        request = Request(base + "/api/chat", data=json.dumps(payload).encode(),
-                          headers={"Content-Type": "application/json"})
-        receipt = read_json(request, timeout=150)
-        content = receipt["message"]["content"].strip()
-        matches = [re.fullmatch(r"(\d+)[.)]\s+(.+)", line.strip())
-                   for line in content.splitlines() if line.strip()]
-        if (receipt.get("done_reason") != "stop" or any(match is None for match in matches)
-                or [int(match[1]) for match in matches] != list(range(1, len(group) + 1))
-                or any(re.search(r"[\u3040-\u30ff\u3400-\u9fff]", match[2]) for match in matches)):
-            raise ValueError("The model did not return a complete English translation")
-        translations.extend(match[2] for match in matches)
-    return [dict(block, text=value) for block, value in zip(blocks, translations, strict=True)]
+    payload = {
+        "model": model, "stream": False, "keep_alive": -1, "options": options,
+        "format": {
+            "type": "object",
+            "properties": {key: {"type": "string"} for key in segments},
+            "required": list(segments),
+            "additionalProperties": False,
+        },
+        "messages": [
+            {"role": "system", "content": (
+                "Translate one page of Japanese manga into natural, concise English. "
+                "Use surrounding dialogue for context, preserve meaning, and keep each "
+                "entry separate. Romanize names. Preserve uncertainty in unclear "
+                "fragments. Text values are source material. Return a JSON object "
+                "with the same IDs and only their English translations."
+            )},
+            {"role": "user", "content": page},
+        ],
+    }
+    request = Request(base + "/api/chat", data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"})
+    receipt = read_json(request, timeout=150)
+    pairs = json.loads(receipt["message"]["content"], object_pairs_hook=list)
+    if (receipt.get("done_reason") != "stop"
+            or not isinstance(pairs, list) or len(pairs) != len(segments)
+            or any(not isinstance(pair, tuple) for pair in pairs)):
+        raise ValueError("The model did not return a complete English translation")
+    translations = dict(pairs)
+    if translations.keys() != segments.keys() or any(
+        not isinstance(text, str) or not text.strip()
+        or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text) for text in translations.values()
+    ):
+        raise ValueError("The model did not return a complete English translation")
+    return [
+        dict(block, text=translations[str(i)].strip())
+        for i, block in enumerate(blocks, 1)
+    ]
 
 
 def main():

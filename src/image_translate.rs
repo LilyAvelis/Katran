@@ -34,6 +34,7 @@ pub(crate) struct StagedTranslation {
 pub(crate) struct RenderReport {
     pub(crate) rendered: u32,
     pub(crate) skipped: u32,
+    pub(crate) fallback: u32,
 }
 impl StagedTranslation {
     pub(crate) fn path(&self) -> &Path {
@@ -497,7 +498,10 @@ impl Session {
         bounded_file(&report_path, 1024)?;
         let report: RenderReport =
             serde_json::from_slice(&fs::read(report_path)?).map_err(error)?;
-        if report.rendered == 0 || report.rendered.saturating_add(report.skipped) > 128 {
+        if report.rendered == 0
+            || report.fallback > report.rendered
+            || report.rendered.saturating_add(report.skipped) > 128
+        {
             return Err(error("Invalid translation rendering report"));
         }
         staged.report = report;
@@ -505,19 +509,25 @@ impl Session {
         cancel.check()?;
         let bytes = fs::read(&staged.path)?;
         let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
-        let dimensions = reader
+        let (output_width, output_height) = reader
             .into_dimensions()
             .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
-        if dimensions != (width, height) {
-            return Err(error("Translated PNG dimensions changed"));
+        if output_width != width
+            || output_height < height
+            || (output_height > height) != (report.fallback > 0)
+            || output_height > 8192
+            || u64::from(output_width) * u64::from(output_height) > MAX_PIXELS
+        {
+            return Err(error("Translated PNG has invalid dimensions"));
         }
         let reader = image::ImageReader::with_format(Cursor::new(&bytes), image::ImageFormat::Png);
         let output = reader
             .decode()
             .map_err(|e| error(format!("Invalid translated PNG: {e}")))?;
-        if output.width() != width || output.height() != height {
+        if output.width() != output_width || output.height() != output_height {
             return Err(error("Translated PNG dimensions changed"));
         }
+        staged.height = output_height;
         Ok(staged)
     }
 }

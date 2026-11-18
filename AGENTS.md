@@ -30,6 +30,10 @@ Published translations appear exclusively in Translate, including tag sort
 and read-only tab snapshots. Keep the OCR workers and private Ollama resident
 for the Service lifetime; release their owned process trees on exit. Report
 skipped regions when the renderer can only safely letter part of a page.
+Submit all recognized blocks of a single page in one Qwen request with stable
+IDs. Use Paddle for detection only and Manga OCR for reading. Keep placements
+disjoint and letter unsafe blocks in a white panel below the original canvas
+when it fits the output limits.
 
 ## Ready text preview retention · 2026-11-18
 

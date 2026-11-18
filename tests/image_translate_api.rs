@@ -64,6 +64,7 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let staging = profile.path().join("translate-work");
     let first = translate_page(&mut service, &input);
     assert_eq!(first["skipped_blocks"], 0);
+    assert_eq!(first["fallback_blocks"], 0);
     let session_dirs = || {
         std::fs::read_dir(&staging)
             .unwrap()
@@ -79,7 +80,8 @@ fn selected_japanese_image_publishes_png_to_translate_with_interface_target() {
     let mut results = vec![first, warm];
     if let Some(complex) = std::env::var_os("KATRAN_TRANSLATE_TEST_COMPLEX_IMAGE") {
         let result = translate_page(&mut service, &complex);
-        assert!(result["skipped_blocks"].as_u64().unwrap() > 0);
+        assert!(result["fallback_blocks"].as_u64().unwrap() > 0);
+        assert_eq!(result["skipped_blocks"], 0);
         results.push(result);
     }
     for (tab, expected) in [(ShelfTab::Images, false), (ShelfTab::Translate, true)] {
@@ -214,15 +216,20 @@ fn translate_page(service: &mut Service, input: &std::ffi::OsStr) -> Value {
         .with_guessed_format()
         .unwrap();
     assert_eq!(image.format(), Some(image::ImageFormat::Png));
-    assert_eq!(
-        image.into_dimensions().unwrap(),
-        image::image_dimensions(&source).unwrap()
-    );
+    let (width, height) = image.into_dimensions().unwrap();
+    let (source_width, source_height) = image::image_dimensions(&source).unwrap();
+    assert_eq!(width, source_width);
+    assert_eq!(result["width"], width);
+    assert_eq!(result["height"], height);
+    let fallback = result["fallback_blocks"].as_u64().unwrap();
+    assert!(height >= source_height);
+    assert_eq!(height > source_height, fallback > 0);
     assert_eq!(std::fs::read(&source).unwrap(), original);
     eprintln!(
-        "Translate in {:?}: {} rendered, {} skipped",
+        "Translate in {:?}: {} rendered, {} in the panel, {} skipped",
         started_at.elapsed(),
         result["rendered_blocks"],
+        result["fallback_blocks"],
         result["skipped_blocks"]
     );
     result

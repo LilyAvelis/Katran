@@ -1,4 +1,4 @@
-"""One-page Japanese PP-OCRv5 probe. Coordinates are in original image pixels."""
+"""Detect text on one page with PP-OCRv5, in original image coordinates."""
 import argparse
 import json
 import os
@@ -14,39 +14,53 @@ os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 os.environ["FLAGS_enable_pir_api"] = "0"
 
 
-def load_model(lang, prepare, parser):
+def load_detector(prepare, parser):
     det = MODELS / "PP-OCRv5_server_det"
-    rec = MODELS / "PP-OCRv5_server_rec"
     if not prepare and any(
-        not (folder / name).is_file()
-        for folder in (det, rec)
+        not (det / name).is_file()
         for name in ("inference.json", "inference.pdiparams", "inference.yml")
     ):
         parser.error("PP-OCRv5 weights are missing; use --prepare to download them explicitly")
-    from paddleocr import PaddleOCR
-    models = (
-        {"lang": lang, "ocr_version": "PP-OCRv5"}
-        if prepare
-        else {"text_detection_model_dir": str(det), "text_recognition_model_dir": str(rec)}
-    )
-    return PaddleOCR(
-        **models, device="cpu",
-        use_doc_orientation_classify=False, use_doc_unwarping=False,
-        use_textline_orientation=False, enable_mkldnn=False,
-    )
+    from paddleocr import TextDetection
+
+    def create(accelerated):
+        return TextDetection(
+            model_dir=None if prepare else str(det),
+            model_name="PP-OCRv5_server_det", device="cpu", enable_mkldnn=accelerated,
+            limit_side_len=64, limit_type="min", thresh=0.3, box_thresh=0.6,
+            unclip_ratio=1.5,
+        )
+
+    detector = None
+    accelerated = True
+
+    def predict(image):
+        nonlocal detector, accelerated
+        try:
+            if detector is None:
+                detector = create(accelerated)
+            return list(detector.predict(str(image), max_side_limit=4000))
+        except (RuntimeError, NotImplementedError):
+            if not accelerated:
+                raise
+            # Some Paddle builds cannot run the oneDNN backend.
+            accelerated = False
+            detector = None
+            detector = create(False)
+            return list(detector.predict(str(image), max_side_limit=4000))
+
+    return predict
 
 
-def recognize(ocr, image, out_json):
-    pages = list(ocr.predict(str(image)))
+def detect(detector, image, out_json):
+    pages = detector(image)
     if len(pages) != 1:
         raise ValueError("Expected exactly one image page")
     result = pages[0]
-    polygons, texts, scores = result["rec_polys"], result["rec_texts"], result["rec_scores"]
-    if not (len(polygons) == len(texts) == len(scores)):
-        raise ValueError("OCR returned inconsistent results")
-    blocks = []
-    for polygon, text, score in zip(polygons, texts, scores):
-        blocks.append({"polygon": [[int(p[0]), int(p[1])] for p in polygon], "text": str(text), "confidence": float(score)})
+    blocks = [
+        {"polygon": polygon.astype(int).tolist(), "text": "", "confidence": float(score)}
+        for polygon, score in zip(result["dt_polys"], result["dt_scores"], strict=True)
+    ]
     with Path(out_json).open("x", encoding="utf-8") as output:
         json.dump(blocks, output, ensure_ascii=False, indent=2)
 
@@ -62,20 +76,20 @@ def main():
     if args.worker:
         if args.image is not None or args.out_json is not None or args.prepare:
             parser.error("--worker does not accept positional arguments or --prepare")
-        ocr = load_model("japan", False, parser)
+        detector = load_detector(False, parser)
         for line in sys.stdin:
             value = json.loads(line)
             if not isinstance(value, str) or not Path(value).is_absolute():
                 raise ValueError("worker request must be an absolute staging directory path")
             staging = Path(value)
-            recognize(ocr, staging / "input.png", staging / "ocr.json")
+            detect(detector, staging / "input.png", staging / "ocr.json")
             with (staging / "paddle.done").open("x", encoding="utf-8"):
                 pass
     else:
         if args.image is None or args.out_json is None or args.lang is None:
             parser.error("image, out_json and --lang are required")
-        ocr = load_model(args.lang, args.prepare, parser)
-        recognize(ocr, args.image, args.out_json)
+        detector = load_detector(args.prepare, parser)
+        detect(detector, args.image, args.out_json)
 
 
 if __name__ == "__main__":
