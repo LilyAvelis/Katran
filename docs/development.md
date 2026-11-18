@@ -1,7 +1,7 @@
 # Developer and agent entry point
 
 The Ctrl+Shift+K Notion source uses `src/notion.rs` for bounded CLI requests,
-`src/jobs_service.rs` for job dispatch and guarded text publication, and
+`src/jobs_service.rs` for job dispatch and guarded file publication, and
 `src/bin/workspace_notion_ui.rs` for the picker and Markdown preview.
 See [connection setup](notion.md).
 

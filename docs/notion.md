@@ -13,10 +13,15 @@ still has an older PATH.
    token and save it. Katran keeps it in Windows Credential Manager for the
    current Windows user. Disconnect removes that local credential.
 4. From the app that should receive the text, summon Katran with its overlay
-   hotkey. Open **Ctrl+Shift+K → Notion** and type a page title. Use **↓** or
+   hotkey. Open **Ctrl+Shift+K**, then use **Ctrl+N** or the round **N** icon
+   in the header to switch to Notion and type a page title. Use **↓** or
    click a result to focus the list. **Space** opens or closes its Markdown
-   preview. **Enter** fetches the Markdown and pastes it into the previous
-   window using Katran's usual clipboard and overlay guards.
+   preview. **Enter** attaches a UTF-8 `.md` file in the previous window
+   using Katran's file clipboard and overlay guards. The receiving app
+   needs to support pasting files.
+5. **Ctrl+.** pins or unpins a selected page. **Ctrl+F** shows favorites and
+   **Ctrl+H** shows the last 100 distinct previewed or exported pages.
+   Katran saves their IDs and titles locally and fetches content on demand.
 
 Search requests match page titles and return up to 25 items. Type a more
 specific title if there are additional matches. Katran does not index this
@@ -24,5 +29,4 @@ content locally. It debounces title changes by 300 ms, cancels stale jobs
 and bounds each CLI request to eight seconds. Preview renders supported
 Markdown as text without loading linked images. Katran rejects truncated
 Notion responses. The preview limit is 65,536 characters and the paste
-limit is 1 MiB of Markdown. Notion data sources, favorites and history are
-outside this pilot.
+limit is 1 MiB of Markdown. Database browsing is outside this pilot.

@@ -154,6 +154,8 @@ pub enum Command {
     BeginPasteNotionPage {
         owner_window: u64,
         page_id: String,
+        #[serde(default)]
+        title: String,
     },
     BeginPasteCollectionPage {
         owner_window: u64,
@@ -211,9 +213,19 @@ pub enum Command {
     },
     ReadNotionPage {
         page_id: String,
+        #[serde(default)]
+        title: String,
     },
     CopyNotionPage {
         page_id: String,
+        #[serde(default)]
+        title: String,
+    },
+    ListSavedNotionPages {
+        favorites: bool,
+    },
+    ToggleFavoriteNotionPage {
+        page: crate::notion::Page,
     },
     SearchFoldersSemantic {
         query: String,

@@ -383,6 +383,8 @@ impl Shelf {
                         );
                     }
                     self.apply_window_visibility(ctx, false);
+                } else {
+                    self.workspace_notion_paste_failed();
                 }
             }
         }

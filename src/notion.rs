@@ -12,10 +12,105 @@ use std::{
 const MAX_RESPONSE: usize = 2 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(8);
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Page {
     pub id: String,
     pub title: String,
+}
+
+impl Page {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !page_id(&self.id) || self.title.len() > 8192 {
+            return Err(ApiError::new("notion_page", "Invalid Notion page"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn filename(&self) -> String {
+        let title: String = self
+            .title
+            .chars()
+            .map(|ch| {
+                if ch.is_control() || "\\/:*?\"<>|".contains(ch) {
+                    ' '
+                } else {
+                    ch
+                }
+            })
+            .take(45)
+            .collect();
+        let title = title.trim_matches([' ', '.']);
+        if title.is_empty() {
+            format!("Notion-{}.md", &self.id[..8])
+        } else {
+            format!("Notion - {title}.md")
+        }
+    }
+}
+
+fn page_library(root: &std::path::Path) -> Result<rusqlite::Connection> {
+    let db = rusqlite::Connection::open(root.join("notion-pages.sqlite3"))?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS pages (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, visited INTEGER, pinned INTEGER
+        );",
+    )?;
+    Ok(db)
+}
+
+pub(crate) fn saved_pages(root: &std::path::Path, favorites: bool) -> Result<Vec<Page>> {
+    let db = page_library(root)?;
+    let sql = if favorites {
+        "SELECT id,title FROM pages WHERE pinned IS NOT NULL ORDER BY pinned DESC, rowid DESC"
+    } else {
+        "SELECT id,title FROM pages WHERE visited IS NOT NULL ORDER BY visited DESC, rowid DESC LIMIT 100"
+    };
+    let mut query = db.prepare(sql)?;
+    let pages = query
+        .query_map([], |row| {
+            Ok(Page {
+                id: row.get(0)?,
+                title: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(pages)
+}
+
+pub(crate) fn toggle_favorite(root: &std::path::Path, page: &Page) -> Result<bool> {
+    page.validate()?;
+    let db = page_library(root)?;
+    let pinned = db.query_row(
+        "INSERT INTO pages(id,title,pinned) VALUES(?1,?2,?3)
+            ON CONFLICT(id) DO UPDATE SET title=excluded.title,
+            pinned=CASE WHEN pages.pinned IS NULL THEN excluded.pinned ELSE NULL END
+            RETURNING pinned IS NOT NULL",
+        rusqlite::params![page.id, page.title, crate::now_ms()],
+        |row| row.get(0),
+    )?;
+    db.execute(
+        "DELETE FROM pages WHERE pinned IS NULL AND visited IS NULL",
+        [],
+    )?;
+    Ok(pinned)
+}
+
+pub(crate) fn record_visit(root: &std::path::Path, page: &Page) -> Result<()> {
+    let mut db = page_library(root)?;
+    let tx = db.transaction()?;
+    tx.execute(
+        "INSERT INTO pages(id,title,visited) VALUES(?1,?2,?3)
+            ON CONFLICT(id) DO UPDATE SET title=COALESCE(NULLIF(excluded.title,''),pages.title),
+            visited=excluded.visited",
+        rusqlite::params![page.id, page.title, crate::now_ms()],
+    )?;
+    tx.execute_batch(
+        "UPDATE pages SET visited=NULL WHERE id IN
+            (SELECT id FROM pages WHERE visited IS NOT NULL ORDER BY visited DESC, rowid DESC LIMIT -1 OFFSET 100);
+         DELETE FROM pages WHERE pinned IS NULL AND visited IS NULL;",
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize)]
@@ -409,6 +504,36 @@ fn request(path: &str, body: Option<Value>, check: impl Fn() -> Result<()>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_history_and_favorites_are_independent_and_markdown_is_a_file() {
+        let root = tempfile::tempdir().unwrap();
+        let page = Page {
+            id: "12345678-0000-0000-0000-000000000000".into(),
+            title: "../Baldur: notes".into(),
+        };
+        assert!(toggle_favorite(root.path(), &page).unwrap());
+        assert!(saved_pages(root.path(), false).unwrap().is_empty());
+        record_visit(root.path(), &page).unwrap();
+        assert_eq!(saved_pages(root.path(), true).unwrap()[0].id, page.id);
+        assert!(!toggle_favorite(root.path(), &page).unwrap());
+        assert!(saved_pages(root.path(), true).unwrap().is_empty());
+        assert_eq!(
+            saved_pages(root.path(), false).unwrap()[0].title,
+            page.title
+        );
+
+        let markdown = "# Текст\r\n\r\n- 頁\n".as_bytes();
+        let filename = page.filename();
+        assert!(crate::validate_name(&filename).is_ok());
+        assert!(filename.ends_with(".md"));
+        let plan =
+            crate::copy_out::prepare_named_file(root.path(), &filename, markdown, 1024).unwrap();
+        assert_eq!(plan.paths.len(), 1);
+        assert_eq!(plan.paths[0].file_name().unwrap(), filename.as_str());
+        assert_eq!(std::fs::read(&plan.paths[0]).unwrap(), markdown);
+        assert!(plan.text_payload.is_none());
+    }
 
     #[cfg(windows)]
     #[test]

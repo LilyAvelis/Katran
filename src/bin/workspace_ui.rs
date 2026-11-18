@@ -194,6 +194,10 @@ impl Shelf {
         ctx.request_repaint();
     }
     fn workspace_mode(&mut self, mode: Mode, ctx: &egui::Context) {
+        if self.workspace.notion_source {
+            self.workspace_cancel_notion();
+            self.workspace.notion = notion_ui::State::default();
+        }
         self.workspace.notion_source = false;
         self.workspace.mode = mode;
         self.workspace.query.clear();
@@ -368,12 +372,22 @@ impl Shelf {
             && !self.open_apps.open
         {
             self.actions = false;
+            let already_in_notion = self.workspace.open && self.workspace.notion_source;
             self.workspace.open = true;
             self.workspace.opened_frame = ctx.cumulative_frame_nr();
-            if self.workspace.notion_source {
-                self.workspace_open_notion(ctx);
+            if already_in_notion {
+                self.workspace_notion_mode(Mode::Search, ctx);
             } else {
                 self.workspace_mode(Mode::Search, ctx);
+            }
+        }
+        if self.workspace.open
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::N))
+        {
+            if self.workspace.notion_source {
+                self.workspace_mode(Mode::Search, ctx);
+            } else {
+                self.workspace_open_notion(ctx);
             }
         }
         if !self.workspace.open
@@ -400,6 +414,7 @@ impl Shelf {
             }
         }
         if self.workspace.open && self.workspace.notion_source {
+            self.workspace_notion_input(ctx);
             return;
         }
         if self.workspace.open {
@@ -628,14 +643,18 @@ impl Shelf {
             .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx, |ui| {
                 ui.set_width(width);
                 let neural = state.mode == Mode::Search && state.neural;
-                ui.label(RichText::new(match state.mode { Mode::Search if neural => tr("Нейропоиск папок · локально", "Neural folder search · local"), Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(match state.mode { Mode::Search if neural => tr("Нейропоиск папок · локально", "Neural folder search · local"), Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        open_notion = notion_ui::source_button(ui, false);
+                    });
+                });
                 ui.add_space(6.0);
                 let mut mode_change = None;
                 ui.horizontal_wrapped(|ui| {
                     for (mode, label) in [(Mode::Search, tr("Поиск", "Search")), (Mode::Favorites, tr("Избранное", "Favorites")), (Mode::History, tr("История", "History")), (Mode::Standard, tr("Стандартные папки", "Standard folders"))] {
                         if ui.selectable_label(state.mode == mode, label).clicked() { mode_change = Some(mode); }
                     }
-                    open_notion = ui.selectable_label(false, "Notion").clicked();
                 });
                 if let Some(mode) = mode_change { ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode)); }
                 if state.incomplete { ui.weak(tr("Показаны частичные результаты", "Partial results shown")); }

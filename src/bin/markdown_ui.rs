@@ -4,11 +4,16 @@ use eframe::egui::{self, Color32, RichText};
 use katran::markdown::{Document, InlineKind, Kind};
 
 pub(super) fn show(ui: &mut egui::Ui, doc: &Document) {
+    let code_background = theme_color(ui.ctx(), Role::Surface, Color32::from_gray(48));
+    show_on(ui, doc, code_background);
+}
+
+pub(super) fn show_on(ui: &mut egui::Ui, doc: &Document, code_background: Color32) {
     for block in &doc.blocks {
         match block.kind {
             Kind::CodeFence => {
                 egui::Frame::new()
-                    .fill(theme_color(ui.ctx(), Role::Surface, Color32::from_gray(48)))
+                    .fill(code_background)
                     .corner_radius(5)
                     .inner_margin(8)
                     .show(ui, |ui| {

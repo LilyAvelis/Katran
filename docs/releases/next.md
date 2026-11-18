@@ -2,8 +2,9 @@
 
 ## Local follow-up · Notion search
 
-Ctrl+Shift+K adds a read-only Notion source alongside Everything. Search titles,
-preview Markdown and paste the source page into the previous window. The official
+Ctrl+Shift+K adds a read-only Notion mode alongside Everything. Ctrl+N or the
+header icon switches modes. Search titles, preview Markdown, pin pages, revisit
+page history, and attach a Markdown file to the previous window. The official
 Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
 [Setup and limits](../notion.md)
 

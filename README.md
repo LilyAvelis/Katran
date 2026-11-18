@@ -1,8 +1,8 @@
 # Katran
 
-**Notion** is available as a read-only source in Ctrl+Shift+K. Search pages by
-title, preview Markdown with Space and paste into the previous window with
-Enter. [Notion setup](docs/notion.md)
+**Notion** is available as a read-only mode in Ctrl+Shift+K. Switch with
+Ctrl+N, search pages by title, preview Markdown with Space and attach an
+`.md` file to the previous window with Enter. [Notion setup](docs/notion.md)
 
 ## Katran 4.0 · Collections, Translate and media
 

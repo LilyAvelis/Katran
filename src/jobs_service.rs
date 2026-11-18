@@ -117,8 +117,14 @@ pub(crate) enum PreparedWork {
         operation: open_file::Operation,
         index: usize,
     },
-    CopyNotionText {
-        text: String,
+    ReadNotionPage {
+        page: notion::Page,
+        markdown: String,
+    },
+    CopyNotionFile {
+        page: notion::Page,
+        plan: copy_out::Plan,
+        sink: copy_out::PreparedNativeClipboard,
         sequence: u32,
     },
     CopyCollectionPage {
@@ -1562,20 +1568,29 @@ impl Service {
                     crate::notion::search(&query, || cancel.check()).map(PreparedWork::Value)
                 })?
             }
-            Command::ReadNotionPage { page_id } => {
+            Command::ReadNotionPage { page_id, title } => {
+                let page = notion::Page { id: page_id, title };
+                page.validate()?;
                 self.jobs.submit(Lane::Discovery, move |cancel| {
-                    let markdown = crate::notion::markdown(&page_id, || cancel.check())?;
-                    Ok(PreparedWork::Value(json!({"markdown": markdown})))
+                    let markdown = notion::markdown(&page.id, || cancel.check())?;
+                    Ok(PreparedWork::ReadNotionPage { page, markdown })
                 })?
             }
-            Command::CopyNotionPage { page_id } => {
+            Command::CopyNotionPage { page_id, title } => {
+                let page = notion::Page { id: page_id, title };
+                page.validate()?;
                 let sequence = capture::sequence_number();
+                let root = self.root.clone();
+                let quota = self.quota;
+                let references = self.reference_paths()?;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
-                    let text = crate::notion::markdown(&page_id, || cancel.check())?;
-                    if text.trim().is_empty() {
-                        return Err(ApiError::new("notion_empty", "This Notion page is empty"));
-                    }
-                    Ok(PreparedWork::CopyNotionText { text, sequence })
+                    let markdown = notion::markdown(&page.id, || cancel.check())?;
+                    cancel.check()?;
+                    let mut plan = copy_out::prepare_named_file(&root, &page.filename(), markdown.as_bytes(), quota)
+                        .map_err(|e| ApiError::new("copy_error", e))?;
+                    plan.protect_references(&references).map_err(|e| ApiError::new("copy_error", e))?;
+                    let sink = copy_out::PreparedNativeClipboard::prepare_files_if_current(&plan.paths, sequence);
+                    Ok(PreparedWork::CopyNotionFile { page, plan, sink, sequence })
                 })?
             }
             Command::CheckUpdates => {
@@ -3050,12 +3065,23 @@ impl Service {
                         Ok(json!({"opened_collection_link":true,"index":index}))
                     }
                 },
-                PreparedWork::CopyNotionText { text, sequence } => {
+                PreparedWork::ReadNotionPage { page, markdown } => {
                     self.jobs.authorize_claimed_effect(ready)?;
-                    let clipboard_sequence = self.text_clipboard.lock()
-                        .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
-                        .write_if_current(&text, sequence)?;
-                    Ok(json!({"text_copied":true,"clipboard_sequence":clipboard_sequence}))
+                    let _ = notion::record_visit(&self.root, &page);
+                    Ok(json!({"markdown":markdown}))
+                },
+                PreparedWork::CopyNotionFile { page, plan, mut sink, sequence } => {
+                    self.jobs.authorize_claimed_effect(ready)?;
+                    if capture::sequence_number() != sequence {
+                        return Err(ApiError::new("clipboard_changed", "Clipboard changed while exporting the page"));
+                    }
+                    let receipt = self.commit_media_copy_plan(&plan, &mut sink)
+                        .map_err(|e| ApiError::new("clipboard_error", e))?;
+                    self.record_clipboard_publication(receipt.sequence);
+                    if receipt.count == 1 && receipt.failures.is_empty() {
+                        let _ = notion::record_visit(&self.root, &page);
+                    }
+                    Ok(json!({"copied":receipt.count,"clipboard_sequence":receipt.sequence,"failures":receipt.failures,"publication":receipt.publication}))
                 },
                 PreparedWork::CopyCollectionPage { event, stamp, pixels, sequence, index } => {
                     let current = self.saved_collection(event.id, &event.revision)?;

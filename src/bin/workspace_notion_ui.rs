@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct State {
+    mode: Mode,
     query: String,
     pages: Vec<katran::notion::Page>,
     selected: usize,
@@ -11,6 +12,7 @@ pub(super) struct State {
     preview_open: bool,
     preview: Option<katran::markdown::Document>,
     error: Option<String>,
+    notice: Option<&'static str>,
     search_due: Option<Instant>,
     job: Option<(JobId, Operation)>,
 }
@@ -19,6 +21,50 @@ pub(super) struct State {
 enum Operation {
     Search,
     Preview,
+}
+
+pub(super) fn source_button(ui: &mut egui::Ui, active: bool) -> bool {
+    let (background, foreground) = if active {
+        (Color32::WHITE, Color32::BLACK)
+    } else {
+        (Color32::from_gray(25), Color32::WHITE)
+    };
+    ui.add(
+        egui::Button::new(RichText::new("N").strong().size(15.0).color(foreground))
+            .min_size(egui::vec2(26.0, 26.0))
+            .corner_radius(13)
+            .fill(background)
+            .stroke(egui::Stroke::new(1.0, Color32::from_gray(105))),
+    )
+    .on_hover_text(if active {
+        tr(
+            "Вернуться в Everything · Ctrl+N",
+            "Back to Everything · Ctrl+N",
+        )
+    } else {
+        tr("Поиск Notion · Ctrl+N", "Search Notion · Ctrl+N")
+    })
+    .clicked()
+}
+
+fn monochrome(ui: &mut egui::Ui) {
+    let visuals = ui.visuals_mut();
+    visuals.override_text_color = Some(Color32::from_gray(235));
+    visuals.extreme_bg_color = Color32::from_gray(17);
+    visuals.selection.bg_fill = Color32::from_gray(74);
+    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
+    for (widget, gray) in [
+        (&mut visuals.widgets.noninteractive, 32),
+        (&mut visuals.widgets.inactive, 44),
+        (&mut visuals.widgets.hovered, 62),
+        (&mut visuals.widgets.active, 80),
+        (&mut visuals.widgets.open, 50),
+    ] {
+        widget.bg_fill = Color32::from_gray(gray);
+        widget.weak_bg_fill = Color32::from_gray(gray);
+        widget.bg_stroke.color = Color32::from_gray(87);
+        widget.fg_stroke.color = Color32::from_gray(220);
+    }
 }
 
 impl Shelf {
@@ -35,9 +81,74 @@ impl Shelf {
         ctx.request_repaint();
     }
 
+    pub(super) fn workspace_notion_mode(&mut self, mode: Mode, ctx: &egui::Context) {
+        self.workspace_open_notion(ctx);
+        self.workspace.notion.mode = mode;
+        if mode != Mode::Search && self.workspace.notion.configured {
+            self.workspace_notion_saved(mode);
+        }
+    }
+
+    fn workspace_notion_saved(&mut self, mode: Mode) {
+        let reply = self.call(Command::ListSavedNotionPages {
+            favorites: mode == Mode::Favorites,
+        });
+        let state = &mut self.workspace.notion;
+        if reply.is_null() {
+            state.error = Some(self.message.clone());
+        } else {
+            state.pages = serde_json::from_value(reply["pages"].clone()).unwrap_or_default();
+            state.selected = state.selected.min(state.pages.len().saturating_sub(1));
+        }
+    }
+
+    pub(super) fn workspace_notion_input(&mut self, ctx: &egui::Context) {
+        let (favorites, history, pin) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::F),
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::H),
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::Period),
+            )
+        });
+        if favorites || history {
+            self.workspace_notion_mode(
+                if favorites {
+                    Mode::Favorites
+                } else {
+                    Mode::History
+                },
+                ctx,
+            );
+        } else if pin {
+            let state = &self.workspace.notion;
+            if let Some(page) = state.pages.get(state.selected).cloned() {
+                let mode = state.mode;
+                let reply = self.call(Command::ToggleFavoriteNotionPage { page });
+                if let Some(favorite) = reply["favorite"].as_bool() {
+                    if mode == Mode::Favorites {
+                        self.workspace_notion_mode(mode, ctx);
+                    }
+                    self.workspace.notion.notice = Some(if favorite {
+                        tr("Страница закреплена", "Page pinned")
+                    } else {
+                        tr("Страница откреплена", "Page unpinned")
+                    });
+                } else {
+                    self.workspace.notion.error = Some(self.message.clone());
+                }
+            }
+        }
+    }
+
     pub(super) fn workspace_cancel_notion(&mut self) {
         if let Some((job_id, _)) = self.workspace.notion.job.take() {
             self.call(Command::CancelJob { job_id });
+        }
+    }
+
+    pub(crate) fn workspace_notion_paste_failed(&mut self) {
+        if self.workspace.open && self.workspace.notion_source {
+            self.workspace.notion.error = Some(self.message.clone());
         }
     }
 
@@ -137,6 +248,7 @@ impl Shelf {
             }
         }
         let mut everything = false;
+        let mut mode_change = None;
         let mut query_changed = false;
         let id = egui::Id::new("workspace-notion-picker");
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 600.0);
@@ -144,12 +256,17 @@ impl Shelf {
         let modal = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24))
-            .frame(crate::action_row::popup_frame(ctx))
+            .frame(crate::action_row::popup_frame(ctx)
+                .fill(Color32::from_gray(32))
+                .stroke(egui::Stroke::new(1.0, Color32::from_gray(100))))
             .show(ctx, |ui| {
+                monochrome(ui);
                 ui.set_width(width);
                 ui.horizontal(|ui| {
-                    everything = ui.selectable_label(false, "Everything").clicked();
-                    ui.selectable_label(true, "Notion").clicked();
+                    ui.label(RichText::new(tr("Найти страницу · Notion", "Find a page · Notion")).strong().size(15.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        everything = source_button(ui, true);
+                    });
                 });
                 if !state.configured {
                     ui.label(tr(
@@ -158,7 +275,18 @@ impl Shelf {
                     ));
                     return;
                 }
-                if !state.preview_open {
+                ui.horizontal(|ui| {
+                    for (mode, label) in [
+                        (Mode::Search, tr("Поиск", "Search")),
+                        (Mode::Favorites, tr("Избранное", "Favorites")),
+                        (Mode::History, tr("История", "History")),
+                    ] {
+                        if ui.selectable_label(state.mode == mode, label).clicked() && state.mode != mode {
+                            mode_change = Some(mode);
+                        }
+                    }
+                });
+                if state.mode == Mode::Search && !state.preview_open {
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut state.query)
                             .id(query_id)
@@ -179,7 +307,7 @@ impl Shelf {
                                 ui.heading(&page.title);
                             }
                             if let Some(doc) = &state.preview {
-                                crate::markdown_ui::show(ui, doc);
+                                crate::markdown_ui::show_on(ui, doc, Color32::from_gray(48));
                             }
                         } else {
                             for (index, page) in state.pages.iter().enumerate() {
@@ -206,20 +334,26 @@ impl Shelf {
                             {
                                 ui.weak(tr("Страницы не найдены", "No pages found"));
                             }
+                            if state.pages.is_empty() && state.mode != Mode::Search && state.error.is_none() {
+                                ui.weak(tr("Здесь пока нет страниц", "No pages yet"));
+                            }
                         }
                         if let Some(error) = &state.error {
                             ui.colored_label(Color32::LIGHT_RED, error);
                         }
                     });
+                if let Some(notice) = state.notice {
+                    ui.weak(notice);
+                }
                 ui.weak(tr(
-                    "↓ ↑ · выбрать    Space · превью    Enter · вставить",
-                    "↓ ↑ · select    Space · preview    Enter · paste",
+                    "Space · превью    Enter · приложить .md    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",
+                    "Space · preview    Enter · attach .md    Ctrl+. · pin    Ctrl+F · favorites    Ctrl+H · history",
                 ));
             });
         if everything {
-            self.workspace_cancel_notion();
-            self.workspace.notion = State::default();
             self.workspace_mode(Mode::Search, ctx);
+        } else if let Some(mode) = mode_change {
+            self.workspace_notion_mode(mode, ctx);
         } else if query_changed {
             self.workspace_cancel_notion();
             let state = &mut self.workspace.notion;
@@ -227,6 +361,7 @@ impl Shelf {
             state.selected = 0;
             state.more = false;
             state.error = None;
+            state.notice = None;
             state.search_due = None;
             if !state.query.trim().is_empty() {
                 let delay = Duration::from_millis(300);
@@ -235,11 +370,12 @@ impl Shelf {
             }
         } else if modal.should_close() {
             self.workspace_close();
-        } else if let Some(page_id) = state.pages.get(state.selected).map(|page| page.id.clone()) {
+        } else if let Some(page) = state.pages.get(state.selected).cloned() {
             if enter {
                 let command = Command::BeginPasteNotionPage {
                     owner_window: self.native_window,
-                    page_id,
+                    page_id: page.id,
+                    title: page.title,
                 };
                 // Keep the picker open so foreground lease failures can be retried.
                 if !self.begin_paste_ui(ctx, command) {
@@ -253,7 +389,10 @@ impl Shelf {
                 self.workspace.notion.preview_open = open;
                 if open {
                     self.workspace_notion_start(
-                        Command::ReadNotionPage { page_id },
+                        Command::ReadNotionPage {
+                            page_id: page.id,
+                            title: page.title,
+                        },
                         Operation::Preview,
                     );
                 }

@@ -918,8 +918,8 @@ impl Service {
             } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
-            Command::BeginPasteNotionPage { owner_window, page_id } => {
-                self.begin_paste_with_copy(owner_window, Command::CopyNotionPage { page_id })
+            Command::BeginPasteNotionPage { owner_window, page_id, title } => {
+                self.begin_paste_with_copy(owner_window, Command::CopyNotionPage { page_id, title })
             }
             Command::BeginPasteCollectionPage {
                 owner_window,
@@ -965,6 +965,12 @@ impl Service {
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
+            Command::ListSavedNotionPages { favorites } => {
+                Ok(serde_json::json!({"pages": notion::saved_pages(&self.root, favorites)?}))
+            }
+            Command::ToggleFavoriteNotionPage { page } => {
+                Ok(serde_json::json!({"favorite": notion::toggle_favorite(&self.root, &page)?}))
+            }
             Command::SetNotionToken { token } => {
                 notion::set_token(token)?;
                 Ok(serde_json::json!({"configured": notion::configured()}))

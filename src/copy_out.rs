@@ -290,19 +290,28 @@ pub(crate) fn prepare_bs_entry(
     entry: &baloh_collection::bs::FileEntry,
     quota: u64,
 ) -> Result<Plan, String> {
+    prepare_named_file(root, &entry.name, &entry.bytes, quota)
+}
+
+pub(crate) fn prepare_named_file(
+    root: &Path,
+    name: &str,
+    bytes: &[u8],
+    quota: u64,
+) -> Result<Plan, String> {
     use std::io::Write;
-    crate::validate_name(&entry.name).map_err(|error| error.message)?;
+    crate::validate_name(name).map_err(|error| error.message)?;
     let (mut plan, used) = prepare_batch(root, quota)?;
-    if entry.bytes.len() as u64 > quota - used {
-        return Err("Open snapshot quota exceeded".into());
+    if bytes.len() as u64 > quota - used {
+        return Err("Export quota exceeded".into());
     }
-    let destination = plan.directory.join(&entry.name);
+    let destination = plan.directory.join(name);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&destination)
         .map_err(|error| error.to_string())?;
-    file.write_all(&entry.bytes)
+    file.write_all(bytes)
         .and_then(|_| file.sync_all())
         .map_err(|error| error.to_string())?;
     drop(file);
@@ -885,6 +894,7 @@ pub(crate) struct PreparedNativeClipboard {
     files: Vec<u8>,
     pixels: Option<Vec<u8>>,
     warnings: Vec<String>,
+    expected_sequence: Option<u32>,
 }
 
 #[cfg(windows)]
@@ -1229,6 +1239,17 @@ pub(crate) fn write_owned_image(pixels: &[u8], expected_sequence: u32) -> Result
     }
 }
 impl PreparedNativeClipboard {
+    pub(crate) fn prepare_files_if_current(paths: &[PathBuf], expected: u32) -> Self {
+        Self {
+            paths: paths.to_vec(),
+            #[cfg(windows)]
+            files: file_drop(paths),
+            pixels: None,
+            warnings: Vec::new(),
+            expected_sequence: Some(expected),
+        }
+    }
+
     pub(crate) fn prepare(paths: &[PathBuf]) -> Self {
         let mut warnings = Vec::new();
         let pixels = if paths.len() == 1 {
@@ -1248,6 +1269,7 @@ impl PreparedNativeClipboard {
             files: file_drop(paths),
             pixels,
             warnings,
+            expected_sequence: None,
         }
     }
 }
@@ -1263,6 +1285,9 @@ impl ClipboardSink for PreparedNativeClipboard {
         #[cfg(windows)]
         {
             let backend = native_publication::Backend::open(&self.files, self.pixels.as_deref())?;
+            if self.expected_sequence.is_some_and(|expected| crate::capture::sequence_number() != expected) {
+                return Err("Clipboard changed while exporting the page".into());
+            }
             publish_file_formats(
                 backend,
                 paths.len(),
@@ -1272,7 +1297,7 @@ impl ClipboardSink for PreparedNativeClipboard {
         }
         #[cfg(not(windows))]
         {
-            let _ = (&self.pixels, &self.warnings);
+            let _ = (&self.pixels, &self.warnings, self.expected_sequence);
             Err("Native clipboard requires Windows".into())
         }
     }
