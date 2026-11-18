@@ -189,3 +189,6 @@ session/context, late control, partial Clipboard failure, contextual Actions and
 pause. Native muted CPU/GPU capture tests use1920×1080 source versus≤1280 preview,
 last-of-rapid-seeks and a frame after native stepping. They do not prove native
 recipient paste or appearance; Lilia performs those checks in the installed app.
+
+Owner acceptance · 2026-11-18: Lilia tested the new Video commands and confirmed
+frame extraction plus Clipboard in primary runtimed615d492be2e.

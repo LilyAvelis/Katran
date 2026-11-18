@@ -2,6 +2,10 @@
 
 ## Video actions and frame extraction · 2026-11-18
 
+Owner acceptance: Lilia tested all new Video commands, confirmed the extracted
+image is also in Clipboard («Новые команды работают все опробовала добавляется
+так же в буфер»). This accepts runtimed615d492be2e for that tested flow.
+
 Installed source **fb3fdec**, one optimized Windows x64 UI build90s, Rust1.95.0,
 locked offline/ui+clipboard-events; pre/post compiled-source hashes matched.
 Primary runtime **d615d492be2e**, executable SHA256
