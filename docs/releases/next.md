@@ -13,6 +13,9 @@ apply to the active Notion source. Mini stream uses its details pane for row
 properties. Ctrl+C copies the selected rows' loaded properties, and drag
 exports separate Markdown files. The picker also accepts database IDs and
 Notion page links and shows visited databases in History.
+Folder restores the active database, filter and reader after switching shelf
+tabs. Ctrl+T applies a Notion title filter to the active data source, and Ctrl+.
+in the picker pins the highlighted database or page to the mixed Favorites list.
 The official Notion CLI uses a Windows Credential Manager token from Settings → Integrations.
 [Setup and limits](../notion.md)
 

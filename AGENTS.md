@@ -20,7 +20,10 @@ API; Space opens a row's page and Ctrl+. pins only the page. No Notion writes.
 Details in Notion uses the metadata pane without body fetches. Ctrl+C publishes
 loaded row properties as owned clipboard text. File drag fetches separate
 Markdown bodies under the ordinary cancellable prepared-drag lifecycle.
-Keep typed database history and direct Notion lookup separate from page favorites.
+Keep database and page entries typed in History and Favorites. Ctrl+. in
+the picker pins the highlighted entry, while Ctrl+. inside a source pins the
+current page. Keep the open source, title filter, rows and reader in session
+memory across shelf tab switches. Ctrl+T uses the active source's title filter.
 See [setup](docs/notion.md).
 
 ## Katran 4.0.0 public release authorization · 2026-11-18

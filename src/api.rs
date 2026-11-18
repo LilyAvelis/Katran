@@ -259,6 +259,10 @@ pub enum Command {
     ToggleFavoriteNotionPage {
         page: crate::notion::Page,
     },
+    ToggleNotionDatabaseFavorite {
+        source_id: String,
+        title: String,
+    },
     SearchFoldersSemantic {
         query: String,
         limit: u32,

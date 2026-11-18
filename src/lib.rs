@@ -970,7 +970,7 @@ impl Service {
             Command::ListSavedNotionPages { favorites } => {
                 let pages = notion::saved_pages(&self.root, favorites)?;
                 if favorites {
-                    Ok(serde_json::json!({"pages": pages}))
+                    Ok(serde_json::json!({"pages": pages, "history": notion::saved_favorites(&self.root)?}))
                 } else {
                     Ok(serde_json::json!({"pages": pages, "history": notion::saved_history(&self.root)?}))
                 }
@@ -993,6 +993,9 @@ impl Service {
             }
             Command::ToggleFavoriteNotionPage { page } => {
                 Ok(serde_json::json!({"favorite": notion::toggle_favorite(&self.root, &page)?}))
+            }
+            Command::ToggleNotionDatabaseFavorite { source_id, title } => {
+                Ok(serde_json::json!({"favorite": notion::toggle_database_favorite(&self.root, &source_id, &title)?}))
             }
             Command::SetNotionToken { token } => {
                 notion::set_token(token)?;

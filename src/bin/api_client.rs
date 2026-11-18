@@ -1201,6 +1201,7 @@ impl Shelf {
                     Some("open") => tr("Открыть текущую страницу в Notion", "Open current page in Notion"),
                     Some("folder_favorites") => tr("Избранное Notion", "Notion favorites"),
                     Some("folder_history") => tr("История Notion", "Notion history"),
+                    Some("shelf_search") => tr("Поиск страниц в базе", "Search pages in database"),
                     _ => continue,
                 };
                 action["label"] = Value::String(label.to_owned());
@@ -2081,6 +2082,7 @@ impl Shelf {
         self.refresh();
     }
     pub(super) fn refresh(&mut self) {
+        self.sync_notion_folder_tab();
         self.pending_folder_select_all = false;
         self.preloaded_has_more = false;
         self.tab_preload.waiting = None;

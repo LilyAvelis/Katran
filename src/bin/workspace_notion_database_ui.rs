@@ -68,6 +68,10 @@ pub(super) struct State {
     rows: Vec<Row>,
     favorites: std::collections::HashSet<String>,
     selected: usize,
+    suspended: bool,
+    restoring: bool,
+    resume_reader: bool,
+    had_selection: bool,
     dirty: bool,
     next_cursor: Option<String>,
     incomplete: bool,
@@ -97,6 +101,10 @@ impl State {
             rows: Vec::new(),
             favorites: Default::default(),
             selected: 0,
+            suspended: false,
+            restoring: false,
+            resume_reader: false,
+            had_selection: false,
             dirty: true,
             next_cursor: None,
             incomplete: false,
@@ -154,6 +162,15 @@ impl Shelf {
             return;
         }
         self.state = state;
+        if let Some(database) = &mut self.workspace.database
+            && database.id == id
+        {
+            database.title = title;
+            self.workspace_close();
+            self.notion_database_sync(ctx);
+            ctx.request_repaint();
+            return;
+        }
         self.close_notion_database();
         self.workspace_close();
         let mut database = State::new(id, title);
@@ -178,6 +195,35 @@ impl Shelf {
 
     pub(crate) fn notion_database_active(&self) -> bool {
         self.workspace.database.is_some() && self.state["tab"] == "folder"
+    }
+
+    // The Folder projection has its own query and cursor even while another tab is active.
+    pub(crate) fn sync_notion_folder_tab(&mut self) {
+        let Some(database) = &mut self.workspace.database else {
+            return;
+        };
+        if self.state["tab"] != "folder" {
+            if !database.suspended {
+                database.suspended = true;
+                self.query.clear();
+                self.loaded_query.clear();
+            }
+        } else if database.suspended {
+            database.suspended = false;
+            database.restoring = true;
+            database.dirty = true;
+            self.query.clone_from(&database.query);
+            self.loaded_query.clear();
+        }
+    }
+
+    pub(crate) fn notion_folder_restoring(&self) -> bool {
+        self.notion_database_active()
+            && self
+                .workspace
+                .database
+                .as_ref()
+                .is_some_and(|database| database.restoring)
     }
 
     pub(crate) fn close_notion_database(&mut self) {
@@ -300,26 +346,48 @@ impl Shelf {
     }
 
     pub(crate) fn notion_database_sync(&mut self, ctx: &egui::Context) {
-        if self.workspace.database.is_none() {
-            return;
-        }
-        if self.state["tab"] != "folder" {
-            self.close_notion_database();
+        self.sync_notion_folder_tab();
+        if !self.notion_database_active() {
             return;
         }
         let Some(mut database) = self.workspace.database.take() else {
             return;
         };
+        if std::mem::take(&mut database.restoring) {
+            if let Some(id) = database.selected().map(|row| row.projection_id) {
+                self.state = self.call(Command::SetVisible {
+                    ids: database.rows.iter().map(|row| row.projection_id).collect(),
+                });
+                self.state = self.call(Command::Select {
+                    id,
+                    mode: katran::interaction::SelectionMode::Replace,
+                });
+                if !database.had_selection {
+                    self.state = self.call(Command::ClearSelection);
+                }
+                if database.resume_reader {
+                    self.state = self.call(Command::OpenCurrent);
+                }
+            }
+        }
         let cursor = self.state["preview"]
             .as_i64()
             .or_else(|| self.state["cursor"].as_i64());
-        database.selected = cursor
-            .and_then(|id| database.rows.iter().position(|row| row.projection_id == id))
-            .unwrap_or(0);
+        if let Some(index) =
+            cursor.and_then(|id| database.rows.iter().position(|row| row.projection_id == id))
+        {
+            database.selected = index;
+        }
         let preview = self.state["preview"].as_i64().filter(|id| {
             database
                 .selected()
                 .is_some_and(|row| row.projection_id == *id)
+        });
+        database.resume_reader = preview.is_some();
+        database.had_selection = database.selected().is_some_and(|row| {
+            self.state["selected"]
+                .as_array()
+                .is_some_and(|ids| ids.iter().any(|id| id == row.projection_id))
         });
         if let Some(id) = preview {
             if database
@@ -377,6 +445,8 @@ impl Shelf {
         database.query = self.query.trim().to_owned();
         database.rows.clear();
         database.selected = 0;
+        database.resume_reader = false;
+        database.had_selection = false;
         database.next_cursor = None;
         database.error = None;
         database.incomplete = false;
@@ -622,6 +692,7 @@ impl Shelf {
             return true;
         }
         match id {
+            "shelf_search" => self.toggle_search_focus(ctx),
             "sort_notion_order" => {
                 if let Some(database) = &mut self.workspace.database {
                     database.sort = Sort::Source;
@@ -695,6 +766,69 @@ mod tests {
             *self.0.lock().unwrap() = text.to_owned();
             Ok(1)
         }
+    }
+
+    #[test]
+    fn notion_folder_restores_filtered_rows_and_ready_reader_after_tab_switch() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        app.open_notion_database(
+            &ctx,
+            "12345678-0000-0000-0000-000000000001".into(),
+            "Fixture DB".into(),
+        );
+        let database = app.workspace.database.as_mut().unwrap();
+        database.pending = None;
+        database.query = "Fixture".into();
+        app.query.clone_from(&database.query);
+        database.append(&serde_json::json!({
+            "rows": [
+                {"id":"12345678-0000-0000-0000-000000000002","title":"Fixture first","summary":"","properties":[],"created_at":"","edited_at":""},
+                {"id":"12345678-0000-0000-0000-000000000003","title":"Fixture second","summary":"","properties":[],"created_at":"","edited_at":""}
+            ],
+            "next_cursor":"next-page"
+        })).unwrap();
+        let ids: Vec<_> = database.rows.iter().map(|row| row.projection_id).collect();
+        let page = ids[1];
+        database.preview = Some(Preview {
+            page,
+            blocks: katran::notion_reader::parse("# Cached reader").unwrap(),
+            ..Default::default()
+        });
+        app.state = app.call(Command::SetVisible { ids });
+        app.state = app.call(Command::Select {
+            id: page,
+            mode: katran::interaction::SelectionMode::Replace,
+        });
+        app.state = app.call(Command::OpenCurrent);
+        app.notion_database_sync(&ctx);
+
+        app.apply_tab_bar_command(
+            Command::SetTab {
+                tab: katran::interaction::ShelfTab::Images,
+            },
+            &ctx,
+        );
+        assert!(app.query.is_empty());
+        app.query = "local shelf search".into();
+        app.apply_tab_bar_command(
+            Command::SetTab {
+                tab: katran::interaction::ShelfTab::All,
+            },
+            &ctx,
+        );
+        app.notion_database_sync(&ctx);
+
+        assert_eq!(app.query, "Fixture");
+        assert_eq!(app.state["cursor"], page);
+        assert_eq!(app.state["preview"], page);
+        assert_eq!(app.events[1]["name"], "Fixture second");
+        assert_eq!(app.next_cursor.as_deref(), Some("next-page"));
+        let database = app.workspace.database.as_ref().unwrap();
+        assert!(database.rows_job.is_none() && database.pending.is_none());
+        assert_eq!(database.preview.as_ref().unwrap().blocks.len(), 1);
+        assert!(database.preview.as_ref().unwrap().job.is_none());
     }
 
     #[test]

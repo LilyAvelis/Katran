@@ -9,6 +9,9 @@ styles into inert native text runs. The Markdown attachment path is independent.
 `src/bin/workspace_notion_database_ui.rs` supplies remote rows to the ordinary
 Folder shelf and routes its context-specific actions. Keep its reserved row
 IDs outside local file resolution.
+The Notion Folder projection keeps its session state across shelf tab switches.
+Notion favorites use typed entries, with distinct sidecar storage for databases
+and the existing page favorites.
 See [connection setup](notion.md).
 
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)

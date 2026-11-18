@@ -60,7 +60,7 @@ pub(super) struct State {
 
 impl State {
     fn results(&self) -> Vec<ResultItem> {
-        if self.mode == Mode::History {
+        if self.mode != Mode::Search {
             return self.history.clone();
         }
         if self.mode == Mode::Search
@@ -121,6 +121,8 @@ mod tests {
         let results = state.results();
         assert_eq!(results[0].page.id, "p");
         assert!(results[1].database);
+        state.mode = Mode::Favorites;
+        assert!(state.results()[1].database);
         assert!(
             ResultItem::from_value(&serde_json::json!({"kind":"other","id":"x","title":"X"}))
                 .is_none()
@@ -350,17 +352,21 @@ impl Shelf {
         self.workspace_cancel();
         let configured = self.call(Command::NotionStatus)["configured"] == true;
         self.workspace.notion_source = true;
-        self.workspace.notion = State {
-            configured,
-            focus: configured,
-            ..State::default()
-        };
+        self.workspace.notion.configured = configured;
+        self.workspace.notion.focus = configured;
         self.workspace.opened_frame = ctx.cumulative_frame_nr();
         ctx.request_repaint();
     }
 
     pub(super) fn workspace_notion_mode(&mut self, mode: Mode, ctx: &egui::Context) {
         self.workspace_open_notion(ctx);
+        if self.workspace.notion.mode != mode {
+            self.workspace.notion.preview_open = false;
+            self.workspace.notion.preview = None;
+            self.workspace.notion.error = None;
+            self.workspace.notion.notice = None;
+            self.workspace.notion.selected = 0;
+        }
         self.workspace.notion.mode = mode;
         if mode != Mode::Search && self.workspace.notion.configured {
             self.workspace_notion_saved(mode);
@@ -376,7 +382,7 @@ impl Shelf {
             state.error = Some(self.message.clone());
         } else {
             state.pages = serde_json::from_value(reply["pages"].clone()).unwrap_or_default();
-            if mode == Mode::History {
+            {
                 state.history = if let Some(history) = reply["history"].as_array() {
                     history.iter().filter_map(ResultItem::from_value).collect()
                 } else {
@@ -439,22 +445,26 @@ impl Shelf {
             );
         } else if pin {
             let state = &self.workspace.notion;
-            if let Some(page) = state
-                .results()
-                .get(state.selected)
-                .filter(|item| !item.database)
-                .map(|item| item.page.clone())
-            {
+            if let Some(item) = state.results().get(state.selected).cloned() {
                 let mode = state.mode;
-                let reply = self.call(Command::ToggleFavoriteNotionPage { page });
+                let database = item.database;
+                let reply = if database {
+                    self.call(Command::ToggleNotionDatabaseFavorite {
+                        source_id: item.page.id,
+                        title: item.page.title,
+                    })
+                } else {
+                    self.call(Command::ToggleFavoriteNotionPage { page: item.page })
+                };
                 if let Some(favorite) = reply["favorite"].as_bool() {
                     if mode == Mode::Favorites {
                         self.workspace_notion_mode(mode, ctx);
                     }
-                    self.workspace.notion.notice = Some(if favorite {
-                        tr("Страница закреплена", "Page pinned")
-                    } else {
-                        tr("Страница откреплена", "Page unpinned")
+                    self.workspace.notion.notice = Some(match (database, favorite) {
+                        (true, true) => tr("База закреплена", "Database pinned"),
+                        (true, false) => tr("База откреплена", "Database unpinned"),
+                        (false, true) => tr("Страница закреплена", "Page pinned"),
+                        (false, false) => tr("Страница откреплена", "Page unpinned"),
                     });
                 } else {
                     self.workspace.notion.error = Some(self.message.clone());
@@ -466,6 +476,18 @@ impl Shelf {
     pub(super) fn workspace_cancel_notion(&mut self) {
         if let Some((job_id, _)) = self.workspace.notion.job.take() {
             self.call(Command::CancelJob { job_id });
+        }
+    }
+
+    pub(super) fn workspace_pause_notion(&mut self) {
+        if let Some((_, operation)) = self.workspace.notion.job {
+            self.workspace_cancel_notion();
+            match operation {
+                Operation::SearchPages | Operation::SearchDatabases => {
+                    self.workspace.notion.search_due = Some(Instant::now());
+                }
+                Operation::Preview => self.workspace.notion.preview_open = false,
+            }
         }
     }
 
@@ -552,6 +574,8 @@ impl Shelf {
             .notion
             .search_due
             .is_some_and(|due| Instant::now() >= due)
+            && self.workspace.notion.mode == Mode::Search
+            && self.workspace.notion.configured
         {
             self.workspace.notion.search_due = None;
             let query = self.workspace.notion.query.clone();
@@ -721,7 +745,10 @@ impl Shelf {
                     ui.weak(notice);
                 }
                 if results.get(state.selected).is_some_and(|item| item.database) || (state.mode == Mode::Search && state.search_kind == SearchKind::Databases && results.is_empty()) {
-                    ui.weak(tr("Enter · открыть базу    \\ · страницы", "Enter · open database    \\ · pages"));
+                    ui.weak(tr("Enter · открыть базу    Ctrl+. · закрепить", "Enter · open database    Ctrl+. · pin"));
+                    if state.mode == Mode::Search {
+                        ui.weak(tr("\\ · страницы", "\\ · pages"));
+                    }
                 } else {
                 ui.weak(tr(
                     "Space · превью    Enter · приложить .md    Alt+Enter · открыть в Notion    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",

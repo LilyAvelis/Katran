@@ -47,8 +47,9 @@ limit is 1 MiB of Markdown.
 1. Open **Ctrl+Shift+N** and press the physical **\\** key to switch from pages
    to databases. Search by the data source title and press **Enter** to open it
    in Folder. Another **\\** in the picker switches back to pages.
-2. **Ctrl+T** focuses the normal shelf search and filters the database by row
-   title. Switch between **Gallery**, **Stream** and **Mini stream** through
+2. **Ctrl+T** focuses the normal shelf search. Notion filters the entire open
+   data source by page title, including pages beyond the loaded rows.
+   Switch between **Gallery**, **Stream** and **Mini stream** through
    the usual Folder controls. For Notion, Mini stream shows the selected row's
    properties across the details pane. Page content loads on **Space**.
 3. **Space** opens the selected page in a centered reader. **Ctrl+C** copies
@@ -60,6 +61,10 @@ limit is 1 MiB of Markdown.
    favorites. **Ctrl+K** shows actions available for a Notion page. Click the
    database name in the status bar to return to the local Folder.
 
+Switching to another shelf tab keeps the current database, filter, loaded rows,
+cursor and open reader in memory. Returning to Folder restores that view
+during the same Katran session.
+
 Rows load in groups of 30. Press **↓** at the last row or use **Load more**.
 The default order comes from Notion's data source API. The standard sorting
 menu supports Notion order, name, creation time and last-edited time. A named
@@ -69,4 +74,6 @@ integration needs access to the source database.
 
 Paste a database ID or a Notion page URL into the picker for a direct lookup.
 When a database ID has multiple data sources, the first source opens. History
-shows visited databases and pages with distinct icons. Favorites contain pages.
+shows visited databases and pages with distinct icons. In the picker, highlight
+a database and press **Ctrl+.** to pin it. **Ctrl+F** shows both pages and
+databases with distinct icons. **Enter** on a saved database opens it in Folder.

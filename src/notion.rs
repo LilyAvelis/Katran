@@ -77,6 +77,9 @@ fn page_library(root: &std::path::Path) -> Result<rusqlite::Connection> {
         );
         CREATE TABLE IF NOT EXISTS database_history (
             id TEXT PRIMARY KEY, title TEXT NOT NULL, visited INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS database_favorites (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, pinned INTEGER NOT NULL
         );",
     )?;
     Ok(db)
@@ -165,6 +168,34 @@ pub(crate) fn saved_history(root: &std::path::Path) -> Result<Vec<Value>> {
             Ok(json!({"kind":kind,"id":id,"title":title}))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub(crate) fn toggle_database_favorite(root: &std::path::Path, id: &str, title: &str) -> Result<bool> {
+    let id = canonical_id(id).ok_or_else(|| ApiError::new("notion_source_id", "Invalid Notion data source ID"))?;
+    if title.len() > 8192 || looks_like_token(title) {
+        return Err(ApiError::new("notion_page", "Invalid Notion data source title"));
+    }
+    let mut db = page_library(root)?;
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let deleted = tx.execute("DELETE FROM database_favorites WHERE id=?1", [&id])?;
+    let pinned = deleted == 0;
+    if pinned {
+        tx.execute("INSERT INTO database_favorites(id,title,pinned) VALUES(?1,?2,?3)", rusqlite::params![id,title,crate::now_ms()])?;
+    }
+    tx.commit()?;
+    Ok(pinned)
+}
+
+pub(crate) fn saved_favorites(root: &std::path::Path) -> Result<Vec<Value>> {
+    let db = page_library(root)?;
+    let mut statement = db.prepare("SELECT kind,id,title FROM (SELECT 'page' AS kind,id,title,pinned FROM pages WHERE pinned IS NOT NULL UNION ALL SELECT 'database' AS kind,id,title,pinned FROM database_favorites) ORDER BY pinned DESC,kind,id")?;
+    let rows = statement.query_map([], |row| {
+        let kind: String = row.get(0)?;
+        let id: String = row.get(1)?;
+        let title: String = row.get(2)?;
+        Ok(json!({"kind":kind,"id":id,"title":title}))
+    })?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -1367,5 +1398,36 @@ mod target_history_tests {
         let favorites = saved_pages(root.path(), true).unwrap();
         assert_eq!(favorites.len(), 1);
         assert_eq!(favorites[0].id, PAGE);
+    }
+
+    #[test]
+    fn database_favorites_are_typed_persistent_and_independent_of_page_history() {
+        let root = tempfile::tempdir().unwrap();
+        let mut api = crate::Service::open(root.path(), crate::DEFAULT_QUOTA).unwrap();
+        let page = Page { id: SOURCE.into(), title: "Page with same ID".into() };
+        record_visit(root.path(), &page).unwrap();
+        record_database_visit(root.path(), SOURCE, "Saved database").unwrap();
+        let call = |api: &mut crate::Service, command| api.execute(crate::Request {
+            api_version: 1, request_id: "synthetic-favorites".into(), command,
+        });
+        assert_eq!(call(&mut api, crate::Command::ToggleFavoriteNotionPage { page })["result"]["favorite"], true);
+        let toggle = || crate::Command::ToggleNotionDatabaseFavorite { source_id: SOURCE.into(), title: "Saved database".into() };
+        assert_eq!(call(&mut api, toggle())["result"]["favorite"], true);
+        drop(api);
+        let mut api = crate::Service::open(root.path(), crate::DEFAULT_QUOTA).unwrap();
+        let listed = call(&mut api, crate::Command::ListSavedNotionPages { favorites: true });
+        assert_eq!(listed["result"]["pages"].as_array().unwrap().len(), 1);
+        let favorites = listed["result"]["history"].as_array().unwrap();
+        assert_eq!(favorites.len(), 2);
+        assert!(favorites.iter().any(|item| item["kind"] == "page" && item["id"] == SOURCE));
+        assert!(favorites.iter().any(|item| item["kind"] == "database" && item["id"] == SOURCE));
+        assert_eq!(call(&mut api, toggle())["result"]["favorite"], false);
+        let listed = call(&mut api, crate::Command::ListSavedNotionPages { favorites: true });
+        assert_eq!(listed["result"]["history"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["result"]["pages"].as_array().unwrap().len(), 1);
+        let history = call(&mut api, crate::Command::ListSavedNotionPages { favorites: false });
+        assert_eq!(history["result"]["history"].as_array().unwrap().len(), 2);
+        let invalid = call(&mut api, crate::Command::ToggleNotionDatabaseFavorite { source_id: "bad".into(), title: "bad".into() });
+        assert_eq!(invalid["ok"], false);
     }
 }

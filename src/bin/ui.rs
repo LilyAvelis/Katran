@@ -1367,6 +1367,11 @@ impl Shelf {
                     });
                 }
                 // Search retains the full header width in every shelf mode.
+                let shelf_search_hint = if self.notion_database_active() {
+                    i18n::tr("Название страницы в базе…", "Page title in database…")
+                } else {
+                    i18n::tr("Поиск на полке…", "Search shelf…")
+                };
                 if self.search_keyboard_only
                     && !self.emoji_ai.enabled
                     && !ctx.memory(|m| m.has_focus(search_id))
@@ -1381,7 +1386,7 @@ impl Shelf {
                         rect.left_center(),
                         egui::Align2::LEFT_CENTER,
                         if self.query.is_empty() {
-                            i18n::tr("Поиск на полке…", "Search shelf…")
+                            shelf_search_hint
                         } else {
                             &self.query
                         },
@@ -1399,7 +1404,7 @@ impl Shelf {
                     let hint = if self.emoji_ai.enabled {
                         i18n::tr("Поиск эмодзи с ИИ…", "Search emoji with AI…")
                     } else {
-                        i18n::tr("Поиск на полке…", "Search shelf…")
+                        shelf_search_hint
                     };
                     let search = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
@@ -1741,6 +1746,9 @@ impl Shelf {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.refresh_tag_materials();
+        if self.notion_folder_restoring() {
+            self.notion_database_sync(&ctx);
+        }
         self.media_preview_lifecycle(&ctx);
         let visible = self.events.clone();
         self.state = self.call(Command::SetVisible {

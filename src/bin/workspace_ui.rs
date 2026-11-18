@@ -80,7 +80,7 @@ pub(super) struct State {
 }
 impl Shelf {
     fn workspace_cancel(&mut self) {
-        self.workspace_cancel_notion();
+        self.workspace_pause_notion();
         if let Some((job_id, _)) = self.workspace.job.take() {
             self.call(Command::CancelJob { job_id });
         }
@@ -197,10 +197,6 @@ impl Shelf {
         ctx.request_repaint();
     }
     fn workspace_mode(&mut self, mode: Mode, ctx: &egui::Context) {
-        if self.workspace.notion_source {
-            self.workspace_cancel_notion();
-            self.workspace.notion = notion_ui::State::default();
-        }
         self.workspace.notion_source = false;
         self.workspace.mode = mode;
         self.workspace.query.clear();
@@ -240,7 +236,6 @@ impl Shelf {
     }
     pub(super) fn workspace_close(&mut self) {
         self.workspace_cancel();
-        self.workspace.notion = notion_ui::State::default();
         self.workspace.open = false;
     }
     pub(super) fn workspace_close_notion(&mut self) {
@@ -367,7 +362,7 @@ impl Shelf {
         }
     }
     pub(super) fn workspace_input(&mut self, ctx: &egui::Context) {
-        if self.workspace.database.is_none() {
+        if !self.notion_database_active() {
             self.workspace_transfer_input(ctx);
         }
         let search = ctx.input_mut(|i| {
