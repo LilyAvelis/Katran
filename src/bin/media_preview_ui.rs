@@ -99,6 +99,14 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn frame_texture_for(&self, target: &Target) -> Option<egui::TextureHandle> {
+        if self.target.as_ref() == Some(target) {
+            self.texture.clone()
+        } else {
+            None
+        }
+    }
+
     fn message(reply: &Value) -> String {
         let code = reply["error"]["code"].as_str().unwrap_or("media_error");
         let message = reply["error"]["message"]
@@ -158,7 +166,13 @@ impl State {
             }
             match response["result"]["state"].as_str() {
                 Some("queued" | "running" | "ready") => {
-                    ctx.request_repaint_after(Duration::from_millis(100));
+                    ctx.request_repaint_after(Duration::from_millis(
+                        if pending.target.entry.is_some() {
+                            32
+                        } else {
+                            100
+                        },
+                    ));
                     return;
                 }
                 Some("succeeded") => {
@@ -658,7 +672,12 @@ impl State {
         if self.auto_start && self.pending.is_none() && self.session.is_none() && !self.stopping {
             self.auto_start = false;
             self.start(target, call);
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            ui.ctx()
+                .request_repaint_after(Duration::from_millis(if target.entry.is_some() {
+                    32
+                } else {
+                    100
+                }));
         }
         if let Some(texture) = &self.texture {
             ui.painter().rect_filled(canvas, 5.0, Color32::BLACK);
@@ -671,6 +690,14 @@ impl State {
             );
         }
         let busy = self.pending.is_some() || self.stopping;
+        if target.entry.is_some()
+            && self.texture.is_none()
+            && self.error.is_none()
+            && (busy || self.snapshot["state"] == "loading")
+        {
+            return;
+        }
+        let show_loading_label = busy && target.entry.is_none();
         let now = Instant::now();
         let activity = ui.input(|input| {
             input
@@ -854,7 +881,7 @@ impl State {
                     + 2.0 * ui.spacing().button_padding.x)
                     .max(ui.spacing().interact_size.x);
                 let mut row_width = if self.stopping { 0.0 } else { button_width };
-                if busy {
+                if show_loading_label {
                     row_width += gap + measure(ui, tr("Загрузка…", "Loading…"), body_font.clone());
                 }
                 if self.session.is_some() && !self.stopping {
@@ -913,7 +940,7 @@ impl State {
                                 self.toggle_pause(call);
                             }
                         }
-                        if busy {
+                        if show_loading_label {
                             ui.weak(tr("Загрузка…", "Loading…"));
                         }
                         if self.session.is_some() && !self.stopping {

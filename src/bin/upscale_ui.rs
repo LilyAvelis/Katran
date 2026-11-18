@@ -24,6 +24,8 @@ struct Collection {
     count: Option<usize>,
     pending: Option<(katran::domain_jobs::JobId, usize)>,
     texture: Option<egui::TextureHandle>,
+    transition_poster: Option<egui::TextureHandle>,
+    opened_at: Instant,
     link: Option<LinkPage>,
     text: Option<TextPage>,
     file: Option<FilePage>,
@@ -198,6 +200,23 @@ fn take_collection_enter(events: &mut Vec<egui::Event>, focused: bool) -> bool {
     pressed
 }
 
+fn collection_modal_layer() -> egui::LayerId {
+    egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("translated-collection"),
+    )
+}
+
+fn collection_intro_transform(elapsed: Duration, center: egui::Pos2) -> egui::emath::TSTransform {
+    let t = (elapsed.as_secs_f32() / 0.3).clamp(0.0, 1.0);
+    let remaining = (1.0 - t).powi(3);
+    let scale = 1.0 - 0.025 * remaining;
+    egui::emath::TSTransform::new(
+        center.to_vec2() * (1.0 - scale) + egui::vec2(0.0, 8.0 * remaining),
+        scale,
+    )
+}
+
 fn collection_canvas_size(viewport: egui::Vec2) -> egui::Vec2 {
     egui::vec2((viewport.x * 0.8).max(1.0), (viewport.y * 0.7).max(1.0))
 }
@@ -279,7 +298,7 @@ impl Shelf {
         revision: String,
         ctx: &egui::Context,
     ) {
-        self.close_translation_collection();
+        self.close_translation_collection(ctx);
         self.upscale.collection = Some(Collection {
             id,
             revision,
@@ -287,6 +306,8 @@ impl Shelf {
             count: None,
             pending: None,
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: None,
             text: None,
             file: None,
@@ -316,7 +337,8 @@ impl Shelf {
         self.request_translation_page(target, ctx);
     }
 
-    fn close_translation_collection(&mut self) {
+    fn close_translation_collection(&mut self, ctx: &egui::Context) {
+        ctx.set_transform_layer(collection_modal_layer(), egui::emath::TSTransform::IDENTITY);
         if self.collection_media_target().is_some() {
             self.stop_media_preview();
         }
@@ -412,7 +434,13 @@ impl Shelf {
     }
 
     fn request_translation_page(&mut self, index: usize, ctx: &egui::Context) {
-        if self.collection_media_target().is_some() {
+        if let Some(target) = self.collection_media_target() {
+            let frame = self.media_preview.frame_texture_for(&target);
+            if let Some(collection) = self.upscale.collection.as_mut() {
+                collection.transition_poster = frame
+                    .or_else(|| collection.texture.clone())
+                    .or_else(|| collection.transition_poster.take());
+            }
             self.stop_media_preview();
         }
         let Some(mut collection) = self.upscale.collection.take() else {
@@ -432,7 +460,7 @@ impl Shelf {
         });
         if let Some(id) = response["job_id"].as_u64() {
             collection.pending = Some((katran::domain_jobs::JobId(id), index));
-            ctx.request_repaint_after(Duration::from_millis(100));
+            ctx.request_repaint_after(Duration::from_millis(32));
         } else {
             collection.error = self.message.clone();
         }
@@ -445,7 +473,7 @@ impl Shelf {
             let response = self.call(Command::PollJob { job_id });
             match response["state"].as_str() {
                 Some("queued" | "running" | "ready") => {
-                    ctx.request_repaint_after(Duration::from_millis(100))
+                    ctx.request_repaint_after(Duration::from_millis(32))
                 }
                 _ => {
                     if let Some(collection) = self.upscale.collection.as_mut()
@@ -492,12 +520,16 @@ impl Shelf {
                                                     egui::TextureOptions::LINEAR,
                                                 )
                                             });
+                                        let video = file.get("video").and_then(Value::as_bool)
+                                            == Some(true);
+                                        if !video {
+                                            collection.transition_poster = None;
+                                        }
                                         collection.file = Some(FilePage {
                                             name: name.to_owned(),
                                             size: size.unwrap(),
                                             extension,
-                                            video: file.get("video").and_then(Value::as_bool)
-                                                == Some(true),
+                                            video,
                                         });
                                         collection.text = None;
                                         collection.link = None;
@@ -540,6 +572,7 @@ impl Shelf {
                                             });
                                         collection.text = None;
                                         collection.file = None;
+                                        collection.transition_poster = None;
                                         collection.link = Some(LinkPage {
                                             url: url.to_owned(),
                                             title,
@@ -560,6 +593,7 @@ impl Shelf {
                                     });
                                     collection.link = None;
                                     collection.file = None;
+                                    collection.transition_poster = None;
                                     collection.texture = None;
                                     collection.ready_index = Some(expected);
                                     collection.zoom = katran::preview_view::State::default();
@@ -578,6 +612,7 @@ impl Shelf {
                                             collection.link = None;
                                             collection.text = None;
                                             collection.file = None;
+                                            collection.transition_poster = None;
                                             collection.ready_index = Some(expected);
                                             collection.zoom =
                                                 katran::preview_view::State::default();
@@ -703,7 +738,23 @@ impl Shelf {
         let mut save_name = false;
         let mut cancel_rename = false;
         let canvas_size = collection_canvas_size(ctx.content_rect().size());
-        let modal = egui::Modal::new(egui::Id::new("translated-collection")).show(ctx, |ui| {
+        let elapsed = collection.opened_at.elapsed();
+        let viewport = ctx.content_rect();
+        let layer = collection_modal_layer();
+        let transform = collection_intro_transform(elapsed, viewport.center());
+        ctx.set_transform_layer(layer, transform);
+        // The dialog moves on its layer; the dimming still covers the viewport.
+        let backdrop = transform.inverse() * viewport;
+        egui::Painter::new(ctx.clone(), layer, backdrop).rect_filled(
+            backdrop,
+            0.0,
+            egui::Color32::from_black_alpha(100),
+        );
+        if elapsed < Duration::from_millis(300) {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        let dialog = egui::Modal::new(layer.id).backdrop_color(egui::Color32::TRANSPARENT);
+        let modal = dialog.show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
             ui.heading(tr("Коллекция", "Collection"));
             ui.horizontal(|ui| {
@@ -799,8 +850,12 @@ impl Shelf {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
             let painter = ui.painter().with_clip_rect(canvas);
             painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
-            if media_target.is_some() {
-                if let Some(texture) = collection.texture.as_ref() {
+            if collection.file.as_ref().is_some_and(|file| file.video) {
+                if let Some(texture) = collection
+                    .transition_poster
+                    .as_ref()
+                    .or(collection.texture.as_ref())
+                {
                     let rect = super::gallery_card::fit_rect(canvas, texture.size_vec2());
                     painter.image(
                         texture.id(),
@@ -1014,6 +1069,9 @@ impl Shelf {
                             command,
                         })
                     });
+                if self.media_preview.frame_texture_for(target).is_some() {
+                    collection.transition_poster = None;
+                }
             }
             if !collection.error.is_empty() {
                 let anchor = canvas.left_top() + egui::vec2(12.0, 12.0);
@@ -1042,7 +1100,7 @@ impl Shelf {
         } else if self.upscale.link_rename.is_some() {
             return;
         } else if close || modal.should_close() {
-            self.close_translation_collection();
+            self.close_translation_collection(ctx);
         } else if previous && current > 0 {
             self.request_translation_page(current - 1, ctx);
         } else if next && count.is_some_and(|n| current + 1 < n) {
@@ -1430,6 +1488,8 @@ mod tests {
             count: Some(3),
             pending: None,
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: Some(LinkPage {
                 url: "https://example.org".into(),
                 title: "old title".into(),
@@ -1452,6 +1512,93 @@ mod tests {
     }
 
     #[test]
+    fn collection_intro_is_bounded_and_finishes_at_identity() {
+        let center = egui::pos2(500.0, 400.0);
+        let start = collection_intro_transform(Duration::ZERO, center);
+        assert!(start.scaling > 0.95 && start.scaling < 1.0);
+        assert!((start * center).y > center.y);
+        assert_eq!(
+            collection_intro_transform(Duration::from_millis(300), center),
+            egui::emath::TSTransform::IDENTITY
+        );
+        assert_eq!(
+            collection_intro_transform(Duration::from_secs(1), center),
+            egui::emath::TSTransform::IDENTITY
+        );
+    }
+
+    #[test]
+    fn leaving_ready_video_retains_its_poster_when_next_page_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        let texture = ctx.load_texture(
+            "video-poster-fixture",
+            egui::ColorImage::from_rgba_unmultiplied([1, 1], &[255; 4]),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        app.upscale.collection = Some(Collection {
+            id: 99999,
+            revision: "missing".into(),
+            index: 0,
+            count: Some(2),
+            pending: None,
+            texture: Some(texture),
+            transition_poster: None,
+            opened_at: Instant::now(),
+            link: None,
+            text: None,
+            file: Some(FilePage {
+                name: "clip.mp4".into(),
+                size: 1,
+                extension: "mp4".into(),
+                video: true,
+            }),
+            ready_index: Some(0),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        });
+        app.request_translation_page(1, &ctx);
+        let collection = app.upscale.collection.as_ref().unwrap();
+        assert_eq!(collection.ready_index, Some(0));
+        assert_eq!(collection.index, 1);
+        assert!(collection.file.as_ref().unwrap().video);
+        assert_eq!(
+            collection.transition_poster.as_ref().unwrap().id(),
+            texture_id
+        );
+        assert!(app.collection_media_target().is_none());
+
+        fn contains_filename(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.job.text.contains("clip.mp4"),
+                egui::Shape::Vec(children) => children.iter().any(contains_filename),
+                _ => false,
+            }
+        }
+        for _ in 0..2 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.translation_collection_ui(ui.ctx()),
+            );
+            assert!(
+                !output
+                    .shapes
+                    .iter()
+                    .any(|shape| contains_filename(&shape.shape))
+            );
+        }
+    }
+
+    #[test]
     fn collection_video_target_requires_current_ready_page() {
         let mut collection = Collection {
             id: 12,
@@ -1460,6 +1607,8 @@ mod tests {
             count: Some(2),
             pending: None,
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: None,
             text: None,
             file: Some(FilePage {
@@ -1490,6 +1639,8 @@ mod tests {
             count: Some(3),
             pending: Some((katran::domain_jobs::JobId(77), 2)),
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: None,
             text: None,
             file: Some(FilePage {
@@ -1516,6 +1667,8 @@ mod tests {
             count: Some(3),
             pending: Some((katran::domain_jobs::JobId(42), 2)),
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             text: None,
             file: None,
             link: Some(LinkPage {
@@ -1543,6 +1696,8 @@ mod tests {
             count: Some(4),
             pending: Some((katran::domain_jobs::JobId(9), 3)),
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: None,
             file: None,
             text: Some(TextPage {
@@ -1617,6 +1772,8 @@ mod tests {
             count: Some(2),
             pending: None,
             texture: None,
+            transition_poster: None,
+            opened_at: Instant::now() - Duration::from_millis(300),
             link: None,
             text: None,
             file: None,
@@ -1679,6 +1836,8 @@ mod tests {
             count: Some(2),
             pending: None,
             texture: Some(texture),
+            transition_poster: None,
+            opened_at: Instant::now(),
             link: None,
             text: None,
             file: None,

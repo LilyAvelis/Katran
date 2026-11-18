@@ -64,6 +64,8 @@ recycle stages are cleaned up automatically.
 Video entries in BULL and BS play with the usual Katran video controls.
 Page turns and closing the viewer stop playback and release the temporary
 video file.
+The collection viewer opens with a short entrance animation. Video page
+turns keep the previous frame visible while the next page prepares.
 Versioned Raycast builds find the shared video player installed by the
 local setup script.
 
