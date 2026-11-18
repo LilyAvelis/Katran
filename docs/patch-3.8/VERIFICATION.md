@@ -1,5 +1,19 @@
 # Katran 3.8 verification handoff
 
+## Mini stream layout correction · 2026-11-18
+
+Owner authorized the fix after the investigation reproduced Links metadata y45→181
+between initial and following frames. Exact parent preview reservation plus clipped
+provider child removes content-dependent placement. Metadata retains the remaining
+viewport using auto_shrink([false,false]); ordinary scroll identity is retained.
+Details5/5, Text11/11, player UI15/15 passed; Clippy UI/tests -D warnings passed3.60s,
+fmt/diff checks passed. The new headless geometry regression waits for actual async
+Link text, covers two links, pin/unpin fields, unavailable-image transition and
+310/500 panel widths, checks slot/metadata bounds and first/following-frame stability.
+Evidence logs: target/build/mini-stream-layout-{details,text,media,clippy}.log.
+Domain/native/storage/player behavior unchanged: preceding evidence reused.
+Primary installation and owner feedback recorded below when available.
+
 ## Video actions and frame extraction · 2026-11-18
 
 Owner acceptance: Lilia tested all new Video commands, confirmed the extracted

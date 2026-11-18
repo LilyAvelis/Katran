@@ -260,72 +260,75 @@ impl Shelf {
         };
         let preview_height = (ui.available_height() * 0.55).max(1.0);
         let width = ui.available_width().max(1.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(width, preview_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_max_height(preview_height);
-                ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
-                if event["available"] == false {
-                    ui.weak(tr("Объект недоступен", "Item unavailable"));
-                } else if let Some(target) =
-                    super::media_preview_ui::target(event, &self.state, false)
-                {
-                    if let Some(api) = self.api.as_mut() {
-                        self.media_preview.show_with_poster(
-                            ui,
-                            &target,
-                            event,
-                            &mut self.images,
-                            &mut |command| {
-                                api.execute(Request {
-                                    api_version: 1,
-                                    request_id: "media-ui".into(),
-                                    command,
-                                })
-                            },
-                        );
-                    } else {
-                        ui.weak(tr(
-                            "Видео временно недоступно",
-                            "Video temporarily unavailable",
-                        ));
-                    }
-                } else if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(width, preview_height),
-                        egui::Sense::hover(),
-                    );
-                    self.pods_ui.paint(ui, event, rect);
-                } else if event["kind"] == "table_fragment" {
-                    if let Some(api) = self.api.as_mut() {
-                        self.table_preview.show(ui, event, api);
-                    } else {
-                        ui.weak(tr("Загрузка…", "Loading…"));
-                    }
-                } else if matches!(
-                    event["kind"].as_str(),
-                    Some("text_fragment" | "link_fragment")
-                ) || katran::file_types::is_markdown(std::path::Path::new(
-                    event["name"].as_str().unwrap_or(""),
-                )) {
-                    self.text_preview.show(ui, event);
-                } else {
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(width, (preview_height - 22.0).max(1.0)),
-                        egui::Sense::hover(),
-                    );
-                    self.images.paint_at(ui, event, rect, 512);
-                    ui.weak(match self.images.visual_status(event, 512) {
-                        "image" => tr("Изображение", "Image"),
-                        "shell_thumbnail" => tr("Миниатюра", "Thumbnail"),
-                        "shell_icon" | "generic_icon" => tr("Значок файла", "File icon"),
-                        "unavailable" => tr("Предпросмотр недоступен", "Preview unavailable"),
-                        _ => tr("Загрузка…", "Loading…"),
-                    });
-                }
-            },
+        // Reserve the slot before drawing: asynchronous preview content must not
+        // change the location or size of the metadata viewport.
+        let (preview_rect, _) =
+            ui.allocate_exact_size(Vec2::new(width, preview_height), egui::Sense::hover());
+        let mut preview_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("details-preview")
+                .max_rect(preview_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
         );
+        preview_ui.set_clip_rect(ui.clip_rect().intersect(preview_rect));
+        {
+            let ui = &mut preview_ui;
+            if event["available"] == false {
+                ui.weak(tr("Объект недоступен", "Item unavailable"));
+            } else if let Some(target) = super::media_preview_ui::target(event, &self.state, false)
+            {
+                if let Some(api) = self.api.as_mut() {
+                    self.media_preview.show_with_poster(
+                        ui,
+                        &target,
+                        event,
+                        &mut self.images,
+                        &mut |command| {
+                            api.execute(Request {
+                                api_version: 1,
+                                request_id: "media-ui".into(),
+                                command,
+                            })
+                        },
+                    );
+                } else {
+                    ui.weak(tr(
+                        "Видео временно недоступно",
+                        "Video temporarily unavailable",
+                    ));
+                }
+            } else if self.state["tab"] == "pods" && event["kind"] == "text_fragment" {
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(width, preview_height), egui::Sense::hover());
+                self.pods_ui.paint(ui, event, rect);
+            } else if event["kind"] == "table_fragment" {
+                if let Some(api) = self.api.as_mut() {
+                    self.table_preview.show(ui, event, api);
+                } else {
+                    ui.weak(tr("Загрузка…", "Loading…"));
+                }
+            } else if matches!(
+                event["kind"].as_str(),
+                Some("text_fragment" | "link_fragment")
+            ) || katran::file_types::is_markdown(std::path::Path::new(
+                event["name"].as_str().unwrap_or(""),
+            )) {
+                self.text_preview.show(ui, event);
+            } else {
+                let (rect, _) = ui.allocate_exact_size(
+                    Vec2::new(width, (preview_height - 22.0).max(1.0)),
+                    egui::Sense::hover(),
+                );
+                self.images.paint_at(ui, event, rect, 512);
+                ui.weak(match self.images.visual_status(event, 512) {
+                    "image" => tr("Изображение", "Image"),
+                    "shell_thumbnail" => tr("Миниатюра", "Thumbnail"),
+                    "shell_icon" | "generic_icon" => tr("Значок файла", "File icon"),
+                    "unavailable" => tr("Предпросмотр недоступен", "Preview unavailable"),
+                    _ => tr("Загрузка…", "Loading…"),
+                });
+            }
+        }
         ui.separator();
         let state = self.state.clone();
         let tag = event["id"]
@@ -340,8 +343,16 @@ impl Shelf {
             .map(|slot| slot.name.clone());
         egui::ScrollArea::vertical()
             .id_salt("details-metadata")
+            .auto_shrink([false, false])
             .max_height(ui.available_height().max(1.0))
             .show(ui, |ui| {
+                #[cfg(test)]
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("test-details-geometry"),
+                        (preview_rect, ui.id(), ui.clip_rect()),
+                    )
+                });
                 self.details_metadata.show(ui, event, &state);
                 if let Some(tag) = tag {
                     ui.weak(tr("Тег", "Tag"));
@@ -396,6 +407,91 @@ mod tests {
         }
         output.textures_delta.clear();
         (text, dots)
+    }
+
+    #[test]
+    fn details_metadata_geometry_stays_fixed_while_preview_loads_and_items_change() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.call(Command::SetTabEnabled {
+            tab: katran::interaction::ShelfTab::Links,
+            enabled: true,
+        });
+        app.text_preview.set_enabled(true);
+        let first_url = "https://example.test/first";
+        let second_url = format!("https://example.test/{}", "long-segment/".repeat(30));
+        let first = app.call(Command::IngestLink {
+            url: first_url.into(),
+            source: "synthetic".into(),
+        });
+        let second = app.call(Command::IngestLink {
+            url: second_url.clone(),
+            source: "synthetic".into(),
+        });
+        let first_id = first["id"].as_i64().unwrap();
+        let second_id = second["id"].as_i64().unwrap();
+        app.state = serde_json::json!({"tab":"links","cursor":first_id,"selected":[],"emoji_catalogue":false,"view_generation":1});
+        let mut events = vec![
+            first,
+            second,
+            serde_json::json!({"id":3,"revision":"synthetic","kind":"managed_image","name":"synthetic-image","available":false,"properties":{}}),
+        ];
+        let ctx = egui::Context::default();
+        for width in [310.0, 500.0] {
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 600.0),
+                )),
+                ..Default::default()
+            };
+            app.text_preview.stop();
+            app.text_preview.set_enabled(true);
+            app.state["cursor"] = first_id.into();
+            let frame = |app: &mut Shelf, events: &[Value]| {
+                let mut out = ctx.run_ui(input(), |ui| app.details_panel(ui, events));
+                out.textures_delta.clear();
+                ctx.data(|data| {
+                    data.get_temp::<(egui::Rect, egui::Id, egui::Rect)>(egui::Id::new(
+                        "test-details-geometry",
+                    ))
+                    .unwrap()
+                })
+            };
+            let loading = frame(&mut app, &events);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !app.text_preview.test_has_text(first_url) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "synthetic link preview did not load"
+                );
+                assert_eq!(frame(&mut app, &events), loading);
+                std::thread::yield_now();
+            }
+            assert_eq!(frame(&mut app, &events), loading);
+            app.state["cursor"] = second_id.into();
+            assert_eq!(frame(&mut app, &events), loading);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !app.text_preview.test_has_text(&second_url) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "second synthetic link preview did not load"
+                );
+                assert_eq!(frame(&mut app, &events), loading);
+                std::thread::yield_now();
+            }
+            assert_eq!(frame(&mut app, &events), loading);
+            events[1]["properties"]["pinned"] = true.into();
+            assert_eq!(frame(&mut app, &events), loading);
+            events[1]["properties"]["pinned"] = false.into();
+            assert_eq!(frame(&mut app, &events), loading);
+            app.state["cursor"] = 3.into();
+            assert_eq!(frame(&mut app, &events), loading);
+            let (preview, _, metadata_clip) = loading;
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0));
+            assert!(bounds.contains_rect(preview) && bounds.contains_rect(metadata_clip));
+            assert!(metadata_clip.top() >= preview.bottom());
+        }
     }
 
     #[test]

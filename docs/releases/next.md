@@ -210,3 +210,10 @@ Images and copies actual image pixels without changing the current preview.
 Clipboard failure preserves Images and reports partial success. Normal managed
 storage/copy_out and immutable session/source guards are reused; no schema
 migration or new public release. See the video contract and verification ledger.
+
+## Local Mini stream layout correction · 2026-11-18
+
+Reserve the preview slot before async provider rendering, preventing arriving
+content from shifting the metadata panel. This targets the reproduced Links
+first/next-frame jump; provider/data/playback semantics are retained. No schema
+change or public release. Owner check follows primary installation.

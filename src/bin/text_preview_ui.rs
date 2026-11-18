@@ -171,6 +171,13 @@ impl TextPreview {
         });
         true
     }
+    #[cfg(test)]
+    pub(super) fn test_has_text(&self, expected: &str) -> bool {
+        self.content
+            .as_ref()
+            .is_some_and(|content| content.as_ref().is_ok_and(|text| text == expected))
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, event: &Value) {
         if !self.enabled {
             return;

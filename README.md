@@ -353,3 +353,6 @@ Local development storage uses one Cargo directory, `target/build`, with guarded
 [build-cache retention](docs/devops.md#local-build-storage-budget--owner-incident-2026-11-18).
 Default budgets are 32 GiB for target and 8 GiB for incremental state; installed
 runtime, optional models, user data and backups are separate.
+
+Local Mini stream layout follow-up reserves preview space while content loads,
+so metadata keeps its position. Details/evidence: [layout investigation](docs/patch-3.8/MINI-STREAM-LAYOUT-INVESTIGATION.md).

@@ -474,3 +474,11 @@ Capture integration complete: sourcefb3fdec; primary runtimed615d492be2e.
 Automated API/native/UI/Clippy gates recorded in VERIFICATION.md, including
 focused fixes after aggregate gate. Polly owns native owner feedback and any
 follow-up; all three worker areas are frozen. Owner check pending; no publication.
+
+## Mini stream layout correction · 2026-11-18
+
+Polly reused /root/fenna (gpt-6.1-terra/high), owner of details_view_ui.rs and
+bounded preview test helpers. Fenna implements/tests exact preview reservation;
+Polly reviews, runs targeted UI gates, updates documentation and stages one
+verified artifact in the primary runtime. Existing API/native player evidence
+is reused because that behavior is unchanged. No team expansion/publication.

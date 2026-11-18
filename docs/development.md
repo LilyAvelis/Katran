@@ -1,5 +1,11 @@
 # Developer and agent entry point
 
+Mini stream geometry is owned by details_view_ui.rs: reserve the exact preview
+slot in the parent, then draw providers inside a clipped child. Egui child
+max_rect is not reserved space; short async content must not collapse the slot
+and later displace metadata. See [layout investigation/fix](patch-3.8/MINI-STREAM-LAYOUT-INVESTIGATION.md).
+Provider/API/storage/playback ownership is unchanged.
+
 Current-frame capture: media_capture.rs prepares source-resolution RGBA/PNG in a
 background job; media_service.rs owns immutable capture leases and normal image
 Clipboard publication; jobs_service.rs commits through managed storage, then

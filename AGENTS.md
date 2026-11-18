@@ -1,5 +1,16 @@
 # Katran development rules
 
+## Mini stream preview slot stability · 2026-11-18
+
+Owner authorized fixing the investigated metadata jump. details_view_ui reserves
+an exact preview rectangle before rendering a clipped child; do not rely on
+allocate_ui_with_layout(desired_size) alone to reserve a minimum height. Async
+provider content must not move metadata when it arrives. Preserve the split
+ratio, bounded preview clipping and existing scrolling/input/provider behavior.
+See docs/patch-3.8/MINI-STREAM-LAYOUT-INVESTIGATION.md for measured pre-fix cause
+and verification. UI-only: domain/storage/player behavior is unchanged; no schema
+or public publication is authorized.
+
 ## Local video actions and frame capture · 2026-11-18
 
 Owner accepted the Alt-step UI stability fix in runtime5c01f6c1060f. The next

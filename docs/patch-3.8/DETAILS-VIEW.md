@@ -51,3 +51,14 @@ binary. Do not assume changing only the executable pointer is sufficient.
 
 See [architecture research](DETAILS-VIEW-RESEARCH.md) and [UX research](DETAILS-VIEW-UX.md)
 for the initial reasoning. Native visual acceptance belongs to Lilia.
+
+## Preview/metadata geometry follow-up · 2026-11-18
+
+The preview slot now reserves its calculated height immediately and renders
+inside a clipped child. Previously an async Link preview initially used only
+its short header; metadata moved when the actual text arrived. Egui's requested
+child maximum size did not reserve the unused space. The exact allocation keeps
+metadata below the same preview slot during loading and cursor changes.
+The metadata ScrollArea fills the remaining viewport even for short field sets.
+See MINI-STREAM-LAYOUT-INVESTIGATION.md for measured cause and verification;
+native owner acceptance of the local fix remains separate.
