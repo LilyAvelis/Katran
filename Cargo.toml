@@ -39,6 +39,7 @@ zip = { version = "=9.5.0", default-features = false, features = ["deflate"] }
 semver = "=1.0.28"
 unicode-general-category = "=1.1.0"
 resvg = { version = "=0.45.1", default-features = false }
+pulldown-cmark = { version = "=0.13.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 libloading = "=0.8.9"

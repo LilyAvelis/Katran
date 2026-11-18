@@ -20,6 +20,79 @@ pub(super) struct State {
     job: Option<(JobId, Operation)>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct Browser(Arc<Mutex<Vec<String>>>);
+    impl katran::open_file::Launcher for Browser {
+        fn launch(
+            &self,
+            path: &std::path::Path,
+            operation: katran::open_file::Operation,
+        ) -> katran::Result<()> {
+            assert_eq!(operation, katran::open_file::Operation::Open);
+            self.0
+                .lock()
+                .unwrap()
+                .push(path.to_string_lossy().into_owned());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn notion_alt_enter_opens_selected_page_from_results_and_reader() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_file_launcher(Box::new(Browser(opened.clone())));
+        let context = egui::Context::default();
+        for preview_open in [false, true] {
+            app.workspace.open = true;
+            app.workspace.notion_source = true;
+            app.workspace.opened_frame = 0;
+            app.workspace.notion = State {
+                configured: true,
+                preview_open,
+                pages: vec![katran::notion::Page {
+                    id: "12345678-0000-0000-0000-000000000000".into(),
+                    title: "Fixture".into(),
+                }],
+                ..Default::default()
+            };
+            context
+                .run_ui(egui::RawInput::default(), |_| {})
+                .textures_delta
+                .clear();
+            let modifiers = egui::Modifiers::ALT;
+            let input = egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            };
+            context
+                .run_ui(input, |_| app.workspace_notion_panel(&context))
+                .textures_delta
+                .clear();
+            assert!(!app.workspace.open);
+            assert!(!app.overlay_ui.pending);
+        }
+        assert_eq!(
+            *opened.lock().unwrap(),
+            ["https://www.notion.so/12345678000000000000000000000000"; 2]
+        );
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Operation {
     Search,
@@ -226,16 +299,18 @@ impl Shelf {
         let editing = ctx.memory(|mem| mem.has_focus(query_id));
         let state = &mut self.workspace.notion;
         let armed = ctx.cumulative_frame_nr() > self.workspace.opened_frame;
-        let (move_down, move_up, space, enter) = ctx.input_mut(|input| {
+        let (move_down, move_up, space, open_in_browser, enter) = ctx.input_mut(|input| {
             if !armed {
-                return (false, false, false, false);
+                return (false, false, false, false, false);
             }
             let modifiers = egui::Modifiers::NONE;
+            let open = input.consume_key(egui::Modifiers::ALT, egui::Key::Enter);
             (
                 input.consume_key(modifiers, egui::Key::ArrowDown),
                 input.consume_key(modifiers, egui::Key::ArrowUp),
                 !editing && input.consume_key(modifiers, egui::Key::Space),
-                input.consume_key(modifiers, egui::Key::Enter),
+                open,
+                !open && input.consume_key(modifiers, egui::Key::Enter),
             )
         });
         let old_selection = state.selected;
@@ -351,8 +426,8 @@ impl Shelf {
                     ui.weak(notice);
                 }
                 ui.weak(tr(
-                    "Space · превью    Enter · приложить .md    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",
-                    "Space · preview    Enter · attach .md    Ctrl+. · pin    Ctrl+F · favorites    Ctrl+H · history",
+                    "Space · превью    Enter · приложить .md    Alt+Enter · открыть в Notion    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",
+                    "Space · preview    Enter · attach .md    Alt+Enter · open in Notion    Ctrl+. · pin    Ctrl+F · favorites    Ctrl+H · history",
                 ));
             });
         if everything {
@@ -376,7 +451,13 @@ impl Shelf {
         } else if modal.should_close() {
             self.workspace_close();
         } else if let Some(page) = state.pages.get(state.selected).cloned() {
-            if enter {
+            if open_in_browser {
+                if self.call(Command::OpenNotionPage { page })["opened"] == true {
+                    self.workspace_close();
+                } else {
+                    self.workspace.notion.error = Some(self.message.clone());
+                }
+            } else if enter {
                 let command = Command::BeginPasteNotionPage {
                     owner_window: self.native_window,
                     page_id: page.id,

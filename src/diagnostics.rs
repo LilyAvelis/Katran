@@ -236,6 +236,7 @@ pub fn summarize_command(command: &crate::Command) -> Value {
         crate::Command::ReadNotionPage { .. } => json!({"type":"read_notion_page"}),
         crate::Command::CopyNotionPage { .. } => json!({"type":"copy_notion_page"}),
         crate::Command::BeginPasteNotionPage { .. } => json!({"type":"begin_paste_notion_page"}),
+        crate::Command::OpenNotionPage { .. } => json!({"type":"open_notion_page"}),
         crate::Command::ToggleFavoriteNotionPage { .. } => json!({"type":"toggle_favorite_notion_page"}),
         crate::Command::IngestLink { url, source } => {
             json!({"type":"ingest_link","byte_count":url.len(),"source":source})

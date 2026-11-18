@@ -1,12 +1,18 @@
 //! Bounded, read-only Notion Markdown v2 projection. Unknown markup remains text.
 //! No tag in this module executes code or fetches an external resource.
-use crate::markdown;
+use crate::{markdown, notion_rich};
 
 const MAX_DEPTH: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Database,
+    Page,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Block {
-    Markdown(markdown::Document),
+    Markdown(notion_rich::Document),
     Callout {
         icon: Option<String>,
         color: Option<String>,
@@ -19,11 +25,28 @@ pub enum Block {
     Table {
         rows: Vec<Vec<Cell>>,
     },
+    Reference {
+        kind: ReferenceKind,
+        title: String,
+        url: Option<String>,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cell {
     pub text: String,
     pub header: bool,
+    pub document: notion_rich::Document,
+}
+
+impl Cell {
+    fn new(text: String, header: bool) -> Self {
+        let document = notion_rich::parse(&text);
+        Self {
+            text: decode_entities(&text),
+            header,
+            document,
+        }
+    }
 }
 
 pub fn parse(source: &str) -> Result<Vec<Block>, &'static str> {
@@ -33,12 +56,11 @@ pub fn parse(source: &str) -> Result<Vec<Block>, &'static str> {
     let lines: Vec<&str> = source.split_inclusive('\n').collect();
     parse_lines(&lines, 0)
 }
-fn flush(pending: &mut String, out: &mut Vec<Block>) -> Result<(), &'static str> {
-    if !pending.is_empty() {
-        out.push(Block::Markdown(markdown::parse(pending)?));
-        pending.clear();
+fn flush(pending: &mut String, out: &mut Vec<Block>) {
+    if !pending.trim().is_empty() {
+        out.push(Block::Markdown(notion_rich::parse(pending)));
     }
-    Ok(())
+    pending.clear();
 }
 fn fence_marker(line: &str) -> Option<usize> {
     let t = line.trim_start();
@@ -95,7 +117,7 @@ fn container_end(lines: &[&str], start: usize, name: &str) -> Option<usize> {
     }
     None
 }
-fn attribute(attrs: &str, wanted: &str) -> Option<String> {
+pub(crate) fn attribute(attrs: &str, wanted: &str) -> Option<String> {
     let mut rest = attrs.trim();
     while !rest.is_empty() {
         let end = rest.find(|c: char| c.is_whitespace() || c == '=')?;
@@ -116,14 +138,88 @@ fn attribute(attrs: &str, wanted: &str) -> Option<String> {
     }
     None
 }
+fn valid_notion_url(value: &str) -> Option<String> {
+    if value.chars().any(|c| c.is_control() || c.is_whitespace()) || value.contains('\\') {
+        return None;
+    }
+    let authority = value.split_once("://")?.1.split(['/', '?', '#']).next()?;
+    if authority.contains('@') {
+        return None;
+    }
+    let parsed = url::Url::parse(value).ok()?;
+    if parsed.scheme() != "https" || !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    if !(host == "notion.so"
+        || host == "notion.com"
+        || host.ends_with(".notion.so")
+        || host.ends_with(".notion.com"))
+    {
+        return None;
+    }
+    Some(value.to_owned())
+}
+fn escaped_at(text: &str, position: usize) -> bool {
+    text.as_bytes()[..position]
+        .iter()
+        .rev()
+        .take_while(|&&b| b == b'\\')
+        .count()
+        % 2
+        == 1
+}
+fn find_unescaped(text: &str, needle: &str) -> Option<usize> {
+    text.match_indices(needle)
+        .map(|(index, _)| index)
+        .find(|&index| !escaped_at(text, index))
+}
+/// Recognize a tag outside inline code and escaped literal markup.
+fn find_reference(line: &str) -> Option<(usize, ReferenceKind, &str, usize)> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut code = None;
+    while i < bytes.len() {
+        if bytes[i] == b'`' && !escaped_at(line, i) {
+            let start = i;
+            while i < bytes.len() && bytes[i] == b'`' {
+                i += 1;
+            }
+            let count = i - start;
+            if code == Some(count) {
+                code = None;
+            } else if code.is_none() {
+                code = Some(count);
+            }
+            continue;
+        }
+        if bytes[i] == b'<' && code.is_none() && !escaped_at(line, i) {
+            for (name, kind) in [
+                ("database", ReferenceKind::Database),
+                ("page", ReferenceKind::Page),
+            ] {
+                if let Some((attrs, tail)) = tag(&line[i..], name) {
+                    if !attrs.trim_end().ends_with('/') {
+                        return Some((i, kind, attrs, line.len() - tail.len()));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
 fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str> {
     let mut out = Vec::new();
     let mut pending = String::new();
     let mut i = 0;
+    let mut offset = 0;
     let mut fence = None;
     while i < lines.len() {
-        let line = lines[i];
-        if let Some(size) = fence_marker(line) {
+        let line = &lines[i][offset..];
+        if offset == 0
+            && let Some(size) = fence_marker(line)
+        {
             if fence.is_none() {
                 fence = Some(size);
             } else if size >= fence.unwrap() {
@@ -138,14 +234,80 @@ fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str>
             i += 1;
             continue;
         }
-        if depth < MAX_DEPTH {
+        let structural = offset == 0
+            && (tag(line.trim_start(), "table").is_some()
+                || opening(line, "callout").is_some()
+                || opening(line, "toggle").is_some());
+        if let Some((position, kind, attrs, after_open)) = if structural {
+            None
+        } else {
+            find_reference(line)
+        } {
+            let name = match kind {
+                ReferenceKind::Database => "database",
+                ReferenceKind::Page => "page",
+            };
+            let closing = format!("</{name}>");
+            let mut end_line = i;
+            let mut segment = &line[after_open..];
+            let mut body = String::new();
+            let mut end_offset = None;
+            loop {
+                if let Some(end) = find_unescaped(segment, &closing) {
+                    body.push_str(&segment[..end]);
+                    end_offset = Some(if end_line == i {
+                        offset + after_open + end + closing.len()
+                    } else {
+                        end + closing.len()
+                    });
+                    break;
+                }
+                body.push_str(segment);
+                end_line += 1;
+                if end_line >= lines.len() || fence_marker(lines[end_line]).is_some() {
+                    break;
+                }
+                segment = lines[end_line];
+            }
+            if let Some(end_offset) = end_offset
+                && !body.contains("<page")
+                && !body.contains("<database")
+            {
+                pending.push_str(&line[..position]);
+                flush(&mut pending, &mut out);
+                let title = decode_entities(body.trim());
+                let url = attribute(attrs, "url").and_then(|url| valid_notion_url(&url));
+                out.push(Block::Reference { kind, title, url });
+                i = end_line;
+                offset = end_offset;
+                if offset >= lines[i].len() {
+                    i += 1;
+                    offset = 0;
+                }
+                continue;
+            }
+            // An unclosed or nested unknown reference stays literal, without
+            // repeatedly rescanning a potentially adversarial suffix.
+            pending.push_str(line);
+            for remaining in &lines[i + 1..] {
+                pending.push_str(remaining);
+            }
+            break;
+        }
+        if matches!(line.trim(), "<p />" | "<p/>") {
+            pending.push('\n');
+            i += 1;
+            offset = 0;
+            continue;
+        }
+        if offset == 0 && depth < MAX_DEPTH {
             let container = ["callout", "toggle"]
                 .into_iter()
                 .find_map(|name| opening(line, name).map(|attrs| (name, attrs)));
             if let Some((name, attrs)) = container
                 && let Some(end) = container_end(lines, i, name)
             {
-                flush(&mut pending, &mut out)?;
+                flush(&mut pending, &mut out);
                 let mut body = &lines[i + 1..end];
                 if name == "callout" {
                     out.push(Block::Callout {
@@ -175,23 +337,26 @@ fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str>
                     });
                 }
                 i = end + 1;
+                offset = 0;
                 continue;
             }
         }
-        if tag(line.trim_start(), "table").is_some() {
+        if offset == 0 && tag(line.trim_start(), "table").is_some() {
             let end = lines[i..].iter().position(|line| line.contains("</table>"));
             if let Some(end) = end {
                 let end = i + end;
                 let raw = lines[i..=end].concat();
                 if let Some(rows) = styled_table(&raw) {
-                    flush(&mut pending, &mut out)?;
+                    flush(&mut pending, &mut out);
                     out.push(Block::Table { rows });
                     i = end + 1;
+                    offset = 0;
                     continue;
                 }
                 // Do not repeatedly rescan a malformed nested table or hide it.
                 pending.push_str(&raw);
                 i = end + 1;
+                offset = 0;
                 continue;
             }
             for line in &lines[i..] {
@@ -199,19 +364,16 @@ fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str>
             }
             break;
         }
-        if i + 1 < lines.len()
+        if offset == 0
+            && i + 1 < lines.len()
             && let Some(head) = pipe_cells(line)
             && let Some(rule) = pipe_cells(lines[i + 1])
             && head.len() == rule.len()
             && !head.is_empty()
             && rule.iter().all(|cell| delimiter(cell))
         {
-            flush(&mut pending, &mut out)?;
-            let mut rows = vec![
-                head.into_iter()
-                    .map(|text| Cell { text, header: true })
-                    .collect(),
-            ];
+            flush(&mut pending, &mut out);
+            let mut rows = vec![head.into_iter().map(|text| Cell::new(text, true)).collect()];
             i += 2;
             while i < lines.len() {
                 let Some(cells) = pipe_cells(lines[i]) else {
@@ -220,21 +382,20 @@ fn parse_lines(lines: &[&str], depth: usize) -> Result<Vec<Block>, &'static str>
                 rows.push(
                     cells
                         .into_iter()
-                        .map(|text| Cell {
-                            text,
-                            header: false,
-                        })
+                        .map(|text| Cell::new(text, false))
                         .collect(),
                 );
                 i += 1;
             }
             out.push(Block::Table { rows });
+            offset = 0;
             continue;
         }
         pending.push_str(line);
         i += 1;
+        offset = 0;
     }
-    flush(&mut pending, &mut out)?;
+    flush(&mut pending, &mut out);
     Ok(out)
 }
 fn pipe_cells(line: &str) -> Option<Vec<String>> {
@@ -270,7 +431,7 @@ fn delimiter(value: &str) -> bool {
     let value = value.trim().trim_start_matches(':').trim_end_matches(':');
     value.len() >= 3 && value.bytes().all(|b| b == b'-')
 }
-fn decode_entities(value: &str) -> String {
+pub(crate) fn decode_entities(value: &str) -> String {
     let mut out = String::new();
     let mut rest = value;
     while let Some(index) = rest.find('&') {
@@ -298,7 +459,7 @@ fn decode_entities(value: &str) -> String {
     out
 }
 /// Return the end offset of an opening tag while respecting quoted attributes.
-fn tag_end(text: &str) -> Option<usize> {
+pub(crate) fn tag_end(text: &str) -> Option<usize> {
     let mut quote = None;
     for (i, c) in text.char_indices() {
         match (quote, c) {
@@ -359,12 +520,10 @@ fn styled_table(raw: &str) -> Option<Vec<Vec<Cell>>> {
                 .replace("<br />", "\n")
                 .replace("<br/>", "\n")
                 .replace("<br>", "\n");
-            row.push(Cell {
-                text: decode_entities(&value),
-                header: header
-                    || (header_row && rows.is_empty())
-                    || (header_column && row.is_empty()),
-            });
+            row.push(Cell::new(
+                value,
+                header || (header_row && rows.is_empty()) || (header_column && row.is_empty()),
+            ));
             row_body = tail[end + closing.len()..].trim_start();
         }
         if row.is_empty() {
@@ -431,6 +590,58 @@ mod tests {
         );
         assert!(
             matches!(&parse("<table><tr><td>x</td></tr></table>").unwrap()[0], Block::Table { rows } if rows[0][0].text == "x")
+        );
+    }
+    #[test]
+    fn parses_multiline_and_inline_references_with_safe_destinations() {
+        let source = "<database url=\"https://work.notion.so/db\" data-source-url=\"https://evil.test/ds\">\nMy database\n</database>\nBefore <page url=\"https://www.notion.com/page?a=1&amp;b=2\">My page</page> after\n";
+        let blocks = parse(source).unwrap();
+        assert!(
+            matches!(&blocks[0], Block::Reference {kind: ReferenceKind::Database, title, url} if title == "My database" && url.as_deref() == Some("https://work.notion.so/db"))
+        );
+        assert!(matches!(&blocks[1], Block::Markdown(doc) if doc.source.contains("Before ")));
+        assert!(
+            matches!(&blocks[2], Block::Reference {kind: ReferenceKind::Page, title, url} if title == "My page" && url.as_deref() == Some("https://www.notion.com/page?a=1&b=2"))
+        );
+        assert!(matches!(&blocks[3], Block::Markdown(doc) if doc.source.contains(" after")));
+    }
+    #[test]
+    fn reference_urls_reject_credentials_wrong_hosts_and_non_https() {
+        for url in [
+            "http://notion.so/x",
+            "https://notion.so.evil.test/x",
+            "https://evilnotion.com/x",
+            "https://user@notion.so/x",
+            "https://@notion.so/x",
+            "https://notion.so\\@evil.test",
+            "javascript:alert(1)",
+            "https://notion.so/hello world",
+        ] {
+            assert!(valid_notion_url(url).is_none(), "{url}");
+        }
+        for url in [
+            "https://notion.so/x",
+            "https://notion.com/x",
+            "https://team.notion.so/x",
+            "https://a.b.notion.com/x",
+        ] {
+            assert_eq!(valid_notion_url(url).as_deref(), Some(url));
+        }
+        let blocks = parse("<database data-source-url=\"https://notion.so/source\">\nTitle\n</database>\n<page url=\"https://evil.test\">Label</page>\n").unwrap();
+        assert!(
+            matches!(&blocks[0], Block::Reference { url: None, title, .. } if title == "Title")
+        );
+        assert!(
+            matches!(&blocks[1], Block::Reference { url: None, title, .. } if title == "Label")
+        );
+    }
+    #[test]
+    fn references_are_inert_in_escaped_and_code_text_and_empty_paragraph_is_whitespace() {
+        let source = "\\<page url=\"https://notion.so/x\">escaped</page>\n`<page url=\"https://notion.so/x\">code</page>`\n```\n<page url=\"https://notion.so/x\">fenced</page>\n<p />\n```\n<p />\n";
+        let blocks = parse(source).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(
+            matches!(&blocks[0], Block::Markdown(doc) if doc.source.contains("escaped</page>") && doc.source.contains("code</page>") && doc.source.contains("fenced</page>") && doc.source.contains("<p />\n```" ) && !doc.source.ends_with("<p />\n"))
         );
     }
 }

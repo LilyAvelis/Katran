@@ -67,6 +67,7 @@ pub mod origin;
 mod paste_service;
 pub mod notion;
 pub mod notion_reader;
+pub mod notion_rich;
 pub mod pinned;
 mod pinned_open;
 pub mod pinned_order;
@@ -968,6 +969,17 @@ impl Service {
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
             Command::ListSavedNotionPages { favorites } => {
                 Ok(serde_json::json!({"pages": notion::saved_pages(&self.root, favorites)?}))
+            }
+            Command::OpenNotionPage { page } => {
+                let url = page.browser_url()?;
+                {
+                    let launcher = self.file_launcher.lock().map_err(|_| {
+                        ApiError::new("open_busy", "Could not use the default browser")
+                    })?;
+                    open_file::open_url(&url, launcher.as_ref())?;
+                }
+                let _ = notion::record_visit(&self.root, &page);
+                Ok(serde_json::json!({"opened": true}))
             }
             Command::ToggleFavoriteNotionPage { page } => {
                 Ok(serde_json::json!({"favorite": notion::toggle_favorite(&self.root, &page)?}))

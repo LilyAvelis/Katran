@@ -19,6 +19,14 @@ pub struct Page {
 }
 
 impl Page {
+    pub(crate) fn browser_url(&self) -> Result<String> {
+        self.validate()?;
+        Ok(format!(
+            "https://www.notion.so/{}",
+            self.id.replace('-', "")
+        ))
+    }
+
     pub(crate) fn validate(&self) -> Result<()> {
         if !page_id(&self.id) || self.title.len() > 8192 {
             return Err(ApiError::new("notion_page", "Invalid Notion page"));

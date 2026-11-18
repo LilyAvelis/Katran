@@ -4,7 +4,8 @@ The Ctrl+Shift+K Notion source uses `src/notion.rs` for bounded CLI requests,
 `src/jobs_service.rs` for job dispatch and guarded file publication, and
 `src/bin/workspace_notion_ui.rs` for the picker. `src/notion_reader.rs`
 parses the Markdown v2 preview and `src/bin/notion_reader_ui.rs` renders its
-supported blocks. The existing Markdown attachment path is independent.
+supported blocks. `src/notion_rich.rs` projects CommonMark and Notion inline
+styles into inert native text runs. The Markdown attachment path is independent.
 See [connection setup](notion.md).
 
 For the closed 4.0 run, start at the [final handoff](patch-4.0/TEAM.md#final-handoff)

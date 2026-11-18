@@ -1,11 +1,14 @@
 use eframe::egui::{self, Color32, RichText, Stroke};
-use katran::notion_reader::{Block, Cell};
+use katran::{
+    notion_reader::{Block, Cell, ReferenceKind},
+    notion_rich::Document,
+};
 
 pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
     for (index, block) in blocks.iter().enumerate() {
         ui.push_id(index, |ui| match block {
             Block::Markdown(document) => {
-                crate::markdown_ui::show_on(ui, document, Color32::from_gray(48));
+                show_document(ui, document, false);
             }
             Block::Callout {
                 icon,
@@ -43,7 +46,120 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
                     .show(ui, |ui| show(ui, children));
             }
             Block::Table { rows } => show_table(ui, rows),
+            Block::Reference { kind, title, url } => {
+                let label = match kind {
+                    ReferenceKind::Database => super::tr("База Notion", "Notion database"),
+                    ReferenceKind::Page => super::tr("Страница Notion", "Notion page"),
+                };
+                egui::Frame::new()
+                    .fill(Color32::from_gray(45))
+                    .corner_radius(6)
+                    .inner_margin(8)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.weak(label);
+                            let title = if title.is_empty() { label } else { title };
+                            if let Some(url) = url {
+                                ui.hyperlink_to(RichText::new(title).strong(), url);
+                            } else {
+                                ui.label(RichText::new(title).strong());
+                            }
+                        });
+                    });
+            }
         });
+    }
+}
+
+fn show_document(ui: &mut egui::Ui, document: &Document, header: bool) {
+    for line in &document.lines {
+        if line.rule {
+            ui.separator();
+            continue;
+        }
+        ui.horizontal_top(|ui| {
+            let indent = (line.indent.min(12) * 12) as f32;
+            if indent > 0.0 {
+                ui.add_space(indent);
+            }
+            let mut job = egui::text::LayoutJob::default();
+            job.wrap.max_width = (ui.available_width() - 8.0).max(20.0);
+            for run in &line.runs {
+                let style = &run.style;
+                let size = match line.heading {
+                    0 => 15.0,
+                    level => 26.0 - f32::from(level) * 1.6,
+                };
+                let color = style.color.as_deref().map_or_else(
+                    || {
+                        if style.link {
+                            Color32::from_rgb(153, 198, 240)
+                        } else if header || style.bold {
+                            Color32::WHITE
+                        } else {
+                            Color32::from_gray(228)
+                        }
+                    },
+                    callout_color_for_text,
+                );
+                let underline = if style.underline || style.link {
+                    Stroke::new(1.0, color)
+                } else {
+                    Stroke::NONE
+                };
+                job.append(
+                    &run.text,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: if style.code {
+                            egui::FontId::monospace(size)
+                        } else if style.bold || header || line.heading != 0 {
+                            egui::FontId::new(
+                                size,
+                                egui::FontFamily::Name(crate::ui_fonts::BOLD_FAMILY.into()),
+                            )
+                        } else {
+                            egui::FontId::proportional(size)
+                        },
+                        color,
+                        background: style
+                            .color
+                            .as_deref()
+                            .filter(|color| color.ends_with("_bg"))
+                            .map_or(Color32::TRANSPARENT, |color| {
+                                callout_color(Some(color)).gamma_multiply(0.32)
+                            }),
+                        italics: style.italic,
+                        underline,
+                        strikethrough: if style.strike {
+                            Stroke::new(1.0, color)
+                        } else {
+                            Stroke::NONE
+                        },
+                        ..Default::default()
+                    },
+                );
+            }
+            if line.quote || line.code {
+                egui::Frame::new()
+                    .fill(Color32::from_gray(if line.code { 48 } else { 40 }))
+                    .inner_margin(5)
+                    .corner_radius(4)
+                    .show(ui, |ui| {
+                        ui.label(job);
+                    });
+            } else {
+                ui.label(job);
+            }
+        });
+    }
+}
+
+fn callout_color_for_text(color: &str) -> Color32 {
+    if color.ends_with("_bg") {
+        Color32::from_gray(240)
+    } else {
+        callout_color(Some(color))
     }
 }
 
@@ -85,11 +201,7 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>]) {
                                 .inner_margin(5)
                                 .show(ui, |ui| {
                                     ui.set_width(cell_width);
-                                    let text = RichText::new(&cell.text);
-                                    ui.add(
-                                        egui::Label::new(if header { text.strong() } else { text })
-                                            .wrap(),
-                                    );
+                                    show_document(ui, &cell.document, header);
                                 });
                         }
                         ui.end_row();
@@ -104,11 +216,14 @@ mod tests {
 
     #[test]
     fn notion_reader_paints_callout_table_and_collapsed_toggle() {
-        let source = "<callout icon=\"💡\" color=\"blue_bg\">\nReader callout\n</callout>\n\n\
+        let source = "This is <b>Bold text</b> and <i>Italic text</i>.\n\n<p />\n\n\
+            <database url=\"https://www.notion.so/example\" data-source-url=\"collection://example\">\nFixture database\n</database>\n\n\
+            <callout icon=\"💡\" color=\"blue_bg\">\nReader callout\n</callout>\n\n\
             | Table heading | Count |\n| --- | --- |\n| Visible value | 42 |\n\n\
             <toggle>\nOpen notes\n\nHidden child\n</toggle>";
         let blocks = katran::notion_reader::parse(source).unwrap();
         let context = egui::Context::default();
+        crate::ui_fonts::install(&context);
         let mut output = egui::FullOutput::default();
         for _ in 0..2 {
             output = context.run_ui(egui::RawInput::default(), |ui| show(ui, &blocks));
@@ -126,6 +241,9 @@ mod tests {
             "Table heading",
             "Visible value",
             "Open notes",
+            "Bold text",
+            "Italic text",
+            "Fixture database",
         ] {
             assert!(
                 output.shapes.iter().any(|s| rendered(&s.shape, expected)),
@@ -138,5 +256,11 @@ mod tests {
                 .iter()
                 .any(|s| rendered(&s.shape, "Hidden child"))
         );
+        for hidden in ["<b>", "<i>", "<p />", "<database", "data-source-url"] {
+            assert!(
+                !output.shapes.iter().any(|s| rendered(&s.shape, hidden)),
+                "{hidden}"
+            );
+        }
     }
 }

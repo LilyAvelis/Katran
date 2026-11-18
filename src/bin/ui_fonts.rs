@@ -2,6 +2,8 @@
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::sync::{Arc, OnceLock};
 
+pub(crate) const BOLD_FAMILY: &str = "katran-bold";
+
 pub(super) fn install(ctx: &egui::Context) {
     static FONTS: OnceLock<FontDefinitions> = OnceLock::new();
     ctx.set_fonts(FONTS.get_or_init(definitions).clone());
@@ -9,8 +11,15 @@ pub(super) fn install(ctx: &egui::Context) {
 
 fn definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
+    let mut bold = Vec::new();
     if let Some(windows) = std::env::var_os("WINDIR") {
         let directory = std::path::PathBuf::from(windows).join("Fonts");
+        if let Ok(bytes) = std::fs::read(directory.join("segoeuib.ttf")) {
+            fonts
+                .font_data
+                .insert("segoeuib.ttf".into(), Arc::new(FontData::from_owned(bytes)));
+            bold.push("segoeuib.ttf".into());
+        }
         // Keep the current text face; these are used only for missing glyphs.
         // Same explicit fallback pattern as Afio, without its terminal Nerd Font.
         for filename in [
@@ -34,6 +43,10 @@ fn definitions() -> FontDefinitions {
             }
         }
     }
+    bold.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
+    fonts
+        .families
+        .insert(FontFamily::Name(BOLD_FAMILY.into()), bold);
     fonts
 }
 

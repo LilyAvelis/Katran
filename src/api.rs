@@ -224,6 +224,9 @@ pub enum Command {
     ListSavedNotionPages {
         favorites: bool,
     },
+    OpenNotionPage {
+        page: crate::notion::Page,
+    },
     ToggleFavoriteNotionPage {
         page: crate::notion::Page,
     },

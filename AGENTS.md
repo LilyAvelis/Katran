@@ -9,7 +9,9 @@ Credential Manager. Keep credentials, titles, queries and page contents out of
 diagnostics. Enter follows the existing overlay lease and publishes a single
 owned Markdown file. Ctrl+Shift+N opens the Notion picker from the ordinary
 Katran UI. Space requests Markdown v2 on demand for the native callout,
-table and toggle reader. Preview markup is inert. Keep local page IDs and
+table and toggle reader. Preview markup is inert, including unknown tags.
+Alt+Enter opens only the canonical Notion URL derived from the selected page ID.
+Keep local page IDs and
 titles in the Notion sidecar for history and favorites. No Notion writes
 or database browsing. See [setup](docs/notion.md).
 
