@@ -278,6 +278,30 @@ pub fn prepare_with_budget(
     if events.is_empty() {
         return Err("No files selected".into());
     }
+    let (mut plan, used) = prepare_batch(root, quota)?;
+    let directory = plan.directory.clone();
+    prepare_events(&mut plan, &directory, events, quota, used)?;
+    Ok(plan)
+}
+
+/// Materialize one verified named file in the normal bounded open snapshot cache.
+pub(crate) fn prepare_bs_entry(root: &Path, entry: &baloh_collection::bs::FileEntry, quota: u64) -> Result<Plan, String> {
+    use std::io::Write;
+    crate::validate_name(&entry.name).map_err(|error| error.message)?;
+    let (mut plan, used) = prepare_batch(root, quota)?;
+    if entry.bytes.len() as u64 > quota - used {
+        return Err("Open snapshot quota exceeded".into());
+    }
+    let destination = plan.directory.join(&entry.name);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&destination)
+        .map_err(|error| error.to_string())?;
+    file.write_all(&entry.bytes).and_then(|_| file.sync_all()).map_err(|error| error.to_string())?;
+    drop(file);
+    plan.paths.push(destination.canonicalize().map_err(|error| error.to_string())?);
+    Ok(plan)
+}
+
+fn prepare_batch(root: &Path, quota: u64) -> Result<(Plan, u64), String> {
     let exports = root.join("exports");
     std::fs::create_dir_all(&exports).map_err(|e| e.to_string())?;
     if std::fs::symlink_metadata(&exports)
@@ -332,7 +356,7 @@ pub fn prepare_with_budget(
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
         .insert(directory.clone());
-    let mut plan = Plan {
+    let plan = Plan {
         paths: vec![],
         failures: vec![],
         text_payload: None,
@@ -341,6 +365,10 @@ pub fn prepare_with_budget(
         published: Cell::new(false),
         attempted: Cell::new(false),
     };
+    Ok((plan, used))
+}
+
+fn prepare_events(plan: &mut Plan, directory: &Path, events: &[crate::Event], quota: u64, mut used: u64) -> Result<(), String> {
     for (index, event) in events.iter().enumerate() {
         let mut attempted_path = None;
         let result = (|| -> Result<PathBuf, String> {
@@ -509,7 +537,7 @@ pub fn prepare_with_budget(
             }),
         }
     }
-    Ok(plan)
+    Ok(())
 }
 fn content_digest(path: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};

@@ -25,6 +25,7 @@ struct Collection {
     texture: Option<egui::TextureHandle>,
     link: Option<LinkPage>,
     text: Option<TextPage>,
+    file: Option<FilePage>,
     ready_index: Option<usize>,
     copy_held: bool,
     zoom: katran::preview_view::State,
@@ -34,9 +35,27 @@ struct Collection {
 impl Collection {
     fn ready_target(&self) -> Option<(i64, String, usize)> {
         self.ready_index
-            .filter(|_| self.texture.is_some() || self.link.is_some() || self.text.is_some())
+            .filter(|_| {
+                self.texture.is_some()
+                    || self.link.is_some()
+                    || self.text.is_some()
+                    || self.file.is_some()
+            })
             .map(|index| (self.id, self.revision.clone(), index))
     }
+    fn ready_transfer_target(&self) -> Option<(i64, String, usize)> {
+        if self.file.is_some() {
+            None
+        } else {
+            self.ready_target()
+        }
+    }
+}
+
+struct FilePage {
+    name: String,
+    size: u64,
+    extension: String,
 }
 
 struct TextPage {
@@ -188,6 +207,38 @@ fn decode_collection_page(encoded: &str) -> Result<egui::ColorImage, String> {
 }
 
 impl Shelf {
+    fn open_ready_collection_entry(&mut self, ctx: &egui::Context) {
+        let target = self.upscale.collection.as_ref().and_then(|c| {
+            c.ready_target().and_then(|(id, revision, index)| {
+                if c.file.is_some() {
+                    Some(Command::OpenBsEntry {
+                        id,
+                        revision,
+                        index,
+                    })
+                } else if c.link.is_some() {
+                    Some(Command::OpenCollectionLink {
+                        id,
+                        revision,
+                        index,
+                    })
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(command) = target
+            && !self.start_job(command, false, ctx.clone())
+            && self.job.is_some()
+        {
+            self.message = tr(
+                "Дождитесь завершения текущей операции",
+                "Wait for the current operation to finish",
+            )
+            .into();
+        }
+    }
+
     pub(super) fn open_translation_collection(
         &mut self,
         id: i64,
@@ -204,6 +255,7 @@ impl Shelf {
             texture: None,
             link: None,
             text: None,
+            file: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -286,7 +338,47 @@ impl Shelf {
                                 && count.is_some_and(|n| n > expected && n <= 32)
                             {
                                 collection.count = count;
-                                if let Some(link) = page["link"].as_object() {
+                                if let Some(file) = page["file"].as_object() {
+                                    let name =
+                                        file.get("name").and_then(Value::as_str).unwrap_or("");
+                                    let size = file.get("size").and_then(Value::as_u64);
+                                    if name.is_empty() || name.len() > 4096 || size.is_none() {
+                                        collection.error =
+                                            tr("Некорректная запись файла", "Invalid file entry")
+                                                .into();
+                                    } else {
+                                        let extension = file
+                                            .get("extension")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                            .chars()
+                                            .take(128)
+                                            .collect();
+                                        let texture = file
+                                            .get("preview_png")
+                                            .and_then(Value::as_str)
+                                            .and_then(|encoded| {
+                                                decode_collection_page(encoded).ok()
+                                            })
+                                            .map(|image| {
+                                                ctx.load_texture(
+                                                    "collection-file-preview",
+                                                    image,
+                                                    egui::TextureOptions::LINEAR,
+                                                )
+                                            });
+                                        collection.file = Some(FilePage {
+                                            name: name.to_owned(),
+                                            size: size.unwrap(),
+                                            extension,
+                                        });
+                                        collection.text = None;
+                                        collection.link = None;
+                                        collection.texture = texture;
+                                        collection.ready_index = Some(expected);
+                                        collection.zoom = katran::preview_view::State::default();
+                                    }
+                                } else if let Some(link) = page["link"].as_object() {
                                     let url = link.get("url").and_then(Value::as_str).unwrap_or("");
                                     if url.is_empty() || url.len() > 16384 {
                                         collection.error =
@@ -320,6 +412,7 @@ impl Shelf {
                                                 )
                                             });
                                         collection.text = None;
+                                        collection.file = None;
                                         collection.link = Some(LinkPage {
                                             url: url.to_owned(),
                                             title,
@@ -337,6 +430,7 @@ impl Shelf {
                                         rendered: true,
                                     });
                                     collection.link = None;
+                                    collection.file = None;
                                     collection.texture = None;
                                     collection.ready_index = Some(expected);
                                     collection.zoom = katran::preview_view::State::default();
@@ -354,6 +448,7 @@ impl Shelf {
                                             ));
                                             collection.link = None;
                                             collection.text = None;
+                                            collection.file = None;
                                             collection.ready_index = Some(expected);
                                             collection.zoom =
                                                 katran::preview_view::State::default();
@@ -400,7 +495,7 @@ impl Shelf {
                 .upscale
                 .collection
                 .as_ref()
-                .and_then(Collection::ready_target);
+                .and_then(Collection::ready_transfer_target);
             if let Some((id, revision, index)) = target {
                 if !self.start_job(
                     Command::CopyCollectionPage {
@@ -441,30 +536,7 @@ impl Shelf {
             pressed
         });
         if open_requested && !self.overlay_ui.pending {
-            let target = self
-                .upscale
-                .collection
-                .as_ref()
-                .filter(|c| c.link.is_some())
-                .and_then(Collection::ready_target);
-            if let Some((id, revision, index)) = target {
-                if !self.start_job(
-                    Command::OpenCollectionLink {
-                        id,
-                        revision,
-                        index,
-                    },
-                    false,
-                    ctx.clone(),
-                ) && self.job.is_some()
-                {
-                    self.message = tr(
-                        "Дождитесь завершения текущей операции",
-                        "Wait for the current operation to finish",
-                    )
-                    .into();
-                }
-            }
+            self.open_ready_collection_entry(ctx);
         }
         let paste_requested = ctx.input_mut(|input| {
             let focused = input.focused;
@@ -475,7 +547,7 @@ impl Shelf {
                 .upscale
                 .collection
                 .as_ref()
-                .and_then(Collection::ready_target);
+                .and_then(Collection::ready_transfer_target);
             if let Some((id, revision, index)) = target {
                 self.paste_collection_page(ctx, id, revision, index);
             }
@@ -489,6 +561,7 @@ impl Shelf {
         let mut previous = previous_key;
         let mut next = next_key;
         let mut close = close_key;
+        let mut open_file = false;
         let canvas_size = collection_canvas_size(ctx.content_rect().size());
         let modal = egui::Modal::new(egui::Id::new("translated-collection")).show(ctx, |ui| {
             ui.set_min_width(canvas_size.x);
@@ -518,6 +591,9 @@ impl Shelf {
                         egui::Button::new(tr("Далее", "Next")),
                     )
                     .clicked();
+                if collection.file.is_some() {
+                    open_file |= ui.button(tr("Открыть", "Open")).clicked();
+                }
                 close |= ui.button(tr("Закрыть", "Close")).clicked();
             });
             let (canvas, response) =
@@ -526,7 +602,39 @@ impl Shelf {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("collection-test-canvas"), canvas));
             let painter = ui.painter().with_clip_rect(canvas);
             painter.rect_filled(canvas, 0.0, egui::Color32::from_gray(24));
-            if let Some(text) = collection.text.as_mut() {
+            if let Some(file) = collection.file.as_ref() {
+                let inner = canvas.shrink(18.0);
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("collection-file-content")
+                        .max_rect(inner),
+                );
+                child.set_clip_rect(inner);
+                egui::ScrollArea::vertical()
+                    .id_salt(("collection-file-scroll", collection.ready_index))
+                    .max_height(inner.height())
+                    .auto_shrink([false, false])
+                    .show(&mut child, |ui| {
+                        ui.set_width(inner.width());
+                        if let Some(texture) = collection.texture.as_ref() {
+                            let original = texture.size_vec2();
+                            let scale = (inner.width() / original.x)
+                                .min(240.0 / original.y)
+                                .min(1.0);
+                            ui.add(egui::Image::new((texture.id(), original * scale)));
+                        } else {
+                            ui.add(egui_lucide::Lucide::File.size(48.0).image());
+                        }
+                        ui.add_space(10.0);
+                        ui.heading(&file.name);
+                        let kind = if file.extension.is_empty() {
+                            tr("Файл", "File")
+                        } else {
+                            file.extension.as_str()
+                        };
+                        ui.weak(format!("{kind} · {} {}", file.size, tr("байт", "bytes")));
+                    });
+            } else if let Some(text) = collection.text.as_mut() {
                 let inner = canvas.shrink(18.0);
                 let mut child = ui.new_child(
                     egui::UiBuilder::new()
@@ -696,6 +804,9 @@ impl Shelf {
         });
         let current = collection.index;
         let count = collection.count;
+        if open_file && !self.overlay_ui.pending {
+            self.open_ready_collection_entry(ctx);
+        }
         if close || modal.should_close() {
             self.close_translation_collection();
         } else if previous && current > 0 {
@@ -1024,6 +1135,7 @@ mod tests {
                 description: "".into(),
             }),
             text: None,
+            file: None,
             ready_index: Some(1),
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -1038,6 +1150,31 @@ mod tests {
     }
 
     #[test]
+    fn bs_ready_entry_can_open_but_cannot_copy_or_paste() {
+        let collection = Collection {
+            id: 12,
+            revision: "rev".into(),
+            index: 2,
+            count: Some(3),
+            pending: Some((katran::domain_jobs::JobId(77), 2)),
+            texture: None,
+            link: None,
+            text: None,
+            file: Some(FilePage {
+                name: "report.pdf".into(),
+                size: 123,
+                extension: "pdf".into(),
+            }),
+            ready_index: Some(1),
+            copy_held: false,
+            zoom: katran::preview_view::State::default(),
+            error: String::new(),
+        };
+        assert_eq!(collection.ready_target(), Some((12, "rev".into(), 1)));
+        assert_eq!(collection.ready_transfer_target(), None);
+    }
+
+    #[test]
     fn link_target_uses_visible_page_while_next_is_pending() {
         let collection = Collection {
             id: 7,
@@ -1047,6 +1184,7 @@ mod tests {
             pending: Some((katran::domain_jobs::JobId(42), 2)),
             texture: None,
             text: None,
+            file: None,
             link: Some(LinkPage {
                 url: "https://example.org".into(),
                 title: "title".into(),
@@ -1072,6 +1210,7 @@ mod tests {
             pending: Some((katran::domain_jobs::JobId(9), 3)),
             texture: None,
             link: None,
+            file: None,
             text: Some(TextPage {
                 source: source.into(),
                 document: katran::markdown::parse(source).ok(),
@@ -1146,6 +1285,7 @@ mod tests {
             texture: None,
             link: None,
             text: None,
+            file: None,
             ready_index: None,
             copy_held: false,
             zoom: katran::preview_view::State::default(),
@@ -1207,6 +1347,7 @@ mod tests {
             texture: Some(texture),
             link: None,
             text: None,
+            file: None,
             ready_index: Some(0),
             copy_held: false,
             zoom: katran::preview_view::State::default(),

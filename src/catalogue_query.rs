@@ -501,7 +501,7 @@ fn slice_projection(
         ShelfTab::Downloads => "e.source='downloads'".into(),
         ShelfTab::Text => text_shelf_predicate().into(),
         ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
-        ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
+        ShelfTab::Files => files_shelf_predicate().into(),
         ShelfTab::Desktop => "0".into(),
         ShelfTab::Translate => translated_image_predicate(),
         ShelfTab::Links => link_shelf_predicate().into(),
@@ -538,7 +538,7 @@ fn projection_sql(
     tables_enabled: bool,
 ) -> String {
     let mut sql = sql();
-    if !images_enabled && tab != ShelfTab::Translate {
+    if !images_enabled && !matches!(tab, ShelfTab::Translate | ShelfTab::Files) {
         sql = sql.replace(
             "AND e.legacy_source_ref=0",
             &format!(
@@ -556,10 +556,10 @@ fn projection_sql(
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Files {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", files_shelf_predicate()));
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     } else {
-        sql=sql.replace("AND e.legacy_source_ref=0", "AND e.legacy_source_ref=0 AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)");
+        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND NOT {}", files_shelf_predicate()));
     }
     if tab == ShelfTab::Translate {
         sql = sql.replace(
@@ -598,6 +598,10 @@ pub(crate) const TRANSLATION_MEMBERSHIP: &str =
 
 pub(crate) fn link_shelf_predicate() -> &'static str {
     "(EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND e.source='link_collection' AND lower(substr(e.name,-5))='.bull'))"
+}
+
+pub(crate) fn files_shelf_predicate() -> &'static str {
+    "(EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) OR (e.blob_hash IS NOT NULL AND (e.source='bs_extracted_file' OR (e.source='bs_collection' AND lower(substr(e.name,-3))='.bs'))))"
 }
 
 pub(crate) fn text_shelf_predicate() -> &'static str {

@@ -128,6 +128,7 @@ fn command(value: &mut Value) -> Result<(), String> {
         | "translation_collection_page"
         | "copy_collection_page"
         | "open_collection_link"
+        | "open_bs_entry"
         | "move_pinned"
         | "select"
         | "preview_image"

@@ -12,6 +12,20 @@ pub enum Operation {
     OpenWith,
 }
 
+pub(crate) fn bs_entry_operation(name: &str) -> Operation {
+    let extension = Path::new(name).extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+    match extension.as_str() {
+        "exe" | "com" | "bat" | "cmd" | "msi" | "msp" | "scr" | "dll" | "cpl" | "lnk" | "url" | "pif"
+        | "ps1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "hta" | "reg" | "chm" | "jar"
+        | "desktop" | "application" | "appref-ms" | "gadget" | "scf" | "sct" | "inf" | "ins" | "isp" => Operation::Reveal,
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "ico" | "heic" | "avif"
+        | "pdf" | "txt" | "rtf" | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" | "csv"
+        | "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "mp4" | "mkv" | "mov" | "webm"
+        | "zip" | "7z" | "rar" | "tar" | "gz" => Operation::Open,
+        _ => Operation::OpenWith,
+    }
+}
+
 pub trait Launcher: Send {
     fn authorize(&self) -> Result<()> {
         Ok(())

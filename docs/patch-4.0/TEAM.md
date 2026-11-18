@@ -18,6 +18,9 @@ For the Links speed change, Vela limited enrichment to HTML, Nemi owned the
 revision-checked blob replacement, Fenna integrated detached UI polling, and
 Polly integrated the independent job lane and verification.
 
+For BS, Nemi owned the portable codec, Vela owned file preparation and
+previews, Fenna owned UI, and Polly integrated the Files shelf and API.
+
 Polly leads the current session and owns the shared Rust command, dispatcher,
 integration, verification and installation. The Notion 4.0 card owns the run
 order. The installed baseline is `09244a0440d7` (source `5eb3f93`), with local

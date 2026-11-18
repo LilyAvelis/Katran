@@ -458,7 +458,13 @@ impl Images {
                 rect
             };
         self.paint_image(ui, event, cover_rect, edge, None);
-        if is_bull(event) {
+        if is_bs(event) {
+            let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
+            paint_bs_badge(
+                ui,
+                egui::Rect::from_min_size(rect.right_bottom() - size, size),
+            );
+        } else if is_bull(event) {
             let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
             let badge = egui::Rect::from_min_size(rect.right_bottom() - size, size);
             paint_bull_badge(ui, badge);
@@ -601,6 +607,27 @@ pub(super) fn is_bull(event: &Value) -> bool {
         .is_some_and(extension_is_bull)
 }
 
+pub(super) fn is_bs(event: &Value) -> bool {
+    (event["source"] == "bs_collection" || event["source"] == "files")
+        && event["name"]
+            .as_str()
+            .and_then(|name| std::path::Path::new(name).extension())
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("bs"))
+}
+
+pub(super) fn paint_bs_badge(ui: &egui::Ui, rect: egui::Rect) {
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, Color32::from_rgb(52, 72, 86));
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "BS",
+        egui::FontId::proportional((rect.height() * 0.62).clamp(8.0, 13.0)),
+        Color32::WHITE,
+    );
+}
+
 pub(super) fn paint_bull_badge(ui: &egui::Ui, rect: egui::Rect) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, Color32::from_rgb(46, 52, 62));
@@ -623,6 +650,20 @@ impl Drop for Images {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bs_badge_requires_managed_source_and_exact_extension() {
+        use serde_json::json;
+        assert!(is_bs(
+            &json!({"source":"bs_collection", "name":"files.BS", "path":"digest"})
+        ));
+        assert!(!is_bs(
+            &json!({"source":"bs_collection", "name":"files.bs.png", "path":"digest"})
+        ));
+        assert!(!is_bs(
+            &json!({"source":"manual", "name":"files.bs", "path":"digest"})
+        ));
+    }
 
     #[test]
     fn bull_badge_uses_exact_actual_extension() {

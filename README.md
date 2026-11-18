@@ -32,6 +32,10 @@ Text BULL keeps ordered exact source entries and can render each as Markdown.
 Ctrl+C copies the current source. Enter in the BULL viewer uses Katran's
 previous-window paste flow for the visible image, URL or text.
 
+Files supports BS for mixed file types. Pack, merge, unpack, preview and open
+use the Files shelf, with whole-file transfer through Copy or drag.
+See [BS v1](docs/patch-4.0/BS.md).
+
 For one selected image, Ctrl+K → **Search image with Google Lens** opens
 the default browser, which submits an image copy to Google Lens.
 

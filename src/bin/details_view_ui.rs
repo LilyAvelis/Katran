@@ -166,7 +166,9 @@ impl Shelf {
                                 rect.left_center() + egui::vec2(16.0, 0.0),
                                 egui::vec2(18.0, 18.0),
                             );
-                            if super::images::is_bull(event) {
+                            if super::images::is_bs(event) {
+                                super::images::paint_bs_badge(ui, icon_rect);
+                            } else if super::images::is_bull(event) {
                                 super::images::paint_bull_badge(ui, icon_rect);
                             } else {
                                 icon.size(18.0)

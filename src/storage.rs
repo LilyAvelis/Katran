@@ -529,6 +529,7 @@ pub(crate) fn visible_collection_input(db: &Connection, id: i64, tab: crate::int
         ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
         ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
         ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
+        ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
         ShelfTab::Images => format!("{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)", crate::catalogue_query::image_shelf_predicate()),
         _ => return Ok(false),
     };
@@ -543,7 +544,7 @@ fn require_collection_input(db: &Connection, id: i64, tab: crate::interaction::S
 }
 
 fn retire_collection(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<String> {
-    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection','text_collection')", [id], |row| row.get(0))?;
+    let hash = tx.query_row("SELECT blob_hash FROM events WHERE id=?1 AND source IN ('image_collection','image_translation_collection','link_collection','text_collection','bs_collection')", [id], |row| row.get(0))?;
     tx.execute("DELETE FROM events WHERE id=?1", [id])?;
     Ok(hash)
 }
@@ -566,7 +567,7 @@ pub(crate) fn commit_shelf_collection(
     for input in &packed.inputs {
         let id = input.event.id;
         require_collection_input(&tx, id, packed.tab)?;
-        if crate::collection::is_managed(&input.event) && tx.query_row(
+        if (crate::collection::is_managed(&input.event) || crate::bs_collection::is_managed(&input.event)) && tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM bull_members WHERE collection_id=?1 AND position>=?2)",
             params![id, input.count], |row| row.get::<_, bool>(0),
         )? {
@@ -589,7 +590,7 @@ pub(crate) fn commit_shelf_collection(
     }
     let mut obsolete = HashSet::new();
     for input in packed.inputs {
-        if crate::collection::is_managed(&input.event) {
+        if crate::collection::is_managed(&input.event) || crate::bs_collection::is_managed(&input.event) {
             tx.execute("UPDATE bull_members SET collection_id=?1,position=position+?2 WHERE collection_id=?3", params![id, input.offset, input.event.id])?;
             obsolete.insert(retire_collection(&tx, input.event.id)?);
         } else {
@@ -614,6 +615,7 @@ pub(crate) fn commit_extracted_collection_pages(
     require_collection_input(&tx, collection_id, tab)?;
     let links = tab == crate::interaction::ShelfTab::Links;
     let text = tab == crate::interaction::ShelfTab::Text;
+    let files = tab == crate::interaction::ShelfTab::Files;
     let translated = tab == crate::interaction::ShelfTab::Translate;
     if collection_members(&tx, collection_id)? != *expected_members {
         return Err(ApiError::new("stale_selection", "Collection membership changed"));
@@ -621,7 +623,9 @@ pub(crate) fn commit_extracted_collection_pages(
     let mut additions = std::collections::HashSet::new();
     let mut required: u64 = tx.query_row("SELECT COALESCE(SUM(size),0) FROM blobs", [], |row| row.get(0))?;
     for page in pages.iter().flatten() {
-        let valid = if links {
+        let valid = if files {
+            page.source == "bs_extracted_file" && page.text.is_none()
+        } else if links {
             page.link && page.source == "link_collection_page"
         } else if text {
             page.text.is_some() && !page.link && !page.table && page.source == "text_collection_page"
@@ -646,12 +650,23 @@ pub(crate) fn commit_extracted_collection_pages(
         pages.reverse();
     }
     let mut items = Vec::with_capacity(pages.len());
+    let mut obsolete = Vec::new();
     for (index, page) in pages {
         let Some(page) = page else {
             items.push(*expected_members.get(&index).ok_or_else(|| ApiError::new("invalid_collection", "Collection page is missing"))?);
             continue;
         };
-        let existing: Option<i64> = if links || text { None } else { tx.query_row(
+        if files && let Some(&id) = expected_members.get(&index) {
+            let previous: Option<String> = tx.query_row("SELECT blob_hash FROM events WHERE id=?1", [id], |row| row.get(0))?;
+            let path = publish_blob_in(&tx, root, quota, &page)?;
+            let path = path.to_str().ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+            tx.execute("DELETE FROM files_pointers WHERE event_id=?1", [id])?;
+            tx.execute("UPDATE events SET source=?1,name=?2,path=?3,size=?4,blob_hash=?5,reference_hash=NULL,delete_policy_json=json_object('kind','shelf_only'),modified_at_ms=detected_at_ms WHERE id=?6", params![page.source,page.name,path,page.size,page.hash,id])?;
+            obsolete.extend(previous);
+            items.push(id);
+            continue;
+        }
+        let existing: Option<i64> = if links || text || files { None } else { tx.query_row(
             "SELECT id FROM events e WHERE source='image_collection_page' AND name=?1 AND blob_hash=?2 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY id LIMIT 1",
             params![page.name, page.hash], |row| row.get(0)
         ).optional()? };
@@ -663,9 +678,9 @@ pub(crate) fn commit_extracted_collection_pages(
     if newest_first {
         items.reverse();
     }
-    let obsolete = retire_collection(&tx, collection_id)?;
+    obsolete.push(retire_collection(&tx, collection_id)?);
     tx.commit()?;
-    Ok((items, crate::delete_shelf::prune_unused_blobs(db, root, [obsolete])))
+    Ok((items, crate::delete_shelf::prune_unused_blobs(db, root, obsolete)))
 }
 
 fn commit_blob_in(

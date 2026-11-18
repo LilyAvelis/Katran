@@ -408,6 +408,7 @@ pub enum Command {
     },
     TranslateSelectedImage,
     CreateImageCollection,
+    CreateBsCollection,
     SearchSelectedImageWithGoogleLens,
     TranslateSelectedImageFrom {
         source: ImageTranslationSource,
@@ -423,6 +424,11 @@ pub enum Command {
         index: usize,
     },
     OpenCollectionLink {
+        id: i64,
+        revision: String,
+        index: usize,
+    },
+    OpenBsEntry {
         id: i64,
         revision: String,
         index: usize,

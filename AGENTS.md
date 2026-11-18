@@ -76,6 +76,13 @@ of one exact UTF-8 entry. Ctrl+C always copies the source. Enter in the BULL
 viewer binds the visible entry to the standard single-use previous-window
 paste lease. Do not post input without a verified clipboard publication.
 
+BS uses a distinct portable raw-file codec. Files owns BS authoring, reversible
+membership, and single-entry preview/open. A typed BULL keeps its category.
+Only BS collections may merge with BS, and collection files cannot be nested.
+Unpack keeps valid original pointers and restores archived bytes into Files
+when an original changed or disappeared. Keep disk originals intact. Internal
+view actions address one BS entry; copy and drag transfer the complete BS file.
+
 After local Translate acceptance, Lilia authorized a separate Google Lens
 action. Prepare a normalized snapshot for one explicitly selected image.
 Use a one-shot loopback handoff to the default Windows browser so its

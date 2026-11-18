@@ -1569,6 +1569,18 @@ impl Shelf {
             };
             return;
         }
+        if result["opened_bs_entry"] == true {
+            self.message = if result["revealed"] == true {
+                tr("Файл показан в Проводнике", "File shown in Explorer")
+            } else {
+                tr(
+                    "Файл передан для открытия",
+                    "File passed to the system to open",
+                )
+            }
+            .into();
+            return;
+        }
         if result["opened_collection_link"] == true {
             self.message = tr(
                 "Ссылка открывается в браузере",
@@ -1579,6 +1591,19 @@ impl Shelf {
         }
         if result["copied_collection_page"] == true {
             self.message = tr("Страница скопирована", "Page copied").into();
+            return;
+        }
+        if result["bs_collection"] == true {
+            let count = result["count"].as_u64().unwrap_or(0);
+            let label = if result["unpacked"] == true {
+                tr("Извлечено файлов", "Files unpacked")
+            } else if result["merged"] == true {
+                tr("Файлов в объединённом BS", "Files in merged BS")
+            } else {
+                tr("Файлов собрано в BS", "Files packed into BS")
+            };
+            self.message = format!("{label}: {count}");
+            self.refresh();
             return;
         }
         if result["image_collection"] == true {
@@ -2139,6 +2164,19 @@ impl Shelf {
         Some(Command::CopySmart { items })
     }
     pub(super) fn run(&mut self, id: String, ctx: &egui::Context) {
+        if id == "create_bs_collection" {
+            if self.start_job(Command::CreateBsCollection, false, ctx.clone()) {
+                self.actions = false;
+                self.message = tr("Обработка BS…", "Processing BS…").into();
+            } else if self.job.is_some() {
+                self.message = tr(
+                    "Дождитесь завершения текущей операции",
+                    "Wait for the current operation to finish",
+                )
+                .into();
+            }
+            return;
+        }
         if id == "create_image_collection" {
             if self.start_job(Command::CreateImageCollection, false, ctx.clone()) {
                 self.actions = false;
@@ -2177,7 +2215,7 @@ impl Shelf {
             let interaction = self.call(Command::Interaction);
             if let Some(event_id) = interaction["cursor"].as_i64() {
                 let event = self.call(Command::Get { id: event_id });
-                if matches!(
+                if (matches!(
                     event["source"].as_str(),
                     Some(
                         "image_translation_collection"
@@ -2185,7 +2223,7 @@ impl Shelf {
                             | "link_collection"
                             | "text_collection"
                     )
-                ) && let Some(revision) = event["revision"].as_str()
+                ) || super::images::is_bs(&event)) && let Some(revision) = event["revision"].as_str()
                 {
                     self.actions = false;
                     self.open_translation_collection(event_id, revision.to_owned(), ctx);

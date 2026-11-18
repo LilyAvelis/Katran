@@ -90,7 +90,7 @@ impl Service {
             ShelfTab::Screenshots => "e.source='sharex'".into(),
             ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
             ShelfTab::Pods => "EXISTS(SELECT 1 FROM text_fragments f JOIN text_contents c ON c.blob_hash=e.blob_hash WHERE f.event_id=e.id AND katran_is_pod(c.content)=1)".into(),
-            ShelfTab::Files => "EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)".into(),
+            ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
             ShelfTab::Desktop => "0".into(),
             ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
             ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),

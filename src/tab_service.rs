@@ -27,6 +27,9 @@ pub(crate) struct BackgroundActions {
     pack_text: bool,
     unpack_bull: bool,
     merge_bull: bool,
+    pack_bs: bool,
+    unpack_bs: bool,
+    merge_bs: bool,
 }
 
 // The Actions catalogue is presentation metadata. Resolve at most one event;
@@ -79,6 +82,9 @@ fn background_actions(
         merge_bull: false,
         pack_links: false,
         pack_text: false,
+        pack_bs: crate::bs_collection::is_packable_file(&event),
+        unpack_bs: crate::bs_collection::is_managed(&event),
+        merge_bs: false,
     }
 }
 
@@ -111,6 +117,8 @@ impl Service {
                 merge_bull: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::is_managed)),
                 pack_links: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_link)),
                 pack_text: events.as_ref().is_ok_and(|events| events.iter().all(crate::collection::packable_text)),
+                pack_bs: events.as_ref().is_ok_and(|events| events.iter().all(crate::bs_collection::is_packable_file)),
+                merge_bs: events.as_ref().is_ok_and(|events| events.iter().all(crate::bs_collection::is_managed)),
                 ..Default::default()
             };
         }
@@ -133,6 +141,8 @@ impl Service {
                 background.translate
             }
             "search_image_google_lens" => background.image,
+            "create_bs_collection" => self.interaction.tab == ShelfTab::Files
+                && (background.pack_bs || background.unpack_bs || background.merge_bs),
             "create_image_collection" => {
                 let supported = match self.interaction.tab {
                     ShelfTab::Images | ShelfTab::Translate => background.translate,
@@ -164,6 +174,16 @@ impl Service {
 
     pub(crate) fn action_label(&self, id: &str, fallback: &str, background: BackgroundActions) -> String {
         let english = self.settings.language == crate::settings::Language::English;
+        if id == "create_bs_collection" {
+            return match (background.unpack_bs, background.merge_bs, english) {
+                (true, _, true) => "Unpack BS",
+                (true, _, false) => "Разобрать BS",
+                (_, true, true) => "Merge BS collections",
+                (_, true, false) => "Объединить BS",
+                (_, _, true) => "Pack files into BS",
+                (_, _, false) => "Собрать файлы в BS",
+            }.into();
+        }
         if id == "create_image_collection" {
             if background.merge_bull {
                 return if english { "Merge BULL collections" } else { "Объединить BULL" }.into();

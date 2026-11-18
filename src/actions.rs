@@ -27,6 +27,7 @@ pub fn palette_order(id: &str) -> usize {
         "reveal",
         "search_image_google_lens",
         "create_image_collection",
+        "create_bs_collection",
         "save",
         "delete",
         "video_pause",
@@ -93,6 +94,7 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "reveal"
         | "search_image_google_lens"
         | "create_image_collection"
+        | "create_bs_collection"
         | "save"
         | "delete" => "Выбранное",
         "transfer_copy" | "transfer_selection" | "add_to_katran" => "Полка ↔ Folder",
@@ -144,6 +146,7 @@ pub fn palette_terms(id: &str) -> &'static str {
         "create_image_collection" => {
             "собрать разобрать коллекция изображения картинки bull pack unpack collection images"
         }
+        "create_bs_collection" => "bs собрать распаковать объединить файлы pack unpack merge files",
         "search_image_google_lens" => {
             "google lens поиск изображение картинка фото search image reverse visual"
         }
@@ -228,6 +231,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "desktop" => "Desktop tab",
         "translate" => "Translate tab",
         "create_image_collection" => "Pack / unpack BULL",
+        "create_bs_collection" => "Pack / unpack BS",
         "search_image_google_lens" => "Search image with Google Lens",
         "translate_image_ja" => "Translate image from Japanese",
         "translate_image_zh" => "Translate image from Simplified Chinese",
@@ -283,6 +287,14 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "create_bs_collection",
+        label: "Собрать / разобрать BS",
+        default_binding: "",
+        rebindable: true,
+        group: "Выбранное",
+        in_palette: true,
+    },
     Definition {
         id: "create_image_collection",
         label: "Собрать / разобрать BULL",
@@ -1263,6 +1275,7 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "refresh" => command(Command::List { limit: 1000 }),
         "transfer_copy" => command(Command::CopySelection),
         "create_image_collection" => command(Command::CreateImageCollection),
+        "create_bs_collection" => command(Command::CreateBsCollection),
         "search_image_google_lens" => command(Command::SearchSelectedImageWithGoogleLens),
         "use_as_background" => command(Command::UseSelectedImageAsBackground),
         "use_as_desktop_wallpaper" => command(Command::UseSelectedImageAsDesktopWallpaper),

@@ -47,6 +47,10 @@ Text BULL saves ordered UTF-8 entries and offers Markdown and source views.
 Ctrl+C in the viewer copies the current source only. Enter on a visible BULL
 entry uses the standard previous-window paste flow for images, Links and Text.
 
+Files has BS v1 for ordered mixed files. Packs replace the selected cards,
+BS collections merge with BS, and unpack restores archived content without
+editing disk originals. The built-in viewer opens one entry at a time.
+
 ## Local follow-up · Google Lens
 
 Ctrl+K offers a rebindable **Search image with Google Lens** action for one

@@ -48,6 +48,12 @@ lease before starting `CopyCollectionPage`. The existing completion path
 validates the lease and clipboard. Image-only publication proves the settled
 DIBV5 bytes and Katran marker after owner teardown before authorizing input.
 
+`CreateBsCollection` uses Files and the existing catalogue membership rules
+for packing, merging and unpacking. `baloh_collection::bs` stores independent
+raw files; `bs_collection` validates source revisions and prepares individual
+previews. `OpenBsEntry` reuses the guarded named snapshot cache and dispatches
+only one Windows open/reveal request. BS is excluded from BULL entry paste.
+
 `SearchSelectedImageWithGoogleLens` runs independently of local Translate.
 On explicit invocation it verifies one selected image and passes a bounded
 JPEG copy to the default browser through a short-lived loopback address.
