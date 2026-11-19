@@ -1,13 +1,32 @@
 //! Katran style adapter for the reusable Avilon settings layout.
 #![allow(dead_code)]
 pub(super) use avilon_egui::settings_layout::{SettingsRow, tokens};
-use eframe::egui::{self, Color32};
+use eframe::egui::{self, Color32, RichText};
 pub(super) struct SettingsSection;
 impl SettingsSection {
+    pub fn set_depth(ctx: &egui::Context, enabled: bool) {
+        let id = egui::Id::new(("settings-section-depth", ctx.viewport_id()));
+        ctx.data_mut(|data| data.insert_temp(id, enabled));
+    }
+
+    fn depth(ui: &egui::Ui) -> bool {
+        let id = egui::Id::new(("settings-section-depth", ui.ctx().viewport_id()));
+        ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false))
+    }
+
     /// A named group keeps related preferences in one raised panel.
     pub fn group(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui::Ui)) {
         ui.add_space(tokens::SM);
-        ui.label(egui::RichText::new(title).strong());
+        if Self::depth(ui) {
+            ui.label(
+                RichText::new(title)
+                    .size(17.0)
+                    .family(egui::FontFamily::Name(crate::ui_fonts::BOLD_FAMILY.into())),
+            );
+            section_rule(ui);
+        } else {
+            ui.label(RichText::new(title).strong());
+        }
         ui.add_space(tokens::XS);
         Self::show(ui, content);
         ui.add_space(tokens::SM);
@@ -23,8 +42,50 @@ impl SettingsSection {
             radius: tokens::SECTION_RADIUS,
             padding: tokens::LG as i8,
         };
-        avilon_egui::settings_layout::SettingsSection::show(ui, style, content);
+        if Self::depth(ui) {
+            let frame = egui::Frame::new()
+                .fill(style.fill)
+                .corner_radius(style.radius)
+                .inner_margin(style.padding)
+                .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(27)))
+                .shadow(egui::Shadow {
+                    offset: [0, 4],
+                    blur: 12,
+                    spread: 0,
+                    color: Color32::from_black_alpha(85),
+                });
+            avilon_egui::settings_layout::SettingsSection::show_with_frame(ui, frame, content);
+        } else {
+            avilon_egui::settings_layout::SettingsSection::show(ui, style, content);
+        }
     }
+}
+
+fn section_rule(ui: &mut egui::Ui) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 2.0), egui::Sense::hover());
+    let accent = crate::theme_ui::color(
+        ui.ctx(),
+        crate::theme_ui::Role::Accent,
+        ui.visuals().selection.stroke.color,
+    );
+    let mut mesh = egui::Mesh::default();
+    for (x, color) in [
+        (rect.left(), accent.linear_multiply(0.85)),
+        (
+            rect.left() + rect.width() * 0.28,
+            Color32::from_white_alpha(48),
+        ),
+        (rect.right(), Color32::TRANSPARENT),
+    ] {
+        mesh.colored_vertex(egui::pos2(x, rect.top()), color);
+        mesh.colored_vertex(egui::pos2(x, rect.bottom()), color);
+    }
+    for left in [0, 2] {
+        mesh.add_triangle(left, left + 2, left + 3);
+        mesh.add_triangle(left, left + 3, left + 1);
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 /// Command lists share the label/description/control ownership and narrow behavior.
 pub(super) fn command_row(

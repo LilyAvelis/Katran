@@ -1594,12 +1594,14 @@ impl State {
         let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
         let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
         let section_headers = self.draft.as_ref().is_some_and(|draft| draft.settings_section_headers);
+        let section_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_section_depth);
         let mut draft_before = self
             .draft
             .as_ref()
             .and_then(|draft| serde_json::to_value(draft).ok());
         let root_ctx = ctx.clone();
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("katran-settings"),egui::ViewportBuilder::default().with_title(super::i18n::tr("Настройки Katran", "Katran Settings")).with_decorations(false).with_inner_size([980.0,680.0]).with_min_inner_size([680.0,460.0]),|ctx,_| {
+   SettingsSection::set_depth(ctx, section_depth);
    if self.restart_confirmation {
     let prompt=egui::Modal::new(egui::Id::new("restart-confirmation")).show(ctx,|ui|{
             ui.heading(super::i18n::tr("Перезапустить Katran?", "Restart Katran?"));
@@ -2053,6 +2055,9 @@ impl State {
         SettingsSection::group(ui, super::i18n::tr("Разделы настроек", "Settings sections"), |ui| {
          ui.checkbox(&mut draft.settings_section_headers, super::i18n::tr(
           "Шапки разделов по центру", "Centered section headers",
+         ));
+         ui.checkbox(&mut draft.settings_section_depth, super::i18n::tr(
+          "Объёмные панели и линии под заголовками", "Raised panels and heading rules",
          ));
         });
         SettingsSection::group(ui, super::i18n::tr("Боковая панель", "Sidebar"), |ui| {

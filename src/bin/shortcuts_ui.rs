@@ -411,15 +411,64 @@ fn keycap_button(
     raised: bool,
     small: bool,
 ) -> egui::Response {
-    let painter = ui.painter().clone();
-    let shadow = raised.then(|| painter.add(egui::Shape::Noop));
+    use egui::{Color32, FontId};
+    let font_size = if small { 13.0 } else { 15.0 };
+    if raised {
+        let color = if !enabled {
+            ui.visuals().weak_text_color()
+        } else if !small {
+            Color32::from_rgb(255, 160, 147)
+        } else {
+            ui.visuals().text_color()
+        };
+        let legend =
+            ui.painter()
+                .layout_no_wrap(label.to_owned(), FontId::proportional(font_size), color);
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.add(
+                    egui::Button::new(
+                        egui::RichText::new(label)
+                            .size(font_size)
+                            .color(Color32::TRANSPARENT),
+                    )
+                    .frame(false)
+                    .min_size(egui::vec2(
+                        legend.size().x + if small { 16.0 } else { 26.0 },
+                        if small { 28.0 } else { 36.0 },
+                    )),
+                )
+            })
+            .inner;
+        let painter = ui.painter().with_clip_rect(response.rect);
+        let base = face_color(ui);
+        let lit = enabled && (response.hovered() || response.has_focus());
+        let base = if lit {
+            shade(base, Color32::WHITE, 0.10)
+        } else {
+            base
+        };
+        let top = paint_keycap(
+            &painter,
+            response.rect,
+            base,
+            response.is_pointer_button_down_on(),
+        );
+        if response.has_focus() {
+            painter.rect_stroke(
+                top,
+                4.0,
+                ui.visuals().selection.stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        painter.galley(top.center() - legend.size() * 0.5, legend, color);
+        return response;
+    }
     let response = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = egui::vec2(if small { 7.0 } else { 11.0 }, 3.0);
-            let mut text = egui::RichText::new(label).size(if small { 13.0 } else { 15.0 });
-            if raised && enabled && !small {
-                text = text.color(egui::Color32::from_rgb(247, 125, 116));
-            }
+            let text = egui::RichText::new(label).size(font_size);
             ui.add_enabled(
                 enabled,
                 egui::Button::new(text)
@@ -429,25 +478,86 @@ fn keycap_button(
             )
         })
         .inner;
-    if let Some(shadow) = shadow
-        && enabled
-        && !response.is_pointer_button_down_on()
-    {
-        painter.set(
-            shadow,
-            egui::Shape::rect_filled(
-                response.rect.translate(egui::vec2(0.0, 2.0)),
-                5.0,
-                egui::Color32::from_black_alpha(120),
-            ),
-        );
-    }
     response
+}
+
+fn face_color(ui: &egui::Ui) -> egui::Color32 {
+    super::theme_ui::color(
+        ui.ctx(),
+        super::theme_ui::Role::Raised,
+        egui::Color32::from_gray(59),
+    )
+    .to_opaque()
+}
+
+fn shade(base: egui::Color32, target: egui::Color32, amount: f32) -> egui::Color32 {
+    let mix = |a, b| egui::lerp(f32::from(a)..=f32::from(b), amount).round() as u8;
+    egui::Color32::from_rgb(
+        mix(base.r(), target.r()),
+        mix(base.g(), target.g()),
+        mix(base.b(), target.b()),
+    )
+}
+
+/// Paint the sloped walls and return the top face for the key legend.
+fn paint_keycap(
+    painter: &egui::Painter,
+    bounds: egui::Rect,
+    base: egui::Color32,
+    pressed: bool,
+) -> egui::Rect {
+    use egui::{Color32, Stroke, pos2, vec2};
+    let outer = bounds.shrink(1.0);
+    let inset = (outer.height() * 0.11).clamp(2.5, 5.0);
+    let depth = (outer.height() * 0.25).clamp(5.0, 11.0);
+    let travel = if pressed { depth * 0.58 } else { 0.0 };
+    let top = egui::Rect::from_min_max(
+        outer.min + vec2(inset, inset * 0.5 + travel),
+        outer.max - vec2(inset, depth - travel),
+    );
+    let edge =
+        |points, color| painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+    painter.rect_filled(outer, 7.0, shade(base, Color32::BLACK, 0.63));
+    edge(
+        vec![
+            pos2(outer.left(), outer.top() + 6.0),
+            top.left_top(),
+            top.left_bottom(),
+            pos2(outer.left() + 2.5, outer.bottom() - 4.0),
+        ],
+        shade(base, Color32::WHITE, 0.17),
+    );
+    edge(
+        vec![
+            top.right_top(),
+            pos2(outer.right(), outer.top() + 6.0),
+            pos2(outer.right() - 2.5, outer.bottom() - 4.0),
+            top.right_bottom(),
+        ],
+        shade(base, Color32::BLACK, 0.27),
+    );
+    edge(
+        vec![
+            top.left_bottom(),
+            top.right_bottom(),
+            pos2(outer.right() - 3.5, outer.bottom() - 2.0),
+            pos2(outer.left() + 3.5, outer.bottom() - 2.0),
+        ],
+        shade(base, Color32::BLACK, 0.41),
+    );
+    painter.rect(
+        top,
+        5.0,
+        shade(base, Color32::WHITE, 0.095),
+        Stroke::new(1.0, shade(base, Color32::WHITE, 0.30)),
+        egui::StrokeKind::Inside,
+    );
+    top
 }
 
 fn capture_field(ui: &mut egui::Ui, binding: &str, raised: bool) {
     use super::theme_ui::{self, Role};
-    use egui::{Color32, FontId};
+    use egui::FontId;
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 112.0),
         egui::Sense::hover(),
@@ -488,21 +598,19 @@ fn capture_field(ui: &mut egui::Ui, binding: &str, raised: bool) {
             egui::pos2(left, rect.center().y - 22.0),
             egui::vec2(width(&key), 44.0),
         );
-        if raised {
-            painter.rect_filled(
-                bounds.translate(egui::vec2(0.0, 3.0)),
+        let face = if raised {
+            paint_keycap(&painter, bounds, face_color(ui), false)
+        } else {
+            painter.rect(
+                bounds,
                 7.0,
-                Color32::from_black_alpha(130),
+                theme_ui::color(ui.ctx(), Role::Raised, egui::Color32::from_gray(59)),
+                ui.visuals().widgets.inactive.bg_stroke,
+                egui::StrokeKind::Inside,
             );
-        }
-        painter.rect(
-            bounds,
-            7.0,
-            theme_ui::color(ui.ctx(), Role::Raised, Color32::from_gray(59)),
-            ui.visuals().widgets.inactive.bg_stroke,
-            egui::StrokeKind::Inside,
-        );
-        painter.galley(bounds.center() - key.size() * 0.5, key, color);
+            bounds
+        };
+        painter.galley(face.center() - key.size() * 0.5, key, color);
         left = bounds.right() + gap;
     }
 }

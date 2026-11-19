@@ -152,6 +152,8 @@ pub struct Settings {
     pub settings_raised_keycaps: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_section_headers: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub settings_section_depth: bool,
     #[serde(skip_serializing_if = "UiFont::is_default")]
     pub ui_font: UiFont,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -212,6 +214,7 @@ impl Settings {
             settings_summon_popover: false,
             settings_raised_keycaps: false,
             settings_section_headers: false,
+            settings_section_depth: false,
             ui_font: UiFont::Default,
             settings_section_order: Vec::new(),
             link_favicons_online: false,

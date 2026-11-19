@@ -27,15 +27,23 @@ pub struct SectionStyle {
 pub struct SettingsSection;
 impl SettingsSection {
     pub fn show(ui: &mut egui::Ui, style: SectionStyle, content: impl FnOnce(&mut egui::Ui)) {
-        egui::Frame::new()
+        let frame = egui::Frame::new()
             .fill(style.fill)
             .corner_radius(style.radius)
-            .inner_margin(style.padding)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing = egui::vec2(tokens::SM, tokens::SM);
-                content(ui);
-            });
+            .inner_margin(style.padding);
+        Self::show_with_frame(ui, frame, content);
+    }
+
+    pub fn show_with_frame(
+        ui: &mut egui::Ui,
+        frame: egui::Frame,
+        content: impl FnOnce(&mut egui::Ui),
+    ) {
+        frame.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing = egui::vec2(tokens::SM, tokens::SM);
+            content(ui);
+        });
     }
 }
 #[derive(Clone, Copy, Debug)]
