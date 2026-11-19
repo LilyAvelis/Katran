@@ -10,7 +10,7 @@ fn old_settings_and_filtered_positions_are_compatible() {
     settings.hidden_tabs.push(Images);
     assert_eq!(
         settings.visible_tabs(),
-        vec![Screenshots, Files, Desktop, Translate]
+        vec![Screenshots, Files, Desktop, Translate, Pages]
     );
     assert_eq!(
         tab_layout::tab_at_visible(&settings.visible_tabs(), 0).unwrap(),
@@ -32,7 +32,11 @@ fn old_settings_and_filtered_positions_are_compatible() {
         tab_layout::tab_at_visible(&settings.visible_tabs(), 4).unwrap(),
         Translate
     );
-    assert!(tab_layout::tab_at_visible(&settings.visible_tabs(), 5).is_err());
+    assert_eq!(
+        tab_layout::tab_at_visible(&settings.visible_tabs(), 5).unwrap(),
+        Pages
+    );
+    assert!(tab_layout::tab_at_visible(&settings.visible_tabs(), 6).is_err());
     let restored: Settings =
         serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
     assert_eq!(restored.hidden_tabs, vec![Images]);
@@ -48,7 +52,8 @@ fn old_settings_and_filtered_positions_are_compatible() {
             Pods,
             Files,
             Desktop,
-            Translate
+            Translate,
+            Pages
         ]
     );
 }
@@ -62,7 +67,15 @@ fn hidden_tabs_reject_all_and_duplicates() {
     assert!(settings.validate(0).is_err());
     settings.hidden_tabs = vec![Images, Images];
     assert!(settings.validate(0).is_err());
-    settings.hidden_tabs = vec![Downloads, Screenshots, Images, Files, Desktop, Translate];
+    settings.hidden_tabs = vec![
+        Downloads,
+        Screenshots,
+        Images,
+        Files,
+        Desktop,
+        Translate,
+        Pages,
+    ];
     assert!(settings.validate(0).is_ok());
     assert!(settings.visible_tabs().is_empty());
     assert_eq!(tab_layout::tab_at_visible(&[], 0).unwrap(), All);

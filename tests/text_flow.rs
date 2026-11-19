@@ -155,7 +155,8 @@ fn feature_visibility_search_and_file_transfer_share_the_domain() {
             "text",
             "files",
             "desktop",
-            "translate"
+            "translate",
+            "pages"
         ])
     );
 }
@@ -219,7 +220,8 @@ fn legacy_saved_tab_order_appends_disabled_text_and_shared_content_is_reclaimed(
             "pods",
             "files",
             "desktop",
-            "translate"
+            "translate",
+            "pages"
         ])
     );
     assert_eq!(settings["links_enabled"], false);
@@ -231,7 +233,8 @@ fn legacy_saved_tab_order_appends_disabled_text_and_shared_content_is_reclaimed(
             "screenshots",
             "files",
             "desktop",
-            "translate"
+            "translate",
+            "pages"
         ])
     );
 }

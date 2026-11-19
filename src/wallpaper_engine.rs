@@ -606,7 +606,7 @@ mod silent_tests {
                 "-t",
                 "1",
                 "-c:v",
-                "libx264",
+                "mpeg4",
                 "-c:a",
                 "aac",
                 "-y",

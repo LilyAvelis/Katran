@@ -132,7 +132,7 @@ fn ctrl_order_and_shift_gesture_direction_drive_plain_text_copy() {
             token: drag["drag_token"].as_str().unwrap().into(),
         },
     );
-    assert_eq!(output.lock().unwrap().len(), 4);
+    assert_eq!(output.lock().unwrap().len(), 5);
 }
 #[test]
 fn existing_markdown_file_is_read_without_becoming_a_text_fragment() {

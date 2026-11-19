@@ -24,6 +24,8 @@ pub fn palette_order(id: &str) -> usize {
         "open",
         "apply_text_draft",
         "show_text_vault",
+        "move_to_pages",
+        "open_pages_vault",
         "open_with",
         "quicklook",
         "reveal",
@@ -95,6 +97,8 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "open"
         | "apply_text_draft"
         | "show_text_vault"
+        | "move_to_pages"
+        | "open_pages_vault"
         | "open_with"
         | "quicklook"
         | "reveal"
@@ -247,6 +251,7 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "files" => "Files tab",
         "desktop" => "Desktop tab",
         "translate" => "Translate tab",
+        "pages" => "Pages tab",
         "create_image_collection" => "Pack / unpack BULL",
         "create_bs_collection" => "Pack / unpack BS",
         "collection_fullscreen" => "Toggle collection fullscreen",
@@ -282,6 +287,8 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "open" => "Open selected item",
         "apply_text_draft" => "Apply Text draft",
         "show_text_vault" => "Open Text vault folder",
+        "move_to_pages" => "Move to Pages",
+        "open_pages_vault" => "Open Pages vault in Obsidian",
         "copy" => "Copy selection",
         "delete" => "Delete selected items…",
         "save" => "Save selected items to folder…",
@@ -555,6 +562,14 @@ pub const DEFS: &[Definition] = &[
         rebindable: true,
         group: "Передача",
         in_palette: true,
+    },
+    Definition {
+        id: "pages",
+        label: "Вкладка Pages",
+        default_binding: "",
+        rebindable: true,
+        group: "Навигация",
+        in_palette: false,
     },
     Definition {
         id: "translate",
@@ -855,6 +870,22 @@ pub const DEFS: &[Definition] = &[
     Definition {
         id: "apply_text_draft",
         label: "Применить правки текста",
+        default_binding: "",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "move_to_pages",
+        label: "Перенести в Pages",
+        default_binding: "",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "open_pages_vault",
+        label: "Открыть Pages в Obsidian",
         default_binding: "",
         rebindable: true,
         group: "Файл",
@@ -1211,6 +1242,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
         "desktop" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Desktop,
         }),
+        "pages" => command(Command::SetTab {
+            tab: crate::interaction::ShelfTab::Pages,
+        }),
         "translate" => command(Command::SetTab {
             tab: crate::interaction::ShelfTab::Translate,
         }),
@@ -1293,6 +1327,8 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
                 .unwrap_or(0),
         }),
         "show_text_vault" => command(Command::ShowTextVault),
+        "move_to_pages" => command(Command::MoveToPages),
+        "open_pages_vault" => command(Command::OpenPagesVault),
         "open" | "reveal" => command(Command::OpenFile {
             id: state
                 .cursor

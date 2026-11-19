@@ -419,7 +419,7 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
     let properties = call(&mut api, Command::GetPinnedProperties { id });
     assert_eq!(properties["properties"]["pinned"], true);
@@ -431,7 +431,7 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("before-v13"))
+                .contains("before-v17"))
     );
 }
 #[test]

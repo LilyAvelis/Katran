@@ -16,6 +16,7 @@ pub enum ShelfTab {
     Files,
     Desktop,
     Translate,
+    Pages,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -103,7 +104,7 @@ impl Interaction {
         self.set_preview(None);
     }
     pub fn select_position(&mut self, tab: ShelfTab) {
-        if self.tab == tab && tab != ShelfTab::All {
+        if self.tab == tab && !matches!(tab, ShelfTab::All | ShelfTab::Pages) {
             self.toggle_pinned_only();
         } else {
             self.set_tab(tab);

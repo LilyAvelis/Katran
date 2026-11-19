@@ -204,10 +204,10 @@ fn find_reference(line: &str) -> Option<(usize, ReferenceKind, &str, usize)> {
                 ("database", ReferenceKind::Database),
                 ("page", ReferenceKind::Page),
             ] {
-                if let Some((attrs, tail)) = tag(&line[i..], name) {
-                    if !attrs.trim_end().ends_with('/') {
-                        return Some((i, kind, attrs, line.len() - tail.len()));
-                    }
+                if let Some((attrs, tail)) = tag(&line[i..], name)
+                    && !attrs.trim_end().ends_with('/')
+                {
+                    return Some((i, kind, attrs, line.len() - tail.len()));
                 }
             }
         }

@@ -125,10 +125,12 @@ mod tests {
 
     #[test]
     fn typed_exact_results_override_search_mode_and_history_retains_order() {
-        let mut state = State::default();
-        state.exact = ResultItem::from_value(
-            &serde_json::json!({"kind":"database","id":"db","title":"Database"}),
-        );
+        let mut state = State {
+            exact: ResultItem::from_value(
+                &serde_json::json!({"kind":"database","id":"db","title":"Database"}),
+            ),
+            ..State::default()
+        };
         assert!(state.results()[0].database);
         state.search_kind = SearchKind::Databases;
         state.exact =

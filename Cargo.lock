@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "katran"
-version = "4.1.5"
+version = "4.2.0"
 dependencies = [
  "arboard",
  "avilon-actions",

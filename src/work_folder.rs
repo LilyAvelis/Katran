@@ -20,6 +20,7 @@ use std::{
 #[derive(Clone, Default)]
 pub struct State {
     root: Option<PathBuf>,
+    pages_only: bool,
     generation: Cell<u64>,
     cache: RefCell<Arc<Cache>>,
 }
@@ -38,6 +39,14 @@ struct Cursor {
 }
 
 impl State {
+    pub(crate) fn pages() -> Self {
+        let mut state = Self {
+            pages_only: true,
+            ..Self::default()
+        };
+        Arc::make_mut(state.cache.get_mut()).next = crate::pages::ID_BASE;
+        state
+    }
     pub fn choose(&mut self, path: &Path) -> Result<()> {
         let root = path.canonicalize()?;
         if !root.is_dir() {
@@ -108,6 +117,9 @@ impl State {
                 continue;
             }
             let path = entry.path();
+            if self.pages_only && !crate::pages::is_document(&path) {
+                continue;
+            }
             let metadata = match fs::symlink_metadata(&path) {
                 Ok(m) => m,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -138,20 +150,30 @@ impl State {
                 .get(&path)
                 .is_none_or(|event| event.revision != revision);
             if needs_new {
-                let id = cache
-                    .next
-                    .checked_sub(1)
-                    .ok_or_else(|| ApiError::new("id_exhausted", "Working folder IDs exhausted"))?;
-                if crate::pods::is_emoji_id(id)
-                    || crate::notion::is_folder_page_id(id)
-                    || id <= crate::desktop_projection::DESKTOP_ID_MAX
-                {
-                    return Err(ApiError::new(
-                        "id_exhausted",
-                        "Working folder IDs exhausted",
-                    ));
-                }
-                cache.next = id;
+                let existing_id = self
+                    .pages_only
+                    .then(|| cache.by_path.get(&path).map(|event| event.id))
+                    .flatten();
+                let id = if let Some(id) = existing_id {
+                    id
+                } else {
+                    let id = cache.next.checked_sub(1).ok_or_else(|| {
+                        ApiError::new("id_exhausted", "Working folder IDs exhausted")
+                    })?;
+                    if (self.pages_only && !crate::pages::is_id(id))
+                        || (!self.pages_only && id <= crate::pages::ID_BASE)
+                        || crate::pods::is_emoji_id(id)
+                        || crate::notion::is_folder_page_id(id)
+                        || id <= crate::desktop_projection::DESKTOP_ID_MAX
+                    {
+                        return Err(ApiError::new(
+                            "id_exhausted",
+                            "Working folder IDs exhausted",
+                        ));
+                    }
+                    cache.next = id;
+                    id
+                };
                 let modified = metadata.modified().ok().and_then(sorting::modified_ms);
                 let event = Event {
                     kind: EventKind::FileReference,

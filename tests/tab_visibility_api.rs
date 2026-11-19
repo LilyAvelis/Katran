@@ -26,15 +26,66 @@ fn setup() -> (tempfile::TempDir, Service) {
 }
 
 #[test]
-fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
-    let (root, mut api) = setup();
+fn a_tenth_numbered_tab_requires_freeing_a_slot() {
+    let (_root, mut api) = setup();
+    for tab in [ShelfTab::Text, ShelfTab::Links] {
+        call(&mut api, Command::SetTabEnabled { tab, enabled: true });
+    }
+    let tabs = call(&mut api, Command::Tabs);
+    assert_eq!(tabs["visible_tabs"].as_array().unwrap().len(), 9);
+    assert_eq!(
+        reply(
+            &mut api,
+            Command::SetTabEnabled {
+                tab: ShelfTab::Pods,
+                enabled: true
+            }
+        )["error"]["code"],
+        "tab_limit"
+    );
+    for position in 1..=9 {
+        assert_eq!(
+            call(&mut api, Command::SelectTabPosition { position })["tab"],
+            tabs["visible_tabs"][usize::from(position - 1)]
+        );
+    }
+    assert_eq!(
+        reply(&mut api, Command::SelectTabPosition { position: 10 })["error"]["code"],
+        "invalid_tab_position"
+    );
     call(
         &mut api,
         Command::SetTabEnabled {
-            tab: ShelfTab::Translate,
+            tab: ShelfTab::Links,
             enabled: false,
         },
     );
+    let restored = call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pods,
+            enabled: true,
+        },
+    );
+    assert_eq!(restored["visible_tabs"].as_array().unwrap().len(), 9);
+    assert_eq!(
+        call(&mut api, Command::SelectTabPosition { position: 0 })["tab"],
+        "folder"
+    );
+}
+
+#[test]
+fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
+    let (root, mut api) = setup();
+    for tab in [ShelfTab::Translate, ShelfTab::Pages] {
+        call(
+            &mut api,
+            Command::SetTabEnabled {
+                tab,
+                enabled: false,
+            },
+        );
+    }
     call(
         &mut api,
         Command::SetTabEnabled {

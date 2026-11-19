@@ -529,39 +529,37 @@ fn keycap_button(
         painter.galley(top.center() - legend.size() * 0.5, legend, color);
         return response;
     }
-    let response = ui
-        .scope(|ui| {
-            ui.spacing_mut().button_padding = egui::vec2(if small { 7.0 } else { 11.0 }, 3.0);
-            let mut text = egui::RichText::new(label).size(font_size);
-            if enabled && !small {
-                text = text.color(accent);
-            }
-            let width = ui
-                .painter()
-                .layout_no_wrap(
-                    label.to_owned(),
-                    FontId::proportional(font_size),
-                    Color32::WHITE,
-                )
-                .size()
-                .x
-                + ui.spacing().button_padding.x * 2.0;
-            ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(
-                    [
-                        width.clamp(28.0, max_width),
-                        if small { 23.0 } else { 30.0 },
-                    ],
-                    egui::Button::new(text)
-                        .truncate()
-                        .corner_radius(5.0)
-                        .stroke(ui.visuals().widgets.inactive.bg_stroke),
-                )
-            })
-            .inner
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = egui::vec2(if small { 7.0 } else { 11.0 }, 3.0);
+        let mut text = egui::RichText::new(label).size(font_size);
+        if enabled && !small {
+            text = text.color(accent);
+        }
+        let width = ui
+            .painter()
+            .layout_no_wrap(
+                label.to_owned(),
+                FontId::proportional(font_size),
+                Color32::WHITE,
+            )
+            .size()
+            .x
+            + ui.spacing().button_padding.x * 2.0;
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.add_sized(
+                [
+                    width.clamp(28.0, max_width),
+                    if small { 23.0 } else { 30.0 },
+                ],
+                egui::Button::new(text)
+                    .truncate()
+                    .corner_radius(5.0)
+                    .stroke(ui.visuals().widgets.inactive.bg_stroke),
+            )
         })
-        .inner;
-    response
+        .inner
+    })
+    .inner
 }
 
 fn face_color(ui: &egui::Ui) -> egui::Color32 {

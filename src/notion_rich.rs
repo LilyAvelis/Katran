@@ -282,11 +282,7 @@ impl Reader {
                 self.text(&text);
                 self.style.code = previous;
             }
-            Event::InlineHtml(tag) => {
-                if !self.html_tag(&tag) {
-                    self.text(&tag);
-                }
-            }
+            Event::InlineHtml(tag) if !self.html_tag(&tag) => self.text(&tag),
             Event::Html(fragment) => self.html(&fragment),
             Event::SoftBreak => self.text(" "),
             Event::HardBreak => self.text("\n"),

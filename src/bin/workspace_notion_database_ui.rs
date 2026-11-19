@@ -361,21 +361,21 @@ impl Shelf {
         let Some(mut database) = self.workspace.database.take() else {
             return;
         };
-        if std::mem::take(&mut database.restoring) {
-            if let Some(id) = database.selected().map(|row| row.projection_id) {
-                self.state = self.call(Command::SetVisible {
-                    ids: database.rows.iter().map(|row| row.projection_id).collect(),
-                });
-                self.state = self.call(Command::Select {
-                    id,
-                    mode: katran::interaction::SelectionMode::Replace,
-                });
-                if !database.had_selection {
-                    self.state = self.call(Command::ClearSelection);
-                }
-                if database.resume_reader {
-                    self.state = self.call(Command::OpenCurrent);
-                }
+        if std::mem::take(&mut database.restoring)
+            && let Some(id) = database.selected().map(|row| row.projection_id)
+        {
+            self.state = self.call(Command::SetVisible {
+                ids: database.rows.iter().map(|row| row.projection_id).collect(),
+            });
+            self.state = self.call(Command::Select {
+                id,
+                mode: katran::interaction::SelectionMode::Replace,
+            });
+            if !database.had_selection {
+                self.state = self.call(Command::ClearSelection);
+            }
+            if database.resume_reader {
+                self.state = self.call(Command::OpenCurrent);
             }
         }
         let cursor = self.state["preview"]
@@ -582,11 +582,16 @@ impl Shelf {
     }
 
     pub(crate) fn text_reader_active(&self) -> bool {
-        self.state["tab"] == "text"
+        matches!(self.state["tab"].as_str(), Some("text" | "pages"))
             && self.state["preview"].as_i64().is_some_and(|id| {
-                self.events
-                    .iter()
-                    .any(|event| event["id"] == id && event["kind"] == "text_fragment")
+                self.events.iter().any(|event| {
+                    event["id"] == id
+                        && (event["kind"] == "text_fragment"
+                            || (self.state["tab"] == "pages"
+                                && event["name"].as_str().is_some_and(|name| {
+                                    katran::file_types::is_markdown(std::path::Path::new(name))
+                                })))
+                })
             })
     }
 
@@ -870,6 +875,7 @@ impl Shelf {
                 | "files"
                 | "desktop"
                 | "translate"
+                | "pages"
                 | "sort_arrival"
                 | "sort_arrival_reverse"
                 | "sort_name"

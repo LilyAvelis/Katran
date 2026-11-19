@@ -15,6 +15,7 @@ pub fn label(tab: ShelfTab) -> &'static str {
         ShelfTab::Files => "Files",
         ShelfTab::Desktop => "Desktop",
         ShelfTab::Translate => "Translate",
+        ShelfTab::Pages => "Pages",
     }
 }
 
@@ -183,6 +184,8 @@ impl Service {
         match id {
             "apply_text_draft" => self.text_card_for_obsidian(),
             "show_text_vault" => self.interaction.tab == ShelfTab::Text,
+            "move_to_pages" => self.can_move_to_pages(),
+            "open_pages_vault" => self.interaction.tab == ShelfTab::Pages,
             "video_pause" | "capture_video_frame" | "extract_video_audio" => background.video,
             "folder_favorites" | "folder_history" | "folder_standard" => {
                 self.interaction.tab == ShelfTab::All
@@ -208,6 +211,7 @@ impl Service {
                             || background.unpack_bull
                             || background.merge_bull;
                     }
+                    ShelfTab::Pages => return self.pages_collection_available(),
                     ShelfTab::All => return background.pack_bs || self.current_archive_selection(),
                     _ => return false,
                 };
@@ -229,6 +233,7 @@ impl Service {
             "files" => self.settings.tab_enabled(ShelfTab::Files),
             "desktop" => self.settings.tab_enabled(ShelfTab::Desktop),
             "translate" => self.settings.tab_enabled(ShelfTab::Translate),
+            "pages" => self.settings.tab_enabled(ShelfTab::Pages),
             _ => true,
         }
     }
@@ -240,7 +245,14 @@ impl Service {
         background: BackgroundActions,
     ) -> String {
         let english = self.settings.language == crate::settings::Language::English;
-        if id == "open" && self.text_card_for_obsidian() {
+        if id == "open"
+            && (self.text_card_for_obsidian()
+                || (self.interaction.tab == ShelfTab::Pages
+                    && self.interaction.cursor.is_some_and(|id| {
+                        self.get(id)
+                            .is_ok_and(|event| crate::file_types::is_markdown(&event.path))
+                    })))
+        {
             return if english {
                 "Edit in Obsidian"
             } else {
@@ -249,7 +261,10 @@ impl Service {
             .into();
         }
         if id == "create_image_collection"
-            && matches!(self.interaction.tab, ShelfTab::Files | ShelfTab::All)
+            && matches!(
+                self.interaction.tab,
+                ShelfTab::Files | ShelfTab::All | ShelfTab::Pages
+            )
         {
             return match (background.unpack_bs, background.merge_bs, english) {
                 (true, _, true) => "Unpack collection",
@@ -419,6 +434,15 @@ impl Service {
     pub(crate) fn set_tab_enabled(&mut self, tab: ShelfTab, enabled: bool) -> Result<Value> {
         if tab == ShelfTab::All {
             return Err(ApiError::new("fixed_tab", "Folder is always enabled"));
+        }
+        if enabled
+            && !self.settings.tab_enabled(tab)
+            && self.settings.visible_tabs().len() >= crate::tab_layout::MAX_NUMBERED_TABS
+        {
+            return Err(ApiError::new(
+                "tab_limit",
+                "Disable a numbered tab before enabling another. Katran supports positions 1–9.",
+            ));
         }
         let mut settings = self.settings.clone();
         settings.hidden_tabs.retain(|t| *t != tab);

@@ -9,7 +9,7 @@ use crate::{
 use baloh_collection::bs::FileEntry;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, io::Read, path::PathBuf};
 
 pub(crate) struct Prepared {
     pub(crate) folder: PathBuf,
@@ -39,6 +39,7 @@ pub(crate) fn prepare(
     events: Vec<Event>,
     folder: PathBuf,
     quota: u64,
+    pages: bool,
     cancel: &Cancellation,
 ) -> Result<Prepared> {
     let mut sources = Vec::with_capacity(events.len());
@@ -71,6 +72,17 @@ pub(crate) fn prepare(
             }
         }
         kind
+    } else if pages {
+        if !events
+            .iter()
+            .all(|event| crate::file_types::is_markdown(&event.path))
+        {
+            return Err(ApiError::new(
+                "invalid_selection",
+                "Select Markdown pages or BULLs of the same type",
+            ));
+        }
+        Kind::Text
     } else {
         collection_kind::choose_folder_files(&events)
     };
@@ -101,7 +113,7 @@ pub(crate) fn prepare(
     let mut archive_hash = None;
     let (output, count) = if unpacked {
         let event = &events[0];
-        let entries = entries(event, &kind, cancel)?;
+        let entries = entries(event, &kind, pages, cancel)?;
         let count = entries.len();
         (
             Output::Extraction(folder_collection::prepare_flat_extraction(
@@ -123,7 +135,23 @@ pub(crate) fn prepare(
                 let mut values = Vec::new();
                 for event in &events {
                     cancel.check()?;
-                    values.extend(collection::read_texts(event)?);
+                    if pages && !archives {
+                        let mut bytes = Vec::new();
+                        File::open(&event.path)?
+                            .take((crate::text_fragments::MAX_TEXT_BYTES + 1) as u64)
+                            .read_to_end(&mut bytes)?;
+                        if bytes.len() > crate::text_fragments::MAX_TEXT_BYTES {
+                            return Err(ApiError::new(
+                                "text_too_large",
+                                "Markdown exceeds the collection page size limit",
+                            ));
+                        }
+                        values.push(String::from_utf8(bytes).map_err(|_| {
+                            ApiError::new("invalid_text", "Markdown must be UTF-8")
+                        })?);
+                    } else {
+                        values.extend(collection::read_texts(event)?);
+                    }
                     if values.len() > baloh_collection::MAX_ENTRIES {
                         return Err(too_many());
                     }
@@ -298,7 +326,12 @@ fn too_many() -> ApiError {
     )
 }
 
-fn entries(event: &Event, kind: &Kind, cancel: &Cancellation) -> Result<Vec<FileEntry>> {
+fn entries(
+    event: &Event,
+    kind: &Kind,
+    pages: bool,
+    cancel: &Cancellation,
+) -> Result<Vec<FileEntry>> {
     open_file::validate(event)?;
     let result = match kind {
         Kind::Bs | Kind::Files(_) => return bs_collection::read_collection(event, cancel),
@@ -314,7 +347,7 @@ fn entries(event: &Event, kind: &Kind, cancel: &Cancellation) -> Result<Vec<File
             .into_iter()
             .enumerate()
             .map(|(index, value)| FileEntry {
-                name: format!("{:02}.txt", index + 1),
+                name: format!("{:02}.{}", index + 1, if pages { "md" } else { "txt" }),
                 bytes: value.into_bytes(),
             })
             .collect(),

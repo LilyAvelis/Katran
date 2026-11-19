@@ -224,7 +224,9 @@ impl Shelf {
                             if let Some(api) = self.api.as_mut() {
                                 self.table_preview.show(ui, event, api);
                             }
-                        } else if self.state["tab"] == "text" && event["kind"] == "text_fragment" {
+                        } else if (self.state["tab"] == "text" && event["kind"] == "text_fragment")
+                            || (self.state["tab"] == "pages" && event["name"].as_str().is_some_and(|name| katran::file_types::is_markdown(std::path::Path::new(name))))
+                        {
                             let preferences = self.text_reader_preferences();
                             let preferences = self.text_preview.reader_draft.unwrap_or(preferences);
                             if !self.modal_owns_input() && !super::search_or_text_edit_focused(ctx) {
@@ -233,6 +235,9 @@ impl Shelf {
                             self.pods_ui.begin_frame();
                             self.text_preview.show_reader(ui, event, preferences, &mut self.pods_ui);
                             self.pods_ui.end_frame();
+                            if let Some(target) = self.text_preview.attachment_request.take() {
+                                self.call(Command::OpenPageAttachment { id, target });
+                            }
                         } else if matches!(
                             event["kind"].as_str(),
                             Some("text_fragment" | "link_fragment")
@@ -380,6 +385,23 @@ impl Shelf {
                                 }
                             }
                         }
+                    }
+                } else if self.state["tab"] == "pages" && visible.is_empty() {
+                    self.images.clear_preview_geometry();
+                    if self.query.trim().is_empty() {
+                        ui.add_space(20.0);
+                        ui.vertical_centered(|ui| {
+                            ui.heading("Pages");
+                            ui.label(tr(
+                                "Выбери заметки в Text и нажми Ctrl+K → Перенести в Pages.",
+                                "Select notes in Text and use Ctrl+K → Move to Pages.",
+                            ));
+                            if ui.button(tr("Открыть папку Pages", "Open Pages folder")).clicked() {
+                                self.call(Command::ShowPagesFolder);
+                            }
+                        });
+                    } else {
+                        ui.label(tr("Страницы не найдены.", "No pages found."));
                     }
                 } else if self.state["tab"] == "translate" && visible.is_empty() {
                     self.images.clear_preview_geometry();

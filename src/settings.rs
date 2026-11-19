@@ -276,6 +276,13 @@ impl Settings {
             .filter(|tab| self.tab_enabled(*tab))
             .collect()
     }
+    pub(crate) fn hide_excess_numbered_tabs(&mut self) {
+        self.hidden_tabs.extend(
+            self.visible_tabs()
+                .into_iter()
+                .skip(crate::tab_layout::MAX_NUMBERED_TABS),
+        );
+    }
     pub(crate) fn validate_tab_hotkeys(&self) -> crate::overlay::Result<()> {
         let mut seen = Vec::new();
         if !self.overlay_hotkey.trim().is_empty() {
@@ -301,6 +308,7 @@ impl Settings {
         Ok(())
     }
     pub fn validate(&self, usage: u64) -> Result<(), String> {
+        crate::tab_layout::validate_visible(&self.visible_tabs())?;
         if !crate::emoji_fonts::valid_id(&self.emoji_font) {
             return Err("Неизвестный шрифт эмодзи".into());
         }

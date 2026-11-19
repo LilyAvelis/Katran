@@ -397,7 +397,7 @@ fn target_id(query: &str) -> Result<Option<String>> {
     }
     let last = url
         .path_segments()
-        .and_then(|parts| parts.filter(|part| !part.is_empty()).next_back())
+        .and_then(|mut parts| parts.rfind(|part| !part.is_empty()))
         .unwrap_or("");
     if let Some(id) = canonical_id(last) {
         return Ok(Some(id));
@@ -457,10 +457,10 @@ fn lookup_target_with(
                 "Notion request failed. Check the token, page access and connection",
             ));
         }
-        if !value["id"]
+        if value["id"]
             .as_str()
             .and_then(canonical_id)
-            .is_some_and(|found| found == id)
+            .is_none_or(|found| found != id)
             || value["in_trash"] == true
             || value["archived"] == true
             || value["is_archived"] == true

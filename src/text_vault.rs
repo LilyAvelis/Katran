@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn directory(parent: &Path, name: &str, create: bool) -> Result<PathBuf> {
+pub(crate) fn directory(parent: &Path, name: &str, create: bool) -> Result<PathBuf> {
     let path = parent.join(name);
     if create {
         match fs::create_dir(&path) {
@@ -142,19 +142,21 @@ pub(crate) fn open_draft(
     let (folder, name) = draft_location(root, event, true)?;
     let path = draft_note(&folder, &name)?;
     publish_draft(&path, &text)?;
+    open_obsidian_path(&path, launcher).map_err(|_| {
+        ApiError::new(
+            "obsidian_open_failed",
+            "Could not open Obsidian. The draft is available in the Text vault.",
+        )
+    })?;
+    Ok(json!({"id":event.id,"obsidian_requested":true,"draft_path":display_path(&path)?}))
+}
+
+pub(crate) fn open_obsidian_path(path: &Path, launcher: &dyn open_file::Launcher) -> Result<()> {
     let mut uri = url::Url::parse("obsidian://open").expect("fixed Obsidian URI");
     uri.query_pairs_mut()
-        .append_pair("path", &display_path(&path)?);
+        .append_pair("path", &display_path(path)?);
     let uri = uri.as_str().replace('+', "%20");
-    launcher
-        .launch(Path::new(&uri), open_file::Operation::Open)
-        .map_err(|_| {
-            ApiError::new(
-                "obsidian_open_failed",
-                "Could not open Obsidian. The draft is available in the Text vault.",
-            )
-        })?;
-    Ok(json!({"id":event.id,"obsidian_requested":true,"draft_path":display_path(&path)?}))
+    launcher.launch(Path::new(&uri), open_file::Operation::Open)
 }
 
 impl Service {

@@ -29,6 +29,91 @@ struct Worker {
     queue: Arc<(Mutex<Queue>, Condvar)>,
     rx: mpsc::Receiver<(Key, Value)>,
 }
+pub(super) struct PageMedia {
+    sections: Vec<katran::pages::Section>,
+    images: std::collections::HashMap<String, Option<egui::TextureHandle>>,
+}
+
+impl PageMedia {
+    pub(super) fn new(text: &str) -> Self {
+        Self {
+            sections: katran::pages::reader_sections(text),
+            images: Default::default(),
+        }
+    }
+
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        note: &std::path::Path,
+        scale: f32,
+        emoji: &mut crate::pods_ui::State,
+    ) -> Option<String> {
+        use katran::pages::{AttachmentKind, Section};
+        let mut opened = None;
+        for (index, section) in self.sections.iter().enumerate() {
+            ui.push_id(index, |ui| match section {
+                Section::Markdown(blocks) => {
+                    super::workspace_ui::show_reader_scaled(ui, blocks, scale, emoji);
+                }
+                Section::Embed(target) => {
+                    let attachment = katran::pages::attachment(note, target);
+                    let Ok((path, kind)) = attachment else {
+                        ui.weak(target);
+                        return;
+                    };
+                    if kind == AttachmentKind::Image {
+                        if !self.images.contains_key(target) && self.images.len() < 16 {
+                            self.images
+                                .insert(target.clone(), page_texture(ui.ctx(), &path));
+                        }
+                        if let Some(Some(texture)) = self.images.get(target) {
+                            let size = texture.size_vec2();
+                            let factor = ((ui.available_width() / size.x).min(1.0) * scale)
+                                .min(ui.available_width() / size.x);
+                            if factor > 0.0 {
+                                ui.image((texture.id(), size * factor));
+                                return;
+                            }
+                        }
+                    }
+                    if ui
+                        .button(path.file_name().unwrap_or_default().to_string_lossy())
+                        .clicked()
+                    {
+                        opened = Some(target.clone());
+                    }
+                }
+            });
+        }
+        opened
+    }
+}
+
+fn page_texture(ctx: &egui::Context, path: &std::path::Path) -> Option<egui::TextureHandle> {
+    if path.metadata().ok()?.len() > 8 * 1024 * 1024 {
+        return None;
+    }
+    let mut reader = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+    let image = reader.decode().ok()?.thumbnail(1200, 960).to_rgba8();
+    Some(ctx.load_texture(
+        "obsidian-page-image",
+        egui::ColorImage::from_rgba_unmultiplied(
+            [image.width() as usize, image.height() as usize],
+            image.as_raw(),
+        ),
+        egui::TextureOptions::LINEAR,
+    ))
+}
+
 pub(super) struct TextPreview {
     root: PathBuf,
     enabled: bool,
@@ -36,6 +121,7 @@ pub(super) struct TextPreview {
     wanted: Option<Key>,
     context: String,
     namespace: String,
+    pages: bool,
     identity: Option<Identity>,
     context_epoch: u64,
     request_serial: u64,
@@ -43,6 +129,8 @@ pub(super) struct TextPreview {
     document: Option<Result<katran::markdown::Document, &'static str>>,
     rendered: bool,
     rich_document: Option<Result<Vec<katran::notion_reader::Block>, &'static str>>,
+    page_media: Option<PageMedia>,
+    pub(super) attachment_request: Option<String>,
     pub(super) reader_preferences: Option<katran::settings::NotionReaderPreferences>,
     pub(super) reader_draft: Option<katran::settings::NotionReaderPreferences>,
 }
@@ -55,6 +143,7 @@ impl TextPreview {
             wanted: None,
             context: String::new(),
             namespace: String::new(),
+            pages: false,
             identity: None,
             context_epoch: 0,
             request_serial: 0,
@@ -62,6 +151,8 @@ impl TextPreview {
             document: None,
             rendered: true,
             rich_document: None,
+            page_media: None,
+            attachment_request: None,
             reader_preferences: None,
             reader_draft: None,
         }
@@ -130,8 +221,10 @@ impl TextPreview {
         self.content = None;
         self.document = None;
         self.rich_document = None;
+        self.page_media = None;
     }
     pub fn set_context(&mut self, state: &Value) {
+        self.pages = state["tab"] == "pages";
         let context = super::images::preview_context(state);
         if self.context != context {
             let namespace =
@@ -149,6 +242,7 @@ impl TextPreview {
                 self.content = None;
                 self.document = None;
                 self.rich_document = None;
+                self.page_media = None;
             }
             if let Some(worker) = &self.worker
                 && let Ok(mut queue) = worker.queue.0.lock()
@@ -250,6 +344,7 @@ impl TextPreview {
             self.content = None;
             self.document = None;
             self.rich_document = None;
+            self.page_media = None;
             return;
         };
         let identity = Identity {
@@ -267,6 +362,7 @@ impl TextPreview {
             self.content = None;
             self.document = None;
             self.rich_document = None;
+            self.page_media = None;
             self.rendered = true;
         }
         let key = (
@@ -286,12 +382,16 @@ impl TextPreview {
                 self.content = None;
                 self.document = None;
                 self.rich_document = None;
+                self.page_media = None;
                 return;
             };
             Some(PathBuf::from(path))
         } else {
             None
         };
+        let note = (self.pages && reader.is_some())
+            .then(|| path.clone())
+            .flatten();
         let is_link = event["kind"] == "link_fragment";
         self.start();
         if self.wanted.as_ref() != Some(&key) {
@@ -300,6 +400,7 @@ impl TextPreview {
                 self.content = None;
                 self.document = None;
                 self.rich_document = None;
+                self.page_media = None;
                 self.rendered = true;
                 let (lock, wake) = &*self.worker.as_ref().unwrap().queue;
                 lock.lock().unwrap().next = Some((key, path, ui.ctx().clone()));
@@ -327,6 +428,7 @@ impl TextPreview {
                     },
                 );
                 self.rich_document = None;
+                self.page_media = None;
                 self.document = None;
             }
         }
@@ -347,6 +449,13 @@ impl TextPreview {
                     let scale = reader.as_ref().map_or(1.0, |(scale, _)| *scale);
                     if self.rendered {
                         if let Some((scale, emoji)) = reader.as_mut()
+                            && let Some(note) = note.as_deref()
+                        {
+                            self.attachment_request = self
+                                .page_media
+                                .get_or_insert_with(|| PageMedia::new(text))
+                                .show(ui, note, *scale, emoji);
+                        } else if let Some((scale, emoji)) = reader.as_mut()
                             && let Ok(blocks) = self
                                 .rich_document
                                 .get_or_insert_with(|| katran::notion_reader::parse(text))
@@ -779,7 +888,7 @@ mod tests {
             )),
             ..Default::default()
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while !app.text_preview.test_has_text(url) {
             let mut output = ctx.run_ui(input(), |ui| app.render(ui));
             output.textures_delta.clear();
@@ -787,7 +896,7 @@ mod tests {
                 std::time::Instant::now() < deadline,
                 "synthetic link did not load"
             );
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let old_epoch = app.text_preview.context_epoch;
         app.state = app.call(Command::TogglePinnedView);

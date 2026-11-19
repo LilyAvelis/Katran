@@ -427,6 +427,13 @@ pub enum Command {
         id: i64,
     },
     ShowTextVault,
+    MoveToPages,
+    OpenPagesVault,
+    ShowPagesFolder,
+    OpenPageAttachment {
+        id: i64,
+        target: String,
+    },
     GetDocumentText {
         id: i64,
     },

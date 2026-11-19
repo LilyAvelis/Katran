@@ -62,6 +62,7 @@ pub fn show(
                             ShelfTab::Files => ("Files", "files"),
                             ShelfTab::Desktop => ("Desktop", "desktop"),
                             ShelfTab::Translate => ("Translate", "translate"),
+                            ShelfTab::Pages => ("Pages", "pages"),
                         };
                         let response = ui.add_enabled(
                             enabled,
@@ -270,6 +271,7 @@ fn show_glass(
                         ShelfTab::Files => ("Files", "files"),
                         ShelfTab::Desktop => ("Desktop", "desktop"),
                         ShelfTab::Translate => ("Translate", "translate"),
+                        ShelfTab::Pages => ("Pages", "pages"),
                     };
                     let label = numbered_tab_label(index, label);
                     let label_width = ui

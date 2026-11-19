@@ -27,6 +27,13 @@ fn explicit_folder_import_goes_to_visible_categories_and_preserves_sources() {
         std::fs::write(folder.path().join(name), data).unwrap();
     }
     let mut service = Service::open(root.path(), 1024 * 1024).unwrap();
+    call(
+        &mut service,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pages,
+            enabled: false,
+        },
+    );
     for tab in [ShelfTab::Text, ShelfTab::Tables, ShelfTab::Links] {
         call(&mut service, Command::SetTabEnabled { tab, enabled: true });
     }
@@ -131,6 +138,13 @@ fn folder_import_job_preserves_types_and_per_item_failures() {
         std::fs::write(folder.path().join(name), data).unwrap();
     }
     let mut service = Service::open(root.path(), 1024 * 1024).unwrap();
+    call(
+        &mut service,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pages,
+            enabled: false,
+        },
+    );
     for tab in [ShelfTab::Text, ShelfTab::Tables, ShelfTab::Links] {
         call(&mut service, Command::SetTabEnabled { tab, enabled: true });
     }

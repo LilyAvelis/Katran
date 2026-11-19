@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 16;
+pub(crate) const VERSION: i64 = 17;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -217,6 +217,14 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         CREATE INDEX tag_scoped_assignments_slot ON tag_scoped_assignments(scope,slot_number,event_id DESC);
         PRAGMA user_version=16;")?;
     }
+    if version < 17 {
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS page_moves(
+                event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+                filename TEXT NOT NULL
+             ); PRAGMA user_version=17;",
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -240,7 +248,7 @@ mod tests {
             .db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, VERSION);
         assert!(reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bull_members')", [], |row| row.get::<_, bool>(0)).unwrap());
         let backup = std::fs::read_dir(profile.path().join("backups"))
             .unwrap()
@@ -249,7 +257,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("index-before-v16")
+                    .starts_with(&format!("index-before-v{VERSION}"))
             })
             .unwrap();
         let backup = Connection::open(backup).unwrap();
@@ -300,7 +308,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("index-before-v16")
+                    .starts_with(&format!("index-before-v{VERSION}"))
             })
             .unwrap();
         let backup = Connection::open(backup).unwrap();

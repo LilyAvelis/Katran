@@ -448,7 +448,7 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
     assert_eq!(
         call(&mut api, Command::GetPinnedProperties { id: item(&old).id })["properties"]["display_name"],
@@ -465,6 +465,6 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("before-v13"))
+                .contains("before-v17"))
     );
 }

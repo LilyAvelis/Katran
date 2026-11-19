@@ -900,6 +900,16 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
         }
         self.notion_database_sync(&ctx);
+        if self.state["tab"] == "pages"
+            && ctx.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(true)))
+            })
+        {
+            self.refresh();
+        }
         self.reader_input(&ctx);
         self.emoji_ai_input(&ctx);
         self.emoji_ai_tick(&ctx);
@@ -966,8 +976,10 @@ impl Shelf {
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")))
             && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
             && !(self.api.is_none() && self.busy_text_editing);
-        self.sorting_input
-            .set_tags_allowed(self.state["tab"] != "folder");
+        self.sorting_input.set_tags_allowed(!matches!(
+            self.state["tab"].as_str(),
+            Some("folder" | "pages")
+        ));
         let notion_sort = self.notion_database_active();
         self.sorting_input.set_notion_context(notion_sort);
         if let Some(action) = self.sorting_input.take(&ctx, sort_allowed) {
@@ -1475,6 +1487,7 @@ impl Shelf {
                         });
                     self.text_preview.set_enabled(
                         text_enabled
+                            || self.state["tab"] == "pages"
                             || link_enabled
                             || markdown_preview
                             || tabs["tabs"].as_array().is_some_and(|tabs| {
@@ -1828,9 +1841,10 @@ impl Shelf {
             && self.pending_delete.is_empty()
         {
             let document_target = self.state["preview"].as_i64().or_else(|| {
-                (self.state["view"] == "details" && self.state["tab"] == "text")
-                    .then(|| self.state["cursor"].as_i64())
-                    .flatten()
+                (self.state["view"] == "details"
+                    && matches!(self.state["tab"].as_str(), Some("text" | "pages")))
+                .then(|| self.state["cursor"].as_i64())
+                .flatten()
             });
             let document_preview = document_target.is_some_and(|id| {
                 self.events.iter().any(|event| {
@@ -3804,9 +3818,22 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn cut_then_tab_and_paste_moves_synthetic_file() {
+        struct StableClipboard;
+        impl katran::clipboard_files::Source for StableClipboard {
+            fn sequence(&self) -> u32 {
+                42
+            }
+            fn files(&self) -> katran::Result<Vec<PathBuf>> {
+                panic!("staged cut should not read external files");
+            }
+        }
         let root = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
         let mut app = test_shelf(root.path());
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_clipboard_files_source(Box::new(StableClipboard));
         app.call(Command::ChooseFolder {
             path: folder.path().into(),
         });

@@ -67,6 +67,7 @@ pub mod notion_reader;
 pub mod notion_rich;
 pub mod open_file;
 pub mod origin;
+pub mod pages;
 mod paste_service;
 pub mod pinned;
 mod pinned_open;
@@ -157,6 +158,7 @@ pub struct Service {
     transfer_sequence: Option<u32>,
     transfer_intent: Option<(Vec<SelectionRef>, bool)>,
     work_folder: work_folder::State,
+    pages: std::cell::RefCell<work_folder::State>,
     updater: updater::Updater,
     checked_update: Option<updater::Release>,
     update_status: serde_json::Value,
@@ -296,6 +298,7 @@ impl Service {
             Some(s) => serde_json::from_str(&s).map_err(|e| ApiError::new("settings_error", e))?,
             None => settings::Settings::defaults(quota),
         };
+        settings.hide_excess_numbered_tabs();
         settings
             .validate(0)
             .map_err(|e| ApiError::new("settings_error", e))?;
@@ -335,6 +338,7 @@ impl Service {
             transfer_sequence: None,
             transfer_intent: None,
             work_folder: Default::default(),
+            pages: std::cell::RefCell::new(work_folder::State::pages()),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
             update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
@@ -399,11 +403,12 @@ impl Service {
                 |row| row.get(0),
             )
             .optional()?;
-        let settings: settings::Settings = match stored {
+        let mut settings: settings::Settings = match stored {
             Some(document) => serde_json::from_str(&document)
                 .map_err(|error| ApiError::new("settings_error", error))?,
             None => settings::Settings::default(),
         };
+        settings.hide_excess_numbered_tabs();
         settings
             .validate(0)
             .map_err(|error| ApiError::new("settings_error", error))?;
@@ -430,6 +435,7 @@ impl Service {
             transfer_sequence: None,
             transfer_intent: None,
             work_folder: Default::default(),
+            pages: std::cell::RefCell::new(work_folder::State::pages()),
             updater: updater::Updater::native(env!("CARGO_PKG_VERSION"))?,
             checked_update: None,
             update_status: serde_json::json!({"state":"not_checked","current_version":env!("CARGO_PKG_VERSION")}),
@@ -1331,6 +1337,10 @@ impl Service {
                 Ok(serde_json::json!(self.get(id)?))
             }
             Command::GetText { id } => self.get_text(id),
+            Command::MoveToPages => self.move_to_pages(),
+            Command::OpenPagesVault => self.open_pages_vault(true),
+            Command::ShowPagesFolder => self.open_pages_vault(false),
+            Command::OpenPageAttachment { id, target } => self.open_page_attachment(id, &target),
             Command::ApplyTextDraft { id } => self.apply_text_draft(id),
             Command::ShowTextVault => {
                 let vault = text_vault::vault(&self.root, true)?;
@@ -1428,7 +1438,12 @@ impl Service {
                     .file_launcher
                     .lock()
                     .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?;
-                if self.interaction.tab == interaction::ShelfTab::Text
+                if pages::is_id(id)
+                    && file_types::is_markdown(&event.path)
+                    && operation == open_file::Operation::Open
+                {
+                    pages::open_note(&event, launcher.as_ref())
+                } else if self.interaction.tab == interaction::ShelfTab::Text
                     && event.kind == EventKind::TextFragment
                     && operation == open_file::Operation::Open
                 {
@@ -1511,11 +1526,14 @@ impl Service {
                 seed,
             } => {
                 if mode == sorting::SortMode::Tags
-                    && self.interaction.tab == interaction::ShelfTab::All
+                    && matches!(
+                        self.interaction.tab,
+                        interaction::ShelfTab::All | interaction::ShelfTab::Pages
+                    )
                 {
                     return Err(ApiError::new(
                         "folder_has_no_tags",
-                        "Folder does not support tag sorting",
+                        "Folder and Pages do not support tag sorting",
                     ));
                 }
                 let mut settings = self.settings.clone();
@@ -2073,7 +2091,10 @@ impl Service {
                     .filter(|d| {
                         d.in_palette
                             && !(d.id == "sort_tags"
-                                && self.interaction.tab == interaction::ShelfTab::All)
+                                && matches!(
+                                    self.interaction.tab,
+                                    interaction::ShelfTab::All | interaction::ShelfTab::Pages
+                                ))
                             && if sort_only {
                                 d.id.starts_with("sort_")
                             } else {
@@ -2345,6 +2366,8 @@ impl Service {
         }
         if desktop_projection::is_desktop_id(id) {
             Ok(desktop_projection::get(&self.root, id)?.0)
+        } else if pages::is_id(id) {
+            self.pages.borrow().get(id)
         } else if id < 0 {
             self.work_folder.get(id)
         } else {

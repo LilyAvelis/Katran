@@ -989,19 +989,23 @@ impl Service {
                     .iter()
                     .map(|&id| self.get(id))
                     .collect::<Result<Vec<_>>>()?;
-                if tab == ShelfTab::All {
-                    let folder = self
-                        .work_folder
-                        .current()
-                        .ok_or_else(|| {
-                            ApiError::new("folder_not_selected", "Choose a Folder first")
-                        })?
-                        .to_owned();
+                if matches!(tab, ShelfTab::All | ShelfTab::Pages) {
+                    let pages = tab == ShelfTab::Pages;
+                    let folder = if pages {
+                        crate::pages::vault(&self.root)?
+                    } else {
+                        self.work_folder
+                            .current()
+                            .ok_or_else(|| {
+                                ApiError::new("folder_not_selected", "Choose a Folder first")
+                            })?
+                            .to_owned()
+                    };
                     let quota = self.quota;
                     let generation = self.interaction.view_generation;
                     let job_id = self.jobs.submit(Lane::Foreground, move |cancel| {
                         let prepared =
-                            folder_bundle_service::prepare(events, folder, quota, &cancel)?;
+                            folder_bundle_service::prepare(events, folder, quota, pages, &cancel)?;
                         Ok(PreparedWork::FolderBundle {
                             prepared,
                             generation,
@@ -2004,6 +2008,9 @@ impl Service {
             })?,
             Command::OpenFile { id, operation } => {
                 let event = self.get(id)?;
+                let pages_note = crate::pages::is_id(id)
+                    && crate::file_types::is_markdown(&event.path)
+                    && operation == open_file::Operation::Open;
                 let obsidian = self.interaction.tab == interaction::ShelfTab::Text
                     && event.kind == EventKind::TextFragment
                     && operation == open_file::Operation::Open;
@@ -2030,7 +2037,9 @@ impl Service {
                         launcher,
                         cancellation: cancel,
                     };
-                    let result = if obsidian {
+                    let result = if pages_note {
+                        crate::pages::open_note(&event, &launcher)?
+                    } else if obsidian {
                         crate::text_vault::open_draft(&root, &event, &launcher)?
                     } else if event.kind == EventKind::LinkFragment
                         && operation == open_file::Operation::Open
@@ -3043,10 +3052,16 @@ impl Service {
                 }) => {
                     let continued = (|| {
                         let folder = prepared.folder.clone();
-                        if self.interaction.tab != interaction::ShelfTab::All
-                            || self.interaction.view_generation != generation
-                            || self.work_folder.current() != Some(folder.as_path())
-                        {
+                        let same_root = match self.interaction.tab {
+                            interaction::ShelfTab::All => {
+                                self.work_folder.current() == Some(folder.as_path())
+                            }
+                            interaction::ShelfTab::Pages => {
+                                crate::pages::vault(&self.root)? == folder
+                            }
+                            _ => false,
+                        };
+                        if !same_root || self.interaction.view_generation != generation {
                             return Err(ApiError::new(
                                 "stale_folder",
                                 "Folder changed before publication",
@@ -3104,7 +3119,12 @@ impl Service {
             };
             let result=result.and_then(|prepared|match prepared {
                 PreparedWork::FolderBundlePublished { folder, receipt } => {
-                    if self.interaction.tab == interaction::ShelfTab::All && self.work_folder.current() == Some(folder.as_path()) {
+                    let same_root = match self.interaction.tab {
+                        interaction::ShelfTab::All => self.work_folder.current() == Some(folder.as_path()),
+                        interaction::ShelfTab::Pages => crate::pages::vault(&self.root).ok().as_deref() == Some(folder.as_path()),
+                        _ => false,
+                    };
+                    if same_root {
                         let removed: Vec<_> = receipt["original_removal"].as_array().into_iter().flatten()
                             .filter(|item| item["original_removed"] == true)
                             .filter_map(|item| item["id"].as_i64()).collect();

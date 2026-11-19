@@ -665,6 +665,7 @@ pub(super) fn localized_shelf_tab(tab: katran::interaction::ShelfTab) -> &'stati
         ShelfTab::Files => super::i18n::tr("Файлы", "Files"),
         ShelfTab::Desktop => super::i18n::tr("Рабочий стол", "Desktop"),
         ShelfTab::Translate => "Translate",
+        ShelfTab::Pages => "Pages",
     }
 }
 
@@ -1686,7 +1687,7 @@ impl State {
                 let input = std::mem::take(&mut self.notion_token);
                 // The password editor's undo history can retain the previous contents.
                 egui::widgets::text_edit::TextEditState::default().store(ui.ctx(), field.id);
-                let token = save.then(|| katran::notion::Token(input));
+                let token = save.then_some(katran::notion::Token(input));
                 let reply = call(api, Command::SetNotionToken { token });
                 self.notion_error.clear();
                 if reply["ok"] == true {

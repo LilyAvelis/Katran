@@ -636,6 +636,7 @@ pub(crate) fn visible_collection_input(
         ShelfTab::Translate => crate::catalogue_query::translated_image_predicate(),
         ShelfTab::Links => crate::catalogue_query::link_shelf_predicate().into(),
         ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
+        ShelfTab::Pages => "0".into(),
         ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
         ShelfTab::Images => format!(
             "{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
@@ -643,7 +644,7 @@ pub(crate) fn visible_collection_input(
         ),
         _ => return Ok(false),
     };
-    Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM events e WHERE e.id=?1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id))"), [id], |row| row.get(0))?)
+    Ok(db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM events e WHERE e.id=?1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id))"), [id], |row| row.get(0))?)
 }
 
 fn require_collection_input(
@@ -888,7 +889,7 @@ fn commit_blob_in(
             "text_fragments"
         };
         let existing: Option<i64> = tx.query_row(
-            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 AND (NOT ?3 OR (e.source='notion_reader')=?4) AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
+            &format!("SELECT e.id FROM events e JOIN {fragments} t ON t.event_id=e.id JOIN text_contents c ON c.blob_hash=e.blob_hash LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.blob_hash=?1 AND c.content=?2 AND (NOT ?3 OR (e.source='notion_reader')=?4) AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id) ORDER BY COALESCE(p.pinned,0) DESC,e.id DESC LIMIT 1"),
             params![prepared.hash, content, prepared.is_pod(), prepared.source == "notion_reader"], |row| row.get(0),
         ).optional()?;
         if let Some(id) = existing {
@@ -1040,7 +1041,7 @@ pub fn query_events(
         ));
     }
     let mut stmt = db.prepare("SELECT id,detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash,delete_policy_json,COALESCE((SELECT preview FROM text_fragments WHERE event_id=events.id),(SELECT preview FROM link_fragments WHERE event_id=events.id),(SELECT preview FROM table_fragments WHERE event_id=events.id)) AS text_preview, EXISTS(SELECT 1 FROM link_fragments WHERE event_id=events.id) AS is_link, EXISTS(SELECT 1 FROM table_fragments WHERE event_id=events.id) AS is_table, modified_at_ms FROM events
-        WHERE id <= ?1 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=events.id) AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2) OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE l.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2))
+        WHERE id <= ?1 AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=events.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=events.id) AND (?2='' OR katran_contains(name,?2) OR katran_contains(source,?2) OR EXISTS(SELECT 1 FROM text_fragments t JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM link_fragments l JOIN text_contents c ON c.blob_hash=events.blob_hash WHERE l.event_id=events.id AND katran_contains(c.content,?2)) OR EXISTS(SELECT 1 FROM table_fragments t JOIN table_contents c ON c.blob_hash=events.blob_hash WHERE t.event_id=events.id AND katran_contains(c.content,?2))
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_app'),'') ELSE '' END,?2)
         OR katran_contains(CASE WHEN json_valid(origin_json) THEN COALESCE(json_extract(origin_json,'$.source_domain'),'') ELSE '' END,?2))
         ORDER BY id DESC LIMIT ?3")?;

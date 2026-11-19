@@ -183,6 +183,13 @@ fn tagged_search_still_finds_text_link_and_table_contents() {
     use katran::interaction::ShelfTab;
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTabEnabled {
+            tab: ShelfTab::Pages,
+            enabled: false,
+        },
+    );
     for tab in [ShelfTab::Text, ShelfTab::Links, ShelfTab::Tables] {
         call(&mut api, Command::SetTabEnabled { tab, enabled: true });
     }

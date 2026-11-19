@@ -2493,6 +2493,16 @@ impl Shelf {
             self.toggle_search_focus(ctx);
             return;
         }
+        if id == "move_to_pages" {
+            let result = self.call(Command::MoveToPages);
+            if let Some(count) = result["pages_moved"].as_u64() {
+                self.state = result["interaction"].clone();
+                self.message = format!("{} · {count}", tr("Перенесено в Pages", "Moved to Pages"));
+                self.refresh();
+            }
+            self.actions = false;
+            return;
+        }
         if id == "restart" {
             self.restart_pending = true;
             self.actions = false;
@@ -2640,6 +2650,7 @@ impl Shelf {
                     | "tab_next"
                     | "images"
                     | "translate"
+                    | "pages"
                     | "screenshots"
                     | "downloads"
                     | "text"

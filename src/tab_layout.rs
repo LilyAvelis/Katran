@@ -1,6 +1,8 @@
 //! Persistent ordering of numbered tabs. All always occupies position zero.
 use crate::{api, interaction::ShelfTab};
 
+pub const MAX_NUMBERED_TABS: usize = 9;
+
 pub fn default_order() -> Vec<ShelfTab> {
     vec![
         ShelfTab::Images,
@@ -13,6 +15,7 @@ pub fn default_order() -> Vec<ShelfTab> {
         ShelfTab::Files,
         ShelfTab::Desktop,
         ShelfTab::Translate,
+        ShelfTab::Pages,
     ]
 }
 
@@ -40,6 +43,9 @@ pub fn deserialize_order<'de, D: serde::Deserializer<'de>>(
     }
     if !order.contains(&ShelfTab::Translate) {
         order.push(ShelfTab::Translate);
+    }
+    if !order.contains(&ShelfTab::Pages) {
+        order.push(ShelfTab::Pages);
     }
     Ok(order)
 }
@@ -78,7 +84,9 @@ pub fn tab_at(order: &[ShelfTab], position: u8) -> api::Result<ShelfTab> {
     if position == 0 {
         return Ok(ShelfTab::All);
     }
-    if let Some(tab) = order.get(usize::from(position - 1)) {
+    if usize::from(position) <= MAX_NUMBERED_TABS
+        && let Some(tab) = order.get(usize::from(position - 1))
+    {
         return Ok(*tab);
     }
     Err(api::ApiError::new(
@@ -90,6 +98,9 @@ pub fn tab_at(order: &[ShelfTab], position: u8) -> api::Result<ShelfTab> {
 /// Validate a subset of numbered tabs, with no duplicates or All.
 pub fn validate_visible(tabs: &[ShelfTab]) -> Result<(), String> {
     let allowed = default_order();
+    if tabs.len() > MAX_NUMBERED_TABS {
+        return Err("At most nine numbered tabs can be enabled".into());
+    }
     if tabs
         .iter()
         .any(|tab| !allowed.contains(tab) || tabs.iter().filter(|item| *item == tab).count() != 1)
@@ -105,7 +116,9 @@ pub fn tab_at_visible(order: &[ShelfTab], position: u8) -> api::Result<ShelfTab>
     if position == 0 {
         return Ok(ShelfTab::All);
     }
-    if let Some(tab) = order.get(usize::from(position - 1)) {
+    if usize::from(position) <= MAX_NUMBERED_TABS
+        && let Some(tab) = order.get(usize::from(position - 1))
+    {
         return Ok(*tab);
     }
     Err(api::ApiError::new(

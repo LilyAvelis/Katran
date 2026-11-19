@@ -26,7 +26,7 @@ impl Service {
         if !(1..=1000).contains(&limit) {
             return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
         }
-        if tab == ShelfTab::All {
+        if matches!(tab, ShelfTab::All | ShelfTab::Pages) {
             return Err(ApiError::new(
                 "session_only_tab",
                 "Folder requires the active session browse API",
@@ -42,11 +42,12 @@ impl Service {
                 |row| row.get(0),
             )
             .optional()?;
-        let settings: crate::settings::Settings = match document {
+        let mut settings: crate::settings::Settings = match document {
             Some(document) => serde_json::from_str(&document)
                 .map_err(|error| ApiError::new("settings_error", error))?,
             None => self.settings.clone(),
         };
+        settings.hide_excess_numbered_tabs();
         if !settings.tab_enabled(tab) {
             return Err(ApiError::new(
                 "tab_disabled",

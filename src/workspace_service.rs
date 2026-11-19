@@ -69,7 +69,7 @@ impl Service {
     pub(crate) fn pinned_tags(&self) -> Result<Value> {
         let category = self.pin_category_sql();
         let sql = format!(
-            "SELECT DISTINCT t.tag_key,t.tag_display FROM katran_tags t JOIN katran_properties k ON k.event_id=t.event_id AND k.pinned=1 JOIN events e ON e.id=t.event_id WHERE {category} AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) ORDER BY t.tag_key"
+            "SELECT DISTINCT t.tag_key,t.tag_display FROM katran_tags t JOIN katran_properties k ON k.event_id=t.event_id AND k.pinned=1 JOIN events e ON e.id=t.event_id WHERE {category} AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id) ORDER BY t.tag_key"
         );
         let mut statement = self.db.prepare(&sql)?;
         let items = statement
@@ -85,7 +85,7 @@ impl Service {
     pub(crate) fn pin_category_sql(&self) -> String {
         use interaction::ShelfTab;
         match self.interaction.tab {
-            ShelfTab::All => "0".into(),
+            ShelfTab::All | ShelfTab::Pages => "0".into(),
             ShelfTab::Downloads => "e.source='downloads'".into(),
             ShelfTab::Screenshots => "e.source='sharex'".into(),
             ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),

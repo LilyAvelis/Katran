@@ -17,6 +17,15 @@ fn call(api: &mut Service, command: Command) -> Value {
 fn details_is_a_per_tab_persisted_view_with_fixed_density() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
+    for tab in [ShelfTab::Translate, ShelfTab::Pages] {
+        call(
+            &mut api,
+            Command::SetTabEnabled {
+                tab,
+                enabled: false,
+            },
+        );
+    }
     let tabs = [
         ShelfTab::All,
         ShelfTab::Images,

@@ -129,6 +129,9 @@ impl Service {
                 .work_folder
                 .browse(query, limit, cursor, self.interaction.sort);
         }
+        if self.interaction.tab == crate::interaction::ShelfTab::Pages {
+            return self.browse_pages(query, limit, cursor);
+        }
         if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
             let mut events = crate::desktop_projection::list(&self.root)?;
             let (tag_slots, tag_generation) =
@@ -210,7 +213,10 @@ impl Service {
         limit: u32,
         after: Option<i64>,
     ) -> Result<serde_json::Value> {
-        if self.interaction.tab == crate::interaction::ShelfTab::Desktop {
+        if matches!(
+            self.interaction.tab,
+            crate::interaction::ShelfTab::Desktop | crate::interaction::ShelfTab::Pages
+        ) {
             if after.is_some() {
                 return Err(crate::ApiError::new(
                     "invalid_cursor",

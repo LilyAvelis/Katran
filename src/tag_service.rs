@@ -17,7 +17,7 @@ fn error(value: tag_slots::StoreError) -> ApiError {
 pub(crate) fn scope(tab: crate::interaction::ShelfTab) -> Result<&'static str> {
     use crate::interaction::ShelfTab::*;
     Ok(match tab {
-        All => {
+        All | Pages => {
             return Err(ApiError::new(
                 "folder_has_no_tags",
                 "Folder has no tag slots",

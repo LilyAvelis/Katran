@@ -99,7 +99,9 @@ impl Shelf {
             .filter(|tab| {
                 !matches!(
                     tab,
-                    katran::interaction::ShelfTab::All | katran::interaction::ShelfTab::Desktop
+                    katran::interaction::ShelfTab::All
+                        | katran::interaction::ShelfTab::Desktop
+                        | katran::interaction::ShelfTab::Pages
                 )
             })
             .collect();
@@ -141,7 +143,9 @@ impl Shelf {
         // Managed backgrounds can change independently of the catalogue stamp.
         if matches!(
             tab,
-            katran::interaction::ShelfTab::All | katran::interaction::ShelfTab::Desktop
+            katran::interaction::ShelfTab::All
+                | katran::interaction::ShelfTab::Desktop
+                | katran::interaction::ShelfTab::Pages
         ) {
             return false;
         }

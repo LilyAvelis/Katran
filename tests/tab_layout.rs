@@ -16,11 +16,12 @@ fn default_positions_and_stable_reorder() {
             Pods,
             Files,
             Desktop,
-            Translate
+            Translate,
+            Pages
         ]
     );
     assert_eq!(tab_layout::tab_at(&order, 0).unwrap(), All);
-    for (index, tab) in order.iter().enumerate() {
+    for (index, tab) in order.iter().take(tab_layout::MAX_NUMBERED_TABS).enumerate() {
         assert_eq!(tab_layout::tab_at(&order, index as u8 + 1).unwrap(), *tab);
     }
     tab_layout::reorder(&mut order, Downloads, 0).unwrap();
@@ -36,7 +37,8 @@ fn default_positions_and_stable_reorder() {
             Pods,
             Files,
             Desktop,
-            Translate
+            Translate,
+            Pages
         ]
     );
     assert_eq!(tab_layout::tab_at(&order, 1).unwrap(), Downloads);
@@ -50,12 +52,12 @@ fn default_positions_and_stable_reorder() {
 fn invalid_requests_preserve_order() {
     use ShelfTab::*;
     let original = tab_layout::default_order();
-    for (tab, index) in [(All, 0), (Images, 10), (Downloads, usize::MAX)] {
+    for (tab, index) in [(All, 0), (Images, 11), (Downloads, usize::MAX)] {
         let mut order = original.clone();
         assert!(tab_layout::reorder(&mut order, tab, index).is_err());
         assert_eq!(order, original);
     }
-    for position in 11..=u8::MAX {
+    for position in 10..=u8::MAX {
         assert_eq!(
             tab_layout::tab_at(&original, position).unwrap_err().code,
             "invalid_tab_position"
