@@ -1,3 +1,6 @@
+#[path = "common/migration_fixture.rs"]
+mod migration_fixture;
+
 use katran::{
     Command, Request, SelectionRef, Service,
     drag_out::{Outcome, Preview, Runner},
@@ -427,7 +430,8 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
     );
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; DROP TABLE link_fragments; PRAGMA user_version=4;")
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("DROP TABLE link_fragments; PRAGMA user_version=4;")
         .unwrap();
     drop(db);
     let mut api = Service::open(root.path(), 10000).unwrap();
@@ -444,7 +448,7 @@ fn migration_from_v4_keeps_text_and_creates_links_metadata() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        13
+        16
     );
     assert_eq!(
         call(&mut api, Command::GetPinnedProperties { id: item(&old).id })["properties"]["display_name"],

@@ -100,6 +100,8 @@ impl Shelf {
         let anchor = trigger
             .map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
             .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
+        // Reserve space for the header, search field, footer and frame above the trigger.
+        let scroll_height = (anchor.y - ctx.content_rect().top() - 165.0).clamp(24.0, 320.0);
         let mut optical_slot = None;
         let result = egui::Modal::new(egui::Id::new("actions"))
             .area(
@@ -134,7 +136,7 @@ impl Shelf {
                     self.scroll_actions = true;
                 }
                 egui::ScrollArea::vertical()
-                    .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
+                    .max_height(scroll_height)
                     .show(ui, |ui| {
                         let mut group = String::new();
                         for (index, a) in actions.iter().enumerate() {

@@ -295,8 +295,24 @@ impl Manager {
                 .flatten()
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .collect();
-            entries
-                .sort_by_key(|e| std::cmp::Reverse(e.metadata().and_then(|m| m.modified()).ok()));
+            // Writing a result changes the directory timestamp. Use the launch
+            // time and serial in the ID so an older receipt cannot hide a newer run.
+            entries.sort_by_cached_key(|entry| {
+                let name = entry.file_name();
+                let mut parts = name.to_str().unwrap_or_default().rsplit('-');
+                let serial = parts.next().and_then(|part| part.parse::<u64>().ok());
+                let launch = parts.next().and_then(|part| part.parse::<u128>().ok());
+                let time = launch.or_else(|| {
+                    entry
+                        .metadata()
+                        .and_then(|meta| meta.modified())
+                        .ok()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|elapsed| elapsed.as_nanos())
+                });
+                std::cmp::Reverse((time, serial))
+            });
             for entry in entries.into_iter().take(128) {
                 let Ok(request) = read_json(&entry.path().join("request.json")) else {
                     continue;

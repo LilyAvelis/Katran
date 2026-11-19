@@ -31,6 +31,13 @@ fn switches_persist_compact_digits_and_never_reenter_disabled_tab() {
     call(
         &mut api,
         Command::SetTabEnabled {
+            tab: ShelfTab::Translate,
+            enabled: false,
+        },
+    );
+    call(
+        &mut api,
+        Command::SetTabEnabled {
             tab: ShelfTab::Desktop,
             enabled: false,
         },

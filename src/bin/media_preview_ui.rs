@@ -1443,7 +1443,8 @@ mod tests {
             }
             _ => panic!("Unexpected control for stale page"),
         };
-        let _ = ctx.run_ui(Default::default(), |ui| state.show(ui, &target, &mut call));
+        let mut output = ctx.run_ui(Default::default(), |ui| state.show(ui, &target, &mut call));
+        output.textures_delta.clear();
         state.sync(&ctx, Some(target), &mut call);
         assert_eq!(actions, ["open", "stop"]);
         assert!(state.session.is_none());

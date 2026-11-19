@@ -142,7 +142,12 @@ fn video_actions_are_contextual_and_pause_uses_current_session() {
         .iter()
         .filter(|a| a["group"] == "Видео" || a["group"] == "Video")
         .collect();
-    assert_eq!(video.len(), 2);
+    let mut ids: Vec<_> = video.iter().filter_map(|a| a["id"].as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        ["capture_video_frame", "extract_video_audio", "video_pause"]
+    );
     assert!(video.iter().all(|a| a["enabled"] == true));
     ok(
         &mut service,

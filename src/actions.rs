@@ -203,6 +203,7 @@ pub fn english_group(id: &str, fallback: &'static str) -> &'static str {
     match palette_group(id, fallback) {
         "Выбранное" => "Selection",
         "Полка ↔ Folder" => "Shelf ↔ Folder",
+        "Навигация" => "Navigation",
         "Навигация и выделение" => "Navigation and selection",
         "Отображение" => "Display",
         "Закреплённые" => "Pinned",

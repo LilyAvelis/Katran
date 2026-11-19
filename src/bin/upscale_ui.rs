@@ -1739,7 +1739,7 @@ mod tests {
         let ctx = egui::Context::default();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 650.0));
         let frame = |app: &mut Shelf, key: Option<(egui::Key, egui::Modifiers)>| {
-            ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(screen),
                     events: key
@@ -1757,7 +1757,9 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| app.render(ui),
-            )
+            );
+            output.textures_delta.clear();
+            output
         };
         let sent = |output: egui::FullOutput, value| {
             output.viewport_output.get(&egui::ViewportId::ROOT).unwrap().commands.iter()
@@ -1853,9 +1855,10 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while app.upscale.collection.as_ref().unwrap().pending.is_some() {
             assert!(std::time::Instant::now() < deadline);
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 app.translation_collection_ui(ui.ctx())
             });
+            output.textures_delta.clear();
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
@@ -2044,7 +2047,7 @@ mod tests {
             }
         }
         for _ in 0..2 {
-            let output = ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -2054,6 +2057,7 @@ mod tests {
                 },
                 |ui| app.translation_collection_ui(ui.ctx()),
             );
+            output.textures_delta.clear();
             assert!(
                 !output
                     .shapes

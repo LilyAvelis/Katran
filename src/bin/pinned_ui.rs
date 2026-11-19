@@ -344,13 +344,15 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _ = ctx.run_ui(input(egui::Key::E), |ui| app.pinned_input(ui.ctx()));
+        let mut output = ctx.run_ui(input(egui::Key::E), |ui| app.pinned_input(ui.ctx()));
+        output.textures_delta.clear();
         assert!(app.pinned_ui.open);
         assert_eq!(app.pinned_ui.name, "Old");
         assert!(app.pinned_ui.collection_revision.is_some());
         assert!(app.pinned_ui.job.is_none());
         app.pinned_ui.name = "New".into();
-        let _ = ctx.run_ui(input(egui::Key::Enter), |ui| app.pinned_panel(ui.ctx()));
+        let mut output = ctx.run_ui(input(egui::Key::Enter), |ui| app.pinned_panel(ui.ctx()));
+        output.textures_delta.clear();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while app.pinned_ui.open {
             assert!(

@@ -1,3 +1,6 @@
+#[path = "common/migration_fixture.rs"]
+mod migration_fixture;
+
 use katran::{
     Command, Request, Service,
     tag_slots::{Material, Slot},
@@ -129,7 +132,8 @@ fn existing_tag_slots_gain_opacity_without_losing_materials() {
     drop(api);
 
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; UPDATE tag_slots SET material='dots',intensity=90 WHERE number=1; ALTER TABLE tag_slots DROP COLUMN opacity; PRAGMA user_version=10;")
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("UPDATE tag_slots SET material='dots',intensity=90 WHERE number=1; ALTER TABLE tag_slots DROP COLUMN opacity; PRAGMA user_version=10;")
         .unwrap();
     drop(db);
 

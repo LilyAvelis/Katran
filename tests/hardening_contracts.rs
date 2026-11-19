@@ -1,3 +1,6 @@
+#[path = "common/migration_fixture.rs"]
+mod migration_fixture;
+
 use katran::{
     Command, Request, Service,
     source_policy::{DeletePolicy, SourceId},
@@ -407,7 +410,7 @@ fn current_schema_restart_recovers_unfinished_classification_without_migration()
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        13
+        16
     );
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();
@@ -434,7 +437,8 @@ fn v11_projection_schema_is_upgraded_in_numbered_migration() {
         [],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; DROP INDEX desktop_pins_order; ALTER TABLE desktop_pins DROP COLUMN slot_number; PRAGMA user_version=11;")
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("DROP INDEX desktop_pins_order; ALTER TABLE desktop_pins DROP COLUMN slot_number; PRAGMA user_version=11;")
         .unwrap();
     drop(db);
 
@@ -443,7 +447,7 @@ fn v11_projection_schema_is_upgraded_in_numbered_migration() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        13
+        16
     );
     assert_eq!(
         db.query_row(
@@ -517,7 +521,8 @@ fn migration_saves_consistent_checkpoint_before_version_change() {
         .unwrap();
     drop(api);
     let db = rusqlite::Connection::open(data.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; PRAGMA user_version=1;").unwrap();
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("PRAGMA user_version=1;").unwrap();
     drop(db);
     let mut api = Service::open(data.path(), 1000000).unwrap();
     assert_eq!(call(&mut api, Command::Get { id })["ok"], true);

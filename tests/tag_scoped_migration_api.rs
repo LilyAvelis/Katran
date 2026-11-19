@@ -1,3 +1,6 @@
+#[path = "common/migration_fixture.rs"]
+mod migration_fixture;
+
 use katran::{Command, Request, Service, interaction::ShelfTab, tag_slots::Slot};
 use serde_json::Value;
 
@@ -35,7 +38,8 @@ fn legacy_v12_tags_survive_and_become_independent() {
     );
     drop(service);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; UPDATE tag_slots SET name='Legacy',color='#123456',material='grain',scale=24,intensity=31,angle=67,seed=198,opacity=76 WHERE number=2; PRAGMA user_version=12;").unwrap();
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("UPDATE tag_slots SET name='Legacy',color='#123456',material='grain',scale=24,intensity=31,angle=67,seed=198,opacity=76 WHERE number=2; PRAGMA user_version=12;").unwrap();
     db.execute(
         "INSERT INTO desktop_pins(asset_id,position,slot_number) VALUES(-999,1,2)",
         [],
@@ -160,7 +164,8 @@ fn failed_migration_rolls_back_before_retry() {
     let service = Service::open(root.path(), 100_000).unwrap();
     drop(service);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; UPDATE tag_slots SET name='Preserved',opacity=73 WHERE number=2; CREATE TABLE tag_scoped_assignments(collision INTEGER); PRAGMA user_version=12;").unwrap();
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("UPDATE tag_slots SET name='Preserved',opacity=73 WHERE number=2; CREATE TABLE tag_scoped_assignments(collision INTEGER); PRAGMA user_version=12;").unwrap();
     drop(db);
     assert!(Service::open(root.path(), 100_000).is_err());
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();

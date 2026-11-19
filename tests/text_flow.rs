@@ -154,7 +154,8 @@ fn feature_visibility_search_and_file_transfer_share_the_domain() {
             "downloads",
             "text",
             "files",
-            "desktop"
+            "desktop",
+            "translate"
         ])
     );
 }
@@ -217,13 +218,21 @@ fn legacy_saved_tab_order_appends_disabled_text_and_shared_content_is_reclaimed(
             "tables",
             "pods",
             "files",
-            "desktop"
+            "desktop",
+            "translate"
         ])
     );
     assert_eq!(settings["links_enabled"], false);
     assert_eq!(
         call(&mut api, Command::Tabs)["visible_tabs"],
-        json!(["downloads", "images", "screenshots", "files", "desktop"])
+        json!([
+            "downloads",
+            "images",
+            "screenshots",
+            "files",
+            "desktop",
+            "translate"
+        ])
     );
 }
 

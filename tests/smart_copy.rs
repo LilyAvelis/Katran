@@ -21,7 +21,7 @@ fn call(api: &mut Service, command: Command) -> Value {
     v["result"].clone()
 }
 #[test]
-fn ctrl_order_and_shift_visible_order_drive_plain_text_copy() {
+fn ctrl_order_and_shift_gesture_direction_drive_plain_text_copy() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 10000).unwrap();
     let output = Arc::new(Mutex::new(vec![]));
@@ -72,11 +72,27 @@ fn ctrl_order_and_shift_visible_order_drive_plain_text_copy() {
         },
     );
     call(&mut api, Command::RunAction { id: "copy".into() });
-    assert_eq!(output.lock().unwrap().last().unwrap(), "A\n\nB\n\nC");
+    assert_eq!(output.lock().unwrap().last().unwrap(), "C\n\nB\n\nA");
     call(
         &mut api,
         Command::SetVisible {
             ids: vec![ids[1], ids[2], ids[0]],
+        },
+    );
+    call(&mut api, Command::RunAction { id: "copy".into() });
+    assert_eq!(output.lock().unwrap().last().unwrap(), "C\n\nB\n\nA");
+    call(
+        &mut api,
+        Command::Select {
+            id: ids[1],
+            mode: SelectionMode::Replace,
+        },
+    );
+    call(
+        &mut api,
+        Command::Select {
+            id: ids[0],
+            mode: SelectionMode::Range,
         },
     );
     call(&mut api, Command::RunAction { id: "copy".into() });

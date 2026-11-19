@@ -1,3 +1,6 @@
+#[path = "common/migration_fixture.rs"]
+mod migration_fixture;
+
 use katran::{
     interaction::ShelfTab,
     table_clipboard::{Receipt, Sink},
@@ -398,7 +401,8 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
     );
     drop(api);
     let db = rusqlite::Connection::open(root.path().join("index.sqlite3")).unwrap();
-    db.execute_batch("DROP TABLE desktop_scoped_assignments; DROP TABLE tag_scoped_assignments; DROP TABLE tag_scoped_slots; DROP TABLE table_fragments;PRAGMA user_version=5;")
+    migration_fixture::remove_later_tables(&db);
+    db.execute_batch("DROP TABLE table_fragments;PRAGMA user_version=5;")
         .unwrap();
     drop(db);
     let mut api = Service::open(root.path(), DEFAULT_QUOTA).unwrap();
@@ -415,7 +419,7 @@ fn aggregate_limits_migration_and_plain_csv_preserve_type_contracts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        13
+        16
     );
     let properties = call(&mut api, Command::GetPinnedProperties { id });
     assert_eq!(properties["properties"]["pinned"], true);
