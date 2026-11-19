@@ -1,6 +1,7 @@
 //! Afio's settings shell and shared section/row components; API owns preferences.
 use super::ui_foundation::{SettingsRow, SettingsSection};
 use eframe::egui::{self, Color32, RichText};
+use egui_lucide::Lucide;
 use katran::{Command, Request, Service, interaction::View, settings::Settings};
 use std::time::{Duration, Instant};
 
@@ -178,6 +179,80 @@ fn apply_global_hotkey(
         false
     }
 }
+const AESTHETIC_SECTION: usize = 8;
+const AESTHETIC_LABEL: (&str, &str) = ("Эстетика", "Aesthetic");
+const SECTIONS: [((&str, &str), Lucide); 9] = [
+    (("Основные", "General"), Lucide::Settings),
+    (("Горячие клавиши", "Shortcuts"), Lucide::Keyboard),
+    (("Вкладки", "Tabs"), Lucide::PanelsTopLeft),
+    (("Обновления", "Updates"), Lucide::RefreshCw),
+    (("Темы", "Themes"), Lucide::Palette),
+    (("Теги", "Tags"), Lucide::Tag),
+    (("AI", "AI"), Lucide::Sparkles),
+    (("Интеграции", "Integrations"), Lucide::Plug),
+    (AESTHETIC_LABEL, Lucide::Gem),
+];
+
+fn section_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: Lucide,
+    selected: bool,
+    depth: bool,
+) -> egui::Response {
+    let size = [ui.available_width(), 38.0];
+    if !depth {
+        return ui.add_sized(size, egui::Button::new(label).selected(selected));
+    }
+
+    let painter = ui.painter().clone();
+    let shadow = painter.add(egui::Shape::Noop);
+    let radius = egui::CornerRadius::same(8);
+    let image = icon.size(16.0).image().tint(ui.visuals().text_color());
+    let response = ui.add_sized(
+        size,
+        egui::Button::image_and_text(image, label)
+            .corner_radius(radius)
+            .selected(selected),
+    );
+    let rect = response.rect;
+    if ui.is_rect_visible(rect) {
+        let pressed = response.is_pointer_button_down_on();
+        if !pressed {
+            painter.set(
+                shadow,
+                egui::Shape::rect_filled(
+                    rect.translate(egui::vec2(0.0, 2.0)),
+                    radius,
+                    Color32::from_black_alpha(84),
+                ),
+            );
+        }
+        let rim = if pressed {
+            16
+        } else if response.hovered() || selected {
+            70
+        } else {
+            39
+        };
+        let left = rect.left() + 9.0;
+        let right = rect.right() - 9.0;
+        let top = rect.top() + 2.0;
+        let bottom = rect.bottom() - 2.0;
+        painter.hline(
+            left..=right,
+            top,
+            egui::Stroke::new(1.0, Color32::from_white_alpha(rim)),
+        );
+        painter.hline(
+            left..=right,
+            bottom,
+            egui::Stroke::new(1.0, Color32::from_black_alpha(75)),
+        );
+    }
+    response
+}
+
 /// Search routes to the owning page, including settings inside named groups.
 fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
     let terms = match index {
@@ -195,12 +270,44 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
             "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese китайский chinese корейский korean ocr язык language"
         }
         7 => "integrations интеграции notion pages токен token",
+        AESTHETIC_SECTION => {
+            "aesthetic эстетика experimental effects экспериментальные эффекты sidebar боковая панель icons иконки raised объём кнопок"
+        }
         _ => "",
     };
     let query = query.trim().to_lowercase();
     query
         .split_whitespace()
         .all(|word| label.to_lowercase().contains(word) || terms.contains(word))
+}
+
+fn navigation_keys(ctx: &egui::Context) -> (bool, i32) {
+    let mut toggle_search = false;
+    let mut direction = 0;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let egui::Event::Key {
+                key, physical_key, pressed: true, repeat, modifiers, ..
+            } = event else {
+                return true;
+            };
+            if !modifiers.ctrl || modifiers.alt || modifiers.mac_cmd {
+                return true;
+            }
+            match key {
+                egui::Key::ArrowUp if modifiers.shift => direction = -1,
+                egui::Key::ArrowDown if modifiers.shift => direction = 1,
+                _ if !modifiers.shift
+                    && (*key == egui::Key::T || *physical_key == Some(egui::Key::T)) =>
+                {
+                    toggle_search |= !repeat;
+                }
+                _ => return true,
+            }
+            false
+        });
+    });
+    (toggle_search, direction)
 }
 
 fn localized_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
@@ -542,6 +649,21 @@ fn apply_theme(
     Ok(())
 }
 impl State {
+    fn switch_section(&mut self, index: usize) {
+        if index == 6 && self.section != 6 {
+            self.ai_components = None;
+            self.ai_last_poll = None;
+            self.ai_error.clear();
+        }
+        if index != 7 {
+            self.notion_token.clear();
+        }
+        self.section = index;
+        if self.tab_hotkey_target.is_none() {
+            self.editor = None;
+        }
+    }
+
     fn refresh_ai_components(&mut self, api: &mut Service) {
         let result = call(api, Command::AiComponentsStatus);
         self.ai_last_poll = Some(Instant::now());
@@ -1333,6 +1455,7 @@ impl State {
         let mut refresh_sharex = false;
         let mut path_editing = false;
         let mut video_gpu_intent = None;
+        let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
         let mut draft_before = self
             .draft
             .as_ref()
@@ -1365,6 +1488,11 @@ impl State {
    let toggle_close=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::Comma));
    let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
    if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape||toggle_close; }
+   let (toggle_search, direction) = if recording || self.restart_confirmation || close {
+    (false, 0)
+   } else {
+    navigation_keys(ctx)
+   };
    let surface=super::theme_ui::color(ctx,super::theme_ui::Role::Surface,Color32::from_gray(69));
    let background=super::theme_ui::color(ctx,super::theme_ui::Role::Background,Color32::from_gray(65));
    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface)).show(ctx,|ui| {
@@ -1378,14 +1506,68 @@ impl State {
       ui.label(RichText::new(super::i18n::tr("Ctrl+, или нажмите «Настройки», чтобы закрыть", "Press Ctrl+, or click Settings to close")).size(11.0).color(Color32::from_gray(185)));
      });
      ui.add_space(16.0);
-     ui.add_sized([ui.available_width(),34.0],egui::TextEdit::singleline(&mut self.query).hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")).margin(egui::vec2(10.0,9.0)));
+     let search_id = ui.make_persistent_id("settings-search");
+     if toggle_search {
+      ui.memory_mut(|memory| {
+       if memory.has_focus(search_id) {
+        memory.surrender_focus(search_id);
+       } else {
+        memory.request_focus(search_id);
+       }
+      });
+     }
+     let search = egui::TextEdit::singleline(&mut self.query)
+      .id(search_id)
+      .hint_text(super::i18n::tr("Поиск настроек…", "Search settings…"))
+      .margin(egui::vec2(10.0, 9.0));
+     ui.add_sized([ui.available_width(), 34.0], search).on_hover_text("Ctrl+T");
+     let shown = SECTIONS.iter().enumerate().filter(|(index, ((ru, _), _))| {
+      section_matches_query(*index, ru, &self.query)
+     }).collect::<Vec<_>>();
+     let keyboard_target = if direction != 0 && !shown.is_empty() {
+      let position = shown.iter().position(|(index, _)| *index == self.section);
+      let next = match position {
+       Some(position) => (position as i32 + direction).rem_euclid(shown.len() as i32) as usize,
+       None if direction < 0 => shown.len() - 1,
+       None => 0,
+      };
+      let index = shown[next].0;
+      if index != self.section {
+       self.switch_section(index);
+       root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+      }
+      Some(index)
+     } else {
+      None
+     };
      ui.add_space(24.0);ui.label(RichText::new(super::i18n::tr("РАЗДЕЛЫ", "WORKSPACE")).size(10.0).color(Color32::from_gray(173)));ui.add_space(8.0);
-     for(index,(label_ru,label_en))in [("Основные","General"),("Горячие клавиши","Shortcuts"),("Вкладки","Tabs"),("Обновления","Updates"),("Темы","Themes"),("Теги","Tags"),("AI","AI"),("Интеграции","Integrations")].iter().enumerate(){let label=super::i18n::tr(label_ru,label_en);if section_matches_query(index,label_ru,&self.query)&&ui.add_sized([ui.available_width(),38.0],egui::Button::new(label).selected(self.section==index)).clicked(){if index==6 && self.section!=6 {self.ai_components=None;self.ai_last_poll=None;self.ai_error.clear();}if index!=7 {self.notion_token.clear();}self.section=index;if self.tab_hotkey_target.is_none(){self.editor=None;}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}}
+     let footer_height = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+     egui::ScrollArea::vertical()
+      .id_salt("settings-sidebar-sections")
+      .max_height((ui.available_height() - footer_height).max(0.0))
+      .show(ui, |ui| {
+       for (index, &((label_ru, label_en), icon)) in shown {
+        let label = super::i18n::tr(label_ru, label_en);
+        let response = ui.push_id(index, |ui| {
+         section_button(ui, label, icon, self.section == index, sidebar_depth)
+        }).inner;
+        if keyboard_target == Some(index) {
+         response.scroll_to_me(None);
+         if !ui.memory(|memory| memory.has_focus(search_id)) {
+          response.request_focus();
+         }
+        }
+        if response.clicked() {
+         self.switch_section(index);
+         root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+       }
+      });
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
-     egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui|{
+    egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]).show(ui,|ui|{
       if self.section != 2 && self.tab_hotkey_target.is_some() && let Some(editor)=self.editor.as_mut() {
        ui.separator();
        if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}
@@ -1679,6 +1861,17 @@ impl State {
        self.show_ai_components(ui,api);
       } else if self.section==7 {
        self.show_integrations(ui,api);
+      } else if self.section == AESTHETIC_SECTION {
+       ui.heading(super::i18n::tr(AESTHETIC_LABEL.0, AESTHETIC_LABEL.1));
+       ui.add_space(16.0);
+       if let Some(draft) = self.draft.as_mut() {
+        SettingsSection::group(ui, super::i18n::tr("Боковая панель", "Sidebar"), |ui| {
+         ui.checkbox(
+          &mut draft.settings_sidebar_depth,
+          super::i18n::tr("Иконки и объём кнопок", "Icons and raised buttons"),
+         );
+        });
+       }
       } else {
        ui.heading(super::i18n::tr("Горячие клавиши", "Shortcuts"));ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}

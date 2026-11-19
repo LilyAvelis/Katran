@@ -124,6 +124,9 @@ pub struct Settings {
     pub default_view: View,
     pub capture_on_start: bool,
     pub search_keyboard_only: bool,
+    /// Optional depth and icons for Settings navigation.
+    #[serde(skip_serializing_if = "is_false")]
+    pub settings_sidebar_depth: bool,
     /// Optional local Folder AI acceleration. Missing means CPU.
     #[serde(skip_serializing_if = "is_false")]
     pub folder_ai_gpu: bool,
@@ -176,6 +179,7 @@ impl Settings {
             default_view: View::Gallery,
             capture_on_start: true,
             search_keyboard_only: false,
+            settings_sidebar_depth: false,
             link_favicons_online: false,
             folder_ai_gpu: false,
             video_gpu_acceleration: false,
