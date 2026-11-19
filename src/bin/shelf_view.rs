@@ -224,6 +224,15 @@ impl Shelf {
                             if let Some(api) = self.api.as_mut() {
                                 self.table_preview.show(ui, event, api);
                             }
+                        } else if self.state["tab"] == "text" && event["kind"] == "text_fragment" {
+                            let preferences = self.text_reader_preferences();
+                            let preferences = self.text_preview.reader_draft.unwrap_or(preferences);
+                            if !self.modal_owns_input() && !super::search_or_text_edit_focused(ctx) {
+                                super::workspace_ui::arm_selection_copy(ctx, false);
+                            }
+                            self.pods_ui.begin_frame();
+                            self.text_preview.show_reader(ui, event, preferences, &mut self.pods_ui);
+                            self.pods_ui.end_frame();
                         } else if matches!(
                             event["kind"].as_str(),
                             Some("text_fragment" | "link_fragment")

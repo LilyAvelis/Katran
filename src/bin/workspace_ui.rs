@@ -8,6 +8,8 @@ mod notion_database_ui;
 #[path = "workspace_notion_ui.rs"]
 mod notion_ui;
 
+pub(super) use notion_ui::{arm_selection_copy, reader_column, show_reader_scaled};
+
 /// Consume the physical switch and only its paired text event. Paste stays intact.
 fn take_neural_toggle(input: &mut egui::InputState) -> bool {
     let mut toggles = 0;

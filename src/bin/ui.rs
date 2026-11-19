@@ -711,7 +711,7 @@ impl Shelf {
     }
     fn non_collection_modal_owns_input(&self) -> bool {
         self.transfer_input_reserved()
-            || self.notion_reader_controls_open()
+            || self.reader_controls_open()
             || self.sorting_input.is_open()
             || self.pods_ui.selector_open
             || self.pods_ui.category_open
@@ -900,7 +900,7 @@ impl Shelf {
             self.state = self.call(Command::Interaction);
         }
         self.notion_database_sync(&ctx);
-        self.notion_reader_input(&ctx);
+        self.reader_input(&ctx);
         self.emoji_ai_input(&ctx);
         self.emoji_ai_tick(&ctx);
         self.poll_preloaded_tab(&ctx);
@@ -1964,7 +1964,7 @@ impl Shelf {
             self.pinned_panel(&ctx);
             self.sort_menu(&ctx);
             self.palette(&ctx);
-            self.notion_reader_controls(&ctx);
+            self.reader_controls(&ctx);
             self.tag_menu_panel(&ctx);
             self.open_apps_panel(&ctx);
         }

@@ -1170,7 +1170,8 @@ impl Shelf {
         }
     }
     pub(super) fn call(&mut self, command: Command) -> Value {
-        let notion_actions = matches!(&command, Command::Actions);
+        let reader_actions = matches!(&command, Command::Actions);
+        let text_reader = self.text_reader_active() && reader_actions;
         let notion_catalogue = self.notion_database_active()
             && matches!(&command, Command::Actions | Command::SortActions);
         let Some(api) = self.api.as_mut() else {
@@ -1246,25 +1247,37 @@ impl Shelf {
                 "group":tr("Сортировка", "Sorting"),
                 "enabled":true
             }));
-            if self.notion_reader_active() && notion_actions {
-                for (id, label) in [
-                    (
-                        "notion_reader_background",
-                        tr("Фон страницы…", "Page background…"),
-                    ),
-                    (
-                        "notion_reader_landscape",
-                        tr("Переключить Landscape", "Toggle Landscape"),
-                    ),
-                    (
-                        "notion_reader_cinema",
-                        tr("Переключить Cinema", "Toggle Cinema"),
-                    ),
-                ] {
-                    actions.push(serde_json::json!({
-                        "id": id, "label": label, "group": tr("Читалка Notion", "Notion reader"), "enabled": true
-                    }));
+        }
+        if (text_reader || (self.notion_reader_active() && reader_actions))
+            && let Some(actions) = result.as_array_mut()
+        {
+            if text_reader {
+                for action in actions.iter_mut() {
+                    let label = match action["id"].as_str() {
+                        Some("density_more") => tr("Уменьшить текст", "Smaller text"),
+                        Some("density_less") => tr("Увеличить текст", "Larger text"),
+                        _ => continue,
+                    };
+                    action["label"] = label.into();
                 }
+            }
+            for (id, label) in [
+                (
+                    "notion_reader_background",
+                    tr("Фон страницы…", "Page background…"),
+                ),
+                (
+                    "notion_reader_landscape",
+                    tr("Переключить Landscape", "Toggle Landscape"),
+                ),
+                (
+                    "notion_reader_cinema",
+                    tr("Переключить Cinema", "Toggle Cinema"),
+                ),
+            ] {
+                actions.push(serde_json::json!({
+                    "id": id, "label": label, "group": tr("Читалка", "Reader"), "enabled": true
+                }));
             }
         }
         result

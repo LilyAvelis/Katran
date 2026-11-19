@@ -972,13 +972,18 @@ impl Service {
                     .map_err(|e| ApiError::new(&e.code, e.message))
             }
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
-            Command::GetNotionReaderPreferences => {
+            Command::GetNotionReaderPreferences | Command::GetTextReaderPreferences => {
+                let key = if matches!(command, Command::GetTextReaderPreferences) {
+                    "text_reader"
+                } else {
+                    "notion_reader"
+                };
                 use rusqlite::OptionalExtension;
                 let document: Option<String> = self
                     .db
                     .query_row(
-                        "SELECT document FROM preferences WHERE key='notion_reader'",
-                        [],
+                        "SELECT document FROM preferences WHERE key=?1",
+                        [key],
                         |row| row.get(0),
                     )
                     .optional()?;
@@ -990,15 +995,21 @@ impl Service {
                     .unwrap_or_default();
                 Ok(serde_json::json!(preferences))
             }
-            Command::SetNotionReaderPreferences { preferences } => {
+            Command::SetNotionReaderPreferences { preferences }
+            | Command::SetTextReaderPreferences { preferences } => {
+                let key = if matches!(command, Command::SetTextReaderPreferences { .. }) {
+                    "text_reader"
+                } else {
+                    "notion_reader"
+                };
                 if !(80..=200).contains(&preferences.text_percent) {
                     return Err(ApiError::new(
                         "invalid_settings",
-                        "Notion reader text scale must be between 80 and 200 percent",
+                        "Reader text scale must be between 80 and 200 percent",
                     ));
                 }
                 let document = serde_json::json!(preferences);
-                self.db.execute("INSERT INTO preferences(key,document) VALUES('notion_reader',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document", [document.to_string()])?;
+                self.db.execute("INSERT INTO preferences(key,document) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET document=excluded.document", rusqlite::params![key, document.to_string()])?;
                 Ok(document)
             }
             Command::ListSavedNotionPages { favorites } => {

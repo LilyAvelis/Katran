@@ -215,6 +215,10 @@ pub enum Command {
     SetNotionReaderPreferences {
         preferences: crate::settings::NotionReaderPreferences,
     },
+    GetTextReaderPreferences,
+    SetTextReaderPreferences {
+        preferences: crate::settings::NotionReaderPreferences,
+    },
     SetNotionToken {
         token: Option<crate::notion::Token>,
     },

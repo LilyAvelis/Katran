@@ -40,8 +40,11 @@ pub(super) struct TextPreview {
     context_epoch: u64,
     request_serial: u64,
     content: Option<Result<String, String>>,
-    document: Option<katran::markdown::Document>,
+    document: Option<Result<katran::markdown::Document, &'static str>>,
     rendered: bool,
+    rich_document: Option<Result<Vec<katran::notion_reader::Block>, &'static str>>,
+    pub(super) reader_preferences: Option<katran::settings::NotionReaderPreferences>,
+    pub(super) reader_draft: Option<katran::settings::NotionReaderPreferences>,
 }
 impl TextPreview {
     pub fn new(root: PathBuf) -> Self {
@@ -58,6 +61,9 @@ impl TextPreview {
             content: None,
             document: None,
             rendered: true,
+            rich_document: None,
+            reader_preferences: None,
+            reader_draft: None,
         }
     }
     fn start(&mut self) {
@@ -123,6 +129,7 @@ impl TextPreview {
         self.identity = None;
         self.content = None;
         self.document = None;
+        self.rich_document = None;
     }
     pub fn set_context(&mut self, state: &Value) {
         let context = super::images::preview_context(state);
@@ -141,6 +148,7 @@ impl TextPreview {
                 self.identity = None;
                 self.content = None;
                 self.document = None;
+                self.rich_document = None;
             }
             if let Some(worker) = &self.worker
                 && let Ok(mut queue) = worker.queue.0.lock()
@@ -212,6 +220,27 @@ impl TextPreview {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, event: &Value) {
+        self.show_document(ui, event, None);
+    }
+
+    pub(super) fn show_reader(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        preferences: katran::settings::NotionReaderPreferences,
+        emoji: &mut crate::pods_ui::State,
+    ) {
+        super::workspace_ui::reader_column(ui, preferences, |ui, scale| {
+            self.show_document(ui, event, Some((scale, emoji)));
+        });
+    }
+
+    fn show_document(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        mut reader: Option<(f32, &mut crate::pods_ui::State)>,
+    ) {
         if !self.enabled {
             return;
         }
@@ -220,6 +249,7 @@ impl TextPreview {
             self.identity = None;
             self.content = None;
             self.document = None;
+            self.rich_document = None;
             return;
         };
         let identity = Identity {
@@ -236,6 +266,7 @@ impl TextPreview {
             self.wanted = None;
             self.content = None;
             self.document = None;
+            self.rich_document = None;
             self.rendered = true;
         }
         let key = (
@@ -254,6 +285,7 @@ impl TextPreview {
                 self.identity = None;
                 self.content = None;
                 self.document = None;
+                self.rich_document = None;
                 return;
             };
             Some(PathBuf::from(path))
@@ -267,6 +299,7 @@ impl TextPreview {
             if !same_ready {
                 self.content = None;
                 self.document = None;
+                self.rich_document = None;
                 self.rendered = true;
                 let (lock, wake) = &*self.worker.as_ref().unwrap().queue;
                 lock.lock().unwrap().next = Some((key, path, ui.ctx().clone()));
@@ -293,14 +326,8 @@ impl TextPreview {
                             .into())
                     },
                 );
-                self.document = if is_link {
-                    None
-                } else {
-                    self.content
-                        .as_ref()
-                        .and_then(|content| content.as_ref().ok())
-                        .and_then(|text| katran::markdown::parse(text).ok())
-                };
+                self.rich_document = None;
+                self.document = None;
             }
         }
         let title = if is_link {
@@ -313,15 +340,29 @@ impl TextPreview {
         preview_header(ui, &title, is_link, &mut self.rendered);
         ui.separator();
         egui::ScrollArea::vertical()
+            .id_salt(("text-document", reader.is_some(), id))
             .max_height(ui.available_height().max(40.0))
             .show(ui, |ui| match &self.content {
                 Some(Ok(text)) => {
-                    if self.rendered
-                        && let Some(document) = &self.document
-                    {
-                        crate::markdown_ui::show(ui, document);
+                    let scale = reader.as_ref().map_or(1.0, |(scale, _)| *scale);
+                    if self.rendered {
+                        if let Some((scale, emoji)) = reader.as_mut()
+                            && let Ok(blocks) = self
+                                .rich_document
+                                .get_or_insert_with(|| katran::notion_reader::parse(text))
+                        {
+                            super::workspace_ui::show_reader_scaled(ui, blocks, *scale, emoji);
+                        } else if !is_link
+                            && let Ok(document) = self
+                                .document
+                                .get_or_insert_with(|| katran::markdown::parse(text))
+                        {
+                            crate::markdown_ui::show(ui, document);
+                        } else {
+                            ui.label(egui::RichText::new(text).monospace().size(15.0 * scale));
+                        }
                     } else {
-                        ui.label(egui::RichText::new(text).monospace().size(15.0));
+                        ui.label(egui::RichText::new(text).monospace().size(15.0 * scale));
                     }
                     if event["size"].as_u64().unwrap_or(0) > text.len() as u64 {
                         ui.add_space(12.0);
@@ -1122,7 +1163,10 @@ mod tests {
             serde_json::from_value(app.call(Command::GetSettings)).unwrap();
         settings.quota_bytes = 200_000;
         app.call(Command::SetSettings { settings });
-        let content = format!("Первая строка 🐄\n{}", "x".repeat(70_000));
+        let content = format!(
+            "Первая строка 🐄\n\n<callout icon=\"🐄\">\nReader fixture\n</callout>\n\n{}",
+            "x".repeat(70_000)
+        );
         let event = app.call(Command::IngestText {
             text: content,
             source: "test".into(),
@@ -1184,6 +1228,39 @@ mod tests {
             &queue,
             &app.text_preview.worker.as_ref().unwrap().queue
         ));
+        assert!(matches!(
+            &app.text_preview.rich_document,
+            Some(Ok(blocks)) if blocks.iter().any(|block| matches!(block, katran::notion_reader::Block::Callout { .. }))
+        ));
+        let actions = app.call(Command::Actions);
+        assert!(
+            actions
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["id"] == "notion_reader_background")
+        );
+        app.run("notion_reader_landscape".into(), &ctx);
+        app.run("notion_reader_cinema".into(), &ctx);
+        let mut zoom_input = raw();
+        zoom_input.events.push(egui::Event::Key {
+            key: egui::Key::Equals,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let mut output = ctx.run_ui(zoom_input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        let text_preferences = app.call(Command::GetTextReaderPreferences);
+        assert_eq!(text_preferences["landscape"], true);
+        assert_eq!(text_preferences["cinema"], true);
+        assert_eq!(text_preferences["text_percent"], 110);
+        assert_eq!(
+            app.call(Command::GetNotionReaderPreferences)["text_percent"],
+            100
+        );
+        assert_eq!(app.state["preview"], id);
         app.call(Command::SetTabEnabled {
             tab: katran::interaction::ShelfTab::Text,
             enabled: false,
@@ -1251,7 +1328,16 @@ mod tests {
             app.text_preview.content.as_ref().unwrap().as_ref().unwrap(),
             source
         );
-        assert_eq!(app.text_preview.document.as_ref().unwrap().source, source);
+        assert_eq!(
+            app.text_preview
+                .document
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .source,
+            source
+        );
         app.text_preview.rendered = false;
         let mut out = ctx.run_ui(raw(), |ui| app.render(ui));
         out.textures_delta.clear();

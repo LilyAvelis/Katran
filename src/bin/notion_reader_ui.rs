@@ -3,6 +3,7 @@ use eframe::egui::{self, Color32, RichText, Stroke};
 use katran::{
     notion_reader::{Block, Cell, ReferenceKind},
     notion_rich::Document,
+    settings::NotionReaderPreferences,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -16,21 +17,27 @@ impl egui::Plugin for ReaderCopy {
 
     fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
         let armed = egui::Id::new(("notion-reader-copy-armed", ctx.viewport_id()));
-        if ctx.data_mut(|data| data.remove_temp::<bool>(armed)) != Some(true) {
+        let Some(save_in_shelf) = ctx.data_mut(|data| data.remove_temp::<bool>(armed)) else {
             return;
-        }
+        };
         let mut copied = None;
-        output.platform_output.commands.retain(|command| {
+        output.platform_output.commands.retain_mut(|command| {
             if let egui::OutputCommand::CopyText(text) = command {
-                copied = Some(text.chars().fold(String::new(), |mut decoded, ch| {
+                let decoded = text.chars().fold(String::new(), |mut decoded, ch| {
                     if let Some(emoji) = katran::emoji_render::emoji_from_placeholder(ch) {
                         decoded.push_str(emoji);
                     } else {
                         decoded.push(ch);
                     }
                     decoded
-                }));
-                false
+                });
+                if save_in_shelf {
+                    copied = Some(decoded);
+                    false
+                } else {
+                    *text = decoded;
+                    true
+                }
             } else {
                 true
             }
@@ -43,6 +50,10 @@ impl egui::Plugin for ReaderCopy {
 }
 
 pub(crate) fn arm_copy(ctx: &egui::Context) {
+    arm_selection_copy(ctx, true);
+}
+
+pub(crate) fn arm_selection_copy(ctx: &egui::Context, save_in_shelf: bool) {
     if ctx.input(|input| {
         input
             .events
@@ -51,8 +62,94 @@ pub(crate) fn arm_copy(ctx: &egui::Context) {
     }) {
         let _ = ctx.plugin_or_default::<ReaderCopy>();
         let armed = egui::Id::new(("notion-reader-copy-armed", ctx.viewport_id()));
-        ctx.data_mut(|data| data.insert_temp(armed, true));
+        ctx.data_mut(|data| data.insert_temp(armed, save_in_shelf));
     }
+}
+
+pub(crate) fn reader_column(
+    ui: &mut egui::Ui,
+    preferences: NotionReaderPreferences,
+    render: impl FnOnce(&mut egui::Ui, f32),
+) {
+    let area = ui.available_rect_before_wrap();
+    let width = if preferences.landscape {
+        area.width()
+    } else {
+        area.width().min(660.0)
+    };
+    let size = egui::vec2(width, area.height());
+    paint_reader_background(
+        ui,
+        egui::Rect::from_center_size(area.center(), size),
+        preferences,
+    );
+    ui.vertical_centered(|ui| {
+        ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(width);
+            ui.set_max_width(width);
+            render(ui, f32::from(preferences.text_percent) / 100.0);
+        });
+    });
+}
+
+fn paint_reader_background(ui: &egui::Ui, column: egui::Rect, prefs: NotionReaderPreferences) {
+    use egui::{Pos2, Rect};
+    let outer = ui.ctx().content_rect();
+    let surround = if prefs.cinema {
+        Color32::from_black_alpha(155)
+    } else {
+        Color32::TRANSPARENT
+    };
+    if prefs.cinema {
+        let painter = ui.painter().with_clip_rect(outer);
+        for rect in [
+            Rect::from_min_max(outer.min, Pos2::new(outer.right(), column.top())),
+            Rect::from_min_max(Pos2::new(outer.left(), column.bottom()), outer.max),
+            Rect::from_min_max(Pos2::new(outer.left(), column.top()), column.left_bottom()),
+            Rect::from_min_max(
+                column.right_top(),
+                Pos2::new(outer.right(), column.bottom()),
+            ),
+        ] {
+            painter.rect_filled(rect, 0.0, surround);
+        }
+    }
+
+    let [r, g, b] = prefs.color;
+    let ink = Color32::from_rgba_unmultiplied(r, g, b, prefs.opacity);
+    let halo = column.expand2(egui::vec2(42.0, 10.0)).intersect(outer);
+    let xs = [halo.left(), column.left(), column.right(), halo.right()];
+    let ys = [
+        column.top(),
+        (column.top() + 10.0).min(column.center().y),
+        (column.bottom() - 10.0).max(column.center().y),
+        column.bottom(),
+    ];
+    let mut mesh = egui::Mesh::default();
+    for (y, top) in ys.into_iter().enumerate() {
+        for (x, left) in xs.into_iter().enumerate() {
+            let color = if (x == 1 || x == 2) && (y == 1 || y == 2) {
+                ink
+            } else if prefs.cinema {
+                if x == 0 || x == 3 {
+                    Color32::TRANSPARENT
+                } else {
+                    surround
+                }
+            } else {
+                Color32::TRANSPARENT
+            };
+            mesh.colored_vertex(Pos2::new(left, top), color);
+        }
+    }
+    for y in 0..3 {
+        for x in 0..3 {
+            let i = y * 4 + x;
+            mesh.add_triangle(i, i + 1, i + 4);
+            mesh.add_triangle(i + 1, i + 5, i + 4);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 #[cfg(test)]

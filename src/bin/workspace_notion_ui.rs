@@ -3,7 +3,7 @@ use super::*;
 #[path = "notion_reader_ui.rs"]
 mod reader;
 
-pub(super) fn show_reader_scaled(
+pub(crate) fn show_reader_scaled(
     ui: &mut egui::Ui,
     blocks: &[katran::notion_reader::Block],
     scale: f32,
@@ -14,6 +14,7 @@ pub(super) fn show_reader_scaled(
 
 pub(super) use reader::arm_copy as arm_reader_copy;
 pub(super) use reader::label as reader_label;
+pub(crate) use reader::{arm_selection_copy, reader_column};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum SearchKind {
