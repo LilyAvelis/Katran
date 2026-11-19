@@ -148,7 +148,7 @@ struct FilePage {
 
 struct TextPage {
     source: String,
-    document: Option<katran::markdown::Document>,
+    document: Option<Vec<katran::notion_reader::Block>>,
     rendered: bool,
 }
 
@@ -720,7 +720,7 @@ impl Shelf {
                                         collection.zoom = katran::preview_view::State::default();
                                     }
                                 } else if let Some(source) = page["text"]["source"].as_str() {
-                                    let document = katran::markdown::parse(source).ok();
+                                    let document = katran::notion_reader::parse(source).ok();
                                     collection.text = Some(TextPage {
                                         source: source.to_owned(),
                                         document,
@@ -1162,7 +1162,11 @@ impl Shelf {
                     }
                 });
                 egui::ScrollArea::vertical()
-                    .id_salt(("collection-text-scroll", collection.ready_index))
+                    .id_salt((
+                        "collection-text-scroll",
+                        collection.id,
+                        collection.ready_index,
+                    ))
                     .max_height((inner.height() - child.spacing().interact_size.y - 8.0).max(1.0))
                     .auto_shrink([false, false])
                     .show(&mut child, |ui| {
@@ -1170,7 +1174,14 @@ impl Shelf {
                         if text.rendered
                             && let Some(document) = &text.document
                         {
-                            super::markdown_ui::show(ui, document);
+                            self.pods_ui.begin_frame();
+                            super::workspace_ui::show_reader_scaled(
+                                ui,
+                                document,
+                                1.0,
+                                &mut self.pods_ui,
+                            );
+                            self.pods_ui.end_frame();
                         } else {
                             ui.add(
                                 egui::Label::new(egui::RichText::new(&text.source).monospace())
@@ -2156,7 +2167,7 @@ mod tests {
             file: None,
             text: Some(TextPage {
                 source: source.into(),
-                document: katran::markdown::parse(source).ok(),
+                document: katran::notion_reader::parse(source).ok(),
                 rendered: true,
             }),
             ready_index: Some(2),
@@ -2166,6 +2177,63 @@ mod tests {
         };
         assert_eq!(collection.ready_target(), Some((11, "rev".into(), 2)));
         assert!(collection.text.as_ref().unwrap().document.is_some());
+    }
+
+    #[test]
+    fn text_bull_shows_notion_markup_in_its_own_viewer_and_keeps_source() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_shelf(root.path());
+        let ctx = egui::Context::default();
+        crate::ui_fonts::install(&ctx);
+        let source = "<callout color=\"blue_bg\">\nReader callout\n</callout>\n\n<toggle>\nMore notes\n\nHidden child\n</toggle>";
+        let mut bytes = Vec::new();
+        baloh_collection::text::write(&mut bytes, &[source.to_owned()]).unwrap();
+        let event = app.call(Command::IngestBytes {
+            name: "notes.bull".into(),
+            source: "text_collection".into(),
+            bytes,
+        });
+        app.open_translation_collection(&event, &ctx);
+        let frame = |app: &mut Shelf| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |_| app.translation_collection_ui(&ctx),
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.upscale.collection.as_ref().unwrap().pending.is_some() {
+            assert!(Instant::now() < deadline);
+            frame(&mut app);
+            std::thread::yield_now();
+        }
+        app.upscale.collection.as_mut().unwrap().opened_at =
+            Instant::now() - Duration::from_secs(1);
+        fn rendered(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.job.text.contains(expected),
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| rendered(shape, expected)),
+                _ => false,
+            }
+        }
+        let shapes = frame(&mut app);
+        let has = |text| shapes.iter().any(|shape| rendered(&shape.shape, text));
+        assert!(has("Reader callout") && has("More notes"));
+        assert!(!has("<callout") && !has("Hidden child"));
+        let collection = app.upscale.collection.as_mut().unwrap();
+        assert_eq!(collection.ready_index, Some(0));
+        let page = collection.text.as_mut().unwrap();
+        assert_eq!(page.source, source);
+        page.rendered = false;
+        let shapes = frame(&mut app);
+        assert!(shapes.iter().any(|shape| rendered(&shape.shape, source)));
     }
 
     #[test]
