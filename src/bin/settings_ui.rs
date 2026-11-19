@@ -235,6 +235,35 @@ fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
     });
 }
 
+fn font_picker(ui: &mut egui::Ui, choice: &mut katran::settings::UiFont) -> bool {
+    use super::{i18n::tr, ui_fonts};
+    use katran::settings::UiFont;
+    let previous = *choice;
+    let default_label = tr("Исходный шрифт", "Original font");
+    let label = match choice {
+        UiFont::Default => default_label,
+        _ => ui_fonts::available()
+            .find_map(|(value, label)| (value == *choice).then_some(label))
+            .unwrap_or(tr("Шрифт недоступен", "Font unavailable")),
+    };
+    ui.horizontal_wrapped(|ui| {
+        egui::ComboBox::from_id_salt("interface-font")
+            .selected_text(label)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(choice, UiFont::Default, default_label);
+                for (value, label) in ui_fonts::available() {
+                    ui.selectable_value(choice, value, label);
+                }
+            });
+        if ui.add_enabled(*choice != UiFont::Default, egui::Button::new(
+            tr("Вернуть исходный", "Restore original"),
+        )).clicked() {
+            *choice = UiFont::Default;
+        }
+    });
+    *choice != previous
+}
+
 fn section_order(saved: &[String]) -> Vec<usize> {
     let mut order = Vec::with_capacity(SECTIONS.len());
     for key in saved.iter().map(String::as_str).chain(SECTION_KEYS) {
@@ -1557,6 +1586,7 @@ impl State {
         let mut global_intent = None;
         let mut theme_intent = None;
         let mut explicit_save = false;
+        let mut font_changed = false;
         let mut refresh_sharex = false;
         let mut path_editing = false;
         let mut video_gpu_intent = None;
@@ -2017,6 +2047,9 @@ impl State {
        self.show_integrations(ui,api);
       } else if self.section == AESTHETIC_SECTION {
        if let Some(draft) = self.draft.as_mut() {
+        SettingsSection::group(ui, super::i18n::tr("Шрифт интерфейса", "Interface font"), |ui| {
+         font_changed = font_picker(ui, &mut draft.ui_font);
+        });
         SettingsSection::group(ui, super::i18n::tr("Разделы настроек", "Settings sections"), |ui| {
          ui.checkbox(&mut draft.settings_section_headers, super::i18n::tr(
           "Шапки разделов по центру", "Centered section headers",
@@ -2042,7 +2075,14 @@ impl State {
         });
        }
       } else {
-       if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}
+       let search = egui::TextEdit::singleline(&mut self.shortcut_filter)
+        .hint_text(super::i18n::tr("Поиск команды…", "Search commands…"))
+        .desired_width(ui.available_width())
+        .min_size(egui::vec2(0.0, 36.0))
+        .vertical_align(egui::Align::Center)
+        .margin(egui::Margin::symmetric(10, 7));
+       if ui.add(search).changed(){self.editor=None;}
+       ui.add_space(6.0);
        let shortcuts:Vec<katran::shortcuts::ShortcutInfo>=serde_json::from_value(call(api,Command::Shortcuts)["result"].clone()).unwrap_or_default();
        let mut edit=None;
        SettingsSection::show(ui,|ui|{
@@ -2059,6 +2099,15 @@ impl State {
              ui.add(egui::Label::new(shortcut_label).wrap());
             });
            }, "", |ui| {
+            let reset = egui::Button::image(Lucide::RotateCcw.size(15.0).image())
+             .min_size(egui::vec2(32.0, 32.0))
+             .corner_radius(16.0);
+            if ui.add_enabled(shortcut.rebindable, reset)
+             .on_hover_text(super::i18n::tr("Сбросить к исходному сочетанию", "Reset to default shortcut")).clicked()
+            {
+             let r = call(api, Command::SetShortcut {id: shortcut.id.clone(), binding: None, replace: false, reset: true});
+             self.error = r["error"]["message"].as_str().unwrap_or_default().into();
+            }
             let anchor = super::shortcuts_ui::binding_button(ui, shortcut.binding.as_deref(),
              shortcut.rebindable && self.tab_hotkey_target.is_none(), raised_keycaps);
             let anchor = if shortcut.rebindable {
@@ -2076,12 +2125,6 @@ impl State {
              let (open, action) = editor.show_popover(ui, &anchor, opened, icon, raised_keycaps);
              intent = action;
              if !open { self.editor = None; }
-            }
-            if shortcut.rebindable && ui.add(egui::Button::image(Lucide::RotateCcw.size(14.0).image()).small())
-             .on_hover_text(super::i18n::tr("Сбросить к исходному сочетанию", "Reset to default shortcut")).clicked()
-            {
-             let r = call(api, Command::SetShortcut {id: shortcut.id.clone(), binding: None, replace: false, reset: true});
-             self.error = r["error"]["message"].as_str().unwrap_or_default().into();
             }
            });
            if let (Some(editor), Some(action)) = (self.editor.as_mut(), intent)
@@ -2174,6 +2217,7 @@ impl State {
             self.pending_save = Some(Instant::now() + AUTOSAVE_DELAY);
         }
         let save_now = explicit_save
+            || font_changed
             || refresh_sharex
             || close
             || (!path_editing
@@ -2186,6 +2230,9 @@ impl State {
                     Ok((saved, resize_changed)) => {
                         self.pending_save = None;
                         super::i18n::set(saved.language);
+                        if font_changed {
+                            super::ui_fonts::apply(ctx, saved.ui_font);
+                        }
                         if resize_changed {
                             ctx.send_viewport_cmd_to(
                                 egui::ViewportId::ROOT,
@@ -2220,6 +2267,11 @@ impl State {
                         ctx.request_repaint_of(egui::ViewportId::ROOT);
                     }
                     Err(error) => {
+                        if font_changed && let Some(draft) = self.draft.as_mut() {
+                            draft.ui_font = draft_before.as_ref()
+                                .and_then(|value| serde_json::from_value(value["ui_font"].clone()).ok())
+                                .unwrap_or_default();
+                        }
                         self.pending_save = None;
                         self.error = error;
                         close = false;

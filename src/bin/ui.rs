@@ -788,6 +788,8 @@ impl Shelf {
         }
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
+            let ui_font = serde_json::from_value(settings["ui_font"].clone()).unwrap_or_default();
+            ui_fonts::apply(&ctx, ui_font);
             i18n::set(if settings["language"] == "en" {
                 katran::settings::Language::English
             } else {
@@ -2511,9 +2513,11 @@ fn main() -> eframe::Result {
         scroll: false,
     };
     app.refresh();
+    let settings = app.call(Command::GetSettings);
     let theme: katran::theme::ThemePreferences =
-        serde_json::from_value(app.call(Command::GetSettings)["theme"].clone()).unwrap_or_default();
-    let window_resizable = app.call(Command::GetSettings)["window_resizable"] == true;
+        serde_json::from_value(settings["theme"].clone()).unwrap_or_default();
+    let window_resizable = settings["window_resizable"] == true;
+    let ui_font = serde_json::from_value(settings["ui_font"].clone()).unwrap_or_default();
     app.video_play_hidden = theme.video_play_hidden;
     let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
     app.transparent_viewport = glass_start;
@@ -2570,6 +2574,7 @@ fn main() -> eframe::Result {
                 }
             }
             ui_style::install(&cc.egui_ctx);
+            ui_fonts::apply(&cc.egui_ctx, ui_font);
             egui_extras::install_image_loaders(&cc.egui_ctx);
             app.start_tab_preload(&cc.egui_ctx);
             Ok(Box::new(app))

@@ -13,6 +13,25 @@ pub enum Language {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum UiFont {
+    #[default]
+    Default,
+    SegoeUi,
+    Tahoma,
+    Verdana,
+    Arial,
+    Calibri,
+    Trebuchet,
+}
+
+impl UiFont {
+    fn is_default(&self) -> bool {
+        *self == Self::Default
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TranslationTarget {
     #[default]
     Interface,
@@ -133,6 +152,8 @@ pub struct Settings {
     pub settings_raised_keycaps: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_section_headers: bool,
+    #[serde(skip_serializing_if = "UiFont::is_default")]
+    pub ui_font: UiFont,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub settings_section_order: Vec<String>,
     /// Optional local Folder AI acceleration. Missing means CPU.
@@ -191,6 +212,7 @@ impl Settings {
             settings_summon_popover: false,
             settings_raised_keycaps: false,
             settings_section_headers: false,
+            ui_font: UiFont::Default,
             settings_section_order: Vec::new(),
             link_favicons_online: false,
             folder_ai_gpu: false,
