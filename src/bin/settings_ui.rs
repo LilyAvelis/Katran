@@ -1673,7 +1673,7 @@ impl State {
              "overlay_hotkey",
              super::i18n::tr("Вызов Katran", "Summon Katran"),
              draft.overlay_hotkey.clone(),
-            ).with_physical_keys());
+            ).with_summon_confirmation());
             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
            }
            if let Some(editor) = self.editor.as_mut().filter(|editor| editor.id == "overlay_hotkey") {
@@ -1691,6 +1691,7 @@ impl State {
             }
             if !open {
              self.editor = None;
+             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
             }
            }
            if ui.add(egui::Button::image(Lucide::RefreshCw.size(14.0).image()).small())
@@ -1700,7 +1701,8 @@ impl State {
             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
            }
           });
-          if !self.overlay_status.is_empty() { ui.weak(&self.overlay_status); }
+          if self.editor.as_ref().is_none_or(|editor| editor.id != "overlay_hotkey")
+           && !self.overlay_status.is_empty() { ui.weak(&self.overlay_status); }
          } else {
          let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{

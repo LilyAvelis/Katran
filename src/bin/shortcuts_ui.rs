@@ -47,10 +47,18 @@ pub struct Editor {
     replaceable: bool,
     selected: Option<usize>,
     physical_keys: bool,
+    confirm_summon: bool,
+    pending_summon: Option<String>,
     held_modifiers: [bool; 8],
     alt_armed: bool,
 }
 impl Editor {
+    pub fn with_summon_confirmation(mut self) -> Self {
+        self.physical_keys = true;
+        self.confirm_summon = true;
+        self
+    }
+
     pub fn with_physical_keys(mut self) -> Self {
         self.physical_keys = true;
         self
@@ -179,6 +187,16 @@ impl Editor {
             if key == Key::Backspace && m.ctrl && !m.alt && !m.shift && !m.mac_cmd {
                 return self.choice(2);
             }
+            if self.confirm_summon {
+                if key == Key::Enter && m.is_none() {
+                    return self.confirm_summon();
+                }
+                if key != Key::Tab || m.ctrl || m.alt || m.mac_cmd {
+                    self.pending_summon = Some(chord(key, m));
+                    self.error = None;
+                }
+                return None;
+            }
             let controls = self.binding.is_some() || self.selected.is_some();
             let backwards =
                 matches!(key, Key::ArrowLeft | Key::ArrowUp) || (key == Key::Tab && m.shift);
@@ -212,32 +230,72 @@ impl Editor {
             })
         })
     }
+    fn confirm_summon(&self) -> Option<Intent> {
+        self.pending_summon.clone().map(|binding| Intent::Set {
+            binding,
+            replace: false,
+        })
+    }
+
     pub fn render_summon_popover(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
-        ui.set_width(250.0);
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            ui.label(tr("Нажмите сочетание клавиш", "Press a shortcut"));
-            ui.weak(tr("Ctrl, Alt или Shift + буква или F-клавиша", "Ctrl, Alt or Shift + a letter or F key"));
-            if let Some(error) = &self.error {
-                ui.colored_label(egui::Color32::LIGHT_RED, error);
-            }
-            ui.add_space(8.0);
-        });
+        use super::special_mode_bar;
+        ui.set_width(360.0);
+        let chord = self
+            .pending_summon
+            .as_deref()
+            .unwrap_or(&self.current_binding);
+        summon_capture_field(ui, chord);
         ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(&self.label);
-            for (index, (_, choice)) in self.choices().into_iter().enumerate() {
-                let label = match choice {
-                    2 => tr("Сбросить", "Clear"),
-                    3 => tr("Отмена · Esc", "Cancel · Esc"),
-                    _ => continue,
-                };
-                if ui.add(egui::Button::new(label).small().selected(self.selected == Some(index))).clicked() {
-                    return self.choice(choice);
+        if let Some(error) = &self.error {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(error)
+                        .small()
+                        .color(egui::Color32::LIGHT_RED),
+                )
+                .truncate(),
+            )
+            .on_hover_text(error);
+        }
+        special_mode_bar::show(ui, |ui| {
+            ui.label(egui::RichText::new(&self.label).small());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if special_mode_bar::action(
+                    ui,
+                    "Enter",
+                    None,
+                    self.pending_summon.is_some(),
+                    false,
+                    66.0,
+                )
+                .on_hover_text(tr("Применить сочетание", "Apply shortcut"))
+                .clicked()
+                {
+                    return self.confirm_summon();
                 }
-            }
-            None
-        }).inner
+                if special_mode_bar::action(ui, "Esc", None, true, false, 56.0)
+                    .on_hover_text(tr("Отмена", "Cancel"))
+                    .clicked()
+                {
+                    return Some(Intent::Cancel);
+                }
+                if special_mode_bar::action(
+                    ui,
+                    tr("Очистить", "Clear"),
+                    None,
+                    !self.current_binding.is_empty(),
+                    false,
+                    82.0,
+                )
+                .clicked()
+                {
+                    return self.choice(2);
+                }
+                None
+            })
+            .inner
+        })
+        .inner
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
@@ -279,6 +337,61 @@ impl Editor {
             "Tab — buttons · arrows — select · Enter — confirm",
         ));
         choice.and_then(|c| self.choice(c))
+    }
+}
+
+fn summon_capture_field(ui: &mut egui::Ui, binding: &str) {
+    use super::theme_ui::{self, Role};
+    use egui::{Color32, FontId};
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 112.0),
+        egui::Sense::hover(),
+    );
+    let painter = ui.painter().with_clip_rect(rect);
+    let top = theme_ui::color(ui.ctx(), Role::Surface, ui.visuals().window_fill).to_opaque();
+    let bottom = ui.visuals().window_fill.to_opaque();
+    let mut gradient = egui::Mesh::default();
+    gradient.colored_vertex(rect.left_top(), top);
+    gradient.colored_vertex(rect.right_top(), top);
+    gradient.colored_vertex(rect.right_bottom(), bottom);
+    gradient.colored_vertex(rect.left_bottom(), bottom);
+    gradient.add_triangle(0, 1, 2);
+    gradient.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(gradient));
+
+    let color = ui.visuals().text_color();
+    let keys: Vec<_> = binding
+        .split_whitespace()
+        .map(|key| painter.layout_no_wrap(key.to_owned(), FontId::monospace(22.0), color))
+        .collect();
+    if keys.is_empty() {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            tr("Нажмите сочетание", "Press a shortcut"),
+            FontId::proportional(18.0),
+            ui.visuals().weak_text_color(),
+        );
+        return;
+    }
+    let gap = 8.0;
+    let width = |key: &egui::Galley| (key.size().x + 24.0).max(42.0);
+    let total = keys.iter().map(|key| width(key)).sum::<f32>() + gap * (keys.len() - 1) as f32;
+    let mut left = rect.center().x - total * 0.5;
+    for key in keys {
+        let bounds = egui::Rect::from_min_size(
+            egui::pos2(left, rect.center().y - 22.0),
+            egui::vec2(width(&key), 44.0),
+        );
+        painter.rect(
+            bounds,
+            7.0,
+            theme_ui::color(ui.ctx(), Role::Raised, Color32::from_gray(59)),
+            ui.visuals().widgets.inactive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(bounds.center() - key.size() * 0.5, key, color);
+        left = bounds.right() + gap;
     }
 }
 fn modifier_index(key: Key) -> Option<usize> {
@@ -423,6 +536,62 @@ mod tests {
         );
         out.textures_delta.clear();
         result
+    }
+    #[test]
+    fn summon_popover_confirms_only_a_recorded_candidate() {
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::new("overlay_hotkey", "Summon Katran", "Alt E").with_summon_confirmation();
+        let mut press = |key, modifiers| {
+            recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![
+                    key_event(key, true, modifiers),
+                    key_event(key, false, modifiers),
+                ],
+            )
+        };
+        assert!(press(Key::Enter, egui::Modifiers::NONE).is_none());
+        assert!(press(Key::Q, egui::Modifiers::CTRL).is_none());
+        assert!(press(Key::R, egui::Modifiers::SHIFT).is_none());
+        assert!(matches!(
+            press(Key::Enter, egui::Modifiers::NONE),
+            Some(Intent::Set { binding, replace: false }) if binding == "Shift R"
+        ));
+        assert_eq!(editor.current_binding, "Alt E");
+    }
+
+    #[test]
+    fn summon_popover_can_replace_a_rejected_candidate_or_cancel() {
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::new("overlay_hotkey", "Summon Katran", "Alt E").with_summon_confirmation();
+        recorder_frame(
+            &ctx,
+            &mut editor,
+            vec![key_event(Key::A, true, egui::Modifiers::NONE)],
+        );
+        editor.failed("A".into(), "Invalid shortcut".into(), false);
+        assert_eq!(editor.pending_summon.as_deref(), Some("A"));
+        assert!(
+            recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![key_event(Key::R, true, egui::Modifiers::ALT)]
+            )
+            .is_none()
+        );
+        assert_eq!(editor.pending_summon.as_deref(), Some("Alt R"));
+        assert!(editor.error.is_none());
+        assert!(matches!(
+            recorder_frame(
+                &ctx,
+                &mut editor,
+                vec![key_event(Key::Escape, true, egui::Modifiers::NONE)]
+            ),
+            Some(Intent::Cancel)
+        ));
     }
     #[test]
     fn physical_recording_recovers_shift_and_other_held_modifiers() {
