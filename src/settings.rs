@@ -147,6 +147,8 @@ pub struct Settings {
     #[serde(skip_serializing_if = "is_false")]
     pub settings_sidebar_depth: bool,
     #[serde(skip_serializing_if = "is_false")]
+    pub settings_sidebar_glass: bool,
+    #[serde(skip_serializing_if = "is_false")]
     pub settings_summon_popover: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_raised_keycaps: bool,
@@ -214,6 +216,7 @@ impl Settings {
             capture_on_start: true,
             search_keyboard_only: false,
             settings_sidebar_depth: false,
+            settings_sidebar_glass: false,
             settings_summon_popover: false,
             settings_raised_keycaps: false,
             settings_raised_keycaps_in_rows: None,

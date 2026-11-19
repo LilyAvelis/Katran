@@ -332,8 +332,12 @@ fn section_button(
     icon: Lucide,
     selected: bool,
     depth: bool,
+    glass: bool,
 ) -> egui::Response {
     let size = [ui.available_width(), 38.0];
+    if glass {
+        return glass_section_button(ui, size, label, icon, selected);
+    }
     if !depth {
         return ui.add_sized(size, egui::Button::new(label).selected(selected));
     }
@@ -385,6 +389,50 @@ fn section_button(
             bottom,
             egui::Stroke::new(1.0, Color32::from_black_alpha(75)),
         );
+    }
+    response
+}
+
+fn glass_section_button(
+    ui: &mut egui::Ui,
+    size: [f32; 2],
+    label: &str,
+    icon: Lucide,
+    selected: bool,
+) -> egui::Response {
+    use super::theme_ui::{self, Role};
+    let painter = ui.painter().clone();
+    let body = painter.add(egui::Shape::Noop);
+    let optics = painter.add(egui::Shape::Noop);
+    let rim = painter.add(egui::Shape::Noop);
+    let shine = painter.add(egui::Shape::Noop);
+    let image = icon.size(16.0).image();
+    let response = ui.add_sized(size, egui::Button::new((image, label, egui::Atom::grow()))
+        .gap(8.0).truncate().frame(false).selected(selected).image_tint_follows_text_color(true));
+    if ui.is_rect_visible(response.rect) {
+        let pill = avilon_egui::tabs::Pill::new(response.rect);
+        let active = selected || response.hovered();
+        let (fill_role, border_role) = if active {
+            (Role::Selection, Role::SelectionOutline)
+        } else {
+            (Role::Raised, Role::Border)
+        };
+        let fallback_fill = if active { ui.visuals().selection.bg_fill } else { Color32::from_gray(42) };
+        let fallback_rim = if active || response.has_focus() {
+            ui.visuals().selection.stroke.color
+        } else {
+            Color32::from_gray(100)
+        };
+        painter.set(body, pill.body(theme_ui::color(ui.ctx(), fill_role, fallback_fill)));
+        if let Some(shape) = theme_ui::optical_shape_for(ui.ctx(), pill.rect, pill.radius, selected) {
+            painter.set(optics, shape);
+        }
+        let border = if response.has_focus() { fallback_rim } else {
+            theme_ui::color(ui.ctx(), border_role, fallback_rim)
+        };
+        painter.set(rim, pill.rim(border));
+        let highlight = if response.is_pointer_button_down_on() { 15 } else { 42 };
+        painter.set(shine, pill.shine(Color32::from_white_alpha(highlight)));
     }
     response
 }
@@ -1597,6 +1645,7 @@ impl State {
         let mut path_editing = false;
         let mut video_gpu_intent = None;
         let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
+        let sidebar_glass = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_glass);
         let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
         let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
         let raised_rows = self.draft.as_ref().is_some_and(|draft| {
@@ -1700,7 +1749,7 @@ impl State {
         let ((label_ru, label_en), icon) = SECTIONS[index];
         let label = super::i18n::tr(label_ru, label_en);
         let response = ui.push_id(index, |ui| {
-         section_button(ui, label, icon, self.section == index, sidebar_depth)
+         section_button(ui, label, icon, self.section == index, sidebar_depth, sidebar_glass)
         }).inner;
         if keyboard_target == Some(index) {
          response.scroll_to_me(None);
@@ -2098,6 +2147,12 @@ impl State {
           &mut draft.settings_sidebar_depth,
           super::i18n::tr("Иконки и объём кнопок", "Icons and raised buttons"),
          );
+         ui.checkbox(&mut draft.settings_sidebar_glass, super::i18n::tr(
+          "Стеклянные кнопки навигации", "Glass navigation buttons",
+         )).on_hover_text(super::i18n::tr(
+          "Используют оптику элементов, если она включена и есть фон Катрана.",
+          "Uses Element optics when enabled and a Katran background is available.",
+         ));
         });
         SettingsSection::group(ui, super::i18n::tr("Порядок разделов", "Section order"), |ui| {
          edit_section_order(ui, &mut draft.settings_section_order);

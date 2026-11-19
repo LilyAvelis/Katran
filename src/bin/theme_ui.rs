@@ -578,7 +578,7 @@ pub(super) fn optical_shape(
 ) -> Option<egui::Shape> {
     optical_shape_for(ctx, rect, radius, false)
 }
-fn optical_shape_for(
+pub(super) fn optical_shape_for(
     ctx: &egui::Context,
     rect: egui::Rect,
     radius: f32,

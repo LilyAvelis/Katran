@@ -99,6 +99,15 @@ Folder and Notion search share the shortcut hint strip. Folder result labels
 remove Windows extended-path prefixes for display while open and favorite
 actions retain their original path. The Notion source button embeds the
 [official favicon](https://www.notion.so/images/favicon.ico).
+Decode the bundled PNG directly and cache its texture. The Notion shortcut
+strip uses its own monochrome widget colors.
+
+The glass navigation experiment uses the shelf's shared pill geometry.
+Element optics samples the selected Katran background texture using the
+Settings viewport bounds. It needs the Blue Experimental theme, nonzero
+optics strength, a loaded background, and the GPU renderer. A plain glass
+pill remains available without those inputs. Native appearance and frame cost
+need separate measurement before extending the effect to more controls.
 
 Flower, Star, Diamond, and Grid materials require catalogue schema 16. The
 first upgrade makes a consistent catalogue backup before applying the

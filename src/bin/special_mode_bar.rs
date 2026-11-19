@@ -1,13 +1,19 @@
 //! Shared compact strip for special shelf modes, styled like the footer.
 use super::*;
 
-pub(super) fn shortcut_hints(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
+pub(super) fn shortcut_hints(ui: &mut egui::Ui, hints: &[(&str, &str)], local_palette: bool) {
     ui.separator();
+    let mut style = super::ui_style::keycaps_style(ui);
+    let fill = if local_palette {
+        style.text_color = ui.visuals().text_color();
+        style.fill = ui.visuals().widgets.inactive.bg_fill;
+        style.stroke = ui.visuals().widgets.inactive.bg_stroke;
+        ui.visuals().widgets.noninteractive.bg_fill
+    } else {
+        theme_ui::footer_fill(ui.ctx(), Color32::from_rgb(54, 54, 58))
+    };
     egui::Frame::new()
-        .fill(theme_ui::footer_fill(
-            ui.ctx(),
-            Color32::from_rgb(54, 54, 58),
-        ))
+        .fill(fill)
         .corner_radius(6.0)
         .inner_margin(egui::Margin::symmetric(8, 5))
         .show(ui, |ui| {
@@ -15,7 +21,7 @@ pub(super) fn shortcut_hints(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
             ui.set_min_width(width);
             ui.horizontal_wrapped(|ui| {
                 for &(keys, description) in hints {
-                    let caps = super::ui_style::KeyCaps::measure(ui, keys);
+                    let caps = avilon_egui::KeyCaps::measure(ui, keys, &style);
                     let color = ui.visuals().text_color();
                     let text_width = (width - caps.size.x - 5.0).max(1.0);
                     let mut job = egui::text::LayoutJob::simple_singleline(
@@ -36,7 +42,7 @@ pub(super) fn shortcut_hints(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
                         egui::pos2(rect.left(), rect.center().y - caps.size.y / 2.0),
                         caps.size,
                     );
-                    caps.paint(ui, cap_rect);
+                    caps.paint(ui, cap_rect, &style);
                     let origin = egui::pos2(
                         cap_rect.right() + 5.0,
                         rect.center().y - label.size().y / 2.0,

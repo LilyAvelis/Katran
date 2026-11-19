@@ -732,7 +732,7 @@ impl Shelf {
                 } else {
                     hints.insert(1, ("Ctrl Shift K", tr("Поиск", "Search")));
                 }
-                super::special_mode_bar::shortcut_hints(ui, &hints);
+                super::special_mode_bar::shortcut_hints(ui, &hints, false);
             });
         if open_notion {
             self.workspace_open_notion(ctx);

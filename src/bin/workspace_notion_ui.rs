@@ -91,6 +91,21 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn source_button_uploads_bundled_png_without_an_image_loader() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            source_button(ui, false);
+        });
+        let texture = ctx
+            .data(|d| {
+                d.get_temp::<egui::TextureHandle>(egui::Id::new("notion-source-icon-texture"))
+            })
+            .expect("bundled Notion PNG decoded into a texture");
+        assert!(texture.size().into_iter().all(|side| side > 0));
+        output.textures_delta.clear();
+    }
+
     struct Browser(Arc<Mutex<Vec<String>>>);
     impl katran::open_file::Launcher for Browser {
         fn launch(
@@ -312,10 +327,31 @@ enum Operation {
 }
 
 pub(super) fn source_button(ui: &mut egui::Ui, active: bool) -> bool {
-    let mark = egui::Image::new(egui::include_image!(
-        "../../assets/branding/notion-favicon.png"
-    ))
-    .fit_to_exact_size(egui::vec2(18.0, 18.0));
+    let id = egui::Id::new("notion-source-icon-texture");
+    let texture = ui
+        .ctx()
+        .data(|d| d.get_temp::<egui::TextureHandle>(id))
+        .or_else(|| {
+            let rgba = image::load_from_memory_with_format(
+                include_bytes!("../../assets/branding/notion-favicon.png"),
+                image::ImageFormat::Png,
+            )
+            .ok()?
+            .into_rgba8();
+            let icon = egui::ColorImage::from_rgba_unmultiplied(
+                [rgba.width() as usize, rgba.height() as usize],
+                rgba.as_raw(),
+            );
+            let texture =
+                ui.ctx()
+                    .load_texture("notion-source-icon", icon, egui::TextureOptions::LINEAR);
+            ui.ctx().data_mut(|d| d.insert_temp(id, texture.clone()));
+            Some(texture)
+        });
+    let button = texture.as_ref().map_or_else(
+        || egui::Button::new(RichText::new("N").color(Color32::BLACK)),
+        |texture| egui::Button::image(egui::Image::new((texture.id(), egui::vec2(18.0, 18.0)))),
+    );
     let border = if active {
         ui.visuals().selection.stroke.color
     } else {
@@ -323,7 +359,7 @@ pub(super) fn source_button(ui: &mut egui::Ui, active: bool) -> bool {
     };
     ui.add_sized(
         [32.0, 32.0],
-        egui::Button::image(mark)
+        button
             .corner_radius(16)
             .fill(Color32::from_gray(242))
             .stroke(egui::Stroke::new(1.0, border)),
@@ -815,7 +851,7 @@ impl Shelf {
                     ("Ctrl H", tr("История", "History")),
                     ("Esc", tr("Закрыть", "Close")),
                 ]);
-                super::special_mode_bar::shortcut_hints(ui, &hints);
+                super::special_mode_bar::shortcut_hints(ui, &hints, true);
             });
         if everything {
             self.workspace_mode(Mode::Search, ctx);
