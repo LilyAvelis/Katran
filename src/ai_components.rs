@@ -261,8 +261,12 @@ impl Manager {
                     &profile,
                     crate::translate_components::MODEL,
                 )?;
+                let reuse_root = (action == Action::Install)
+                    .then(crate::translate_components::installer_ocr_reuse_root)
+                    .flatten();
                 json!({
                     "ocr_root": crate::translate_components::ocr_root(&profile)?,
+                    "ocr_reuse_root": reuse_root,
                     "paddle_python": status.paddle_python,
                     "vision_python": status.manga_python,
                     "ollama": status.ollama_exe,

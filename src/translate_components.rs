@@ -95,6 +95,19 @@ fn local_checkout_probe() -> Option<PathBuf> {
     }
     Some(project.join("target/build/translate-probe/ocr"))
 }
+fn checkout_ocr_root() -> Option<&'static Path> {
+    // Cache hash verification for this process's immutable executable.
+    static PROBE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    PROBE.get_or_init(local_checkout_probe).as_deref()
+}
+
+pub(crate) fn installer_ocr_reuse_root() -> Option<&'static Path> {
+    if std::env::var_os("KATRAN_TRANSLATE_ROOT").is_some() {
+        return None;
+    }
+    checkout_ocr_root().filter(|root| root.is_dir())
+}
+
 pub(crate) fn ocr_root(profile: &Path) -> Result<PathBuf> {
     if std::env::var_os("KATRAN_TRANSLATE_ROOT").is_some() {
         return env_path("KATRAN_TRANSLATE_ROOT").ok_or_else(|| {
@@ -108,12 +121,7 @@ pub(crate) fn ocr_root(profile: &Path) -> Result<PathBuf> {
     if root.is_dir() {
         return Ok(root);
     }
-    // Cache hash verification; it applies to this process's immutable executable.
-    static PROBE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-    Ok(PROBE
-        .get_or_init(local_checkout_probe)
-        .clone()
-        .unwrap_or(root))
+    Ok(checkout_ocr_root().map(Path::to_path_buf).unwrap_or(root))
 }
 fn ollama_executable(profile: &Path) -> Option<PathBuf> {
     if std::env::var_os("KATRAN_OLLAMA_EXE").is_some() {

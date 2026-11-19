@@ -47,6 +47,9 @@ try {
     $componentRoot = switch ($req.component) { 'emoji' { Join-Path $profile 'emoji-ai-runtime' } 'folder' { Join-Path $profile 'folder-ai-runtime' } 'folder_gpu' { Join-Path $profile 'folder-ai-gpu-runtime' } }
     Start-Transcript -LiteralPath $logPath -Append | Out-Null; $transcript = $true
     Write-Host "Katran AI: $($req.component) / $($req.action)"
+    if ($req.component -eq 'translate' -and $req.action -eq 'install') {
+        Write-Host 'Katran is preparing image translation. Existing components are reused when available; missing models may be large. Keep this window open until the result.'
+    }
     Write-Host 'This window shows the operation. You can share the local log with another assistant after reviewing it for personal paths.'
     $lockFile = Join-Path (Join-Path $profile 'ai-installations') ($req.component + '.lock')
     try { $lock = [IO.File]::Open($lockFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
@@ -127,6 +130,9 @@ try {
         $tempResult = Join-Path $job ('result-' + [guid]::NewGuid().ToString('N') + '.tmp')
         [IO.File]::WriteAllText($tempResult, (ConvertTo-Json -InputObject $result -Depth 5), [Text.UTF8Encoding]::new($false))
         [IO.File]::Move($tempResult, (Join-Path $job 'result.json'))
+        if ($req.component -eq 'translate' -and $req.action -eq 'install' -and $verified) {
+            Write-Host 'Image translation is installed and passed its local checks.'
+        }
         Write-Host "Result: $state ($code). Log: $logPath"
         $quotedLog = $logPath.Replace("'", "''")
         Write-Host ("Read the log: Get-Content -Raw -LiteralPath '" + $quotedLog + "'")

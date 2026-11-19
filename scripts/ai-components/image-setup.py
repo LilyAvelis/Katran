@@ -1,6 +1,7 @@
 """Install or exercise the image workers with synthetic input in a visible terminal."""
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -79,6 +80,14 @@ def managed_path(profile, relative):
 
 def download(url, target, limit, digest=None):
     if target.is_file() and target.stat().st_size > 0:
+        if digest:
+            sha = hashlib.sha256()
+            with target.open("rb") as existing:
+                for block in iter(lambda: existing.read(1024 * 1024), b""):
+                    sha.update(block)
+            if sha.hexdigest() != digest:
+                raise ValueError(f"Existing {target.name} has an incorrect SHA-256 and was left intact.")
+        say(f"Reusing {target.name}.")
         return
     if target.exists():
         raise ValueError(f"{target.name} already exists but is incomplete. Inspect it before replacing it.")
@@ -88,23 +97,36 @@ def download(url, target, limit, digest=None):
     try:
         with os.fdopen(fd, "wb") as out:
             for attempt in range(3):
+                say(f"{target.name}: attempt {attempt + 1}/3")
                 sha = hashlib.sha256()
                 size = 0
                 out.seek(0)
                 out.truncate()
                 try:
                     with urlopen(url, timeout=45) as response:
+                        header = response.headers.get("Content-Length")
+                        total = int(header) if header and header.isdigit() else None
+                        last_report = 0.0
                         for block in iter(lambda: response.read(1024 * 1024), b""):
                             size += len(block)
                             if size > limit:
                                 raise ValueError(f"{target.name} exceeds its download size limit")
                             sha.update(block)
                             out.write(block)
+                            now = time.monotonic()
+                            if now - last_report >= 1:
+                                detail = f" / {total / 1024**2:.1f} MiB" if total is not None else " MiB"
+                                say(f"{target.name}: {size / 1024**2:.1f}{detail}")
+                                last_report = now
+                        if total is not None and size != total:
+                            raise ConnectionError(f"Expected {total} bytes, received {size}")
+                        detail = f" / {total / 1024**2:.1f} MiB" if total is not None else " MiB"
+                        say(f"{target.name}: {size / 1024**2:.1f}{detail} received")
                     break
-                except (TimeoutError, URLError, ConnectionError):
+                except (TimeoutError, URLError, ConnectionError, http.client.IncompleteRead):
                     if attempt == 2:
                         raise
-                    say(f"Connection interrupted for {target.name}. Retrying ...")
+                    say(f"Connection interrupted for {target.name} after {size / 1024**2:.1f} MiB. Retrying from the beginning in 2 seconds ...")
                     time.sleep(2)
         if not size or (digest and sha.hexdigest() != digest):
             raise ValueError(f"{target.name} download is empty or its SHA-256 is incorrect")
@@ -122,7 +144,10 @@ def environment(path, packages, torch=False, existing=None, probe=None):
         raise ValueError(f"{path.name} already exists. The installer will not change an unowned Python environment.")
     python = path / "Scripts/python.exe"
     if (path / "katran-ready").is_file() and python.is_file():
-        return python
+        if not probe or subprocess.run([python, "-I", "-c", probe], timeout=90).returncode == 0:
+            return python
+        say("The managed image Python failed the import check. Repairing it.")
+        (path / "katran-ready").unlink()
     path.mkdir(parents=True, exist_ok=True)
     (path / "katran-setup").touch()
     if not python.is_file():
@@ -184,6 +209,7 @@ def upscale(config, profile, job, scripts, install):
 def install_paddle_model(model_root, name, job):
     target = model_root / name
     if all((target / file).is_file() and (target / file).stat().st_size for file in PADDLE_FILES):
+        say(f"Reusing Paddle model {name}.")
         return
     if target.exists():
         raise ValueError(f"Existing Paddle model {name} is incomplete and was left intact.")
@@ -261,6 +287,38 @@ def local_ollama(executable, models):
                 server.wait(timeout=5)
 
 
+def reuse_ocr_models(previous_root, profile):
+    # The worker expects one OCR root. Copy only complete discovered
+    # models into the managed root, leaving the source untouched.
+    for name in PADDLE_MODELS:
+        source = previous_root / "paddlex/official_models" / name
+        target = managed_path(profile, "translate-runtime/paddlex/official_models") / name
+        if not target.exists() and all((source / file).is_file() and (source / file).stat().st_size for file in PADDLE_FILES):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix=".reuse-", dir=target.parent) as staging:
+                staged = Path(staging) / name
+                staged.mkdir()
+                for file in PADDLE_FILES:
+                    shutil.copyfile(source / file, staged / file)
+                staged.rename(target)
+            say(f"Reusing Paddle model {name} from the existing OCR directory.")
+    for name, digest in MANGA_FILES.items():
+        source = previous_root / "manga-model" / name
+        target = managed_path(profile, "translate-runtime/manga-model") / name
+        if not target.exists() and source.is_file() and source.stat().st_size:
+            sha = hashlib.sha256()
+            with source.open("rb") as existing:
+                for block in iter(lambda: existing.read(1024 * 1024), b""):
+                    sha.update(block)
+            if sha.hexdigest() == digest:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(prefix=".reuse-", dir=target.parent) as staging:
+                    staged = Path(staging) / name
+                    shutil.copyfile(source, staged)
+                    staged.rename(target)
+                say(f"Reusing {name} from the existing OCR directory.")
+
+
 def translate(config, profile, job, scripts, install):
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     root = Path(config["ocr_root"])
@@ -271,9 +329,14 @@ def translate(config, profile, job, scripts, install):
             say("Using the explicitly configured OCR directory as-is.")
         else:
             managed_root = managed_path(profile, "translate-runtime")
-            if managed_root != root:
-                paddle = None
+            previous_root = Path(config["ocr_reuse_root"]) if config.get("ocr_reuse_root") else root
+            if root != managed_root:
+                paddle = None  # Discovery requires the Python under the active root.
             root = managed_root
+            if previous_root != root:
+                say("Reusing available OCR models from the existing directory ...")
+                reuse_ocr_models(previous_root, profile)
+            say("Preparing Paddle OCR environment and models ...")
             paddle = environment(managed_path(profile, "translate-runtime/venv"),
                                  ("paddlepaddle==3.2.2", "paddleocr==3.3.3", "paddlex==3.3.13"),
                                  existing=paddle, probe="import paddle; from paddleocr import PaddleOCR")
@@ -282,10 +345,12 @@ def translate(config, profile, job, scripts, install):
             for name, digest in MANGA_FILES.items():
                 target = managed_path(profile, "translate-runtime/manga-model") / name
                 download(MANGA_SOURCE + name + "?download=true", target, 1024**3, digest)
+        say("Preparing Manga OCR environment ...")
         vision = environment(managed_path(profile, "translate-vision-runtime/venv"),
                              ("pillow==12.1.1", "numpy==2.2.6", "opencv-python==4.13.0.92",
                               "transformers==5.2.0"), torch=True, existing=vision,
                              probe="import cv2; from transformers import ViTImageProcessor, VisionEncoderDecoderModel")
+        say("Preparing Ollama runtime ...")
         if not ollama:
             if os.getenv("KATRAN_OLLAMA_EXE"):
                 raise ValueError("KATRAN_OLLAMA_EXE does not point to an existing Ollama executable")
