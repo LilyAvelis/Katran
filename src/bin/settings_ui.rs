@@ -903,7 +903,7 @@ impl State {
             }
         }
         ui.label(super::i18n::tr("Компоненты необязательны и устанавливаются только по вашему запросу. Обычный поиск работает без них.", "Components are optional and installed only when you request them. Ordinary search works without them."));
-        ui.weak(super::i18n::tr("Для Emoji и Folder кнопки установки и проверки открывают отдельный терминал. Перевод и увеличение изображений настраиваются вручную по инструкциям ниже.", "The Emoji and Folder install and verify buttons open a separate terminal. Image translation and upscaling are set up manually using the guides below."));
+        ui.weak(super::i18n::tr("Кнопки установки и проверки открывают отдельный терминал с журналом.", "Install and Verify open a separate terminal with a log."));
         if ui
             .button(super::i18n::tr("Обновить статусы", "Refresh status"))
             .clicked()
@@ -913,6 +913,112 @@ impl State {
         if !self.ai_error.is_empty() {
             ui.colored_label(Color32::LIGHT_RED, &self.ai_error);
         }
+        let components = self.ai_components.clone();
+        let mut requested = None;
+        let mut draw_operation = |ui: &mut egui::Ui, component: Component| {
+            let item = components
+                .as_ref()
+                .and_then(|value| value["components"].as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item["component"] == component.name())
+                });
+            if let Some(item) = item {
+                let operation = &item["operation"];
+                let receipt = &operation["receipt"];
+                if item["files_found"] != true {
+                    ui.weak(super::i18n::tr("Комплект неполный", "Component files are incomplete"));
+                } else if receipt["verified"] != true {
+                    ui.weak(super::i18n::tr(
+                        "Файлы найдены, требуется проверка",
+                        "Files found; verification required",
+                    ));
+                }
+                if operation["state"] == "running" {
+                    ui.label(super::i18n::tr(
+                        "Операция выполняется в отдельном терминале…",
+                        "Operation running in a separate terminal…",
+                    ));
+                } else if operation["state"] == "unknown" {
+                    ui.colored_label(
+                        Color32::LIGHT_RED,
+                        super::i18n::tr(
+                            "Результат неизвестен; проверьте журнал",
+                            "Result unknown; check the log",
+                        ),
+                    );
+                }
+                if receipt.is_object() {
+                    let timestamp = receipt["completed_at"].as_str().unwrap_or("");
+                    if receipt["state"] == "succeeded" && receipt["verified"] == true {
+                        ui.label(format!(
+                            "{} {timestamp}",
+                            super::i18n::tr(
+                                "Последняя проверка прошла:",
+                                "Last verification passed:"
+                            )
+                        ));
+                    } else if receipt["code"] == "model_missing" {
+                        ui.label(super::i18n::tr("CUDA-компонент установлен; для проверки установите модель Folder или Emoji AI.", "CUDA component installed; install the Folder or Emoji AI model to verify it."));
+                    } else {
+                        ui.colored_label(
+                            Color32::LIGHT_RED,
+                            format!(
+                                "{} {}",
+                                super::i18n::tr("Последняя операция:", "Last operation:"),
+                                receipt["message"].as_str().unwrap_or(super::i18n::tr(
+                                    "не удалось проверить",
+                                    "verification failed"
+                                ))
+                            ),
+                        );
+                    }
+                }
+                if let Some(path) = receipt["log_path"]
+                    .as_str()
+                    .or_else(|| operation["log_path"].as_str())
+                {
+                    ui.weak(super::i18n::tr("Журнал", "Log"));
+                    ui.add(egui::Label::new(super::info_bar::friendly_path(path)).selectable(true).wrap());
+                }
+                let available =
+                    item["installer_available"] == true && operation["state"] != "running";
+                if item["installer_available"] != true {
+                    ui.weak(super::i18n::tr(
+                        "Установщик недоступен в этой сборке",
+                        "Installer unavailable in this build",
+                    ));
+                }
+                ui.horizontal(|ui| {
+                    let install = ui.add_enabled(
+                        available,
+                        egui::Button::new(super::i18n::tr("Установить", "Install")),
+                    );
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(("ai-install", component.name())),
+                            install.rect,
+                        )
+                    });
+                    if install.clicked() {
+                        requested = Some((component, Action::Install));
+                    }
+                    if ui
+                        .add_enabled(
+                            available,
+                            egui::Button::new(super::i18n::tr("Проверить", "Verify")),
+                        )
+                        .clicked()
+                    {
+                        requested = Some((component, Action::Verify));
+                    }
+                });
+            } else {
+                ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
+            }
+        };
         let translate = self
             .ai_components
             .as_ref()
@@ -922,10 +1028,7 @@ impl State {
             ui,
             super::i18n::tr("Перевод изображений", "Image translation"),
             |ui| {
-                ui.weak(super::i18n::tr(
-                    "Для перевода установите компоненты вручную по инструкции.",
-                    "Set up the translation components manually using the guide.",
-                ));
+                draw_operation(ui, Component::Translate);
                 ui.hyperlink_to(
                     super::i18n::tr(
                         "Инструкция по настройке перевода",
@@ -994,10 +1097,7 @@ impl State {
             ui,
             super::i18n::tr("Увеличение изображений", "Image upscaling"),
             |ui| {
-                ui.weak(super::i18n::tr(
-                    "Для увеличения изображений установите компоненты вручную по инструкции.",
-                    "Set up the image upscaling components manually using the guide.",
-                ));
+                draw_operation(ui, Component::Upscale);
                 ui.hyperlink_to(
                     super::i18n::tr(
                         "Инструкция по настройке увеличения",
@@ -1038,8 +1138,6 @@ impl State {
                 }
             },
         );
-        let components = self.ai_components.clone();
-        let mut requested = None;
         for (component, title, description) in [
             (
                 Component::Emoji,
@@ -1066,110 +1164,9 @@ impl State {
                 ),
             ),
         ] {
-            let item = components
-                .as_ref()
-                .and_then(|value| value["components"].as_array())
-                .and_then(|items| {
-                    items
-                        .iter()
-                        .find(|item| item["component"] == component.name())
-                });
             SettingsSection::group(ui, title, |ui| {
                 ui.label(description);
-                if let Some(item) = item {
-                    ui.weak(if item["files_found"] == true {
-                        super::i18n::tr(
-                            "Файлы найдены, требуется проверка",
-                            "Files found; verification required",
-                        )
-                    } else {
-                        super::i18n::tr("Файлы не найдены", "Files not found")
-                    });
-                    let operation = &item["operation"];
-                    if operation["state"] == "running" {
-                        ui.label(super::i18n::tr(
-                            "Операция выполняется в отдельном терминале…",
-                            "Operation running in a separate terminal…",
-                        ));
-                    } else if operation["state"] == "unknown" {
-                        ui.colored_label(
-                            Color32::LIGHT_RED,
-                            super::i18n::tr(
-                                "Результат неизвестен; проверьте журнал",
-                                "Result unknown; check the log",
-                            ),
-                        );
-                    }
-                    let receipt = &operation["receipt"];
-                    if receipt.is_object() {
-                        let timestamp = receipt["completed_at"].as_str().unwrap_or("");
-                        if receipt["state"] == "succeeded" && receipt["verified"] == true {
-                            ui.label(format!(
-                                "{} {timestamp}",
-                                super::i18n::tr(
-                                    "Последняя проверка прошла:",
-                                    "Last verification passed:"
-                                )
-                            ));
-                        } else if receipt["code"] == "model_missing" {
-                            ui.label(super::i18n::tr("CUDA-компонент установлен; для проверки установите модель Folder или Emoji AI.", "CUDA component installed; install the Folder or Emoji AI model to verify it."));
-                        } else {
-                            ui.colored_label(
-                                Color32::LIGHT_RED,
-                                format!(
-                                    "{} {}",
-                                    super::i18n::tr("Последняя операция:", "Last operation:"),
-                                    receipt["message"].as_str().unwrap_or(super::i18n::tr(
-                                        "не удалось проверить",
-                                        "verification failed"
-                                    ))
-                                ),
-                            );
-                        }
-                    }
-                    if let Some(path) = operation["log_path"]
-                        .as_str()
-                        .or_else(|| receipt["log_path"].as_str())
-                    {
-                        ui.weak(super::i18n::tr("Журнал", "Log"));
-                        ui.add(egui::Label::new(path).selectable(true).wrap());
-                    }
-                    let available =
-                        item["installer_available"] == true && operation["state"] != "running";
-                    if item["installer_available"] != true {
-                        ui.weak(super::i18n::tr(
-                            "Установщик недоступен в этой сборке",
-                            "Installer unavailable in this build",
-                        ));
-                    }
-                    ui.horizontal(|ui| {
-                        let install = ui.add_enabled(
-                            available,
-                            egui::Button::new(super::i18n::tr("Установить", "Install")),
-                        );
-                        #[cfg(test)]
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(
-                                egui::Id::new(("ai-install", component.name())),
-                                install.rect,
-                            )
-                        });
-                        if install.clicked() {
-                            requested = Some((component, Action::Install));
-                        }
-                        if ui
-                            .add_enabled(
-                                available,
-                                egui::Button::new(super::i18n::tr("Проверить", "Verify")),
-                            )
-                            .clicked()
-                        {
-                            requested = Some((component, Action::Verify));
-                        }
-                    });
-                } else {
-                    ui.weak(super::i18n::tr("Статус недоступен", "Status unavailable"));
-                }
+                draw_operation(ui, component);
                 if component == Component::FolderGpu
                     && let Some(draft) = self.draft.as_mut()
                 {
@@ -2464,8 +2461,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            3
+            5
         );
+        for component in ["translate", "upscale"] {
+            assert!(ctx.data(|data| {
+                data.get_temp::<egui::Rect>(egui::Id::new(("ai-install", component)))
+                    .is_some()
+            }));
+        }
         let rect: egui::Rect = ctx.data(|data| {
             data.get_temp(egui::Id::new(("ai-install", "folder")))
                 .unwrap()

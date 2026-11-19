@@ -17,6 +17,8 @@ if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
     & $Python -m venv $venv
     if ($LASTEXITCODE -ne 0) { throw 'Could not create Folder GPU environment.' }
 }
+& $pythonExe -m pip --isolated install --no-input --disable-pip-version-check 'pip==25.3'
+if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the Python package installer.' }
 # CUDA 12.9 Windows wheels and cuDNN 9; no global CUDA or driver changes.
 $packages = @(
     'onnxruntime-gpu==1.23.2', 'numpy==2.2.6', 'tokenizers==0.23.3',

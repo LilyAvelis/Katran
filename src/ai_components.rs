@@ -15,6 +15,8 @@ pub enum Component {
     Emoji,
     Folder,
     FolderGpu,
+    Translate,
+    Upscale,
 }
 impl Component {
     pub fn name(self) -> &'static str {
@@ -22,6 +24,8 @@ impl Component {
             Self::Emoji => "emoji",
             Self::Folder => "folder",
             Self::FolderGpu => "folder_gpu",
+            Self::Translate => "translate",
+            Self::Upscale => "upscale",
         }
     }
 }
@@ -238,7 +242,36 @@ impl Manager {
             ));
         }
         let request_path = directory.join("request.json");
-        fs::write(&request_path,json!({"id":id,"component":component,"action":action,"profile":profile,"bundle_root":bundle,"log_path":directory.join("install.log"),"result_path":directory.join("result.json")}).to_string())?;
+        let image = match component {
+            Component::Upscale => {
+                let models = crate::upscale_components::MODELS
+                    .into_iter()
+                    .map(|name| {
+                        let found = crate::upscale_components::discover(&profile, name)?;
+                        Ok((name, found.model))
+                    })
+                    .collect::<Result<BTreeMap<_, _>>>()?;
+                json!({
+                    "python": crate::upscale_components::resolve_python(&profile),
+                    "models": models,
+                })
+            }
+            Component::Translate => {
+                let status = crate::translate_components::discover(
+                    &profile,
+                    crate::translate_components::MODEL,
+                )?;
+                json!({
+                    "ocr_root": crate::translate_components::ocr_root(&profile)?,
+                    "paddle_python": status.paddle_python,
+                    "vision_python": status.manga_python,
+                    "ollama": status.ollama_exe,
+                    "ollama_models": status.ollama_models,
+                })
+            }
+            _ => Value::Null,
+        };
+        fs::write(&request_path,json!({"id":id,"component":component,"action":action,"profile":profile,"bundle_root":bundle,"log_path":directory.join("install.log"),"result_path":directory.join("result.json"),"image":image}).to_string())?;
         let process = self.launcher.launch(&request_path, &bundle)?;
         self.running.insert(
             component,
@@ -291,14 +324,42 @@ impl Manager {
         let emoji_present = legacy
             .join("local-experiments/emoji-ai/katran-e-runtime.json")
             .is_file();
-        let components=[Component::Emoji,Component::Folder,Component::FolderGpu].into_iter().map(|component| {
-            let installed=match component {
-                Component::Emoji=>emoji_present,
-                Component::Folder=>folder.join("manifest.json").is_file() || emoji_present,
-                Component::FolderGpu=>profile.join("folder-ai-gpu-runtime/manifest.json").is_file(),
+        let components = [
+            Component::Emoji,
+            Component::Folder,
+            Component::FolderGpu,
+            Component::Translate,
+            Component::Upscale,
+        ]
+        .into_iter()
+        .map(|component| {
+            let installed = match component {
+                Component::Emoji => emoji_present,
+                Component::Folder => folder.join("manifest.json").is_file() || emoji_present,
+                Component::FolderGpu => profile.join("folder-ai-gpu-runtime/manifest.json").is_file(),
+                Component::Translate => crate::translate_components::discover(
+                    profile,
+                    crate::translate_components::MODEL,
+                )
+                .is_ok_and(|status| {
+                    use crate::ImageTranslationSource::{Chinese, Japanese, Korean};
+                    [Japanese, Chinese, Korean]
+                        .into_iter()
+                        .all(|source| status.resolve(source).is_ok())
+                }),
+                Component::Upscale => crate::upscale_components::MODELS.into_iter().all(|name| {
+                    crate::upscale_components::discover(profile, name)
+                        .is_ok_and(|status| status.python.is_some() && status.model.is_some())
+                }),
             };
-            json!({"component":component,"files_found":installed,"operation":latest.remove(&component).map(|(_,v)|v),"installer_available":bundle_available})
-        }).collect::<Vec<_>>();
+            json!({
+                "component": component,
+                "files_found": installed,
+                "operation": latest.remove(&component).map(|(_, value)| value),
+                "installer_available": bundle_available,
+            })
+        })
+        .collect::<Vec<_>>();
         Ok(json!({"components":components,"status_kind":"metadata_and_last_terminal_receipt"}))
     }
 }

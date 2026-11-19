@@ -33,8 +33,8 @@ if ($Python) {
     $pythonCommand = $launcher.Source
     $pythonArgs = @('-3.10-64')
 }
-$pythonInfo = & $pythonCommand @pythonArgs -c 'import struct,sys; print("%s.%s %s" % (sys.version_info.major, sys.version_info.minor, struct.calcsize("P") * 8))'
-if ($LASTEXITCODE -ne 0 -or $pythonInfo -cne '3.10 64') { throw '64-bit Python 3.10 is required.' }
+$pythonInfo = & $pythonCommand @pythonArgs -I -c 'import sys;print(sys.version_info[:2], sys.maxsize.bit_length() + 1)'
+if ($LASTEXITCODE -ne 0 -or $pythonInfo -cne '(3, 10) 64') { throw '64-bit Python 3.10 is required.' }
 New-Item -ItemType Directory -Path $Profile -Force | Out-Null
 $stage = Join-Path $Profile ('.emoji-ai-stage-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
@@ -49,18 +49,24 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'assets/unicode/emoji-test.txt') -Destination $unicode
     $base = 'https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3'
     $inputs = @(
-        @{ Local=$ModelFile; Remote="$base/onnx/model.onnx"; Name='model.onnx'; Hash='ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665' },
-        @{ Local=$TokenizerFile; Remote="$base/tokenizer.json"; Name='tokenizer.json'; Hash='0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39' }
+        @{ Local=$ModelFile; Remote="$base/onnx/model.onnx?download=true"; Name='model.onnx'; Hash='ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665' },
+        @{ Local=$TokenizerFile; Remote="$base/tokenizer.json?download=true"; Name='tokenizer.json'; Hash='0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39' }
     )
     foreach ($inputFile in $inputs) {
         $target = Join-Path $modelDir $inputFile.Name
         if ($inputFile.Local) { Copy-Item -LiteralPath $inputFile.Local -Destination $target }
-        else { Write-Host "Downloading $($inputFile.Name)..."; Invoke-WebRequest -Uri $inputFile.Remote -OutFile $target -UseBasicParsing }
+        else {
+            Write-Host "Downloading $($inputFile.Name)..."
+            & "$env:SystemRoot/System32/curl.exe" --fail --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 600 --max-filesize 536870912 --silent --show-error --output $target $inputFile.Remote
+            if ($LASTEXITCODE -ne 0) { throw "Download failed: $($inputFile.Name)" }
+        }
         if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inputFile.Hash) { throw "Checksum mismatch: $($inputFile.Name)" }
     }
     & $pythonCommand @pythonArgs -m venv (Join-Path $worker '.venv')
     if ($LASTEXITCODE -ne 0) { throw 'Python environment creation failed.' }
     $python = Join-Path $worker '.venv/Scripts/python.exe'
+    & $python -m pip --isolated install --no-input --disable-pip-version-check 'pip==25.3'
+    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the Python package installer.' }
     & $python -m pip install 'numpy==2.2.6' 'onnxruntime==1.23.2' 'tokenizers==0.23.3'
     if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
     & $python (Join-Path $worker 'semantic_search.py') --model (Join-Path $modelDir 'model.onnx') --tokenizer (Join-Path $modelDir 'tokenizer.json') --cldr $cldr build

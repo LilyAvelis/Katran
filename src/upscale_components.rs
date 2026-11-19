@@ -1,4 +1,4 @@
-//! Bounded discovery of manually installed image-upscale components.
+//! Bounded discovery of managed or manually installed image-upscale components.
 //!
 //! `KATRAN_COMFYUI_ROOT` may name a portable ComfyUI directory containing
 //! `ComfyUI/extra_model_paths.yaml` and `python_embeded/python.exe`. When unset,
@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MODELS: [&str; 3] = [
+pub(crate) const MODELS: [&str; 3] = [
     "4x_foolhardy_Remacri.pth",
     "RealESRGAN_x2plus.pth",
     "RealESRGAN_x4.pth",
@@ -40,10 +40,20 @@ fn portable_root() -> Option<PathBuf> {
     None
 }
 
-/// Returns an existing portable Python executable, without claiming it is usable.
-pub fn resolve_python() -> Option<PathBuf> {
-    let path = portable_root()?.join("python_embeded").join("python.exe");
-    regular(&path).then_some(path)
+/// Returns an existing image Python executable, without claiming it is usable.
+pub fn resolve_python(profile: &Path) -> Option<PathBuf> {
+    let managed = profile.join("upscale-runtime/venv");
+    managed_python(&managed).or_else(portable_python)
+}
+
+pub(crate) fn portable_python() -> Option<PathBuf> {
+    let python = portable_root()?.join("python_embeded/python.exe");
+    regular(&python).then_some(python)
+}
+
+pub(crate) fn managed_python(venv: &Path) -> Option<PathBuf> {
+    let python = venv.join("Scripts/python.exe");
+    (regular(&venv.join("katran-ready")) && regular(&python)).then_some(python)
 }
 
 /// File presence only: neither value proves the runtime/model is functional.
@@ -74,7 +84,7 @@ pub fn discover(profile: &Path, filename: &str) -> Result<Discovery> {
         .map(|root| root.join(filename))
         .find(|path| regular(path));
     Ok(Discovery {
-        python: resolve_python(),
+        python: resolve_python(profile),
         model,
     })
 }
@@ -90,7 +100,7 @@ pub fn resolve(profile: &Path, filename: &str) -> Result<Resolved> {
     let python = found.python.ok_or_else(|| {
         ApiError::new(
             "upscale_runtime_missing",
-            "ComfyUI portable Python was not found",
+            "Upscale Python is missing. Open Settings → AI to install it.",
         )
     })?;
     Ok(Resolved { python, model })

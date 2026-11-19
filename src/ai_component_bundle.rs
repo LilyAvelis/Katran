@@ -20,6 +20,26 @@ const FILES: &[(&str, &[u8])] = &[
         include_bytes!("../scripts/ai-components/verify.py"),
     ),
     (
+        "scripts/ai-components/image-setup.py",
+        include_bytes!("../scripts/ai-components/image-setup.py"),
+    ),
+    (
+        "scripts/image-upscale/worker.py",
+        include_bytes!("../scripts/image-upscale/worker.py"),
+    ),
+    (
+        "scripts/image-translate/ocr_page.py",
+        include_bytes!("../scripts/image-translate/ocr_page.py"),
+    ),
+    (
+        "scripts/image-translate/manga_recognize.py",
+        include_bytes!("../scripts/image-translate/manga_recognize.py"),
+    ),
+    (
+        "scripts/image-translate/translate_page.py",
+        include_bytes!("../scripts/image-translate/translate_page.py"),
+    ),
+    (
         "scripts/folder-semantic/setup.ps1",
         include_bytes!("../scripts/folder-semantic/setup.ps1"),
     ),

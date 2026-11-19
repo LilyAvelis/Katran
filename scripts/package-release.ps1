@@ -37,7 +37,7 @@ foreach ($file in @('es.exe','LICENSE','NOTICE.txt')) {
 foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')) {
     if (!(Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) { throw "Missing emoji AI installer input: $file" }
 }
-$componentInputs = @('scripts/ai-components/terminal.ps1','scripts/ai-components/ensure-python.ps1','scripts/ai-components/verify.py','scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/folder-semantic/worker.py')
+$componentInputs = @('scripts/ai-components/terminal.ps1','scripts/ai-components/ensure-python.ps1','scripts/ai-components/verify.py','scripts/ai-components/image-setup.py','scripts/image-upscale/worker.py','scripts/image-translate/ocr_page.py','scripts/image-translate/manga_recognize.py','scripts/image-translate/translate_page.py','scripts/folder-semantic/setup.ps1','scripts/folder-semantic/setup-gpu.ps1','scripts/folder-semantic/worker.py')
 foreach ($file in $componentInputs) { if (!(Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) { throw "Missing AI component installer input: $file" } }
 $videoPlayerSetup = 'scripts/setup-video-player.ps1'
 if (!(Test-Path -LiteralPath (Join-Path $Root $videoPlayerSetup) -PathType Leaf)) { throw 'Missing optional video player setup script' }
@@ -78,7 +78,7 @@ Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran-launcher.exe') -Desti
 Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'katran.exe') -Destination (Join-Path $portable 'katran-cli.exe')
 [IO.File]::WriteAllText((Join-Path $portable 'portable.flag'), '', $utf8)
 # The optional model and generated runtime are never part of either release ZIP.
-foreach ($dir in @('scripts/emoji-ai','scripts/ai-components','scripts/folder-semantic','assets/emoji-ai/cldr','assets/unicode')) { New-Item -ItemType Directory -Path (Join-Path $portable $dir) -Force | Out-Null }
+foreach ($dir in @('scripts/emoji-ai','scripts/ai-components','scripts/folder-semantic','scripts/image-upscale','scripts/image-translate','assets/emoji-ai/cldr','assets/unicode')) { New-Item -ItemType Directory -Path (Join-Path $portable $dir) -Force | Out-Null }
 foreach ($file in @('scripts/install-emoji-ai-model.ps1','scripts/create-emoji-ai-runtime-manifest.py','scripts/emoji-ai/worker.py','scripts/emoji-ai/semantic_search.py','assets/unicode/emoji-test.txt','assets/emoji-ai/cldr/LICENSE','assets/emoji-ai/cldr/cldr-annotations-full-en.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-en.json','assets/emoji-ai/cldr/cldr-annotations-full-ru.json','assets/emoji-ai/cldr/cldr-annotations-derived-full-ru.json')) {
     Copy-Item -LiteralPath (Join-Path $Root $file) -Destination (Join-Path $portable $file)
 }
@@ -113,7 +113,7 @@ foreach ($dir in @('crates/baloh-collection/src','scripts/image-translate')) {
 foreach ($assetDir in @('assets/branding','assets/themes/lilies','assets/emoji-flags','assets/unicode')) {
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $Root $assetDir) -Recurse -File | ForEach-Object { $_.FullName.Substring($Root.Length + 1) })
 }
-$sources = @($sourceFiles | Sort-Object | ForEach-Object { [ordered]@{path=$_.Replace('\','/'); sha256=(Hash (Join-Path $Root $_))} })
+$sources = @($sourceFiles | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique | ForEach-Object { [ordered]@{path=$_; sha256=(Hash (Join-Path $Root $_))} })
 if ($AppleBundleSha256) { $sources += [ordered]@{path='assets/emoji-bundle/apple.zip';sha256=$AppleBundleSha256} }
 # A release receipt describes the producer; the packaging machine's toolchain does not.
 $receiptPath = Join-Path $BinaryDirectory 'receipt.json'

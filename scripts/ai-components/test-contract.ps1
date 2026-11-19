@@ -8,19 +8,28 @@ try {
     $profile = Join-Path $base 'профиль space'
     $jobs = Join-Path $profile 'ai-installations'
     New-Item -ItemType Directory -Force -Path $jobs | Out-Null
-    function New-Request([string]$Id, [string]$Action) {
+    function New-Request([string]$Id, [string]$Action, [string]$Component = 'folder', [switch]$Extended) {
         $dir = Join-Path $jobs $Id
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        $request = @{ id=$Id; component='folder'; action=$Action; profile=$profile; bundle_root=$repo; log_path=(Join-Path $dir 'install.log'); result_path=(Join-Path $dir 'result.json') }
+        $request = @{ id=$Id; component=$Component; action=$Action; profile=$profile; bundle_root=$repo; log_path=(Join-Path $dir 'install.log'); result_path=(Join-Path $dir 'result.json'); image=@{python=$null;paddle_python=$null} }
+        if ($Extended) {
+            foreach ($key in 'profile','bundle_root','log_path','result_path') { $request[$key] = '\\?\' + $request[$key] }
+        }
         [IO.File]::WriteAllText((Join-Path $dir 'request.json'), ($request | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
         return $dir
     }
     $script = Join-Path $repo 'scripts/ai-components/terminal.ps1'
-    $dir = New-Request 'verify-unavailable' 'verify'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Request (Join-Path $dir 'request.json') | Out-Null
+    $dir = New-Request 'verify-unavailable' 'verify' -Extended
+    & powershell -NoProfile -ExecutionPolicy Bypass -File ('\\?\' + $script) -Request ('\\?\' + (Join-Path $dir 'request.json')) | Out-Null
     $result = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($result.state -ne 'failed' -or $result.verified -ne $false -or $result.code -ne 'component_unavailable' -or $result.id -ne 'verify-unavailable') { throw 'Missing component did not report an explicit failure' }
     if (-not (Test-Path -LiteralPath (Join-Path $dir 'install.log'))) { throw 'Missing log' }
+    foreach ($component in 'translate','upscale') {
+        $dir = New-Request "$component-unavailable" 'verify' $component -Extended
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Request ('\\?\' + (Join-Path $dir 'request.json')) | Out-Null
+        $result = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($result.component -ne $component -or $result.code -ne 'component_unavailable' -or $result.verified) { throw "Missing $component runtime was accepted" }
+    }
     $existing = Join-Path $profile 'folder-ai-runtime'
     New-Item -ItemType Directory -Path $existing | Out-Null
     [IO.File]::WriteAllText((Join-Path $existing 'canary.txt'), 'keep')

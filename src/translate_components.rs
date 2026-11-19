@@ -4,7 +4,7 @@
 //! `venv`, `paddlex/official_models`, and `manga-model`. When unset, the active
 //! profile's `translate-runtime` is checked. A local developer checkout is used
 //! only when the current executable matches its immutable runtime manifest.
-//! ComfyUI Python uses `KATRAN_COMFYUI_ROOT` (see upscale_components), and
+//! Managed vision Python is preferred, with portable Python as a fallback.
 //! `KATRAN_OLLAMA_EXE` can name an existing Ollama executable. `OLLAMA_MODELS`
 //! selects Ollama's model store. File presence is not an inference test.
 use crate::{ApiError, ImageTranslationSource, Result};
@@ -95,7 +95,7 @@ fn local_checkout_probe() -> Option<PathBuf> {
     }
     Some(project.join("target/build/translate-probe/ocr"))
 }
-fn ocr_root(profile: &Path) -> Result<PathBuf> {
+pub(crate) fn ocr_root(profile: &Path) -> Result<PathBuf> {
     if std::env::var_os("KATRAN_TRANSLATE_ROOT").is_some() {
         return env_path("KATRAN_TRANSLATE_ROOT").ok_or_else(|| {
             ApiError::new(
@@ -115,10 +115,14 @@ fn ocr_root(profile: &Path) -> Result<PathBuf> {
         .clone()
         .unwrap_or(root))
 }
-fn ollama_executable() -> Option<PathBuf> {
+fn ollama_executable(profile: &Path) -> Option<PathBuf> {
     if std::env::var_os("KATRAN_OLLAMA_EXE").is_some() {
         let path = env_path("KATRAN_OLLAMA_EXE")?;
         return file(&path).then_some(path);
+    }
+    let private = profile.join("translate-ollama-runtime/ollama.exe");
+    if file(&private) {
+        return Some(private);
     }
     #[cfg(windows)]
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
@@ -177,7 +181,13 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
         ApiError::new("invalid_translate_model", "Invalid local Ollama model tag")
     })?;
     let root = ocr_root(profile)?;
-    let python = root.join("venv/Scripts/python.exe");
+    let venv = root.join("venv");
+    let python = venv.join("Scripts/python.exe");
+    let paddle_python = if venv.join("katran-setup").exists() {
+        crate::upscale_components::managed_python(&venv)
+    } else {
+        file(&python).then_some(python)
+    };
     let models = root.join("paddlex/official_models");
     let weights = ["inference.json", "inference.pdiparams", "inference.yml"];
     let paddle_ok = complete(&models.join("PP-OCRv5_server_det"), &weights);
@@ -194,13 +204,16 @@ pub fn discover(profile: &Path, ollama_tag: &str) -> Result<Status> {
         ],
     );
     Ok(Status {
-        paddle_python: file(&python).then_some(python),
+        paddle_python,
         chinese_model: complete(&models.join("PP-OCRv5_server_rec"), &weights),
         korean_model: complete(&models.join("korean_PP-OCRv5_mobile_rec"), &weights),
         paddle_models: paddle_ok.then_some(models),
-        manga_python: crate::upscale_components::resolve_python(),
+        manga_python: crate::upscale_components::managed_python(
+            &profile.join("translate-vision-runtime/venv"),
+        )
+        .or_else(crate::upscale_components::portable_python),
         manga_model: manga_ok.then_some(manga),
-        ollama_exe: ollama_executable(),
+        ollama_exe: ollama_executable(profile),
         ollama_models: find_ollama_models(profile, &manifest),
     })
 }
@@ -233,7 +246,7 @@ impl Status {
             .ok_or_else(|| missing("Paddle OCR models are missing"))?,
         manga_python: self
             .manga_python.clone()
-            .ok_or_else(|| missing("ComfyUI Python is missing"))?,
+            .ok_or_else(|| missing("Translation image runtime is missing. Open Settings → AI."))?,
         manga_model: self.manga_model.clone(),
         ollama_exe: self
             .ollama_exe.clone()

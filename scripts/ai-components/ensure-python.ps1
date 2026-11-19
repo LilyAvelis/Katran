@@ -3,8 +3,9 @@ $ErrorActionPreference = 'Stop'
 function Test-Python([string]$Candidate) {
     if (-not $Candidate -or -not (Test-Path -LiteralPath $Candidate -PathType Leaf)) { return $false }
     try {
-        $value = & $Candidate -c 'import struct,sys;print("%s.%s %s"%(sys.version_info.major,sys.version_info.minor,struct.calcsize("P")*8))' 2>$null
-        return ($LASTEXITCODE -eq 0 -and $value -ceq '3.10 64')
+        # Windows PowerShell strips nested double quotes from native arguments.
+        $value = & $Candidate -I -c 'import sys;print(sys.version_info[:2], sys.maxsize.bit_length() + 1)' 2>$null
+        return ($LASTEXITCODE -eq 0 -and $value -ceq '(3, 10) 64')
     } catch { return $false }
 }
 $private = Join-Path $Profile 'ai-tools/python310/python.exe'
@@ -18,12 +19,21 @@ if ($launcher) {
 }
 $system = Get-Command python.exe -ErrorAction SilentlyContinue
 if ($system -and (Test-Python $system.Source)) { Write-Output $system.Source; return }
+foreach ($location in @(
+    [IO.Path]::Combine([Environment]::GetFolderPath('LocalApplicationData'), 'Programs/Python/Python310/python.exe'),
+    [IO.Path]::Combine($env:USERPROFILE, 'AppData/Local/Programs/Python/Python310/python.exe'),
+    [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'Python310/python.exe')
+)) {
+    if (Test-Python $location) { Write-Output $location; return }
+}
 $target = Join-Path $Profile 'ai-tools/python310'
 if (Test-Path -LiteralPath $target) { throw 'A private Python directory exists but is unusable. Inspect it before retrying; it was not overwritten.' }
 $installer = Join-Path $JobDir 'python-3.10.11-amd64.exe'
 if (Test-Path -LiteralPath $installer) { throw 'Python bootstrap file already exists in this job. Start a fresh installation.' }
 Write-Host 'Downloading official 64-bit Python 3.10.11 into the installation job...'
 Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe' -OutFile $installer -UseBasicParsing
+# Load the Windows PowerShell module even when the parent supplies a PowerShell 7 module path.
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1')
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
 if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Subject -notmatch '(?i)(^|,)\s*CN\s*=\s*Python Software Foundation\s*(,|$)') {
     throw 'Official Python installer signature could not be verified. Install Python 3.10 x64 from python.org and retry.'

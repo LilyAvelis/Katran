@@ -585,7 +585,7 @@ impl Service {
                 })
                 .collect::<Result<Vec<_>>>()?;
                 status["image_upscale"] = serde_json::json!({
-                    "runtime_found": upscale_components::resolve_python().is_some(),
+                    "runtime_found": upscale_components::resolve_python(&self.root).is_some(),
                     "models": models,
                 });
                 let translation =
