@@ -121,9 +121,9 @@ impl Shelf {
                     });
                 });
                 let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.action_query)
+                    super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.action_query)
                         .hint_text(tr("Найти действие…", "Find an action…"))
-                        .desired_width(width - 12.0),
+                        .desired_width(width - 12.0)),
                 );
                 if self.focus_actions {
                     search.request_focus();

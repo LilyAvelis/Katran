@@ -82,8 +82,12 @@ impl State {
         if !self.open {
             return;
         }
-        Self::clear_popup_focus(ctx);
         self.open = false;
+        self.leave_editor(ctx);
+    }
+
+    fn leave_editor(&mut self, ctx: &egui::Context) {
+        Self::clear_popup_focus(ctx);
         self.editing = false;
         self.save_requested = false;
         self.reload_requested = false;
@@ -130,39 +134,18 @@ impl State {
         if self.editing {
             let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             if escape {
-                Self::clear_popup_focus(ctx);
-                self.editing = false;
-                self.save_requested = false;
-                self.reload_requested = false;
-                if self.editor.as_ref().is_some_and(|editor| !editor.dirty) {
-                    self.editor = None;
-                }
-                ctx.request_repaint();
+                self.leave_editor(ctx);
                 return None;
             }
             let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
-            let anchor = ctx
-                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("tags-button-rect")))
-                .map(|r| r.right_top() + egui::vec2(0.0, -6.0))
-                .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
             let mut optical = None;
-            let result = egui::Modal::new(egui::Id::new("tag-menu"))
-                .area(
-                    egui::Area::new(egui::Id::new("tag-menu"))
-                        .order(egui::Order::Foreground)
-                        .pivot(egui::Align2::RIGHT_BOTTOM)
-                        .fixed_pos(anchor),
-                )
+            let result = egui::Modal::new(egui::Id::new("tag-editor"))
                 .backdrop_color(Color32::from_black_alpha(24))
                 .frame(super::action_row::popup_frame(ctx))
                 .show(ctx, |ui| {
                     optical = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
                     ui.set_width(width);
                     if let Some(editor) = self.editor.as_mut() {
-                        ui.label(
-                            RichText::new(format!("{} · {}", tr("Тег", "Tag"), editor.slot.number))
-                                .strong(),
-                        );
                         let before = editor.slot.clone();
                         egui::ScrollArea::vertical()
                             .max_height((ctx.content_rect().height() - 140.0).max(80.0))
@@ -198,15 +181,18 @@ impl State {
                                 self.reload_requested = true;
                             }
                         }
-                        ui.weak(tr("Esc · назад к тегам", "Esc · back to tags"));
+                        return super::tag_settings_ui::editor_footer(ui, editor.slot.number, true);
                     }
+                    false
                 });
             if let Some((painter, index)) = optical
                 && let Some(shape) = super::theme_ui::optical_shape(ctx, result.response.rect, 12.0)
             {
                 painter.set(index, shape);
             }
-            if result.should_close() {
+            if result.inner {
+                self.leave_editor(ctx);
+            } else if result.should_close() {
                 self.close(ctx);
             }
             return None;
@@ -464,13 +450,13 @@ impl State {
                     });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let r = ui.add(
+                    let r = ui.add(super::ui_foundation::text_field(
                         egui::TextEdit::singleline(&mut self.query)
                             .id(egui::Id::new("tag-menu-search"))
                             .hint_text(tr("Поиск тегов…", "Search tags…"))
                             .frame(egui::Frame::NONE)
                             .desired_width(width - 65.0),
-                    );
+                    ));
                     if self.focus {
                         r.request_focus();
                         self.focus = false;
@@ -1079,6 +1065,13 @@ mod tests {
         assert!(
             text.contains("Название") || text.contains("Name"),
             "editor controls missing; emitted text: {text:?}"
+        );
+        let editor_rect = ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("tag-editor")))
+            .expect("centered tag editor has its own area");
+        assert!(
+            editor_rect.center().distance(egui::pos2(470.0, 340.0)) <= 2.0,
+            "tag editor should be centered: {editor_rect:?}"
         );
         assert!(!text.contains("Предпросмотр материала") && !text.contains("Material preview"));
         assert!(

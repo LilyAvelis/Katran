@@ -182,7 +182,7 @@ impl Shelf {
                 });
                 ui.add_space(super::ui_foundation::tokens::SM);
                 ui.label(tr("Имя", "Name"));
-                let mut name = egui::TextEdit::singleline(&mut state.name)
+                let mut name = super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.name))
                     .interactive(!saving)
                     .id_salt("pinned-name")
                     .desired_width(ui.available_width())

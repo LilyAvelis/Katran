@@ -237,9 +237,10 @@ impl Shelf {
                 ui.separator();
                 ui.horizontal(|ui| {
                     let r = ui.add(
-                        egui::TextEdit::singleline(&mut state.query)
+                        super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.query))
                             .hint_text(tr("Поиск приложений…", "Search apps…"))
                             .frame(egui::Frame::NONE)
+                            .margin(egui::Margin::symmetric(4, 2))
                             .desired_width(width - 65.0),
                     );
                     if state.focus {

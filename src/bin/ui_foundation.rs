@@ -2,6 +2,14 @@
 #![allow(dead_code)]
 pub(super) use avilon_egui::settings_layout::{SettingsRow, tokens};
 use eframe::egui::{self, Color32, RichText};
+
+/// Shared geometry for single-line fields; callers retain their IDs and behavior.
+pub(super) fn text_field(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
+    edit.min_size(egui::vec2(0.0, 36.0))
+        .vertical_align(egui::Align::Center)
+        .margin(egui::Margin::symmetric(10, 7))
+}
+
 pub(super) struct SettingsSection;
 impl SettingsSection {
     pub fn set_depth(ctx: &egui::Context, enabled: bool) {

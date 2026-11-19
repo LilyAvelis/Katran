@@ -1486,9 +1486,9 @@ impl State {
                 tr("Токен не настроен", "No token configured")
             });
             let field = ui.add(
-                egui::TextEdit::singleline(&mut self.notion_token)
+                super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.notion_token)
                     .password(true)
-                    .hint_text(tr("Токен внутренней интеграции", "Internal integration token")),
+                    .hint_text(tr("Токен внутренней интеграции", "Internal integration token"))),
             );
             let save = ui.add_enabled(
                 !self.notion_token.trim().is_empty(),
@@ -1659,11 +1659,10 @@ impl State {
        }
       });
      }
-     let search = egui::TextEdit::singleline(&mut self.query)
+     let search = super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.query)
       .id(search_id)
-      .hint_text(super::i18n::tr("Поиск настроек…", "Search settings…"))
-      .margin(egui::vec2(10.0, 9.0));
-     ui.add_sized([ui.available_width(), 34.0], search).on_hover_text("Ctrl+T");
+      .hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")));
+     ui.add_sized([ui.available_width(), 36.0], search).on_hover_text("Ctrl+T");
      let order = self.draft.as_ref().map_or(&[][..], |draft| draft.settings_section_order.as_slice());
      let shown = section_order(order).into_iter().filter(|&index| {
       section_matches_query(index, SECTIONS[index].0.0, &self.query)
@@ -1823,7 +1822,7 @@ impl State {
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
          SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
-          let response=ui.add(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots"));
+          let response=ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")));
           path_editing |= response.has_focus();
           if response.changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
           if ui.button(super::i18n::tr("Обновить", "Refresh")).clicked() {
@@ -1831,7 +1830,7 @@ impl State {
           }
          });
          SettingsRow::show(ui,super::i18n::tr("Папка Downloads", "Downloads folder"),super::i18n::tr("Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.", "Leave empty to use the Windows Downloads folder, or enter another absolute path."),|ui|{
-          let response=ui.add(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder")));
+          let response=ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder"))));
           path_editing |= response.has_focus();
           if response.changed(){draft.downloads_folder=if self.downloads_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.downloads_folder.trim()))};}
          });
@@ -2093,12 +2092,9 @@ impl State {
         });
        }
       } else {
-       let search = egui::TextEdit::singleline(&mut self.shortcut_filter)
+       let search = super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.shortcut_filter)
         .hint_text(super::i18n::tr("Поиск команды…", "Search commands…"))
-        .desired_width(ui.available_width())
-        .min_size(egui::vec2(0.0, 36.0))
-        .vertical_align(egui::Align::Center)
-        .margin(egui::Margin::symmetric(10, 7));
+        .desired_width(ui.available_width()));
        if ui.add(search).changed(){self.editor=None;}
        ui.add_space(6.0);
        let shortcuts:Vec<katran::shortcuts::ShortcutInfo>=serde_json::from_value(call(api,Command::Shortcuts)["result"].clone()).unwrap_or_default();

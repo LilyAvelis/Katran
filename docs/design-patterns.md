@@ -84,6 +84,12 @@ field with a minimum height of 36 points, internal padding, and vertically
 centered text. Place the main vertical scrollbar against the right edge of
 the Settings window. Put horizontal content padding inside the scrolling area.
 
+Use the shared `ui_foundation::text_field` for single-line text inputs.
+Callers choose IDs, hints, width, and masking. A surface with its own measured
+header may keep its spacing. Tag Settings and the shelf's centered tag editor
+share the tag controls and footer. Each surface retains its own save and
+conflict handling.
+
 Display shortcut arrows and punctuation as symbols. Show the primary chord
 and the count of alternatives in a bounded keycap. Show the complete list on
 hover and keep the stored binding unchanged. The reset column must stay

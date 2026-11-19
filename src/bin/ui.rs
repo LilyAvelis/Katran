@@ -1413,11 +1413,14 @@ impl Shelf {
                         shelf_search_hint
                     };
                     let search = ui.add(
-                        egui::TextEdit::singleline(&mut self.query)
+                        ui_foundation::text_field(egui::TextEdit::singleline(&mut self.query))
                             .id(search_id)
                             .hint_text(hint)
                             .font(egui::FontId::proportional(22.0))
                             .frame(egui::Frame::NONE)
+                            .margin(egui::Margin::symmetric(4, 2))
+                            .min_size(egui::Vec2::ZERO)
+                            .vertical_align(egui::Align::Min)
                             .desired_width(ui.available_width()),
                     );
                     #[cfg(test)]
@@ -2096,7 +2099,7 @@ impl Shelf {
                     "Existing destination folder",
                 ));
                 let r =
-                    ui.add(egui::TextEdit::singleline(&mut self.destination).desired_width(420.0));
+                    ui.add(ui_foundation::text_field(egui::TextEdit::singleline(&mut self.destination).desired_width(420.0)));
                 r.request_focus();
                 if ui
                     .button(i18n::tr("Сохранить · Enter", "Save · Enter"))

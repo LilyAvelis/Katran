@@ -679,14 +679,14 @@ impl Shelf {
                 });
                 if state.mode == Mode::Search && !state.preview_open {
                     let field = ui.add(
-                        egui::TextEdit::singleline(&mut state.query)
+                        super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.query)
                             .id(query_id)
                             .desired_width(f32::INFINITY)
                             .hint_text(if state.search_kind == SearchKind::Databases {
                                 tr("Название базы данных…", "Database title…")
                             } else {
                                 tr("Название страницы…", "Page title…")
-                            }),
+                            })),
                     );
                     if state.focus {
                         field.request_focus();

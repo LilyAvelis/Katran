@@ -705,7 +705,7 @@ impl Shelf {
                 });
                 ui.separator();
                 let field = egui::Frame::new().inner_margin(4).stroke(egui::Stroke::new(if neural { 1.5 } else { 0.0 }, Color32::from_rgb(221, 178, 75))).show(ui, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY))
+                    ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY)))
                 }).inner;
                 if state.focus { field.request_focus(); state.focus = false; }
                 if state.mode == Mode::Search { ui.weak(if neural { tr("Enter · искать / открыть    ↓ на последнем · ещё 10    \\ · обычный поиск", "Enter · search / open    ↓ on last · 10 more    \\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }

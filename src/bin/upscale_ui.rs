@@ -1040,9 +1040,9 @@ impl Shelf {
                     ui.horizontal(|ui| {
                         let name = ui.add_enabled(
                             idle,
-                            egui::TextEdit::singleline(&mut edit.title)
+                            super::ui_foundation::text_field(egui::TextEdit::singleline(&mut edit.title)
                                 .desired_width((canvas_size.x - 200.0).clamp(100.0, 480.0))
-                                .hint_text(tr("Имя ссылки", "Link name")),
+                                .hint_text(tr("Имя ссылки", "Link name"))),
                         );
                         if idle && std::mem::take(&mut edit.focus) {
                             name.request_focus();

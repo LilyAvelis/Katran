@@ -101,9 +101,9 @@ impl Shelf {
                         .size(14.0),
                 );
                 let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.pods_ui.category_query)
+                    super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.pods_ui.category_query)
                         .hint_text(i18n::tr("Найти категорию…", "Find a category…"))
-                        .desired_width(width - 12.0),
+                        .desired_width(width - 12.0)),
                 );
                 if self.pods_ui.category_focus {
                     search.request_focus();
