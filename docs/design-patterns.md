@@ -75,3 +75,17 @@ acceptance.
 
 The [development map](development.md) defines the API-first and shared-dispatcher
 boundary; use it before adding a new client path.
+
+## Settings search, scrolling, and shortcut labels
+
+Keep Settings navigation search above the section list. Ctrl+T toggles focus
+while preserving the query. The Shortcuts command search uses a full-width
+field with a minimum height of 36 points, internal padding, and vertically
+centered text. Place the main vertical scrollbar against the right edge of
+the Settings window. Put horizontal content padding inside the scrolling area.
+
+Display shortcut arrows and punctuation as symbols. Show the primary chord
+and the count of alternatives in a bounded keycap. Show the complete list on
+hover and keep the stored binding unchanged. The reset column must stay
+aligned even when shortcut labels differ in length. Keep raised keycaps in
+Settings rows and in the recorder independently configurable.

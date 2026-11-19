@@ -393,15 +393,59 @@ pub fn binding_button(
     enabled: bool,
     raised: bool,
 ) -> egui::Response {
-    keycap_button(
-        ui,
-        binding
-            .filter(|binding| !binding.is_empty())
-            .unwrap_or(tr("Назначить", "Set shortcut")),
-        enabled,
-        raised,
-        false,
-    )
+    let (label, alternatives) = binding_labels(binding.unwrap_or_default());
+    let response = keycap_button(ui, &label, enabled, raised, false);
+    if let Some(full) = alternatives {
+        if enabled {
+            response.on_hover_text(full)
+        } else {
+            response.on_disabled_hover_text(full)
+        }
+    } else {
+        response
+    }
+}
+
+fn display_key(key: &str) -> &str {
+    match key {
+        "ArrowUp" => "↑",
+        "ArrowDown" => "↓",
+        "ArrowLeft" => "←",
+        "ArrowRight" => "→",
+        "Plus" => "+",
+        "Equals" => "=",
+        "Minus" => "−",
+        _ => key,
+    }
+}
+
+fn display_chord(chord: &str) -> String {
+    chord
+        .split_whitespace()
+        .map(display_key)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn binding_labels(binding: &str) -> (String, Option<String>) {
+    let mut chords = binding
+        .split(" / ")
+        .filter(|chord| !chord.trim().is_empty())
+        .map(display_chord);
+    let Some(primary) = chords.next() else {
+        return (tr("Назначить", "Set shortcut").to_owned(), None);
+    };
+    let alternatives: Vec<_> = chords.collect();
+    if alternatives.is_empty() {
+        (primary, None)
+    } else {
+        let label = format!("{primary} · +{}", alternatives.len());
+        let full = std::iter::once(primary)
+            .chain(alternatives)
+            .collect::<Vec<_>>()
+            .join(" / ");
+        (label, Some(full))
+    }
 }
 
 fn keycap_button(
@@ -413,30 +457,42 @@ fn keycap_button(
 ) -> egui::Response {
     use egui::{Color32, FontId};
     let font_size = if small { 13.0 } else { 15.0 };
+    let max_width = ui
+        .available_width()
+        .clamp(28.0, if small { 80.0 } else { 208.0 });
+    let accent = Color32::from_rgb(255, 160, 147);
     if raised {
         let color = if !enabled {
             ui.visuals().weak_text_color()
         } else if !small {
-            Color32::from_rgb(255, 160, 147)
+            accent
         } else {
             ui.visuals().text_color()
         };
-        let legend =
-            ui.painter()
-                .layout_no_wrap(label.to_owned(), FontId::proportional(font_size), color);
+        let padding = if small { 16.0 } else { 26.0 };
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label.to_owned(),
+            FontId::proportional(font_size),
+            color,
+        );
+        job.wrap.max_width = (max_width - padding).max(1.0);
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let legend = ui.painter().layout_job(job);
         let response = ui
             .add_enabled_ui(enabled, |ui| {
-                ui.add(
+                ui.add_sized(
+                    [
+                        max_width.min(legend.size().x + padding),
+                        if small { 28.0 } else { 36.0 },
+                    ],
                     egui::Button::new(
                         egui::RichText::new(label)
                             .size(font_size)
                             .color(Color32::TRANSPARENT),
                     )
                     .frame(false)
-                    .min_size(egui::vec2(
-                        legend.size().x + if small { 16.0 } else { 26.0 },
-                        if small { 28.0 } else { 36.0 },
-                    )),
+                    .truncate(),
                 )
             })
             .inner;
@@ -468,14 +524,33 @@ fn keycap_button(
     let response = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = egui::vec2(if small { 7.0 } else { 11.0 }, 3.0);
-            let text = egui::RichText::new(label).size(font_size);
-            ui.add_enabled(
-                enabled,
-                egui::Button::new(text)
-                    .min_size(egui::vec2(28.0, if small { 23.0 } else { 30.0 }))
-                    .corner_radius(5.0)
-                    .stroke(ui.visuals().widgets.inactive.bg_stroke),
-            )
+            let mut text = egui::RichText::new(label).size(font_size);
+            if enabled && !small {
+                text = text.color(accent);
+            }
+            let width = ui
+                .painter()
+                .layout_no_wrap(
+                    label.to_owned(),
+                    FontId::proportional(font_size),
+                    Color32::WHITE,
+                )
+                .size()
+                .x
+                + ui.spacing().button_padding.x * 2.0;
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.add_sized(
+                    [
+                        width.clamp(28.0, max_width),
+                        if small { 23.0 } else { 30.0 },
+                    ],
+                    egui::Button::new(text)
+                        .truncate()
+                        .corner_radius(5.0)
+                        .stroke(ui.visuals().widgets.inactive.bg_stroke),
+                )
+            })
+            .inner
         })
         .inner;
     response
@@ -575,8 +650,9 @@ fn capture_field(ui: &mut egui::Ui, binding: &str, raised: bool) {
     painter.add(egui::Shape::mesh(gradient));
 
     let color = ui.visuals().text_color();
-    let keys: Vec<_> = binding
+    let keys: Vec<_> = crate::action_row::primary_shortcut(binding)
         .split_whitespace()
+        .map(display_key)
         .map(|key| painter.layout_no_wrap(key.to_owned(), FontId::proportional(23.0), color))
         .collect();
     if keys.is_empty() {
@@ -732,6 +808,29 @@ pub fn take_action_with_editing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiple_alternatives_fit_in_a_keycap_and_remain_readable() {
+        let binding = "Ctrl Plus / Ctrl Equals / Ctrl Shift Plus / Ctrl Shift Equals";
+        let (label, full) = binding_labels(binding);
+        assert_eq!(label, "Ctrl + · +3");
+        assert_eq!(
+            full.as_deref(),
+            Some("Ctrl + / Ctrl = / Ctrl Shift + / Ctrl Shift =")
+        );
+        assert_eq!(display_chord("Ctrl Alt ArrowUp"), "Ctrl Alt ↑");
+        assert_eq!(display_chord("Ctrl ArrowLeft"), "Ctrl ←");
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(290.0);
+            for raised in [false, true] {
+                let rect = binding_button(ui, Some(binding), true, raised).rect;
+                assert!(rect.width() <= 208.0);
+                assert!(rect.right() <= ui.max_rect().right());
+            }
+        });
+        output.textures_delta.clear();
+    }
     fn key_event(key: Key, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,

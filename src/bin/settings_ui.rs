@@ -1593,6 +1593,9 @@ impl State {
         let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
         let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
         let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
+        let raised_rows = self.draft.as_ref().is_some_and(|draft| {
+            draft.settings_raised_keycaps_in_rows.unwrap_or(draft.settings_raised_keycaps)
+        });
         let section_headers = self.draft.as_ref().is_some_and(|draft| draft.settings_section_headers);
         let section_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_section_depth);
         let mut draft_before = self
@@ -1707,9 +1710,10 @@ impl State {
       });
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
-    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
+    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(egui::Margin::symmetric(0, 24))).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
     egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]).show(ui,|ui|{
+     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
       section_heading(ui, self.section, section_headers);
       if self.section != 2 && self.tab_hotkey_target.is_some() && let Some(editor)=self.editor.as_mut() {
        ui.separator();
@@ -1732,7 +1736,7 @@ impl State {
           let title = RichText::new(title).family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into()));
           SettingsRow::show_with_title(ui, title, "", |ui| {
            let anchor = super::shortcuts_ui::binding_button(ui, Some(&draft.overlay_hotkey),
-            self.tab_hotkey_target.is_none(), raised_keycaps)
+            self.tab_hotkey_target.is_none(), raised_rows)
             .on_hover_text(super::i18n::tr("Изменить сочетание", "Change shortcut"));
            let opened = anchor.clicked();
            if opened {
@@ -2075,7 +2079,16 @@ impl State {
           "Compact shortcut editor",
          ));
          ui.add_enabled_ui(draft.settings_summon_popover, |ui| {
-          ui.checkbox(&mut draft.settings_raised_keycaps, super::i18n::tr("Объёмные кейкапы", "Raised keycaps"));
+          let mut rows = draft.settings_raised_keycaps_in_rows.unwrap_or(draft.settings_raised_keycaps);
+          let editor_changed = ui.checkbox(&mut draft.settings_raised_keycaps, super::i18n::tr(
+           "Объёмные кейкапы в редакторе", "Raised keycaps in the editor",
+          )).changed();
+          let rows_changed = ui.checkbox(&mut rows, super::i18n::tr(
+           "Объёмные кейкапы в строках настроек", "Raised keycaps in settings rows",
+          )).changed();
+          if editor_changed || rows_changed {
+           draft.settings_raised_keycaps_in_rows = Some(rows);
+          }
          });
         });
        }
@@ -2114,7 +2127,7 @@ impl State {
              self.error = r["error"]["message"].as_str().unwrap_or_default().into();
             }
             let anchor = super::shortcuts_ui::binding_button(ui, shortcut.binding.as_deref(),
-             shortcut.rebindable && self.tab_hotkey_target.is_none(), raised_keycaps);
+             shortcut.rebindable && self.tab_hotkey_target.is_none(), raised_rows);
             let anchor = if shortcut.rebindable {
              anchor.on_hover_text(super::i18n::tr("Изменить сочетание", "Change shortcut"))
             } else {
@@ -2155,6 +2168,7 @@ impl State {
        if let Some(s)=edit {let label=localized_shortcut_label(&s.id,&s.label).to_owned();self.editor=Some(super::shortcuts_ui::Editor::new(s.id,label,s.binding.unwrap_or_default()));}
       }
       if !self.error.is_empty(){super::ui_foundation::message(ui,&self.error,false);}
+     });
      });
     });
    });

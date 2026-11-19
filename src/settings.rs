@@ -150,6 +150,9 @@ pub struct Settings {
     pub settings_summon_popover: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_raised_keycaps: bool,
+    /// Missing uses the previous shared preference until a placement is changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_raised_keycaps_in_rows: Option<bool>,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_section_headers: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -213,6 +216,7 @@ impl Settings {
             settings_sidebar_depth: false,
             settings_summon_popover: false,
             settings_raised_keycaps: false,
+            settings_raised_keycaps_in_rows: None,
             settings_section_headers: false,
             settings_section_depth: false,
             ui_font: UiFont::Default,
