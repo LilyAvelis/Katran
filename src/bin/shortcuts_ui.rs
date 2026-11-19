@@ -212,6 +212,34 @@ impl Editor {
             })
         })
     }
+    pub fn render_summon_popover(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
+        ui.set_width(250.0);
+        ui.vertical_centered(|ui| {
+            ui.add_space(8.0);
+            ui.label(tr("Нажмите сочетание клавиш", "Press a shortcut"));
+            ui.weak(tr("Ctrl, Alt или Shift + буква или F-клавиша", "Ctrl, Alt or Shift + a letter or F key"));
+            if let Some(error) = &self.error {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+            ui.add_space(8.0);
+        });
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(&self.label);
+            for (index, (_, choice)) in self.choices().into_iter().enumerate() {
+                let label = match choice {
+                    2 => tr("Сбросить", "Clear"),
+                    3 => tr("Отмена · Esc", "Cancel · Esc"),
+                    _ => continue,
+                };
+                if ui.add(egui::Button::new(label).small().selected(self.selected == Some(index))).clicked() {
+                    return self.choice(choice);
+                }
+            }
+            None
+        }).inner
+    }
+
     pub fn render(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
         ui.strong(format!("{} · {}", tr("Клавиша", "Shortcut"), self.label));
         ui.label(format!(

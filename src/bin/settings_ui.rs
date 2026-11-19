@@ -181,6 +181,9 @@ fn apply_global_hotkey(
 }
 const AESTHETIC_SECTION: usize = 8;
 const AESTHETIC_LABEL: (&str, &str) = ("Эстетика", "Aesthetic");
+const SECTION_KEYS: [&str; SECTIONS.len()] = [
+    "general", "shortcuts", "tabs", "updates", "themes", "tags", "ai", "integrations", "aesthetic",
+];
 const SECTIONS: [((&str, &str), Lucide); 9] = [
     (("Основные", "General"), Lucide::Settings),
     (("Горячие клавиши", "Shortcuts"), Lucide::Keyboard),
@@ -192,6 +195,68 @@ const SECTIONS: [((&str, &str), Lucide); 9] = [
     (("Интеграции", "Integrations"), Lucide::Plug),
     (AESTHETIC_LABEL, Lucide::Gem),
 ];
+
+fn section_order(saved: &[String]) -> Vec<usize> {
+    let mut order = Vec::with_capacity(SECTIONS.len());
+    for key in saved.iter().map(String::as_str).chain(SECTION_KEYS) {
+        if let Some(index) = SECTION_KEYS.iter().position(|candidate| *candidate == key)
+            && !order.contains(&index)
+        {
+            order.push(index);
+        }
+    }
+    order
+}
+
+struct SectionDrag(usize);
+
+fn edit_section_order(ui: &mut egui::Ui, saved: &mut Vec<String>) {
+    use super::i18n::tr;
+    let mut order = section_order(saved);
+    let mut drop = None;
+    for &index in &order {
+        let ((ru, en), icon) = SECTIONS[index];
+        let row = ui.push_id(index, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_width(ui.available_width());
+                let handle = ui
+                    .add(egui::Button::image(Lucide::GripVertical.size(16.0).image())
+                        .frame(false).sense(egui::Sense::drag()))
+                    .on_hover_cursor(egui::CursorIcon::Grab)
+                    .on_hover_text(tr("Перетащить раздел", "Drag section"));
+                if handle.drag_started() {
+                    handle.dnd_set_drag_payload(SectionDrag(index));
+                }
+                ui.add(icon.size(16.0).image().tint(ui.visuals().text_color()));
+                ui.label(tr(ru, en));
+            }).response
+        }).inner;
+        let target = ui.interact(row.rect, row.id.with("drop"), egui::Sense::hover());
+        if let Some(pointer) = ui.input(|input| input.pointer.interact_pos()) {
+            let after = pointer.y >= row.rect.center().y;
+            if target.dnd_hover_payload::<SectionDrag>().is_some_and(|drag| drag.0 != index) {
+                let y = if after { row.rect.bottom() } else { row.rect.top() };
+                ui.painter().hline(row.rect.x_range(), y, ui.visuals().selection.stroke);
+            }
+            if let Some(drag) = target.dnd_release_payload::<SectionDrag>() && drag.0 != index {
+                drop = Some((drag.0, index, after));
+            }
+        }
+    }
+    if let Some((source, target, after)) = drop {
+        order.retain(|&index| index != source);
+        let position = order.iter().position(|&index| index == target).unwrap();
+        order.insert(position + usize::from(after), source);
+        if order.iter().copied().eq(0..SECTIONS.len()) {
+            saved.clear();
+        } else {
+            *saved = order.into_iter().map(|index| SECTION_KEYS[index].to_owned()).collect();
+        }
+    }
+    if ui.add_enabled(!saved.is_empty(), egui::Button::new(tr("Вернуть исходный порядок", "Reset order"))).clicked() {
+        saved.clear();
+    }
+}
 
 fn section_button(
     ui: &mut egui::Ui,
@@ -274,7 +339,7 @@ fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
         }
         7 => "integrations интеграции notion pages токен token",
         AESTHETIC_SECTION => {
-            "aesthetic эстетика experimental effects экспериментальные эффекты sidebar боковая панель icons иконки raised объём кнопок"
+            "aesthetic эстетика experimental effects экспериментальные эффекты sidebar боковая панель icons иконки raised объём кнопок section order порядок разделов compact summon запись сочетания вызова"
         }
         _ => "",
     };
@@ -1524,17 +1589,18 @@ impl State {
       .hint_text(super::i18n::tr("Поиск настроек…", "Search settings…"))
       .margin(egui::vec2(10.0, 9.0));
      ui.add_sized([ui.available_width(), 34.0], search).on_hover_text("Ctrl+T");
-     let shown = SECTIONS.iter().enumerate().filter(|(index, ((ru, _), _))| {
-      section_matches_query(*index, ru, &self.query)
+     let order = self.draft.as_ref().map_or(&[][..], |draft| draft.settings_section_order.as_slice());
+     let shown = section_order(order).into_iter().filter(|&index| {
+      section_matches_query(index, SECTIONS[index].0.0, &self.query)
      }).collect::<Vec<_>>();
      let keyboard_target = if direction != 0 && !shown.is_empty() {
-      let position = shown.iter().position(|(index, _)| *index == self.section);
+      let position = shown.iter().position(|&index| index == self.section);
       let next = match position {
        Some(position) => (position as i32 + direction).rem_euclid(shown.len() as i32) as usize,
        None if direction < 0 => shown.len() - 1,
        None => 0,
       };
-      let index = shown[next].0;
+      let index = shown[next];
       if index != self.section {
        self.switch_section(index);
        root_ctx.request_repaint_of(egui::ViewportId::ROOT);
@@ -1549,7 +1615,8 @@ impl State {
       .id_salt("settings-sidebar-sections")
       .max_height((ui.available_height() - footer_height).max(0.0))
       .show(ui, |ui| {
-       for (index, &((label_ru, label_en), icon)) in shown {
+       for index in shown {
+        let ((label_ru, label_en), icon) = SECTIONS[index];
         let label = super::i18n::tr(label_ru, label_en);
         let response = ui.push_id(index, |ui| {
          section_button(ui, label, icon, self.section == index, sidebar_depth)
@@ -1588,6 +1655,53 @@ impl State {
          });
         });
         SettingsSection::group(ui,super::i18n::tr("Запуск и управление", "Startup and controls"),|ui|{
+         if draft.settings_summon_popover {
+          let title = super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window");
+          let title = RichText::new(title).family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into()));
+          let keycap = if draft.overlay_hotkey.is_empty() {
+           super::i18n::tr("Назначить", "Set shortcut")
+          } else {
+           &draft.overlay_hotkey
+          };
+          SettingsRow::show_with_title(ui, title, "", |ui| {
+           let button = egui::Button::new(RichText::new(keycap).monospace()).small();
+           let anchor = ui.add_enabled(self.tab_hotkey_target.is_none(), button)
+            .on_hover_text(super::i18n::tr("Изменить сочетание", "Change shortcut"));
+           let opened = anchor.clicked();
+           if opened {
+            self.editor = Some(super::shortcuts_ui::Editor::new(
+             "overlay_hotkey",
+             super::i18n::tr("Вызов Katran", "Summon Katran"),
+             draft.overlay_hotkey.clone(),
+            ).with_physical_keys());
+            root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+           }
+           if let Some(editor) = self.editor.as_mut().filter(|editor| editor.id == "overlay_hotkey") {
+            let mut open = ui.is_rect_visible(anchor.rect);
+            let popup = egui::Popup::from_response(&anchor)
+             .open_bool(&mut open)
+             .gap(6.0)
+             .close_behavior(if opened {
+              egui::PopupCloseBehavior::IgnoreClicks
+             } else {
+              egui::PopupCloseBehavior::CloseOnClickOutside
+             });
+            if let Some(response) = popup.show(|ui| editor.render_summon_popover(ui)) {
+             global_intent = response.inner;
+            }
+            if !open {
+             self.editor = None;
+            }
+           }
+           if ui.add(egui::Button::image(Lucide::RefreshCw.size(14.0).image()).small())
+            .on_hover_text(super::i18n::tr("Повторить регистрацию", "Retry registration")).clicked()
+           {
+            self.overlay_retry = true;
+            root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+           }
+          });
+          if !self.overlay_status.is_empty() { ui.weak(&self.overlay_status); }
+         } else {
          let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{
           if ui.add_enabled(self.tab_hotkey_target.is_none(),egui::Button::new(super::i18n::tr("Изменить", "Change"))).clicked(){self.editor=Some(super::shortcuts_ui::Editor::new("overlay_hotkey",super::i18n::tr("Вызов Katran", "Summon Katran"),draft.overlay_hotkey.clone()).with_physical_keys());root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
@@ -1596,6 +1710,7 @@ impl State {
          });
          if !self.overlay_status.is_empty(){ui.weak(&self.overlay_status);}
          if let Some(editor)=self.editor.as_mut(){ui.separator();if let Some(intent)=editor.render(ui){global_intent=Some(intent);}ui.separator();}
+         }
          SettingsRow::show(ui,super::i18n::tr("Изменение размера окна", "Window resizing"),super::i18n::tr("Можно менять размер главного окна мышью. Применяется автоматически.", "Allow resizing the main window with the mouse. Applies automatically."),|ui|{ui.checkbox(&mut draft.window_resizable,super::i18n::tr("Разрешить изменение размера", "Allow resizing"));});
          SettingsRow::show(ui,super::i18n::tr("Ускорение видео на GPU", "GPU acceleration for video"),super::i18n::tr("При отсутствии поддержки видео воспроизводится на CPU.", "Falls back to CPU when unsupported."),|ui|{if ui.checkbox(&mut draft.video_gpu_acceleration,super::i18n::tr("Использовать GPU", "Use GPU")).changed(){video_gpu_intent=Some(draft.video_gpu_acceleration);}});
          SettingsRow::show(ui,super::i18n::tr("Захват при запуске", "Capture on startup"),super::i18n::tr("По умолчанию включён. Текущий захват переключается через Actions.", "On by default. Toggle the current capture from Actions."),|ui|{ui.checkbox(&mut draft.capture_on_start,super::i18n::tr("Включать", "Enable"));});
@@ -1873,6 +1988,15 @@ impl State {
           &mut draft.settings_sidebar_depth,
           super::i18n::tr("Иконки и объём кнопок", "Icons and raised buttons"),
          );
+        });
+        SettingsSection::group(ui, super::i18n::tr("Порядок разделов", "Section order"), |ui| {
+         edit_section_order(ui, &mut draft.settings_section_order);
+        });
+        SettingsSection::group(ui, super::i18n::tr("Горячие клавиши", "Shortcuts"), |ui| {
+         ui.checkbox(&mut draft.settings_summon_popover, super::i18n::tr(
+          "Компактная запись сочетания вызова Katran",
+          "Compact Katran summon shortcut editor",
+         ));
         });
        }
       } else {
