@@ -196,6 +196,45 @@ const SECTIONS: [((&str, &str), Lucide); 9] = [
     (AESTHETIC_LABEL, Lucide::Gem),
 ];
 
+fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
+    use super::{i18n::tr, theme_ui::{self, Role}};
+    let ((ru, en), icon) = SECTIONS.get(index).unwrap_or(&SECTIONS[1]);
+    let title = tr(ru, en);
+    if !expanded {
+        ui.heading(title);
+        match index {
+            0 | 1 | AESTHETIC_SECTION => ui.add_space(16.0),
+            2 | 4 => ui.add_space(8.0),
+            _ => {}
+        }
+        return;
+    }
+    let description = match index {
+        0 => tr("Язык, запуск и поведение Катрана", "Language, startup, and app behavior"),
+        2 => tr("Видимость и горячие клавиши вкладок полки", "Shelf tabs and their global shortcuts"),
+        3 => tr("Версия Катрана и доступные обновления", "Your version of Katran and available updates"),
+        4 => tr("Цвета, фоны и оформление окна", "Colors, backgrounds, and window appearance"),
+        5 => tr("Названия и цвета тегов на полке", "Names and colors for shelf tags"),
+        6 => tr("Компоненты для поиска и обработки изображений", "Components for search and image processing"),
+        7 => tr("Подключение внешних сервисов", "Connect external services"),
+        AESTHETIC_SECTION => tr("Экспериментальные элементы интерфейса", "Optional interface experiments"),
+        _ => tr("Сочетания клавиш для команд Катрана", "Keyboard shortcuts for Katran commands"),
+    };
+    ui.vertical_centered(|ui| {
+        ui.add_space(8.0);
+        let (badge, _) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
+        let fill = theme_ui::color(ui.ctx(), Role::Selection, Color32::from_gray(65));
+        ui.painter().rect_filled(badge, 13.0, fill);
+        let icon_rect = egui::Rect::from_center_size(badge.center(), egui::vec2(25.0, 25.0));
+        icon.size(25.0).image().tint(ui.visuals().text_color()).paint_at(ui, icon_rect);
+        ui.add_space(5.0);
+        ui.label(RichText::new(title).size(27.0)
+            .family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into())));
+        ui.add(egui::Label::new(RichText::new(description).size(13.0).weak()).wrap());
+        ui.add_space(18.0);
+    });
+}
+
 fn section_order(saved: &[String]) -> Vec<usize> {
     let mut order = Vec::with_capacity(SECTIONS.len());
     for key in saved.iter().map(String::as_str).chain(SECTION_KEYS) {
@@ -774,7 +813,6 @@ impl State {
                     .request_repaint_after(Duration::from_secs(1) - elapsed);
             }
         }
-        ui.heading(super::i18n::tr("AI", "AI"));
         ui.label(super::i18n::tr("Компоненты необязательны и устанавливаются только по вашему запросу. Обычный поиск работает без них.", "Components are optional and installed only when you request them. Ordinary search works without them."));
         ui.weak(super::i18n::tr("Для Emoji и Folder кнопки установки и проверки открывают отдельный терминал. Перевод и увеличение изображений настраиваются вручную по инструкциям ниже.", "The Emoji and Folder install and verify buttons open a separate terminal. Image translation and upscaling are set up manually using the guides below."));
         if ui
@@ -1404,7 +1442,6 @@ impl State {
         let configured = *self.notion_configured.get_or_insert_with(|| {
             call(api, Command::NotionStatus)["result"]["configured"] == true
         });
-        ui.heading(tr("Интеграции", "Integrations"));
         SettingsSection::group(ui, "Notion", |ui| {
             ui.label(tr(
                 "Создайте внутреннюю интеграцию с правом Read content и подключите к ней страницы.",
@@ -1526,6 +1563,7 @@ impl State {
         let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
         let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
         let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
+        let section_headers = self.draft.as_ref().is_some_and(|draft| draft.settings_section_headers);
         let mut draft_before = self
             .draft
             .as_ref()
@@ -1640,13 +1678,13 @@ impl State {
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(24)).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
     egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]).show(ui,|ui|{
+      section_heading(ui, self.section, section_headers);
       if self.section != 2 && self.tab_hotkey_target.is_some() && let Some(editor)=self.editor.as_mut() {
        ui.separator();
        if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}
        ui.separator();
       }
       if self.section==0 {
-       ui.heading(super::i18n::tr("Основные", "General"));ui.add_space(16.0);
        if let Some(draft)=self.draft.as_mut(){
         SettingsSection::group(ui,super::i18n::tr("Язык интерфейса", "Interface language"),|ui|{
          SettingsRow::show(ui,super::i18n::tr("Язык", "Language"),super::i18n::tr("Применяется автоматически.", "Applies automatically."),|ui|{
@@ -1681,17 +1719,26 @@ impl State {
              root_ctx.request_repaint_of(egui::ViewportId::ROOT);
             }
            }
-           if ui.add(egui::Button::image(Lucide::RefreshCw.size(14.0).image()).small())
-            .on_hover_text(super::i18n::tr("Повторить регистрацию", "Retry registration")).clicked()
+           let retry = super::i18n::tr("Повторить регистрацию", "Retry registration");
+           let has_warning = self.editor.is_none()
+            && !draft.overlay_hotkey.is_empty()
+            && !self.overlay_status.is_empty()
+            && !self.overlay_status.starts_with("Active: ")
+            && !self.overlay_status.starts_with("Активно: ")
+            && self.overlay_status != super::i18n::tr("Нажмите новое сочетание клавиш", "Press a new shortcut");
+           let icon = if has_warning { Lucide::TriangleAlert } else { Lucide::RefreshCw };
+           let button = ui.add(egui::Button::image(icon.size(14.0).image()).small());
+           let button = if has_warning {
+            button.on_hover_text(format!("{}\n{retry}", self.overlay_status))
+           } else {
+            button.on_hover_text(retry)
+           };
+           if button.clicked()
            {
             self.overlay_retry = true;
             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
            }
           });
-          if self.editor.as_ref().is_none_or(|editor| editor.id != "overlay_hotkey")
-           && !self.overlay_status.is_empty()
-           && !self.overlay_status.starts_with("Active: ")
-           && !self.overlay_status.starts_with("Активно: ") { ui.weak(&self.overlay_status); }
          } else {
          let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{
@@ -1775,7 +1822,6 @@ impl State {
        ui.weak(super::i18n::tr("Изменения сохраняются автоматически", "Changes save automatically"));
        if ui.button(super::i18n::tr("Сохранить настройки", "Save settings")).clicked(){explicit_save=true;}
       } else if self.section==2 {
-       ui.heading(super::i18n::tr("Вкладки", "Tabs"));ui.add_space(8.0);
        ui.label(super::i18n::tr("Выключенная вкладка скрывается и останавливает сбор связанных данных. Исключение: фоны рабочего стола сохраняются и при скрытой вкладке. Сохранённые данные остаются на месте.", "A disabled tab is hidden and stops collecting related data. Exception: Desktop backgrounds are still saved while its tab is hidden. Saved data stays in place."));ui.add_space(16.0);
        let result=call(api,Command::Tabs);
        let saved_hotkeys=call(api,Command::GetSettings);
@@ -1827,7 +1873,6 @@ impl State {
       } else if self.section==3 {
        self.updates.show(ui,api,&updates_ctx);
       } else if self.section==4 {
-       ui.heading(super::i18n::tr("Темы", "Themes"));ui.add_space(8.0);
        ui.label(super::i18n::tr("Тема применяется сразу. Стандартный вид остаётся доступен.", "The theme applies immediately. The standard appearance remains available."));ui.add_space(16.0);
        let response=call(api,Command::Themes);
        if response["ok"]==true {
@@ -1971,9 +2016,12 @@ impl State {
       } else if self.section==7 {
        self.show_integrations(ui,api);
       } else if self.section == AESTHETIC_SECTION {
-       ui.heading(super::i18n::tr(AESTHETIC_LABEL.0, AESTHETIC_LABEL.1));
-       ui.add_space(16.0);
        if let Some(draft) = self.draft.as_mut() {
+        SettingsSection::group(ui, super::i18n::tr("Разделы настроек", "Settings sections"), |ui| {
+         ui.checkbox(&mut draft.settings_section_headers, super::i18n::tr(
+          "Шапки разделов по центру", "Centered section headers",
+         ));
+        });
         SettingsSection::group(ui, super::i18n::tr("Боковая панель", "Sidebar"), |ui| {
          ui.checkbox(
           &mut draft.settings_sidebar_depth,
@@ -1994,7 +2042,6 @@ impl State {
         });
        }
       } else {
-       ui.heading(super::i18n::tr("Горячие клавиши", "Shortcuts"));ui.add_space(16.0);
        if ui.add(egui::TextEdit::singleline(&mut self.shortcut_filter).hint_text(super::i18n::tr("Поиск команды…", "Search commands…")).desired_width(ui.available_width())).changed(){self.editor=None;}
        let shortcuts:Vec<katran::shortcuts::ShortcutInfo>=serde_json::from_value(call(api,Command::Shortcuts)["result"].clone()).unwrap_or_default();
        let mut edit=None;

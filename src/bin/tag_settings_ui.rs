@@ -303,7 +303,6 @@ impl State {
                 self.load_slots(api);
             }
         }
-        ui.heading(tr("Теги", "Tags"));
         ui.weak(tr(
             "Теги назначаются только закреплённым объектам.",
             "Tags can only be assigned to pinned items.",

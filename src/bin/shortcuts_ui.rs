@@ -59,6 +59,10 @@ impl Editor {
         self
     }
 
+    pub(super) fn uses_confirmation(&self) -> bool {
+        self.confirm_pending
+    }
+
     pub fn with_physical_keys(mut self) -> Self {
         self.physical_keys = true;
         self
@@ -267,7 +271,12 @@ impl Editor {
         (open, intent)
     }
 
-    fn render_popover(&mut self, ui: &mut egui::Ui, icon: Lucide, raised: bool) -> Option<Intent> {
+    pub(super) fn render_popover(
+        &mut self,
+        ui: &mut egui::Ui,
+        icon: Lucide,
+        raised: bool,
+    ) -> Option<Intent> {
         use super::special_mode_bar;
         ui.set_width(360.0);
         let chord = self

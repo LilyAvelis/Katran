@@ -39,21 +39,41 @@ impl Shelf {
             && shortcuts_ui::take_assignment_key(ctx)
             && let Some(action) = actions.get(self.action_selected)
         {
-            self.shortcut_editor = Some(shortcuts_ui::Editor::new(
+            let compact = self.call(Command::GetSettings)["settings_summon_popover"] == true;
+            let editor = shortcuts_ui::Editor::new(
                 action["id"].as_str().unwrap(),
                 action["label"].as_str().unwrap(),
                 action["shortcut"].as_str().unwrap_or(""),
-            ));
+            );
+            self.shortcut_editor = Some(if compact {
+                editor.with_confirmation()
+            } else {
+                editor
+            });
         }
+        let raised = self
+            .shortcut_editor
+            .as_ref()
+            .is_some_and(|editor| editor.uses_confirmation())
+            && self.call(Command::GetSettings)["settings_raised_keycaps"] == true;
         if let Some(editor) = self.shortcut_editor.as_mut() {
-            let result = egui::Modal::new(egui::Id::new("shortcut-editor"))
-                .show(ctx, |ui| editor.render(ui));
-            if let Some(intent) = result.inner
-                && self
-                    .api
+            let compact = editor.uses_confirmation();
+            let icon = action_icons::icon(&editor.id);
+            let result = egui::Modal::new(egui::Id::new("shortcut-editor")).show(ctx, |ui| {
+                if compact {
+                    editor.render_popover(ui, icon, raised)
+                } else {
+                    editor.render(ui)
+                }
+            });
+            let closed = if let Some(intent) = result.inner {
+                self.api
                     .as_mut()
                     .is_some_and(|api| shortcuts_ui::apply(api, editor, intent))
-            {
+            } else {
+                compact && result.should_close()
+            };
+            if closed {
                 self.shortcut_editor = None;
             }
             return;
@@ -386,5 +406,31 @@ mod video_action_tests {
                 .map(|editor| editor.id.as_str()),
             Some("capture_video_frame")
         );
+        assert!(!app.shortcut_editor.as_ref().unwrap().uses_confirmation());
+        app.shortcut_editor = None;
+        let mut settings: katran::settings::Settings =
+            serde_json::from_value(app.call(Command::GetSettings)).unwrap();
+        settings.settings_summon_popover = true;
+        app.call(Command::SetSettings { settings });
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(
+            input(vec![
+                egui::Event::Key {
+                    key: egui::Key::Comma,
+                    physical_key: Some(egui::Key::Comma),
+                    pressed: false,
+                    repeat: false,
+                    modifiers,
+                },
+                key(egui::Key::Comma, modifiers),
+            ]),
+            |_| app.palette(&ctx),
+        );
+        out.textures_delta.clear();
+        assert!(app.shortcut_editor.as_ref().unwrap().uses_confirmation());
     }
 }

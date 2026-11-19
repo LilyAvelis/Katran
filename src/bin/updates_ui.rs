@@ -281,7 +281,6 @@ impl State {
         if !self.initialized {
             self.read_status(api);
         }
-        ui.heading(tr("Обновления", "Updates"));
         ui.label(self.status_label());
 
         let busy = self.job.is_some();
