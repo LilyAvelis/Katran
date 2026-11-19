@@ -45,6 +45,7 @@ fn settings_persist_validate_and_do_not_delete_cache() {
         sharex_folder: None,
         downloads_folder: None,
         downloads_enabled: true,
+        ..Settings::default()
     };
     assert_eq!(
         call(&mut api, Command::SetSettings { settings })["ok"],
