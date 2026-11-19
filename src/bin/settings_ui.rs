@@ -208,10 +208,13 @@ fn section_button(
     let painter = ui.painter().clone();
     let shadow = painter.add(egui::Shape::Noop);
     let radius = egui::CornerRadius::same(8);
-    let image = icon.size(16.0).image().tint(ui.visuals().text_color());
+    let image = icon.size(16.0).image();
     let response = ui.add_sized(
         size,
-        egui::Button::image_and_text(image, label)
+        egui::Button::new((image, label, egui::Atom::grow()))
+            .gap(8.0)
+            .truncate()
+            .image_tint_follows_text_color(true)
             .corner_radius(radius)
             .selected(selected),
     );
