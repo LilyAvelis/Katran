@@ -12,6 +12,10 @@ const FILES: &[(&str, &[u8])] = &[
         include_bytes!("../scripts/ai-components/terminal.ps1"),
     ),
     (
+        "scripts/ai-components/model-download.ps1",
+        include_bytes!("../scripts/ai-components/model-download.ps1"),
+    ),
+    (
         "scripts/ai-components/ensure-python.ps1",
         include_bytes!("../scripts/ai-components/ensure-python.ps1"),
     ),

@@ -16,13 +16,15 @@ try {
         @{ Local=$ModelFile; Url="$base/onnx/model.onnx?download=true"; Name='model.onnx'; Hash='ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665' },
         @{ Local=$TokenizerFile; Url="$base/tokenizer.json?download=true"; Name='tokenizer.json'; Hash='0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39' }
     )
+    if (!$ModelFile -or !$TokenizerFile) {
+        . (Join-Path $PSScriptRoot '../ai-components/model-download.ps1')
+    }
     foreach ($inputFile in $files) {
         $target = Join-Path $stage ('model/' + $inputFile.Name)
         if ($inputFile.Local) { Copy-Item -LiteralPath $inputFile.Local -Destination $target }
         else {
-            Write-Host "Downloading $($inputFile.Name)..."
-            & "$env:SystemRoot/System32/curl.exe" --fail --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 600 --max-filesize 536870912 --silent --show-error --output $target $inputFile.Url
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: $($inputFile.Name)" }
+            $asset = Get-KatranModelAsset -Profile $profilePath -Name $inputFile.Name -Source $inputFile.Url -Sha256 $inputFile.Hash
+            Copy-Item -LiteralPath $asset -Destination $target
         }
         if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -cne $inputFile.Hash) { throw "Checksum mismatch: $($inputFile.Name)" }
     }
