@@ -64,7 +64,7 @@ fn draft_location(root: &Path, event: &Event, create: bool) -> Result<(PathBuf, 
     };
     let folder = directory(&vault(root, create)?, &format!("Text-{}", event.id), create)?;
     let generation = event.modified_at_ms.unwrap_or(event.detected_at_ms);
-    Ok((folder, format!("{generation}-{hash}.md")))
+    Ok((folder, draft_name(generation, hash)))
 }
 
 fn validate_draft(path: &Path) -> Result<()> {
@@ -75,6 +75,34 @@ fn validate_draft(path: &Path) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn draft_name(generation: i64, hash: &str) -> String {
+    format!("{generation}-{hash}.md")
+}
+
+fn draft_note(folder: &Path, name: &str) -> Result<PathBuf> {
+    let link = folder.join(format!(".{name}.draft"));
+    match fs::symlink_metadata(&link) {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(folder.join(name)),
+        result => result?,
+    };
+    validate_draft(&link)?;
+    let mut target = String::new();
+    File::open(&link)?.take(128).read_to_string(&mut target)?;
+    let valid = target
+        .strip_suffix(".md")
+        .and_then(|stem| stem.rsplit_once('-'))
+        .is_some_and(|(generation, hash)| {
+            generation.parse::<i64>().is_ok() && storage::is_hash(hash)
+        });
+    if !valid {
+        return Err(ApiError::new(
+            "invalid_text_draft",
+            "Invalid Markdown draft reference",
+        ));
+    }
+    Ok(folder.join(target))
 }
 
 fn publish_draft(path: &Path, text: &str) -> Result<()> {
@@ -112,7 +140,7 @@ pub(crate) fn open_draft(
     launcher.authorize()?;
     let text = text_fragments::read_text_event(event)?;
     let (folder, name) = draft_location(root, event, true)?;
-    let path = folder.join(name);
+    let path = draft_note(&folder, &name)?;
     publish_draft(&path, &text)?;
     let mut uri = url::Url::parse("obsidian://open").expect("fixed Obsidian URI");
     uri.query_pairs_mut()
@@ -132,8 +160,12 @@ pub(crate) fn open_draft(
 impl Service {
     pub(crate) fn apply_text_draft(&mut self, id: i64) -> Result<Value> {
         let event = self.get(id)?;
-        let (folder, name) = draft_location(&self.root, &event, false)?;
-        let path = folder.join(name);
+        self.apply_text_draft_from(&event)
+    }
+
+    fn apply_text_draft_from(&mut self, event: &Event) -> Result<Value> {
+        let (folder, name) = draft_location(&self.root, event, false)?;
+        let path = draft_note(&folder, &name)?;
         if matches!(fs::symlink_metadata(&path), Err(error) if error.kind() == ErrorKind::NotFound)
         {
             return Err(ApiError::new(
@@ -148,7 +180,7 @@ impl Service {
             .read_to_end(&mut bytes)?;
         let text = String::from_utf8(bytes)
             .map_err(|_| ApiError::new("invalid_text_draft", "The Markdown draft must be UTF-8"))?;
-        let saved = text_fragments::read_text_event(&event)?;
+        let saved = text_fragments::read_text_event(event)?;
         let changed = text != saved;
         let revision = if changed {
             let prepared = text_fragments::prepare(
@@ -159,12 +191,50 @@ impl Service {
                 &event.origin,
                 &self.reference_paths()?,
             )?;
-            storage::replace_text_blob(&mut self.db, &self.root, self.quota, &event, prepared)?
+            let note = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("generated draft name");
+            storage::replace_text_blob(
+                &mut self.db,
+                &self.root,
+                self.quota,
+                event,
+                prepared,
+                |generation, hash| {
+                    let link = folder.join(format!(".{}.draft", draft_name(generation, hash)));
+                    publish_draft(&link, note)?;
+                    if draft_note(&folder, &draft_name(generation, hash))? != path {
+                        return Err(ApiError::new(
+                            "text_draft_conflict",
+                            "Another draft was linked to this revision",
+                        ));
+                    }
+                    Ok(())
+                },
+            )?
         } else {
-            event.revision
+            event.revision.clone()
         };
         Ok(
-            json!({"id":id,"revision":revision,"text_draft_applied":changed,"draft_path":display_path(&path)?}),
+            json!({"id":event.id,"revision":revision,"text_draft_applied":changed,"draft_path":display_path(&path)?}),
         )
+    }
+
+    pub(crate) fn text_draft_on_preview(&mut self, event: &Event) -> Value {
+        if self.interaction.tab != crate::interaction::ShelfTab::Text
+            || event.kind != crate::EventKind::TextFragment
+            || event.id <= 0
+        {
+            return Value::Null;
+        }
+        match self.apply_text_draft_from(event) {
+            Ok(result) if result["text_draft_applied"] == true => {
+                json!({"text_draft_applied":true})
+            }
+            Ok(_) => Value::Null,
+            Err(error) if error.code == "text_draft_missing" => Value::Null,
+            Err(error) => json!({"text_draft_warning":error}),
+        }
     }
 }

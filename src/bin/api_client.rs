@@ -1191,6 +1191,14 @@ impl Shelf {
                 .into();
         }
         let mut result = r["result"].clone();
+        if result.get("preview").is_some()
+            && (self.text_draft_preview_dirty
+                || result["text_draft_warning"].is_object()
+                || result["text_draft_applied"] == true)
+        {
+            self.state = result.clone();
+            self.text_draft_preview_feedback(&result);
+        }
         if notion_catalogue && let Some(actions) = result.as_array_mut() {
             actions.retain(|action| {
                 action["id"]
@@ -1846,6 +1854,7 @@ impl Shelf {
         }
         if result.get("preview").is_some() && result.get("view").is_some() {
             self.state = result.clone();
+            self.text_draft_preview_feedback(result);
             return;
         }
         if result.get("classification_changed").is_some() {
@@ -2642,6 +2651,28 @@ impl Shelf {
             }
         }
     }
+    fn text_draft_preview_feedback(&mut self, result: &Value) {
+        if let Some(message) = result["text_draft_warning"]["message"].as_str() {
+            self.message = message.into();
+        }
+        if result["preview"].is_null() && std::mem::take(&mut self.text_draft_preview_dirty) {
+            self.refresh();
+        }
+        if result["text_draft_applied"] == true
+            && let Some(id) = result["preview"].as_i64()
+        {
+            let updated = self.call(Command::Get { id });
+            if let Some(cached) = self.events.iter_mut().find(|event| event["id"] == id) {
+                for field in ["revision", "text_preview", "size", "modified_at_ms"] {
+                    cached[field] = updated[field].clone();
+                }
+            }
+            // The edit may stop matching the active query. Keep the preview
+            // open and reconcile membership and sort order when it closes.
+            self.text_draft_preview_dirty = true;
+        }
+    }
+
     pub(super) fn action_result(&mut self, r: Value) {
         if let Some(applied) = r["text_draft_applied"].as_bool() {
             self.message = if applied {

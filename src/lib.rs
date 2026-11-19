@@ -1635,22 +1635,12 @@ impl Service {
             }
             command @ Command::PreviewPublishedTranslation { .. } => self.begin_job(command),
             Command::TogglePreview => {
-                if self.interaction.preview.is_none()
-                    && let Some(id) = self.interaction.cursor
-                    && !notion::is_folder_page_id(id)
-                {
-                    let event = self.get(id)?;
-                    if !file_types::has_internal_preview(&event) {
-                        return self.preview_external(event.id);
-                    }
+                if self.interaction.preview.is_some() {
+                    self.interaction.set_preview(None);
+                    Ok(serde_json::json!(self.interaction))
+                } else {
+                    self.open_shelf_preview()
                 }
-                self.interaction
-                    .set_preview(if self.interaction.preview.is_some() {
-                        None
-                    } else {
-                        self.interaction.cursor
-                    });
-                Ok(serde_json::json!(self.interaction))
             }
             Command::NavigatePreview { delta } => {
                 if self.interaction.preview.is_some() {
@@ -2047,18 +2037,7 @@ impl Service {
                 self.dispatch(Command::SetSettings { settings })?;
                 Ok(serde_json::json!(self.interaction))
             }
-            Command::OpenCurrent => {
-                if let Some(id) = self.interaction.cursor
-                    && !notion::is_folder_page_id(id)
-                {
-                    let event = self.get(id)?;
-                    if !file_types::has_internal_preview(&event) {
-                        return self.preview_external(event.id);
-                    }
-                }
-                self.interaction.set_preview(self.interaction.cursor);
-                Ok(serde_json::json!(self.interaction))
-            }
+            Command::OpenCurrent => self.open_shelf_preview(),
             Command::ClosePreview => {
                 self.interaction.set_preview(None);
                 Ok(serde_json::json!(self.interaction))
@@ -2319,6 +2298,28 @@ impl Service {
         Ok(
             serde_json::json!({"text_copied":true,"count":pages.len(),"clipboard_sequence":sequence}),
         )
+    }
+
+    fn open_shelf_preview(&mut self) -> Result<serde_json::Value> {
+        let mut draft = serde_json::Value::Null;
+        if let Some(id) = self.interaction.cursor
+            && !notion::is_folder_page_id(id)
+        {
+            let event = self.get(id)?;
+            if !file_types::has_internal_preview(&event) {
+                return self.preview_external(event.id);
+            }
+            draft = self.text_draft_on_preview(&event);
+        }
+        self.interaction.set_preview(self.interaction.cursor);
+        let mut state = serde_json::json!(self.interaction);
+        if let Some(draft) = draft.as_object() {
+            state
+                .as_object_mut()
+                .expect("interaction object")
+                .extend(draft.clone());
+        }
+        Ok(state)
     }
 
     fn get(&self, id: i64) -> Result<Event> {

@@ -93,11 +93,11 @@ press **Alt+Enter** to open its Markdown draft. The vault contains drafts for
 cards opened for editing. **Ctrl+Shift+Enter** continues to show the Windows
 app picker.
 
-After saving in Obsidian, return to the same card and choose **Ctrl+K → Apply
-Text draft**. Katran updates the existing card and preserves its tags and pin.
-Each draft belongs to the card revision it was opened from. If the card has
-changed, earlier drafts remain in the vault for recovery. After applying,
-press **Alt+Enter** again to open a draft for the new revision.
+After saving in Obsidian, return to the same card and press **Space** to apply
+the saved edits and preview them. **Ctrl+K → Apply Text draft** also works.
+Katran updates the existing card and preserves its tags and pin. You can keep
+editing the same Markdown file after each apply. If applying fails, Katran
+opens the last saved card and keeps the draft in the vault.
 
 ### Text commands
 

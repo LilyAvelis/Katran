@@ -47,7 +47,7 @@ impl katran::text_fragments::ClipboardSink for FakeClipboard {
 }
 
 #[test]
-fn obsidian_draft_edits_the_same_card_and_preserves_a_stale_draft() {
+fn obsidian_draft_applies_repeatedly_when_opening_text_preview() {
     use katran::open_file::{Launcher, Operation};
     use std::{fs, path::Path};
 
@@ -125,14 +125,48 @@ fn obsidian_draft_edits_the_same_card_and_preserves_a_stale_draft() {
     assert_eq!(updated["properties"]["pinned"], true);
     assert_eq!(updated["tags"][0]["display"], "Preserved");
 
-    fs::write(path, "Stale draft edits").unwrap();
-    let stale = reply(&mut api, Command::ApplyTextDraft { id });
-    assert_eq!(stale["error"]["code"], "text_draft_conflict");
-    assert_eq!(fs::read_to_string(path).unwrap(), "Stale draft edits");
+    call(&mut api, Command::SetVisible { ids: vec![id] });
+    call(
+        &mut api,
+        Command::Select {
+            id,
+            mode: katran::interaction::SelectionMode::Replace,
+        },
+    );
+    let open_with_space = |api: &mut Service| {
+        call(
+            api,
+            Command::RunAction {
+                id: "preview".into(),
+            },
+        )
+    };
+    fs::write(path, "Second edits in the same note").unwrap();
+    let preview = open_with_space(&mut api);
+    assert_eq!(preview["preview"], id);
+    assert_eq!(preview["text_draft_applied"], true);
+    fs::write(path, "Third edit").unwrap();
+    let close = open_with_space(&mut api);
+    assert!(close["preview"].is_null());
     assert_eq!(
         call(&mut api, Command::GetText { id })["text"],
-        "# Edited note\nПривет 🐳"
+        "Second edits in the same note"
     );
+    assert_eq!(open_with_space(&mut api)["text_draft_applied"], true);
+    assert_eq!(
+        call(&mut api, Command::GetText { id })["text"],
+        "Third edit"
+    );
+    open_with_space(&mut api);
+    fs::write(path, [255]).unwrap();
+    let preview = open_with_space(&mut api);
+    assert_eq!(preview["preview"], id);
+    assert_eq!(preview["text_draft_warning"]["code"], "invalid_text_draft");
+    assert_eq!(
+        call(&mut api, Command::GetText { id })["text"],
+        "Third edit"
+    );
+    assert_eq!(fs::read(path).unwrap(), [255]);
 }
 
 #[test]

@@ -532,6 +532,7 @@ pub(crate) fn replace_text_blob(
     quota: u64,
     event: &Event,
     prepared: PreparedBlob,
+    before_commit: impl FnOnce(i64, &str) -> Result<()>,
 ) -> Result<String> {
     let text = prepared
         .text
@@ -570,17 +571,18 @@ pub(crate) fn replace_text_blob(
         "UPDATE text_fragments SET preview=?1 WHERE event_id=?2",
         params![preview, event.id],
     )?;
+    let modified_at = crate::now_ms().max(
+        event
+            .modified_at_ms
+            .unwrap_or(event.detected_at_ms)
+            .saturating_add(1),
+    );
     tx.execute(
         "UPDATE events SET path=?1,blob_hash=?2,size=?3,
-         modified_at_ms=MAX(?4,COALESCE(modified_at_ms,detected_at_ms)+1) WHERE id=?5",
-        params![
-            path,
-            prepared.hash,
-            prepared.size,
-            crate::now_ms(),
-            event.id
-        ],
+         modified_at_ms=?4 WHERE id=?5",
+        params![path, prepared.hash, prepared.size, modified_at, event.id],
     )?;
+    before_commit(modified_at, &prepared.hash)?;
     tx.commit()?;
     let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old.to_owned()]);
     Ok(format!("blob:{}", prepared.hash))
