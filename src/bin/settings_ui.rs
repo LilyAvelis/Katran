@@ -407,7 +407,13 @@ fn glass_section_button(
     let rim = painter.add(egui::Shape::Noop);
     let shine = painter.add(egui::Shape::Noop);
     let image = icon.size(16.0).image();
-    let response = ui.add_sized(size, egui::Button::new((image, label, egui::Atom::grow()))
+    // A frameless egui button has no frame padding. Reserve room for the
+    // curved ends inside the pill without changing the clickable rectangle.
+    let cap_inset = egui::Atom {
+        size: Some(egui::vec2(size[1] * 0.5 - 8.0, 0.0)),
+        ..Default::default()
+    };
+    let response = ui.add_sized(size, egui::Button::new((cap_inset.clone(), image, label, egui::Atom::grow(), cap_inset))
         .gap(8.0).truncate().frame(false).selected(selected).image_tint_follows_text_color(true));
     if ui.is_rect_visible(response.rect) {
         let pill = avilon_egui::tabs::Pill::new(response.rect);

@@ -108,6 +108,11 @@ Settings viewport bounds. It needs the Blue Experimental theme, nonzero
 optics strength, a loaded background, and the GPU renderer. A plain glass
 pill remains available without those inputs. Native appearance and frame cost
 need separate measurement before extending the effect to more controls.
+Keep the icon and label inside the pill's curved ends while retaining the
+full hit area. All visible pills sample the same video frame texture already
+uploaded by the shelf. They add a GPU draw per visible pill, with seven
+texture samples per covered fragment, and do not start another decoder or
+upload another frame. This describes the render path, not measured GPU load.
 
 Flower, Star, Diamond, and Grid materials require catalogue schema 16. The
 first upgrade makes a consistent catalogue backup before applying the

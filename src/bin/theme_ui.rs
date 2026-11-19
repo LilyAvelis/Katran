@@ -662,6 +662,7 @@ mod optical_tests {
             egui::ColorImage::filled([2, 2], Color32::RED),
             egui::TextureOptions::LINEAR,
         );
+        let frame_id = frame.id();
         set_video_texture(&ctx, "video-a", Some(frame));
         let mut rendered = false;
         let mut output = ctx.run_ui(
@@ -684,7 +685,33 @@ mod optical_tests {
         );
         output.textures_delta.clear();
         assert!(rendered);
-        assert!(video_texture(&ctx, "video-a").is_some());
+        let mut next = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                for index in 0..9 {
+                    let lens = egui::Rect::from_min_size(
+                        egui::pos2(10.0, index as f32 * 10.0),
+                        egui::vec2(48.0, 10.0),
+                    );
+                    assert!(matches!(
+                        optical_shape_for(ui.ctx(), lens, 5.0, index == 0),
+                        Some(egui::Shape::Callback(_))
+                    ));
+                }
+                assert_eq!(video_texture(ui.ctx(), "video-a").unwrap().id(), frame_id);
+            },
+        );
+        assert!(
+            !next
+                .textures_delta
+                .set
+                .iter()
+                .any(|(id, _)| *id == frame_id)
+        );
+        next.textures_delta.clear();
         apply(
             &ctx,
             &ThemePreferences {
