@@ -91,6 +91,7 @@ mod tag_service;
 pub mod tag_slots;
 pub mod text_fragments;
 mod text_service;
+mod text_vault;
 mod transfer_service;
 mod translate_components;
 mod upscale_components;
@@ -1319,6 +1320,17 @@ impl Service {
                 Ok(serde_json::json!(self.get(id)?))
             }
             Command::GetText { id } => self.get_text(id),
+            Command::ApplyTextDraft { id } => self.apply_text_draft(id),
+            Command::ShowTextVault => {
+                let vault = text_vault::vault(&self.root, true)?;
+                let launcher = self
+                    .file_launcher
+                    .lock()
+                    .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?;
+                launcher.authorize()?;
+                launcher.launch(&vault, open_file::Operation::Open)?;
+                Ok(serde_json::json!({"text_vault_path": text_vault::display_path(&vault)?}))
+            }
             Command::GetDocumentText { id } => self.get_document_text(id),
             Command::MergeText { items, separator } => self.merge_text(&items, &separator),
             Command::CopyText { items, separator } => self.copy_text(&items, &separator),
@@ -1405,7 +1417,13 @@ impl Service {
                     .file_launcher
                     .lock()
                     .map_err(|_| ApiError::new("open_busy", "File launcher lock poisoned"))?;
-                if event.kind == EventKind::LinkFragment && operation == open_file::Operation::Open
+                if self.interaction.tab == interaction::ShelfTab::Text
+                    && event.kind == EventKind::TextFragment
+                    && operation == open_file::Operation::Open
+                {
+                    text_vault::open_draft(&self.root, &event, launcher.as_ref())
+                } else if event.kind == EventKind::LinkFragment
+                    && operation == open_file::Operation::Open
                 {
                     open_file::execute_link(&event, launcher.as_ref())
                 } else {

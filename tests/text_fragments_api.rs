@@ -47,6 +47,95 @@ impl katran::text_fragments::ClipboardSink for FakeClipboard {
 }
 
 #[test]
+fn obsidian_draft_edits_the_same_card_and_preserves_a_stale_draft() {
+    use katran::open_file::{Launcher, Operation};
+    use std::{fs, path::Path};
+
+    struct FakeLauncher(Arc<Mutex<Vec<String>>>);
+    impl Launcher for FakeLauncher {
+        fn launch(&self, path: &Path, operation: Operation) -> katran::Result<()> {
+            assert_eq!(operation, Operation::Open);
+            self.0.lock().unwrap().push(path.to_string_lossy().into());
+            Ok(())
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 4_000_000).unwrap();
+    let launches = Arc::new(Mutex::new(Vec::new()));
+    api.set_file_launcher(Box::new(FakeLauncher(launches.clone())));
+    enable(&mut api);
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Text,
+        },
+    );
+    let original = ingest(&mut api, "Original note");
+    let id = item(&original).id;
+    call(&mut api, Command::TogglePins { ids: vec![id] });
+    call(
+        &mut api,
+        Command::SetPinnedTags {
+            id,
+            tags: vec!["Preserved".into()],
+        },
+    );
+
+    let draft = call(
+        &mut api,
+        Command::OpenFile {
+            id,
+            operation: Operation::Open,
+        },
+    );
+    let path = Path::new(draft["draft_path"].as_str().unwrap());
+    assert!(
+        path.canonicalize()
+            .unwrap()
+            .starts_with(root.path().join("Katran Text").canonicalize().unwrap())
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), "Original note");
+    let launched = launches.lock().unwrap()[0].clone();
+    let uri = url::Url::parse(&launched).unwrap();
+    assert_eq!(uri.scheme(), "obsidian");
+    assert_eq!(uri.query_pairs().next().unwrap().1, path.to_string_lossy());
+
+    fs::write(path, "# Edited note\nПривет 🐳").unwrap();
+    call(
+        &mut api,
+        Command::OpenFile {
+            id,
+            operation: Operation::Open,
+        },
+    );
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "# Edited note\nПривет 🐳"
+    );
+    let saved = call(&mut api, Command::ApplyTextDraft { id });
+    assert_eq!(saved["id"], id);
+    assert_eq!(saved["text_draft_applied"], true);
+    assert_ne!(saved["revision"], original["revision"]);
+    assert_eq!(
+        call(&mut api, Command::GetText { id })["text"],
+        "# Edited note\nПривет 🐳"
+    );
+    let updated = call(&mut api, Command::GetPinnedProperties { id });
+    assert_eq!(updated["properties"]["pinned"], true);
+    assert_eq!(updated["tags"][0]["display"], "Preserved");
+
+    fs::write(path, "Stale draft edits").unwrap();
+    let stale = reply(&mut api, Command::ApplyTextDraft { id });
+    assert_eq!(stale["error"]["code"], "text_draft_conflict");
+    assert_eq!(fs::read_to_string(path).unwrap(), "Stale draft edits");
+    assert_eq!(
+        call(&mut api, Command::GetText { id })["text"],
+        "# Edited note\nПривет 🐳"
+    );
+}
+
+#[test]
 fn unicode_reuses_exact_arrival_and_preserves_metadata_after_restart() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 4_000_000).unwrap();

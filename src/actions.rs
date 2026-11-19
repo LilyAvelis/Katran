@@ -22,6 +22,8 @@ pub fn palette_order(id: &str) -> usize {
         "copy_text",
         "preview",
         "open",
+        "apply_text_draft",
+        "show_text_vault",
         "open_with",
         "quicklook",
         "reveal",
@@ -91,6 +93,8 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "copy_text"
         | "preview"
         | "open"
+        | "apply_text_draft"
+        | "show_text_vault"
         | "open_with"
         | "quicklook"
         | "reveal"
@@ -275,6 +279,8 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
         "refresh" => "Refresh contents",
         "quicklook" => "Preview with QuickLook",
         "open" => "Open selected item",
+        "apply_text_draft" => "Apply Text draft",
+        "show_text_vault" => "Open Text vault folder",
         "copy" => "Copy selection",
         "delete" => "Delete selected items…",
         "save" => "Save selected items to folder…",
@@ -846,6 +852,22 @@ pub const DEFS: &[Definition] = &[
         in_palette: true,
     },
     Definition {
+        id: "apply_text_draft",
+        label: "Применить правки текста",
+        default_binding: "",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "show_text_vault",
+        label: "Открыть папку Text vault",
+        default_binding: "",
+        rebindable: true,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
         id: "copy",
         label: "Копировать выбранное",
         default_binding: "Ctrl C",
@@ -1263,6 +1285,13 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
                 .or_else(|| state.selected.first().copied())
                 .unwrap_or(0),
         }),
+        "apply_text_draft" => command(Command::ApplyTextDraft {
+            id: state
+                .cursor
+                .or_else(|| state.selected.first().copied())
+                .unwrap_or(0),
+        }),
+        "show_text_vault" => command(Command::ShowTextVault),
         "open" | "reveal" => command(Command::OpenFile {
             id: state
                 .cursor

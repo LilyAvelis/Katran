@@ -52,6 +52,8 @@ pub fn icon(id: &str) -> Lucide {
         "transfer_copy" | "transfer_selection" => Lucide::ArrowLeftRight,
         "delete" => Lucide::Trash2,
         "open" => Lucide::ExternalLink,
+        "apply_text_draft" => Lucide::Save,
+        "show_text_vault" => Lucide::FolderOpen,
         "reveal" => Lucide::FolderOpen,
         "open_with" => Lucide::AppWindow,
         "tabs_settings" => Lucide::PanelsTopLeft,

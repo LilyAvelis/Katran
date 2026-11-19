@@ -167,8 +167,22 @@ impl Service {
         })
     }
 
+    fn text_card_for_obsidian(&self) -> bool {
+        self.interaction.tab == ShelfTab::Text
+            && self
+                .interaction
+                .cursor
+                .or_else(|| self.interaction.selected.first().copied())
+                .is_some_and(|id| {
+                    self.get(id)
+                        .is_ok_and(|event| event.kind == crate::EventKind::TextFragment)
+                })
+    }
+
     pub(crate) fn action_available(&self, id: &str, background: BackgroundActions) -> bool {
         match id {
+            "apply_text_draft" => self.text_card_for_obsidian(),
+            "show_text_vault" => self.interaction.tab == ShelfTab::Text,
             "video_pause" | "capture_video_frame" | "extract_video_audio" => background.video,
             "folder_favorites" | "folder_history" | "folder_standard" => {
                 self.interaction.tab == ShelfTab::All
@@ -226,6 +240,14 @@ impl Service {
         background: BackgroundActions,
     ) -> String {
         let english = self.settings.language == crate::settings::Language::English;
+        if id == "open" && self.text_card_for_obsidian() {
+            return if english {
+                "Edit in Obsidian"
+            } else {
+                "Редактировать в Obsidian"
+            }
+            .into();
+        }
         if id == "create_image_collection"
             && matches!(self.interaction.tab, ShelfTab::Files | ShelfTab::All)
         {

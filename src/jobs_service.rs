@@ -2004,6 +2004,9 @@ impl Service {
             })?,
             Command::OpenFile { id, operation } => {
                 let event = self.get(id)?;
+                let obsidian = self.interaction.tab == interaction::ShelfTab::Text
+                    && event.kind == EventKind::TextFragment
+                    && operation == open_file::Operation::Open;
                 let pinned_launcher = if id > 0 && operation == open_file::Operation::Open {
                     self.pinned_app_launcher(&event)?
                 } else {
@@ -2027,7 +2030,9 @@ impl Service {
                         launcher,
                         cancellation: cancel,
                     };
-                    let result = if event.kind == EventKind::LinkFragment
+                    let result = if obsidian {
+                        crate::text_vault::open_draft(&root, &event, &launcher)?
+                    } else if event.kind == EventKind::LinkFragment
                         && operation == open_file::Operation::Open
                     {
                         open_file::execute_link(&event, &launcher)?

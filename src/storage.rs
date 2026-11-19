@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn is_hash(value: &str) -> bool {
+pub(crate) fn is_hash(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -524,6 +524,66 @@ pub(crate) fn replace_link_collection_blob(
         let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old]);
     }
     Ok(true)
+}
+
+pub(crate) fn replace_text_blob(
+    db: &mut Connection,
+    root: &Path,
+    quota: u64,
+    event: &Event,
+    prepared: PreparedBlob,
+) -> Result<String> {
+    let text = prepared
+        .text
+        .as_deref()
+        .filter(|_| !prepared.link && !prepared.table)
+        .ok_or_else(|| ApiError::new("invalid_text", "Expected a prepared text fragment"))?;
+    let old = event
+        .revision
+        .strip_prefix("blob:")
+        .filter(|hash| is_hash(hash))
+        .ok_or_else(|| ApiError::new("not_text", "Expected a saved Text card"))?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let eligible: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM events e JOIN text_fragments t ON t.event_id=e.id
+         WHERE e.id=?1 AND e.blob_hash=?2 AND e.modified_at_ms IS ?3 AND e.legacy_source_ref=0
+         AND NOT EXISTS(SELECT 1 FROM bull_members m WHERE m.member_id=e.id))",
+        params![event.id, old, event.modified_at_ms],
+        |row| row.get(0),
+    )?;
+    if !eligible {
+        return Err(ApiError::new(
+            "text_draft_conflict",
+            "The Text card changed. Your draft remains in the vault.",
+        ));
+    }
+    let path = publish_blob_in(&tx, root, quota, &prepared)?;
+    let path = path
+        .to_str()
+        .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode path"))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO text_contents(blob_hash,content) VALUES(?1,?2)",
+        params![prepared.hash, text],
+    )?;
+    let preview: String = text.chars().take(512).collect();
+    tx.execute(
+        "UPDATE text_fragments SET preview=?1 WHERE event_id=?2",
+        params![preview, event.id],
+    )?;
+    tx.execute(
+        "UPDATE events SET path=?1,blob_hash=?2,size=?3,
+         modified_at_ms=MAX(?4,COALESCE(modified_at_ms,detected_at_ms)+1) WHERE id=?5",
+        params![
+            path,
+            prepared.hash,
+            prepared.size,
+            crate::now_ms(),
+            event.id
+        ],
+    )?;
+    tx.commit()?;
+    let _ = crate::delete_shelf::prune_unused_blobs(db, root, [old.to_owned()]);
+    Ok(format!("blob:{}", prepared.hash))
 }
 
 fn commit_blob(

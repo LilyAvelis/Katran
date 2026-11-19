@@ -419,6 +419,10 @@ pub enum Command {
     GetText {
         id: i64,
     },
+    ApplyTextDraft {
+        id: i64,
+    },
+    ShowTextVault,
     GetDocumentText {
         id: i64,
     },

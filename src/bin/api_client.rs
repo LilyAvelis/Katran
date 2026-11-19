@@ -1827,6 +1827,10 @@ impl Shelf {
             self.refresh();
             return;
         }
+        if result["obsidian_requested"] == true {
+            self.message = tr("Черновик передан в Obsidian", "Draft sent to Obsidian").into();
+            return;
+        }
         if result["google_lens_requested"] == true {
             self.message = tr(
                 "Google Lens открывается в браузере",
@@ -2639,6 +2643,20 @@ impl Shelf {
         }
     }
     pub(super) fn action_result(&mut self, r: Value) {
+        if let Some(applied) = r["text_draft_applied"].as_bool() {
+            self.message = if applied {
+                tr("Правки сохранены в карточке", "Edits saved to the card")
+            } else {
+                tr("В черновике нет новых правок", "The draft has no new edits")
+            }
+            .into();
+        }
+        if let Some(path) = r["text_vault_path"].as_str() {
+            self.message = format!(
+                "{} · {path}",
+                tr("Папка для vault Obsidian", "Obsidian vault folder")
+            );
+        }
         if let Some(copied) = r["table_copied"].as_bool() {
             self.message = if copied {
                 format!(

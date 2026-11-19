@@ -85,6 +85,22 @@ text, never interpreted or executed. This is not a full CommonMark parser.
 
 ## Domain API
 
+### Edit with Obsidian
+
+In Text, open **Ctrl+K → Open Text vault folder**. In Obsidian, use **Open folder
+as vault** and pick that `Katran Text` folder once. Select a card in Katran and
+press **Alt+Enter** to open its Markdown draft. The vault contains drafts for
+cards opened for editing. **Ctrl+Shift+Enter** continues to show the Windows
+app picker.
+
+After saving in Obsidian, return to the same card and choose **Ctrl+K → Apply
+Text draft**. Katran updates the existing card and preserves its tags and pin.
+Each draft belongs to the card revision it was opened from. If the card has
+changed, earlier drafts remain in the vault for recovery. After applying,
+press **Alt+Enter** again to open a draft for the new revision.
+
+### Text commands
+
 These commands use the same versioned dispatcher as the UI and other clients:
 
 ```json
