@@ -54,6 +54,10 @@ pub fn paint(ui: &egui::Ui, rect: Rect, slot: &Slot) {
         Material::Dots => avilon_egui::material::Pattern::Dots,
         Material::Lines => avilon_egui::material::Pattern::Lines,
         Material::Grain => avilon_egui::material::Pattern::Grain,
+        Material::Flower => avilon_egui::material::Pattern::Flower,
+        Material::Star => avilon_egui::material::Pattern::Star,
+        Material::Diamond => avilon_egui::material::Pattern::Diamond,
+        Material::Grid => avilon_egui::material::Pattern::Grid,
     };
     let params = avilon_egui::material::Parameters {
         pattern,

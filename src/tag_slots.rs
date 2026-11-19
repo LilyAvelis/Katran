@@ -38,6 +38,10 @@ pub enum Material {
     Dots,
     Lines,
     Grain,
+    Flower,
+    Star,
+    Diamond,
+    Grid,
 }
 impl Material {
     fn as_str(self) -> &'static str {
@@ -46,6 +50,10 @@ impl Material {
             Self::Dots => "dots",
             Self::Lines => "lines",
             Self::Grain => "grain",
+            Self::Flower => "flower",
+            Self::Star => "star",
+            Self::Diamond => "diamond",
+            Self::Grid => "grid",
         }
     }
     fn parse(value: &str) -> rusqlite::Result<Self> {
@@ -54,6 +62,10 @@ impl Material {
             "dots" => Ok(Self::Dots),
             "lines" => Ok(Self::Lines),
             "grain" => Ok(Self::Grain),
+            "flower" => Ok(Self::Flower),
+            "star" => Ok(Self::Star),
+            "diamond" => Ok(Self::Diamond),
+            "grid" => Ok(Self::Grid),
             _ => Err(rusqlite::Error::InvalidQuery),
         }
     }

@@ -1629,9 +1629,10 @@ impl State {
 
    if let Some(editor)=self.editor.as_mut() && let Some(intent)=editor.input(ctx) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}root_ctx.request_repaint_of(egui::ViewportId::ROOT);}
    let toggle_close=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::CTRL,egui::Key::Comma));
-   let escape=!recording&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
+   let editing_tag = self.section == 5 && self.tags.is_editing();
+   let escape=!recording&&!editing_tag&&ctx.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
    if escape && self.confirm_history { self.confirm_history=false; } else { close=ctx.input(|i|i.viewport().close_requested())||escape||toggle_close; }
-   let (toggle_search, direction) = if recording || self.restart_confirmation || close {
+   let (toggle_search, direction) = if recording || editing_tag || self.restart_confirmation || close {
     (false, 0)
    } else {
     navigation_keys(ctx)

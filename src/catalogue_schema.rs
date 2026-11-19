@@ -2,7 +2,7 @@
 use crate::{ApiError, Result};
 use rusqlite::Connection;
 
-pub(crate) const VERSION: i64 = 15;
+pub(crate) const VERSION: i64 = 16;
 pub(crate) fn check_version(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > VERSION {
@@ -203,6 +203,20 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         ); PRAGMA user_version=15;",
         )?;
     }
+    if version < 16 {
+        // Rebuild both sides of the foreign key; dropping the old child first
+        // preserves assignments while foreign-key enforcement remains enabled.
+        tx.execute_batch("CREATE TABLE tag_scoped_slots_v16(scope TEXT NOT NULL, number INTEGER NOT NULL CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain','flower','star','diamond','grid')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295), opacity INTEGER NOT NULL CHECK(opacity BETWEEN 0 AND 100), PRIMARY KEY(scope,number));
+        INSERT INTO tag_scoped_slots_v16 SELECT scope,number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_scoped_slots;
+        CREATE TABLE tag_scoped_assignments_v16(scope TEXT NOT NULL, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL, PRIMARY KEY(scope,event_id), FOREIGN KEY(scope,slot_number) REFERENCES tag_scoped_slots_v16(scope,number));
+        INSERT INTO tag_scoped_assignments_v16 SELECT scope,event_id,slot_number FROM tag_scoped_assignments;
+        DROP TABLE tag_scoped_assignments;
+        DROP TABLE tag_scoped_slots;
+        ALTER TABLE tag_scoped_slots_v16 RENAME TO tag_scoped_slots;
+        ALTER TABLE tag_scoped_assignments_v16 RENAME TO tag_scoped_assignments;
+        CREATE INDEX tag_scoped_assignments_slot ON tag_scoped_assignments(scope,slot_number,event_id DESC);
+        PRAGMA user_version=16;")?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -226,7 +240,7 @@ mod tests {
             .db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
         assert!(reopened.db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bull_members')", [], |row| row.get::<_, bool>(0)).unwrap());
         let backup = std::fs::read_dir(profile.path().join("backups"))
             .unwrap()
@@ -235,7 +249,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("index-before-v15")
+                    .starts_with("index-before-v16")
             })
             .unwrap();
         let backup = Connection::open(backup).unwrap();
@@ -286,7 +300,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("index-before-v15")
+                    .starts_with("index-before-v16")
             })
             .unwrap();
         let backup = Connection::open(backup).unwrap();
@@ -302,5 +316,101 @@ mod tests {
                 .unwrap(),
             "ok"
         );
+    }
+
+    #[test]
+    fn materials_migrate_preserving_assignments_and_checked_writes() {
+        let profile = tempfile::tempdir().unwrap();
+        let mut service = crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
+        let enabled = service.execute(crate::Request {
+            api_version: 1,
+            request_id: "migration-test-enable-text".into(),
+            command: crate::Command::SetTabEnabled {
+                tab: crate::interaction::ShelfTab::Text,
+                enabled: true,
+            },
+        });
+        assert_eq!(enabled["ok"], true, "{enabled}");
+        let result = service.execute(crate::Request {
+            api_version: 1,
+            request_id: "migration-test".into(),
+            command: crate::Command::IngestText {
+                text: "migration fixture".into(),
+                source: "test".into(),
+            },
+        });
+        assert_eq!(result["ok"], true, "{result}");
+        let id = result["result"]["id"].as_i64().unwrap();
+        service
+            .db
+            .execute(
+                "INSERT INTO tag_scoped_assignments VALUES('text',?1,1)",
+                [id],
+            )
+            .unwrap();
+        let original = crate::tag_slots::list_slots(&service.db, "text").unwrap();
+        let rev = crate::tag_slots::revision(&service.db, "text", &original).unwrap();
+        // Recreate the exact v15 scoped tables, including the original CHECK
+        // and foreign key, before exercising the v16 migration.
+        service.db.execute_batch("CREATE TABLE tag_scoped_slots_v15(scope TEXT NOT NULL, number INTEGER NOT NULL CHECK(number BETWEEN 1 AND 9), name TEXT NOT NULL, color TEXT NOT NULL, material TEXT NOT NULL CHECK(material IN('solid','dots','lines','grain')), scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 100), intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 100), angle INTEGER NOT NULL CHECK(angle BETWEEN 0 AND 359), seed INTEGER NOT NULL CHECK(seed BETWEEN 0 AND 4294967295), opacity INTEGER NOT NULL CHECK(opacity BETWEEN 0 AND 100), PRIMARY KEY(scope,number));
+        INSERT INTO tag_scoped_slots_v15 SELECT scope,number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_scoped_slots;
+        CREATE TABLE tag_scoped_assignments_v15(scope TEXT NOT NULL, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, slot_number INTEGER NOT NULL, PRIMARY KEY(scope,event_id), FOREIGN KEY(scope,slot_number) REFERENCES tag_scoped_slots_v15(scope,number));
+        INSERT INTO tag_scoped_assignments_v15 SELECT scope,event_id,slot_number FROM tag_scoped_assignments;
+        DROP TABLE tag_scoped_assignments;
+        DROP TABLE tag_scoped_slots;
+        ALTER TABLE tag_scoped_slots_v15 RENAME TO tag_scoped_slots;
+        ALTER TABLE tag_scoped_assignments_v15 RENAME TO tag_scoped_assignments;
+        CREATE INDEX tag_scoped_assignments_slot ON tag_scoped_assignments(scope,slot_number,event_id DESC);
+        PRAGMA user_version=15;").unwrap();
+        assert!(
+            service
+                .db
+                .execute(
+                    "UPDATE tag_scoped_slots SET material='flower' WHERE scope='text' AND number=1",
+                    []
+                )
+                .is_err()
+        );
+        drop(service);
+        let service = crate::Service::open(profile.path(), crate::DEFAULT_QUOTA).unwrap();
+        assert_eq!(
+            crate::tag_slots::list_slots(&service.db, "text").unwrap(),
+            original
+        );
+        assert_eq!(
+            crate::tag_slots::revision(&service.db, "text", &original).unwrap(),
+            rev
+        );
+        assert_eq!(service.db.query_row("SELECT slot_number FROM tag_scoped_assignments WHERE scope='text' AND event_id=?1", [id], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(
+            service
+                .db
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            0
+        );
+        let mut current_rev = rev;
+        let mut slot = original[0].clone();
+        for material in [
+            crate::tag_slots::Material::Flower,
+            crate::tag_slots::Material::Star,
+            crate::tag_slots::Material::Diamond,
+            crate::tag_slots::Material::Grid,
+        ] {
+            slot.material = material;
+            let old_rev = current_rev.clone();
+            current_rev =
+                crate::tag_slots::save_slot_checked(&service.db, "text", &slot, &old_rev).unwrap();
+            assert!(
+                crate::tag_slots::save_slot_checked(&service.db, "text", &slot, &old_rev).is_err()
+            );
+            assert_eq!(
+                crate::tag_slots::list_slots(&service.db, "text").unwrap()[0],
+                slot
+            );
+        }
     }
 }

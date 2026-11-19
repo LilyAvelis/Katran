@@ -86,9 +86,17 @@ the Settings window. Put horizontal content padding inside the scrolling area.
 
 Use the shared `ui_foundation::text_field` for single-line text inputs.
 Callers choose IDs, hints, width, and masking. A surface with its own measured
-header may keep its spacing. Tag Settings and the shelf's centered tag editor
-share the tag controls and footer. Each surface retains its own save and
-conflict handling.
+header may keep its spacing. Open the shared tag editor as a centered modal
+from Settings. Include a gallery-style sample card that paints the material
+on its full surface. On the shelf, anchor the modal to the footer tags button
+so tag changes can be seen in the cards above it. Each surface retains its
+own save and conflict handling.
+
+Flower, Star, Diamond, and Grid materials require catalogue schema 16. The
+first upgrade makes a consistent catalogue backup before applying the
+migration. A version 15 executable needs a version 15 catalogue to reopen
+the profile. Restoring the backup rolls catalogue contents back to its capture
+time, so preserve any later changes before a rollback.
 
 Display shortcut arrows and punctuation as symbols. Show the primary chord
 and the count of alternatives in a bounded keycap. Show the complete list on

@@ -32,16 +32,19 @@ fn move_order(source: u8, target: u8) -> Option<Vec<u8>> {
 
 pub(super) fn edit_controls(ui: &mut egui::Ui, slot: &mut Slot) {
     ui.vertical_centered(|ui| {
-        let font = egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into());
-        let title = egui::RichText::new(tr("Оформление тега", "Tag appearance")).size(19.0);
-        let has_bold = ui.fonts(|fonts| fonts.definitions().families.contains_key(&font));
-        ui.label(if has_bold {
-            title.family(font)
-        } else {
-            title.strong()
-        });
+        let width = ui.available_width().min(365.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(width);
+                edit_fields(ui, slot);
+            },
+        );
     });
-    ui.add_space(6.0);
+}
+
+fn edit_fields(ui: &mut egui::Ui, slot: &mut Slot) {
     ui.label(tr("Название", "Name"));
     ui.add(text_field(
         egui::TextEdit::singleline(&mut slot.name).desired_width(ui.available_width().min(420.0)),
@@ -63,12 +66,24 @@ pub(super) fn edit_controls(ui: &mut egui::Ui, slot: &mut Slot) {
                 Material::Dots => tr("Точки", "Dots"),
                 Material::Lines => tr("Линии", "Lines"),
                 Material::Grain => tr("Зерно", "Grain"),
+                Material::Flower => tr("Цветы", "Flowers"),
+                Material::Star => tr("Звёзды", "Stars"),
+                Material::Diamond => tr("Ромбы", "Diamonds"),
+                Material::Grid => tr("Сетка", "Grid"),
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut slot.material, Material::Solid, tr("Сплошная", "Solid"));
                 ui.selectable_value(&mut slot.material, Material::Dots, tr("Точки", "Dots"));
                 ui.selectable_value(&mut slot.material, Material::Lines, tr("Линии", "Lines"));
                 ui.selectable_value(&mut slot.material, Material::Grain, tr("Зерно", "Grain"));
+                ui.selectable_value(&mut slot.material, Material::Flower, tr("Цветы", "Flowers"));
+                ui.selectable_value(&mut slot.material, Material::Star, tr("Звёзды", "Stars"));
+                ui.selectable_value(
+                    &mut slot.material,
+                    Material::Diamond,
+                    tr("Ромбы", "Diamonds"),
+                );
+                ui.selectable_value(&mut slot.material, Material::Grid, tr("Сетка", "Grid"));
             });
     });
     default_texture_strength(slot, previous_material);
@@ -111,6 +126,88 @@ pub(super) fn edit_controls(ui: &mut egui::Ui, slot: &mut Slot) {
     });
 }
 
+pub(super) fn editor_modal<R>(
+    ctx: &egui::Context,
+    id: &'static str,
+    anchor: Option<egui::Pos2>,
+    width: f32,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::ModalResponse<R> {
+    let mut modal = egui::Modal::new(egui::Id::new(id))
+        .backdrop_color(Color32::from_black_alpha(24))
+        .frame(super::action_row::popup_frame(ctx));
+    if let Some(anchor) = anchor {
+        modal = modal.area(
+            egui::Area::new(egui::Id::new(id))
+                .order(egui::Order::Foreground)
+                .pivot(egui::Align2::RIGHT_BOTTOM)
+                .fixed_pos(anchor),
+        );
+    }
+    modal.show(ctx, |ui| {
+        ui.set_width(width);
+        ui.vertical_centered(|ui| {
+            let font = egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into());
+            let title = egui::RichText::new(tr("Оформление тега", "Tag appearance")).size(19.0);
+            let has_bold = ui.fonts(|fonts| fonts.definitions().families.contains_key(&font));
+            ui.label(if has_bold {
+                title.family(font)
+            } else {
+                title.strong()
+            });
+        });
+        ui.add_space(6.0);
+        content(ui)
+    })
+}
+
+fn sample_card(ui: &mut egui::Ui, slot: &Slot, selected: &mut bool, cursor: &mut bool) {
+    ui.vertical_centered(|ui| {
+        ui.label(tr("Материал на карточке", "Card material"));
+        let size = egui::vec2(ui.available_width().min(155.0), 138.0);
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let painter = ui.painter().with_clip_rect(rect);
+        painter.rect_filled(rect, 6.0, Color32::from_gray(60));
+        super::tag_material_ui::paint(ui, rect, slot);
+        let image = egui::Rect::from_min_max(
+            rect.min + egui::vec2(13.0, 12.0),
+            rect.max - egui::vec2(13.0, 34.0),
+        );
+        painter.rect_filled(image, 5.0, Color32::from_rgb(25, 31, 48));
+        let sun = image.left_top() + egui::vec2(image.width() * 0.69, image.height() * 0.25);
+        painter.circle_filled(sun, 8.0, Color32::from_rgb(238, 188, 141));
+        for (x, color) in [
+            (0.43, Color32::from_rgb(81, 95, 136)),
+            (0.72, Color32::from_rgb(50, 66, 99)),
+        ] {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    image.left_bottom() + egui::vec2(4.0, -2.0),
+                    image.left_top() + egui::vec2(image.width() * x, image.height() * 0.30),
+                    image.right_bottom() - egui::vec2(4.0, 2.0),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        painter.text(
+            egui::pos2(rect.center().x, rect.bottom() - 17.0),
+            egui::Align2::CENTER_CENTER,
+            tr("Пример карточки", "Sample card"),
+            egui::FontId::proportional(13.0),
+            super::tag_material_ui::title_color(slot),
+        );
+        if let Some(stroke) = super::shelf_view::card_outline(ui.ctx(), *selected) {
+            painter.rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
+        }
+        if *cursor {
+            super::shelf_view::paint_cursor(ui, rect);
+        }
+        ui.checkbox(selected, tr("Выбрано", "Selected"));
+        ui.checkbox(cursor, tr("Курсор", "Cursor"));
+    });
+}
+
 pub(super) fn editor_footer(ui: &mut egui::Ui, number: u8, on_shelf: bool) -> bool {
     use super::special_mode_bar;
     use egui_lucide::Lucide;
@@ -149,6 +246,105 @@ pub struct State {
     conflicted: bool,
 }
 impl State {
+    pub fn is_editing(&self) -> bool {
+        self.draft.is_some()
+    }
+
+    fn show_editor(&mut self, ctx: &egui::Context, api: &mut Service, opened: bool) -> bool {
+        let Some(slot) = self.draft.as_mut() else {
+            return false;
+        };
+        let before = slot.clone();
+        let width = (ctx.content_rect().width() - 36.0).clamp(240.0, 560.0);
+        let mut retry = false;
+        let mut reload = false;
+        let modal = editor_modal(ctx, "settings-tag-editor", None, width, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height((ctx.content_rect().height() - 145.0).max(80.0))
+                .show(ui, |ui| {
+                    if width >= 490.0 {
+                        ui.horizontal_top(|ui| {
+                            let main = ui.available_width() - 185.0;
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(main, 0.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui.set_width(main);
+                                    ui.add_enabled_ui(!self.conflicted, |ui| {
+                                        edit_controls(ui, slot)
+                                    });
+                                },
+                            );
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(175.0, 0.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui.set_width(175.0);
+                                    sample_card(
+                                        ui,
+                                        slot,
+                                        &mut self.preview_selected,
+                                        &mut self.preview_cursor,
+                                    );
+                                },
+                            );
+                        });
+                    } else {
+                        ui.add_enabled_ui(!self.conflicted, |ui| edit_controls(ui, slot));
+                        ui.add_space(12.0);
+                        sample_card(
+                            ui,
+                            slot,
+                            &mut self.preview_selected,
+                            &mut self.preview_cursor,
+                        );
+                    }
+                    if !self.error.is_empty() {
+                        ui.colored_label(Color32::LIGHT_RED, &self.error);
+                        if self.conflicted {
+                            reload = ui
+                                .button(tr(
+                                    "Отменить черновик и обновить",
+                                    "Discard draft and reload",
+                                ))
+                                .clicked();
+                        } else if self.dirty {
+                            retry = ui
+                                .button(tr("Повторить сохранение", "Retry save"))
+                                .clicked();
+                        }
+                    }
+                });
+            editor_footer(ui, slot.number, false)
+        });
+        let edited = before != *slot;
+        let mut changed = false;
+        if reload {
+            self.draft = None;
+            self.dirty = false;
+            self.conflicted = false;
+            self.slots = None;
+            self.revision = None;
+            self.error.clear();
+            self.load_slots(api);
+        } else {
+            if edited || retry {
+                self.dirty = true;
+                changed = self.flush(api);
+            }
+            if (modal.inner || (!opened && modal.should_close())) && !self.dirty {
+                self.draft = None;
+                egui::Popup::close_all(ctx);
+                ctx.memory_mut(|memory| {
+                    if let Some(focus) = memory.focused() {
+                        memory.surrender_focus(focus);
+                    }
+                });
+            }
+        }
+        changed
+    }
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -343,7 +539,7 @@ impl State {
         if self.slots.is_none() {
             self.load_slots(api);
         }
-        if self.conflicted {
+        if self.conflicted && self.draft.is_none() {
             ui.colored_label(
                 Color32::LIGHT_RED,
                 tr(
@@ -374,15 +570,10 @@ impl State {
         ui.add_space(12.0);
         let slots = self.slots.clone().unwrap_or_default();
         let mut clicked = None;
-        let mut draft_changed = false;
         let mut drop = None;
         SettingsSection::show(ui, |ui| {
             for row in &slots {
                 ui.push_id((format!("{:?}", self.tab), row.number), |ui| {
-                    let expanded = self
-                        .draft
-                        .as_ref()
-                        .is_some_and(|slot| slot.number == row.number);
                     let geometry = SettingsRow::show(
                         ui,
                         &format!("{} · {}", row.number, row.name),
@@ -422,14 +613,7 @@ impl State {
                                 .allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
                             ui.painter()
                                 .rect_filled(rect, 4.0, super::tag_material_ui::color(row));
-                            if ui
-                                .button(if expanded {
-                                    tr("Закрыть", "Close")
-                                } else {
-                                    tr("Изменить", "Edit")
-                                })
-                                .clicked()
-                            {
+                            if ui.button(tr("Изменить", "Edit")).clicked() {
                                 clicked = Some(row.clone());
                             }
                         },
@@ -457,130 +641,24 @@ impl State {
                     if let Some(payload) = target.dnd_release_payload::<TagDrag>() {
                         drop = Some(((*payload).clone(), row.number));
                     }
-                    #[cfg(test)]
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(
-                            egui::Id::new(("tag-row-bottom", row.number)),
-                            ui.min_rect().bottom(),
-                        )
-                    });
-                    if expanded && let Some(slot) = self.draft.as_mut() {
-                        #[cfg(test)]
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(
-                                egui::Id::new(("tag-editor-top", row.number)),
-                                ui.cursor().top(),
-                            )
-                        });
-                        let before = slot.clone();
-                        ui.add_space(14.0);
-                        ui.add_enabled_ui(!self.conflicted, |ui| edit_controls(ui, slot));
-                        ui.label(tr("Предпросмотр материала", "Material preview"));
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.preview_selected, tr("Выбрано", "Selected"));
-                            ui.checkbox(&mut self.preview_cursor, tr("Курсор", "Cursor"));
-                        });
-                        for image in [false, true] {
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width().min(300.0), 72.0),
-                                egui::Sense::hover(),
-                            );
-                            ui.painter().rect_filled(
-                                rect,
-                                6.0,
-                                ui.visuals().widgets.inactive.weak_bg_fill,
-                            );
-                            let content = egui::Rect::from_min_max(
-                                rect.min,
-                                egui::pos2(rect.right(), rect.top() + 22.0),
-                            );
-                            super::tag_material_ui::paint(ui, content, slot);
-                            ui.painter().text(
-                                content.center(),
-                                egui::Align2::CENTER_CENTER,
-                                if image {
-                                    tr("Пример изображения", "Image example")
-                                } else {
-                                    tr("Пример текста", "Text example")
-                                },
-                                egui::FontId::proportional(14.0),
-                                super::tag_material_ui::title_color(slot),
-                            );
-                            if image {
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_max(
-                                        rect.left_bottom() - egui::vec2(-10.0, 40.0),
-                                        rect.right_bottom() - egui::vec2(10.0, 8.0),
-                                    ),
-                                    3.0,
-                                    Color32::from_gray(110),
-                                );
-                            }
-                            if let Some(stroke) =
-                                super::shelf_view::card_outline(ui.ctx(), self.preview_selected)
-                            {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    6.0,
-                                    stroke,
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            if self.preview_cursor {
-                                super::shelf_view::paint_cursor(ui, rect);
-                            }
-                            ui.add_space(4.0);
-                        }
-                        ui.weak(tr(
-                "Оптическое стекло в предпросмотре недоступно; проверьте его в основном окне.",
-                "Optical glass is unavailable in the preview; check it in the main window.",
-            ));
-                        if editor_footer(ui, slot.number, false) {
-                            clicked = Some(row.clone());
-                        }
-                        draft_changed |= *slot != before;
-                    }
                 });
             }
         });
-        if draft_changed {
-            self.dirty = true;
-            if self.flush(api) {
-                changed = true;
-            }
-        }
         if let Some((drag, target)) = drop
             && self.reorder(api, &drag, target)
         {
             changed = true;
         }
+        let mut opened = false;
         if let Some(row) = clicked
             && self.flush(api)
         {
-            if self
-                .draft
-                .as_ref()
-                .is_some_and(|slot| slot.number == row.number)
-            {
-                self.draft = None;
-            } else {
-                self.draft = Some(row);
-            }
+            self.draft = Some(row);
+            opened = true;
         }
-        if self.dirty
-            && !self.conflicted
-            && ui
-                .button(tr("Повторить сохранение", "Retry save"))
-                .clicked()
-            && self.flush(api)
-        {
-            changed = true;
-        }
-        if !self.error.is_empty() {
-            ui.colored_label(
-                Color32::LIGHT_RED,
-                format!("{}: {}", tr("Не сохранено", "Not saved"), self.error),
-            );
+        changed |= self.show_editor(ui.ctx(), api, opened);
+        if self.draft.is_none() && !self.error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, &self.error);
         }
         changed
     }
@@ -733,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_editor_is_between_its_row_and_next_row() {
+    fn settings_tag_editor_opens_as_a_centered_modal() {
         use katran::interaction::ShelfTab;
         let root = tempfile::tempdir().unwrap();
         let mut api = Service::open(root.path(), 100_000).unwrap();
@@ -752,27 +830,28 @@ mod tests {
             ..Default::default()
         };
         let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 2000.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                state.show(ui, &mut api);
-            },
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 2000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    state.show(ui, &mut api);
+                },
+            );
+            output.textures_delta.clear();
+        }
+        let rect = ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("settings-tag-editor")))
+            .expect("Edit should use a separate modal");
+        assert!(
+            rect.center().distance(egui::pos2(450.0, 1000.0)) <= 2.0,
+            "{rect:?}"
         );
-        output.textures_delta.clear();
-        let (row_bottom, editor_top, next_bottom): (f32, f32, f32) = ctx.data(|d| {
-            (
-                d.get_temp(egui::Id::new(("tag-row-bottom", 1))).unwrap(),
-                d.get_temp(egui::Id::new(("tag-editor-top", 1))).unwrap(),
-                d.get_temp(egui::Id::new(("tag-row-bottom", 2))).unwrap(),
-            )
-        });
-        assert!(editor_top >= row_bottom && editor_top < next_bottom);
     }
 
     #[test]

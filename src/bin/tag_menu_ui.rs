@@ -4,6 +4,12 @@ use eframe::egui::{self, Color32, RichText};
 use katran::interaction::ShelfTab;
 use katran::tag_slots::Slot;
 
+fn tag_anchor(ctx: &egui::Context) -> egui::Pos2 {
+    ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("tags-button-rect")))
+        .map(|r| r.right_top() + egui::vec2(0.0, -6.0))
+        .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0))
+}
+
 /// Reserved modal close keys: consume their paired typed character, not Paste.
 fn take_tag_close(input: &mut egui::InputState, editing: bool) -> bool {
     let mut close = false;
@@ -139,12 +145,13 @@ impl State {
             }
             let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
             let mut optical = None;
-            let result = egui::Modal::new(egui::Id::new("tag-editor"))
-                .backdrop_color(Color32::from_black_alpha(24))
-                .frame(super::action_row::popup_frame(ctx))
-                .show(ctx, |ui| {
+            let result = super::tag_settings_ui::editor_modal(
+                ctx,
+                "tag-editor",
+                Some(tag_anchor(ctx)),
+                width,
+                |ui| {
                     optical = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
-                    ui.set_width(width);
                     if let Some(editor) = self.editor.as_mut() {
                         let before = editor.slot.clone();
                         egui::ScrollArea::vertical()
@@ -184,7 +191,8 @@ impl State {
                         return super::tag_settings_ui::editor_footer(ui, editor.slot.number, true);
                     }
                     false
-                });
+                },
+            );
             if let Some((painter, index)) = optical
                 && let Some(shape) = super::theme_ui::optical_shape(ctx, result.response.rect, 12.0)
             {
@@ -380,10 +388,7 @@ impl State {
         });
         self.scroll |= before != self.selected || self.focus;
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
-        let anchor = ctx
-            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("tags-button-rect")))
-            .map(|r| r.right_top() + egui::vec2(0.0, -6.0))
-            .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
+        let anchor = tag_anchor(ctx);
         let mut picked = None;
         let mut optical = None;
         let result = egui::Modal::new(egui::Id::new("tag-menu"))
@@ -1068,10 +1073,10 @@ mod tests {
         );
         let editor_rect = ctx
             .memory(|memory| memory.area_rect(egui::Id::new("tag-editor")))
-            .expect("centered tag editor has its own area");
+            .expect("tag editor has its own area");
         assert!(
-            editor_rect.center().distance(egui::pos2(470.0, 340.0)) <= 2.0,
-            "tag editor should be centered: {editor_rect:?}"
+            editor_rect.right_bottom().distance(super::tag_anchor(&ctx)) <= 2.0,
+            "tag editor should use the footer anchor: {editor_rect:?}"
         );
         assert!(!text.contains("Предпросмотр материала") && !text.contains("Material preview"));
         assert!(
