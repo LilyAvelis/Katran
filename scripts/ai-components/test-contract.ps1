@@ -30,6 +30,18 @@ try {
         $result = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($result.component -ne $component -or $result.code -ne 'component_unavailable' -or $result.verified) { throw "Missing $component runtime was accepted" }
     }
+    $partialGpu = Join-Path $profile 'folder-ai-gpu-runtime'
+    New-Item -ItemType Directory -Path $partialGpu | Out-Null
+    [IO.File]::WriteAllText((Join-Path $partialGpu 'canary.txt'), 'keep')
+    $dir = New-Request 'gpu-verify-partial' 'verify' 'folder_gpu'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Request (Join-Path $dir 'request.json') | Out-Null
+    $result = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($result.code -ne 'component_unavailable' -or $result.verified) { throw 'Verify accepted a partial Folder CUDA installation' }
+    if ((Test-Path -LiteralPath (Join-Path $jobs 'python-bootstrap.lock')) -or
+        @(Get-ChildItem -LiteralPath $partialGpu -Force).Count -ne 1 -or
+        [IO.File]::ReadAllText((Join-Path $partialGpu 'canary.txt')) -ne 'keep') {
+        throw 'Verify unexpectedly started setup or touched the partial CUDA runtime'
+    }
     $existing = Join-Path $profile 'folder-ai-runtime'
     New-Item -ItemType Directory -Path $existing | Out-Null
     [IO.File]::WriteAllText((Join-Path $existing 'canary.txt'), 'keep')

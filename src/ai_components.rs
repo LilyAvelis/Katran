@@ -356,8 +356,8 @@ impl Manager {
             let installed = match component {
                 Component::Emoji => emoji_present,
                 Component::Folder => folder.join("manifest.json").is_file() || emoji_present,
-                Component::FolderGpu => profile
-                    .join("folder-ai-gpu-runtime/manifest.json")
+                Component::FolderGpu => crate::folder_gpu_runtime::runtime_path(profile)
+                    .join("manifest.json")
                     .is_file(),
                 Component::Translate => crate::translate_components::discover(
                     profile,

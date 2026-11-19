@@ -9,6 +9,7 @@ use std::{
 };
 
 const RUNTIME: &str = "folder-ai-gpu-runtime";
+const FALLBACK_RUNTIME: &str = "folder-ai-gpu-runtime-owned";
 const HELP: &str = "Folder GPU runtime is unavailable. Install it using scripts/folder-semantic/setup-gpu.ps1, then retry.";
 
 #[derive(Deserialize)]
@@ -28,7 +29,7 @@ pub(crate) fn resolve(profile_root: &Path) -> Result<PathBuf> {
     if !profile_root.is_absolute() {
         return Err(unavailable());
     }
-    let runtime = fs::canonicalize(profile_root.join(RUNTIME)).map_err(|_| unavailable())?;
+    let runtime = fs::canonicalize(runtime_path(profile_root)).map_err(|_| unavailable())?;
     let profile = fs::canonicalize(profile_root).map_err(|_| unavailable())?;
     if !runtime.starts_with(&profile) {
         return Err(unavailable());
@@ -59,6 +60,16 @@ pub(crate) fn resolve(profile_root: &Path) -> Result<PathBuf> {
         return Err(unavailable());
     }
     Ok(interpreter)
+}
+
+pub(crate) fn runtime_path(profile_root: &Path) -> PathBuf {
+    let primary = profile_root.join(RUNTIME);
+    let fallback = profile_root.join(FALLBACK_RUNTIME);
+    if !primary.join("manifest.json").is_file() && fallback.join("manifest.json").is_file() {
+        fallback
+    } else {
+        primary
+    }
 }
 
 #[cfg(test)]
@@ -98,5 +109,33 @@ mod tests {
         fs::create_dir_all(py.parent().unwrap()).unwrap();
         fs::write(&py, b"synthetic").unwrap();
         assert_eq!(resolve(root.path()).unwrap(), fs::canonicalize(py).unwrap());
+    }
+
+    #[test]
+    fn fallback_preserves_incomplete_primary_and_complete_primary_has_priority() {
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join(RUNTIME);
+        let fallback = root.path().join(FALLBACK_RUNTIME);
+        fs::create_dir_all(&primary).unwrap();
+        fs::write(primary.join("foreign"), b"unchanged").unwrap();
+        #[cfg(windows)]
+        let py = fallback.join(".venv/Scripts/python.exe");
+        #[cfg(not(windows))]
+        let py = fallback.join(".venv/bin/python");
+        fs::create_dir_all(py.parent().unwrap()).unwrap();
+        fs::write(&py, b"synthetic").unwrap();
+        fs::write(
+            fallback.join("manifest.json"),
+            r#"{"version":1,"backend":"onnxruntime-cuda","onnxruntime":"1.23.2"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolve(root.path()).unwrap(),
+            fs::canonicalize(&py).unwrap()
+        );
+        assert_eq!(fs::read(primary.join("foreign")).unwrap(), b"unchanged");
+        fs::write(primary.join("manifest.json"), b"{}").unwrap();
+        assert_eq!(runtime_path(root.path()), primary);
+        assert!(resolve(root.path()).is_err());
     }
 }

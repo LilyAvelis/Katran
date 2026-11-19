@@ -54,6 +54,12 @@ try {
     $lockFile = Join-Path (Join-Path $profile 'ai-installations') ($req.component + '.lock')
     try { $lock = [IO.File]::Open($lockFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
     catch { $code = 'component_busy'; throw 'This component is already being installed or checked.' }
+    if ($req.component -eq 'folder_gpu' -and -not (Test-Path -LiteralPath (Join-Path $componentRoot 'manifest.json'))) {
+        $fallback = Join-Path $profile 'folder-ai-gpu-runtime-owned'
+        $primaryEntry = if (Test-Path -LiteralPath $componentRoot) { Get-Item -LiteralPath $componentRoot -Force } else { $null }
+        if ($primaryEntry -and (($primaryEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $primaryEntry.PSIsContainer)) { throw 'Invalid Folder GPU runtime directory.' }
+        if ((Test-Path -LiteralPath (Join-Path $fallback 'manifest.json')) -or ($primaryEntry -and -not (Test-Path -LiteralPath (Join-Path $componentRoot '.katran-gpu-installing')) -and @(Get-ChildItem -LiteralPath $componentRoot -Force).Count -gt 0)) { $componentRoot = $fallback }
+    }
     if ($req.component -in @('translate','upscale')) {
         if ($req.action -eq 'install') {
             $pythonExe = Get-SetupPython $profile $job
@@ -102,6 +108,14 @@ try {
     $legacyFolder = $req.component -eq 'folder' -and -not (Test-Path -LiteralPath $componentRoot)
     if ($req.component -in @('folder','folder_gpu') -and -not $legacyFolder) {
         $manifestPath = Join-Path $componentRoot 'manifest.json'
+        if ($req.component -eq 'folder_gpu') {
+            $gpuVenv = Join-Path $componentRoot '.venv'
+            foreach ($path in @($componentRoot, $manifestPath, $gpuVenv, (Join-Path $gpuVenv 'Scripts'), (Join-Path $gpuVenv 'Scripts/python.exe'))) {
+                if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                    $code = 'component_unavailable'; throw 'Invalid Folder GPU runtime path.'
+                }
+            }
+        }
         if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { $code = 'component_unavailable'; throw 'Component manifest is missing; existing files were not changed.' }
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $backend = if ($req.component -eq 'folder') { 'onnxruntime-cpu' } else { 'onnxruntime-cuda' }
