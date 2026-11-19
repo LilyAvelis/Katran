@@ -681,16 +681,19 @@ impl Shelf {
                 }
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - if neural { 300.0 } else { 240.0 }).clamp(40.0, 360.0)).show(ui, |ui| {
                     for (index, path) in state.items.iter().enumerate() {
-                        let text = path.to_string_lossy();
+                        let text = super::info_bar::friendly_path(&path.to_string_lossy());
                         let detail = state.standard_details.get(index);
                         let name = detail.map(|(name, _)| match name.as_str() {
                             "desktop" => tr("Рабочий стол", "Desktop"), "downloads" => tr("Загрузки", "Downloads"),
                             "documents" => tr("Документы", "Documents"), "pictures" => tr("Изображения", "Pictures"),
                             "videos" => tr("Видео", "Videos"), "music" => tr("Музыка", "Music"), _ => name.as_str(),
-                        }.to_owned()).unwrap_or_else(|| path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned());
-                        let detail_text = detail.and_then(|(_, error)| error.as_deref()).unwrap_or(text.as_ref());
+                        }.to_owned()).unwrap_or_else(|| path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| text.clone()));
+                        let detail_text = detail.and_then(|(_, error)| error.as_deref()).unwrap_or(&text);
                         let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
-                        if index == state.selected || response.hovered() { ui.painter().rect_filled(rect, 7.0, if index == state.selected { Color32::from_rgb(91,91,99) } else { Color32::from_rgb(77,77,83) }); }
+                        if index == state.selected || response.hovered() {
+                            let role = if index == state.selected { super::theme_ui::Role::Selection } else { super::theme_ui::Role::Raised };
+                            ui.painter().rect_filled(rect, 7.0, super::theme_ui::color(ui.ctx(), role, Color32::from_gray(74)));
+                        }
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 5.0))).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                             ui.add(egui_lucide::Lucide::Folder.size(21.0).image().tint(Color32::from_rgb(224,188,127)));
                             ui.vertical(|ui| { ui.add(egui::Label::new(RichText::new(name).size(14.0)).truncate()); ui.add(egui::Label::new(RichText::new(detail_text).size(11.0).color(Color32::from_gray(183))).truncate()); });
@@ -704,12 +707,32 @@ impl Shelf {
                     else if state.items.is_empty() { ui.weak(if neural && state.submitted_query.is_none() { tr("Введите запрос и нажмите Enter", "Type a query and press Enter") } else if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
                 });
                 ui.separator();
-                let field = egui::Frame::new().inner_margin(4).stroke(egui::Stroke::new(if neural { 1.5 } else { 0.0 }, Color32::from_rgb(221, 178, 75))).show(ui, |ui| {
+                let gold = Color32::from_rgba_unmultiplied(229, 181, 74, 110);
+                let frame = egui::Frame::new().inner_margin(4).corner_radius(9.0);
+                let frame = if neural {
+                    frame.shadow(egui::Shadow { offset: [0, 0], blur: 16, spread: 1, color: gold })
+                        .stroke(egui::Stroke::new(1.0, gold))
+                } else { frame };
+                let field = frame.show(ui, |ui| {
                     ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY)))
                 }).inner;
                 if state.focus { field.request_focus(); state.focus = false; }
-                if state.mode == Mode::Search { ui.weak(if neural { tr("Enter · искать / открыть    ↓ на последнем · ещё 10    \\ · обычный поиск", "Enter · search / open    ↓ on last · 10 more    \\ · ordinary search") } else { tr("\\ · нейропоиск", "\\ · neural search") }); }
-                ui.weak(tr("Ctrl Shift K · поиск    Ctrl H · история    Ctrl F · избранное    Ctrl . · избранное для выбранной папки    Enter · открыть    Esc · закрыть", "Ctrl Shift K · search    Ctrl H · history    Ctrl F · favorites    Ctrl . · favorite selected folder    Enter · open    Esc · close"));
+                let mut hints = vec![
+                    ("Enter", if neural { tr("Искать / открыть", "Search / open") } else { tr("Открыть", "Open") }),
+                    ("Ctrl .", tr("Закрепить", "Favorite")),
+                    ("Ctrl F", tr("Избранное", "Favorites")),
+                    ("Ctrl H", tr("История", "History")),
+                    ("Esc", tr("Закрыть", "Close")),
+                ];
+                if state.mode == Mode::Search {
+                    hints.insert(1, ("\\", if neural { tr("Обычный поиск", "Everything") } else { tr("Нейропоиск", "Neural search") }));
+                    if neural && state.next_offset.is_some() {
+                        hints.insert(2, ("↓", tr("Ещё 10 с конца списка", "10 more at end")));
+                    }
+                } else {
+                    hints.insert(1, ("Ctrl Shift K", tr("Поиск", "Search")));
+                }
+                super::special_mode_bar::shortcut_hints(ui, &hints);
             });
         if open_notion {
             self.workspace_open_notion(ctx);

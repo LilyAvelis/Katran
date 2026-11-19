@@ -561,8 +561,7 @@ fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePrefere
         |ui| {
             let available = ui.available_width();
             ui.spacing_mut().slider_width = (available - 64.0).clamp(80.0, 180.0);
-            changed |= ui
-                .add(egui::Slider::new(&mut theme.selection_intensity, 0..=100).suffix(" %"))
+            changed |= super::ui_foundation::slider(ui, true, egui::Slider::new(&mut theme.selection_intensity, 0..=100).suffix(" %"))
                 .changed();
         },
     );
@@ -685,10 +684,8 @@ fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferenc
             ),
         ] {
             SettingsRow::show(ui, title, description, |ui| {
-                changed |= ui
-                    .add(
-                        egui::Slider::new(value, if max == 100 { 1 } else { 0 }..=max).suffix(" %"),
-                    )
+                changed |= super::ui_foundation::slider(ui, true,
+                        egui::Slider::new(value, if max == 100 { 1 } else { 0 }..=max).suffix(" %"))
                     .changed();
             });
         }
@@ -795,6 +792,15 @@ impl State {
             self.notion_token.clear();
         }
         self.section = index;
+        if index != 2
+            && self.tab_hotkey_target.is_some()
+            && self.editor.as_ref().is_some_and(|editor| editor.uses_confirmation())
+        {
+            if let Some(tab) = self.tab_hotkey_target.take() {
+                self.tab_hotkey_statuses.remove(&tab);
+            }
+            self.editor = None;
+        }
         if self.tab_hotkey_target.is_none() {
             self.editor = None;
         }
@@ -1814,10 +1820,10 @@ impl State {
          if let Some(profile)=draft.tab_preferences.get_mut(&tab) {
           ui.strong(format!("{}: {}",super::i18n::tr("Текущая вкладка", "Current tab"),localized_shelf_tab(tab)));
           SettingsRow::show(ui,super::i18n::tr("Вид вкладки", "Tab view"),super::i18n::tr("Сохраняется отдельно для этой вкладки.", "Saved separately for this tab."),|ui|{ui.selectable_value(&mut profile.view,View::Gallery,super::i18n::tr("Галерея", "Gallery"));ui.selectable_value(&mut profile.view,View::List,super::i18n::tr("Поток", "Stream"));ui.selectable_value(&mut profile.view,View::Details,super::i18n::tr("Мини-поток", "Mini stream"));});
-          SettingsRow::show(ui,super::i18n::tr("Столбцы галереи", "Gallery columns"),super::i18n::tr("Ctrl− / Ctrl+: число карточек в строке этой вкладки.", "Ctrl− / Ctrl+: cards per row on this tab."),|ui|{ui.add(egui::Slider::new(&mut profile.gallery_columns,1..=12));});
-          SettingsRow::show(ui,super::i18n::tr("Строки потока", "Stream rows"),super::i18n::tr("Число видимых строк в потоке этой вкладки.", "Number of visible rows in this tab's stream."),|ui|{ui.add(egui::Slider::new(&mut profile.stream_rows,1..=12));});
+          SettingsRow::show(ui,super::i18n::tr("Столбцы галереи", "Gallery columns"),super::i18n::tr("Ctrl− / Ctrl+: число карточек в строке этой вкладки.", "Ctrl− / Ctrl+: cards per row on this tab."),|ui|{super::ui_foundation::slider(ui,true,egui::Slider::new(&mut profile.gallery_columns,1..=12));});
+          SettingsRow::show(ui,super::i18n::tr("Строки потока", "Stream rows"),super::i18n::tr("Число видимых строк в потоке этой вкладки.", "Number of visible rows in this tab's stream."),|ui|{super::ui_foundation::slider(ui,true,egui::Slider::new(&mut profile.stream_rows,1..=12));});
           if matches!(tab,katran::interaction::ShelfTab::Pods|katran::interaction::ShelfTab::Links) {
-           SettingsRow::show(ui,super::i18n::tr("Компактные плитки", "Compact tiles"),super::i18n::tr("Число карточек в строке этой вкладки.", "Number of cards per row on this tab."),|ui|{ui.add(egui::Slider::new(&mut profile.compact_columns,1..=12));});
+           SettingsRow::show(ui,super::i18n::tr("Компактные плитки", "Compact tiles"),super::i18n::tr("Число карточек в строке этой вкладки.", "Number of cards per row on this tab."),|ui|{super::ui_foundation::slider(ui,true,egui::Slider::new(&mut profile.compact_columns,1..=12));});
           }
          }
         });
@@ -1871,7 +1877,12 @@ impl State {
            let tab_key=entry["tab"].as_str().unwrap_or("");
            let binding=saved_hotkeys["result"]["tab_hotkeys"][tab_key].as_str().unwrap_or("").to_owned();
            let status=if binding.is_empty(){super::i18n::tr("Не назначена", "Not assigned").to_owned()}else if !enabled{super::i18n::tr("Вкладка отключена; сочетание неактивно", "Tab disabled; shortcut inactive").to_owned()}else{self.tab_hotkey_statuses.get(&tab).cloned().unwrap_or_else(||super::i18n::tr("Сохранено · ожидание регистрации", "Saved · registration pending").into())};
-           SettingsRow::show(ui,label,&status,|ui|{ui.horizontal(|ui|{
+           let visible_status = if compact_shortcuts && (binding.is_empty()
+            || status.starts_with("Active: ") || status.starts_with("Активно: ")
+            || status == super::i18n::tr("Запись сочетания — регистрация приостановлена", "Recording — registration suspended")
+            || status == super::i18n::tr("Сохранено · ожидание регистрации", "Saved · registration pending"))
+           { "" } else { status.as_str() };
+           ui.push_id(tab_key, |ui| SettingsRow::show(ui,label,visible_status,|ui|{ui.horizontal(|ui|{
             let eye=ui.add_enabled(can_toggle,egui::Button::image(if enabled {egui_lucide::Lucide::Eye.size(18.0).image()} else {egui_lucide::Lucide::EyeOff.size(18.0).image()})).on_hover_text(if enabled {super::i18n::tr("Выключить вкладку", "Disable tab")} else {super::i18n::tr("Включить вкладку", "Enable tab")});
             #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tab-hotkey-eye",tab_key)),eye.rect));
             if eye.clicked() {
@@ -1883,12 +1894,30 @@ impl State {
              } else {self.error=response["error"]["message"].as_str().unwrap_or(super::i18n::tr("Ошибка", "Error")).into();}
             }
             let caption=if binding.is_empty(){super::i18n::tr("Назначить", "Set shortcut")}else{binding.as_str()};
-            let key_button=ui.add_enabled(self.editor.is_none(),egui::Button::new(caption)).on_hover_text(super::i18n::tr("Глобальное сочетание Windows для вкладки", "Global Windows shortcut for this tab"));
+            let key_button=if compact_shortcuts {
+             super::shortcuts_ui::binding_button(ui, Some(&binding), self.editor.is_none(), raised_rows)
+            } else {
+             ui.add_enabled(self.editor.is_none(),egui::Button::new(caption))
+            }.on_hover_text(super::i18n::tr("Глобальное сочетание Windows для вкладки", "Global Windows shortcut for this tab"));
             #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new(("tab-hotkey-button",tab_key)),key_button.rect));
-            if key_button.clicked() {
+            let opened = key_button.clicked();
+            if opened {
              self.tab_hotkey_target=Some(tab);
-             self.editor=Some(super::shortcuts_ui::Editor::new("tab_global_hotkey",label,binding.clone()).with_physical_keys());
+             let editor=super::shortcuts_ui::Editor::new("tab_global_hotkey",label,binding.clone()).with_physical_keys();
+             self.editor=Some(if compact_shortcuts { editor.with_confirmation() } else { editor });
              self.tab_hotkey_statuses.remove(&tab);
+             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+            }
+            if compact_shortcuts && self.tab_hotkey_target==Some(tab) && let Some(editor)=self.editor.as_mut() {
+             let (open, action) = editor.show_popover(ui, &key_button, opened, Lucide::PanelsTopLeft, raised_keycaps);
+             if let Some(action) = action {
+              global_intent = Some(action);
+             } else if !open {
+              self.editor = None;
+              self.tab_hotkey_target = None;
+              self.tab_hotkey_statuses.remove(&tab);
+              root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+             }
             }
             if !binding.is_empty() && ui.add_enabled(self.editor.is_none(),egui::Button::new("×")).on_hover_text(super::i18n::tr("Снять сочетание", "Clear shortcut")).clicked() {
              self.tab_hotkey_target=Some(tab);
@@ -1896,8 +1925,8 @@ impl State {
              self.tab_hotkey_statuses.remove(&tab);
              global_intent=Some(super::shortcuts_ui::Intent::Set{binding:String::new(),replace:false});
             }
-           });});
-           if self.tab_hotkey_target==Some(tab) && let Some(editor)=self.editor.as_mut(){
+           });}));
+           if !compact_shortcuts && self.tab_hotkey_target==Some(tab) && let Some(editor)=self.editor.as_mut(){
             ui.separator();
             if let Some(intent)=editor.render(ui) && apply_editor_intent(api,editor,intent,&mut self.draft,self.tab_hotkey_target){self.editor=None;if let Some(tab)=self.tab_hotkey_target.take(){self.tab_hotkey_statuses.remove(&tab);}}
             ui.separator();
@@ -2013,7 +2042,7 @@ impl State {
             .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_show_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
           });
           SettingsRow::show(ui,super::i18n::tr("Время появления", "Show duration"),super::i18n::tr("От 50 до 800 мс; при режиме без анимации не используется.", "From 50 to 800 ms; unused when animation is disabled."),|ui|{
-           if ui.add_enabled(theme.animation_show_style!="none",egui::Slider::new(&mut theme.animation_show_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
+           if super::ui_foundation::slider(ui,theme.animation_show_style!="none",egui::Slider::new(&mut theme.animation_show_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
           });
           SettingsRow::show(ui,super::i18n::tr("Исчезновение", "Hide animation"),super::i18n::tr("Как окно скрывается.", "How the window is hidden."),|ui|{
            egui::ComboBox::from_id_salt("animation-hide-style")
@@ -2021,7 +2050,7 @@ impl State {
             .show_ui(ui,|ui|{for (id,label) in styles {if ui.selectable_value(&mut theme.animation_hide_style,id.to_owned(),label).changed(){theme_intent=Some(theme.clone());}}});
           });
           SettingsRow::show(ui,super::i18n::tr("Время исчезновения", "Hide duration"),super::i18n::tr("От 50 до 800 мс; при режиме без анимации не используется.", "From 50 to 800 ms; unused when animation is disabled."),|ui|{
-           if ui.add_enabled(theme.animation_hide_style!="none",egui::Slider::new(&mut theme.animation_hide_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
+           if super::ui_foundation::slider(ui,theme.animation_hide_style!="none",egui::Slider::new(&mut theme.animation_hide_ms,50..=800).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
           });
          });
          SettingsSection::group(ui,super::i18n::tr("Прокрутка", "Scrolling"),|ui|{
@@ -2036,10 +2065,10 @@ impl State {
           });
           if theme.banana_scroll {
            SettingsRow::show(ui,super::i18n::tr("Скорость прокрутки", "Scroll speed"),super::i18n::tr("Длина движения от одного шага колесика.", "Distance moved per wheel step."),|ui|{
-            if ui.add(egui::Slider::new(&mut theme.banana_scroll_speed,25..=300).suffix("%")).changed(){theme_intent=Some(theme.clone());}
+            if super::ui_foundation::slider(ui,true,egui::Slider::new(&mut theme.banana_scroll_speed,25..=300).suffix("%")).changed(){theme_intent=Some(theme.clone());}
            });
            SettingsRow::show(ui,super::i18n::tr("Инерция прокрутки", "Scroll inertia"),super::i18n::tr("Время мягкого затухания после движения.", "How long movement continues to ease out."),|ui|{
-            if ui.add(egui::Slider::new(&mut theme.banana_scroll_inertia_ms,50..=1000).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
+            if super::ui_foundation::slider(ui,true,egui::Slider::new(&mut theme.banana_scroll_inertia_ms,50..=1000).suffix(super::i18n::tr(" мс", " ms"))).changed(){theme_intent=Some(theme.clone());}
            });
           }
          });
@@ -2413,6 +2442,9 @@ mod tests {
         use katran::interaction::ShelfTab;
         let root = tempfile::tempdir().unwrap();
         let mut api = Service::open(root.path(), 10000).unwrap();
+        let mut prefs: Settings = serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        prefs.settings_summon_popover = true;
+        assert_eq!(call(&mut api, Command::SetSettings { settings: prefs })["ok"], true);
         call(&mut api, Command::ShowTabSettings);
         let ctx = egui::Context::default();
         ctx.set_embed_viewports(true);
@@ -2464,7 +2496,7 @@ mod tests {
             out.textures_delta.clear();
         }
         assert_eq!(state.tab_hotkey_target, Some(ShelfTab::Images));
-        assert!(state.editor.is_some());
+        assert!(state.editor.as_ref().is_some_and(|editor| editor.uses_confirmation()));
         assert_eq!(
             call(&mut api, Command::Tabs)["result"]["tabs"]
                 .as_array()
@@ -2474,6 +2506,23 @@ mod tests {
                 .unwrap()["enabled"],
             before
         );
+        for (key, modifiers) in [(egui::Key::F9, egui::Modifiers::CTRL), (egui::Key::Enter, egui::Modifiers::NONE)] {
+            let mut out = ctx.run_ui(egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key, physical_key: Some(key), pressed: true, repeat: false, modifiers,
+                }],
+                ..Default::default()
+            }, |ui| { state.show(ui.ctx(), &mut api); });
+            out.textures_delta.clear();
+            let saved = call(&mut api, Command::GetSettings);
+            if key == egui::Key::F9 {
+                assert!(saved["result"]["tab_hotkeys"]["images"].is_null());
+                assert!(state.tab_hotkey_target.is_some());
+            } else {
+                assert_eq!(saved["result"]["tab_hotkeys"]["images"], "Ctrl+F9");
+                assert!(state.tab_hotkey_target.is_none());
+            }
+        }
     }
     #[test]
     fn tab_hotkey_recording_keeps_target_across_section_change() {

@@ -420,6 +420,14 @@ fn display_key(key: &str) -> &str {
 }
 
 fn display_chord(chord: &str) -> String {
+    let windows_delimiters;
+    let chord =
+        if !chord.contains(char::is_whitespace) && chord.contains('+') && !chord.ends_with('+') {
+            windows_delimiters = chord.replace('+', " ");
+            windows_delimiters.as_str()
+        } else {
+            chord
+        };
     chord
         .split_whitespace()
         .map(display_key)
@@ -650,9 +658,9 @@ fn capture_field(ui: &mut egui::Ui, binding: &str, raised: bool) {
     painter.add(egui::Shape::mesh(gradient));
 
     let color = ui.visuals().text_color();
-    let keys: Vec<_> = crate::action_row::primary_shortcut(binding)
+    let chord = display_chord(crate::action_row::primary_shortcut(binding));
+    let keys: Vec<_> = chord
         .split_whitespace()
-        .map(display_key)
         .map(|key| painter.layout_no_wrap(key.to_owned(), FontId::proportional(23.0), color))
         .collect();
     if keys.is_empty() {
@@ -819,6 +827,7 @@ mod tests {
             Some("Ctrl + / Ctrl = / Ctrl Shift + / Ctrl Shift =")
         );
         assert_eq!(display_chord("Ctrl Alt ArrowUp"), "Ctrl Alt ↑");
+        assert_eq!(display_chord("Alt+A"), "Alt A");
         assert_eq!(display_chord("Ctrl ArrowLeft"), "Ctrl ←");
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

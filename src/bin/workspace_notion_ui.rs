@@ -312,17 +312,21 @@ enum Operation {
 }
 
 pub(super) fn source_button(ui: &mut egui::Ui, active: bool) -> bool {
-    let (background, foreground) = if active {
-        (Color32::WHITE, Color32::BLACK)
+    let mark = egui::Image::new(egui::include_image!(
+        "../../assets/branding/notion-favicon.png"
+    ))
+    .fit_to_exact_size(egui::vec2(18.0, 18.0));
+    let border = if active {
+        ui.visuals().selection.stroke.color
     } else {
-        (Color32::from_gray(25), Color32::WHITE)
+        Color32::from_gray(105)
     };
-    ui.add(
-        egui::Button::new(RichText::new("N").strong().size(15.0).color(foreground))
-            .min_size(egui::vec2(26.0, 26.0))
-            .corner_radius(13)
-            .fill(background)
-            .stroke(egui::Stroke::new(1.0, Color32::from_gray(105))),
+    ui.add_sized(
+        [32.0, 32.0],
+        egui::Button::image(mark)
+            .corner_radius(16)
+            .fill(Color32::from_gray(242))
+            .stroke(egui::Stroke::new(1.0, border)),
     )
     .on_hover_text(if active {
         tr(
@@ -642,14 +646,18 @@ impl Shelf {
         let modal = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
             .backdrop_color(Color32::from_black_alpha(24))
-            .frame(crate::action_row::popup_frame(ctx)
-                .fill(Color32::from_gray(32))
-                .stroke(egui::Stroke::new(1.0, Color32::from_gray(100))))
+            .frame(
+                crate::action_row::popup_frame(ctx)
+                    .fill(Color32::from_gray(32))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(100))),
+            )
             .show(ctx, |ui| {
                 monochrome(ui);
                 ui.set_width(width);
                 ui.horizontal(|ui| {
-                    let title = if state.search_kind == SearchKind::Databases && state.mode == Mode::Search {
+                    let title = if state.search_kind == SearchKind::Databases
+                        && state.mode == Mode::Search
+                    {
                         tr("Найти базу данных · Notion", "Find a database · Notion")
                     } else {
                         tr("Найти страницу · Notion", "Find a page · Notion")
@@ -672,22 +680,24 @@ impl Shelf {
                         (Mode::Favorites, tr("Избранное", "Favorites")),
                         (Mode::History, tr("История", "History")),
                     ] {
-                        if ui.selectable_label(state.mode == mode, label).clicked() && state.mode != mode {
+                        if ui.selectable_label(state.mode == mode, label).clicked()
+                            && state.mode != mode
+                        {
                             mode_change = Some(mode);
                         }
                     }
                 });
                 if state.mode == Mode::Search && !state.preview_open {
-                    let field = ui.add(
-                        super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.query)
+                    let field = ui.add(super::ui_foundation::text_field(
+                        egui::TextEdit::singleline(&mut state.query)
                             .id(query_id)
                             .desired_width(f32::INFINITY)
                             .hint_text(if state.search_kind == SearchKind::Databases {
                                 tr("Название базы данных…", "Database title…")
                             } else {
                                 tr("Название страницы…", "Page title…")
-                            })),
-                    );
+                            }),
+                    ));
                     if state.focus {
                         field.request_focus();
                         state.focus = false;
@@ -711,18 +721,32 @@ impl Shelf {
                                     ui.weak(tr("Страница пуста", "Page is empty"));
                                 } else {
                                     self.pods_ui.begin_frame();
-                                    ui.push_id(&page.page.id, |ui| reader::show_scaled(ui, blocks, 1.0, &mut self.pods_ui));
+                                    ui.push_id(&page.page.id, |ui| {
+                                        reader::show_scaled(ui, blocks, 1.0, &mut self.pods_ui)
+                                    });
                                     self.pods_ui.end_frame();
                                 }
                             }
                         } else {
-                            let databases = state.mode == Mode::Search && state.search_kind == SearchKind::Databases;
+                            let databases = state.mode == Mode::Search
+                                && state.search_kind == SearchKind::Databases;
                             for (index, item) in results.iter().enumerate() {
-                                let row = ui.horizontal(|ui| {
-                                    let icon = if item.database { egui_lucide::Lucide::Database } else { egui_lucide::Lucide::FileText };
-                                    ui.add(icon.size(16.0).image().tint(Color32::from_gray(200)));
-                                    ui.selectable_label(state.selected == index, &item.page.title)
-                                }).inner;
+                                let row = ui
+                                    .horizontal(|ui| {
+                                        let icon = if item.database {
+                                            egui_lucide::Lucide::Database
+                                        } else {
+                                            egui_lucide::Lucide::FileText
+                                        };
+                                        ui.add(
+                                            icon.size(16.0).image().tint(Color32::from_gray(200)),
+                                        );
+                                        ui.selectable_label(
+                                            state.selected == index,
+                                            &item.page.title,
+                                        )
+                                    })
+                                    .inner;
                                 if row.clicked() {
                                     state.selected = index;
                                     ctx.memory_mut(|mem| mem.surrender_focus(query_id));
@@ -743,9 +767,16 @@ impl Shelf {
                                 && state.job.is_none()
                                 && state.error.is_none()
                             {
-                                ui.weak(if databases { tr("Базы данных не найдены", "No databases found") } else { tr("Страницы не найдены", "No pages found") });
+                                ui.weak(if databases {
+                                    tr("Базы данных не найдены", "No databases found")
+                                } else {
+                                    tr("Страницы не найдены", "No pages found")
+                                });
                             }
-                            if results.is_empty() && state.mode != Mode::Search && state.error.is_none() {
+                            if results.is_empty()
+                                && state.mode != Mode::Search
+                                && state.error.is_none()
+                            {
                                 ui.weak(tr("Здесь пока нет записей", "No items yet"));
                             }
                         }
@@ -756,20 +787,35 @@ impl Shelf {
                 if let Some(notice) = state.notice {
                     ui.weak(notice);
                 }
-                if results.get(state.selected).is_some_and(|item| item.database) || (state.mode == Mode::Search && state.search_kind == SearchKind::Databases && results.is_empty()) {
-                    ui.weak(tr("Enter · открыть базу    Ctrl+. · закрепить", "Enter · open database    Ctrl+. · pin"));
+                let mut hints = Vec::new();
+                if results
+                    .get(state.selected)
+                    .is_some_and(|item| item.database)
+                    || (state.mode == Mode::Search
+                        && state.search_kind == SearchKind::Databases
+                        && results.is_empty())
+                {
+                    hints.push(("Enter", tr("Открыть базу", "Open database")));
                     if state.mode == Mode::Search {
-                        ui.weak(tr("\\ · страницы", "\\ · pages"));
+                        hints.push(("\\", tr("Страницы", "Pages")));
                     }
                 } else {
-                ui.weak(tr(
-                    "Space · превью    Enter · приложить .md    Alt+Enter · открыть в Notion    Ctrl+. · закрепить    Ctrl+F · избранное    Ctrl+H · история",
-                    "Space · preview    Enter · attach .md    Alt+Enter · open in Notion    Ctrl+. · pin    Ctrl+F · favorites    Ctrl+H · history",
-                ));
-                if state.mode == Mode::Search && !state.preview_open {
-                    ui.weak(tr("\\ · базы данных", "\\ · databases"));
+                    hints.extend([
+                        ("Space", tr("Превью", "Preview")),
+                        ("Enter", tr("Приложить .md", "Attach .md")),
+                        ("Alt Enter", tr("Открыть в Notion", "Open in Notion")),
+                    ]);
+                    if state.mode == Mode::Search && !state.preview_open {
+                        hints.push(("\\", tr("Базы данных", "Databases")));
+                    }
                 }
-                }
+                hints.extend([
+                    ("Ctrl .", tr("Закрепить", "Pin")),
+                    ("Ctrl F", tr("Избранное", "Favorites")),
+                    ("Ctrl H", tr("История", "History")),
+                    ("Esc", tr("Закрыть", "Close")),
+                ]);
+                super::special_mode_bar::shortcut_hints(ui, &hints);
             });
         if everything {
             self.workspace_mode(Mode::Search, ctx);

@@ -17,7 +17,7 @@ impl State {
         self.page.is_some()
     }
 }
-fn friendly_path(path: &str) -> String {
+pub(super) fn friendly_path(path: &str) -> String {
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")
     } else if let Some(rest) = path.strip_prefix(r"\\?\") {

@@ -88,21 +88,9 @@ fn edit_fields(ui: &mut egui::Ui, slot: &mut Slot) {
     });
     default_texture_strength(slot, previous_material);
     ui.add_space(6.0);
-    ui.scope(|ui| {
+    super::ui_foundation::slider_scope(ui, |ui| {
         let width = (ui.available_width() - 190.0).clamp(80.0, 164.0);
         ui.spacing_mut().slider_width = width;
-        ui.spacing_mut().slider_rail_height = 5.0;
-        let visuals = ui.visuals_mut();
-        visuals.handle_shape = egui::style::HandleShape::Circle;
-        visuals.slider_trailing_fill = true;
-        let selection = visuals.selection.stroke.color.to_opaque();
-        for face in [
-            &mut visuals.widgets.inactive,
-            &mut visuals.widgets.hovered,
-            &mut visuals.widgets.active,
-        ] {
-            face.bg_stroke = egui::Stroke::new(1.0, selection);
-        }
         ui.add(
             egui::Slider::new(&mut slot.opacity, 0..=100)
                 .suffix("%")

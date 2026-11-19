@@ -1,6 +1,55 @@
 //! Shared compact strip for special shelf modes, styled like the footer.
 use super::*;
 
+pub(super) fn shortcut_hints(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
+    ui.separator();
+    egui::Frame::new()
+        .fill(theme_ui::footer_fill(
+            ui.ctx(),
+            Color32::from_rgb(54, 54, 58),
+        ))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            let width = ui.available_width();
+            ui.set_min_width(width);
+            ui.horizontal_wrapped(|ui| {
+                for &(keys, description) in hints {
+                    let caps = super::ui_style::KeyCaps::measure(ui, keys);
+                    let color = ui.visuals().text_color();
+                    let text_width = (width - caps.size.x - 5.0).max(1.0);
+                    let mut job = egui::text::LayoutJob::simple_singleline(
+                        description.to_owned(),
+                        egui::FontId::proportional(12.0),
+                        color,
+                    );
+                    job.wrap.max_width = text_width;
+                    job.wrap.max_rows = 1;
+                    job.wrap.break_anywhere = true;
+                    let label = ui.painter().layout_job(job);
+                    let size = egui::vec2(
+                        (caps.size.x + 5.0 + label.size().x).min(width),
+                        caps.size.y.max(label.size().y),
+                    );
+                    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+                    let cap_rect = egui::Rect::from_min_size(
+                        egui::pos2(rect.left(), rect.center().y - caps.size.y / 2.0),
+                        caps.size,
+                    );
+                    caps.paint(ui, cap_rect);
+                    let origin = egui::pos2(
+                        cap_rect.right() + 5.0,
+                        rect.center().y - label.size().y / 2.0,
+                    );
+                    ui.painter()
+                        .with_clip_rect(rect)
+                        .galley(origin, label, color);
+                    response.on_hover_text(format!("{keys} · {description}"));
+                }
+            });
+        });
+}
+
 pub(super) fn show<R>(
     ui: &mut egui::Ui,
     add: impl FnOnce(&mut egui::Ui) -> R,

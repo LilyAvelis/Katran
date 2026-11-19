@@ -10,6 +10,25 @@ pub(super) fn text_field(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
         .margin(egui::Margin::symmetric(10, 7))
 }
 
+/// Apply the shared slider appearance without changing surrounding widgets.
+pub(super) fn slider_scope<R>(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().slider_rail_height = 5.0;
+        let visuals = ui.visuals_mut();
+        visuals.handle_shape = egui::style::HandleShape::Circle;
+        visuals.slider_trailing_fill = true;
+        let selection = visuals.selection.stroke.color.to_opaque();
+        for face in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+            face.bg_stroke = egui::Stroke::new(1.0, selection);
+        }
+        content(ui)
+    }).inner
+}
+
+pub(super) fn slider(ui: &mut egui::Ui, enabled: bool, slider: egui::Slider<'_>) -> egui::Response {
+    slider_scope(ui, |ui| ui.add_enabled(enabled, slider))
+}
+
 pub(super) struct SettingsSection;
 impl SettingsSection {
     pub fn set_depth(ctx: &egui::Context, enabled: bool) {

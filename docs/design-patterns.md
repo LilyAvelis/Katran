@@ -92,6 +92,14 @@ on its full surface. On the shelf, anchor the modal to the footer tags button
 so tag changes can be seen in the cards above it. Each surface retains its
 own save and conflict handling.
 
+Use the same round slider treatment in Settings and in the tag editor.
+Retain each control's range, precision, units, enabled state, and save path.
+
+Folder and Notion search share the shortcut hint strip. Folder result labels
+remove Windows extended-path prefixes for display while open and favorite
+actions retain their original path. The Notion source button embeds the
+[official favicon](https://www.notion.so/images/favicon.ico).
+
 Flower, Star, Diamond, and Grid materials require catalogue schema 16. The
 first upgrade makes a consistent catalogue backup before applying the
 migration. A version 15 executable needs a version 15 catalogue to reopen
