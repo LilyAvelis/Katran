@@ -237,15 +237,25 @@ pub fn summarize_command(command: &crate::Command) -> Value {
         crate::Command::SetNotionToken { .. } => json!({"type":"set_notion_token"}),
         crate::Command::ReadNotionPage { .. } => json!({"type":"read_notion_page"}),
         crate::Command::CopyNotionPageFields { .. } => json!({"type":"copy_notion_page_fields"}),
-        crate::Command::CopyNotionReaderSelection { .. } => json!({"type":"copy_notion_reader_selection"}),
-        crate::Command::PrepareNotionPagesDrag { .. } => json!({"type":"prepare_notion_pages_drag"}),
-        crate::Command::RecordNotionDatabaseVisit { .. } => json!({"type":"record_notion_database_visit"}),
-        crate::Command::ToggleNotionDatabaseFavorite { .. } => json!({"type":"toggle_notion_database_favorite"}),
+        crate::Command::CopyNotionReaderSelection { .. } => {
+            json!({"type":"copy_notion_reader_selection"})
+        }
+        crate::Command::PrepareNotionPagesDrag { .. } => {
+            json!({"type":"prepare_notion_pages_drag"})
+        }
+        crate::Command::RecordNotionDatabaseVisit { .. } => {
+            json!({"type":"record_notion_database_visit"})
+        }
+        crate::Command::ToggleNotionDatabaseFavorite { .. } => {
+            json!({"type":"toggle_notion_database_favorite"})
+        }
         crate::Command::ReadNotionPageExcerpt { .. } => json!({"type":"read_notion_page_excerpt"}),
         crate::Command::CopyNotionPage { .. } => json!({"type":"copy_notion_page"}),
         crate::Command::BeginPasteNotionPage { .. } => json!({"type":"begin_paste_notion_page"}),
         crate::Command::OpenNotionPage { .. } => json!({"type":"open_notion_page"}),
-        crate::Command::ToggleFavoriteNotionPage { .. } => json!({"type":"toggle_favorite_notion_page"}),
+        crate::Command::ToggleFavoriteNotionPage { .. } => {
+            json!({"type":"toggle_favorite_notion_page"})
+        }
         crate::Command::IngestLink { url, source } => {
             json!({"type":"ingest_link","byte_count":url.len(),"source":source})
         }

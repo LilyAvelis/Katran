@@ -506,7 +506,10 @@ fn slice_projection(
         ShelfTab::Translate => translated_image_predicate(),
         ShelfTab::Links => link_shelf_predicate().into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
-        ShelfTab::Images => format!("{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",image_shelf_predicate()),
+        ShelfTab::Images => format!(
+            "{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
+            image_shelf_predicate()
+        ),
     };
     // Literal quoting is restricted to this optional tag value; all search and
     // cursor values remain bound parameters in the shared SQL pipeline.
@@ -555,7 +558,10 @@ fn projection_sql(
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Pods {
-        sql=sql.replace("AND e.legacy_source_ref=0", &format!("AND e.legacy_source_ref=0 AND {}", pods_shelf_predicate()));
+        sql = sql.replace(
+            "AND e.legacy_source_ref=0",
+            &format!("AND e.legacy_source_ref=0 AND {}", pods_shelf_predicate()),
+        );
         sql = sql.replace("WHERE ?2=0", "WHERE 0 AND ?2=0");
     }
     if tab == ShelfTab::Files {

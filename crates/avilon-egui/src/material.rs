@@ -51,16 +51,22 @@ fn marks(rect: Rect, slot: &Parameters) -> Vec<Mark> {
     let scale = f32::from(slot.scale.clamp(1, 100) - 1) / 99.0;
     let mut result = Vec::new();
     if slot.pattern == Pattern::Grid {
-        let spacing = (8.0 + 20.0 * scale)
-            .max((rect.width() + rect.height()) / (MAX_MARKS as f32 - 2.0));
+        let spacing =
+            (8.0 + 20.0 * scale).max((rect.width() + rect.height()) / (MAX_MARKS as f32 - 2.0));
         let mut x = rect.left() + (slot.seed % 97) as f32 / 97.0 * spacing;
         while x < rect.right() && result.len() < MAX_MARKS {
-            result.push(Mark::Line(Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())));
+            result.push(Mark::Line(
+                Pos2::new(x, rect.top()),
+                Pos2::new(x, rect.bottom()),
+            ));
             x += spacing;
         }
         let mut y = rect.top() + (slot.seed.wrapping_mul(31) % 97) as f32 / 97.0 * spacing;
         while y < rect.bottom() && result.len() < MAX_MARKS {
-            result.push(Mark::Line(Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)));
+            result.push(Mark::Line(
+                Pos2::new(rect.left(), y),
+                Pos2::new(rect.right(), y),
+            ));
             y += spacing;
         }
     } else if slot.pattern == Pattern::Lines {
@@ -78,11 +84,15 @@ fn marks(rect: Rect, slot: &Parameters) -> Vec<Mark> {
             ));
             offset += spacing;
         }
-    } else if matches!(slot.pattern, Pattern::Flower | Pattern::Star | Pattern::Diamond) {
+    } else if matches!(
+        slot.pattern,
+        Pattern::Flower | Pattern::Star | Pattern::Diamond
+    ) {
         // A flower uses six primitives, so bound symbols to one sixth of the budget.
         let limit = MAX_MARKS / 6;
         let nominal = 16.0 + 24.0 * scale;
-        let spacing = nominal.max(((rect.width() + nominal) * (rect.height() + nominal) / limit as f32).sqrt());
+        let spacing = nominal
+            .max(((rect.width() + nominal) * (rect.height() + nominal) / limit as f32).sqrt());
         let mut y = rect.top();
         let mut row = 0u32;
         while y < rect.bottom() && result.len() < limit {
@@ -92,7 +102,11 @@ fn marks(rect: Rect, slot: &Parameters) -> Vec<Mark> {
                 let h = hash(slot.seed, col, row);
                 let px = x + (h & 255) as f32 / 255.0 * spacing;
                 let py = y + ((h >> 8) & 255) as f32 / 255.0 * spacing;
-                result.push(Mark::Symbol(Pos2::new(px, py), (3.0 + 3.0 * scale).min(spacing * 0.18), slot.pattern));
+                result.push(Mark::Symbol(
+                    Pos2::new(px, py),
+                    (3.0 + 3.0 * scale).min(spacing * 0.18),
+                    slot.pattern,
+                ));
                 x += spacing;
                 col += 1;
             }
@@ -161,18 +175,32 @@ pub fn paint(
                 Pattern::Flower => {
                     for index in 0..5 {
                         let angle = index as f32 * std::f32::consts::TAU / 5.0;
-                        painter.circle_filled(center + egui::vec2(angle.cos(), angle.sin()) * radius * 0.65, radius * 0.48, ink);
+                        painter.circle_filled(
+                            center + egui::vec2(angle.cos(), angle.sin()) * radius * 0.65,
+                            radius * 0.48,
+                            ink,
+                        );
                     }
                     painter.circle_filled(center, radius * 0.36, ink);
                 }
                 Pattern::Star | Pattern::Diamond => {
                     let count = if pattern == Pattern::Star { 10 } else { 4 };
-                    let points = (0..count).map(|index| {
-                        let angle = -std::f32::consts::FRAC_PI_2 + index as f32 * std::f32::consts::TAU / count as f32;
-                        let r = if pattern == Pattern::Star && index % 2 == 1 { radius * 0.45 } else { radius };
-                        center + egui::vec2(angle.cos(), angle.sin()) * r
-                    }).collect();
-                    painter.add(egui::Shape::closed_line(points, egui::Stroke::new(1.2, ink)));
+                    let points = (0..count)
+                        .map(|index| {
+                            let angle = -std::f32::consts::FRAC_PI_2
+                                + index as f32 * std::f32::consts::TAU / count as f32;
+                            let r = if pattern == Pattern::Star && index % 2 == 1 {
+                                radius * 0.45
+                            } else {
+                                radius
+                            };
+                            center + egui::vec2(angle.cos(), angle.sin()) * r
+                        })
+                        .collect();
+                    painter.add(egui::Shape::closed_line(
+                        points,
+                        egui::Stroke::new(1.2, ink),
+                    ));
                 }
                 _ => {}
             },
@@ -193,7 +221,15 @@ mod tests {
             angle: 0,
             seed: 42,
         };
-        for pattern in [Pattern::Dots, Pattern::Lines, Pattern::Grain, Pattern::Flower, Pattern::Star, Pattern::Diamond, Pattern::Grid] {
+        for pattern in [
+            Pattern::Dots,
+            Pattern::Lines,
+            Pattern::Grain,
+            Pattern::Flower,
+            Pattern::Star,
+            Pattern::Diamond,
+            Pattern::Grid,
+        ] {
             p.pattern = pattern;
             let first = marks(rect, &p);
             assert!(!first.is_empty() && first.len() <= MAX_MARKS);

@@ -1580,12 +1580,23 @@ impl Service {
                     notion::search_databases(&query, || cancel.check()).map(PreparedWork::Value)
                 })?
             }
-            Command::QueryNotionDatabase { source_id, query, cursor, sort, descending } => {
-                self.jobs.submit(Lane::Discovery, move |cancel| {
-                    notion::query_database(&source_id, &query, cursor.as_deref(), sort.as_deref(), descending, || cancel.check())
-                        .map(PreparedWork::Value)
-                })?
-            }
+            Command::QueryNotionDatabase {
+                source_id,
+                query,
+                cursor,
+                sort,
+                descending,
+            } => self.jobs.submit(Lane::Discovery, move |cancel| {
+                notion::query_database(
+                    &source_id,
+                    &query,
+                    cursor.as_deref(),
+                    sort.as_deref(),
+                    descending,
+                    || cancel.check(),
+                )
+                .map(PreparedWork::Value)
+            })?,
             Command::ReadNotionPage { page_id, title } => {
                 let page = notion::Page { id: page_id, title };
                 page.validate()?;
@@ -1611,18 +1622,37 @@ impl Service {
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     let markdown = notion::markdown(&page.id, || cancel.check())?;
                     cancel.check()?;
-                    let mut plan = copy_out::prepare_named_file(&root, &page.filename(), markdown.as_bytes(), quota)
+                    let mut plan = copy_out::prepare_named_file(
+                        &root,
+                        &page.filename(),
+                        markdown.as_bytes(),
+                        quota,
+                    )
+                    .map_err(|e| ApiError::new("copy_error", e))?;
+                    plan.protect_references(&references)
                         .map_err(|e| ApiError::new("copy_error", e))?;
-                    plan.protect_references(&references).map_err(|e| ApiError::new("copy_error", e))?;
-                    let sink = copy_out::PreparedNativeClipboard::prepare_files_if_current(&plan.paths, sequence);
-                    Ok(PreparedWork::CopyNotionFile { page, plan, sink, sequence })
+                    let sink = copy_out::PreparedNativeClipboard::prepare_files_if_current(
+                        &plan.paths,
+                        sequence,
+                    );
+                    Ok(PreparedWork::CopyNotionFile {
+                        page,
+                        plan,
+                        sink,
+                        sequence,
+                    })
                 })?
             }
             Command::PrepareNotionPagesDrag { pages } => {
                 if !(1..=text_fragments::MAX_ITEMS).contains(&pages.len()) {
-                    return Err(ApiError::new("invalid_argument", "Select at least one Notion page"));
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Select at least one Notion page",
+                    ));
                 }
-                for page in &pages { page.validate()?; }
+                for page in &pages {
+                    page.validate()?;
+                }
                 self.pending_drag = None;
                 let root = self.root.clone();
                 let quota = self.quota;
@@ -1633,18 +1663,28 @@ impl Service {
                     let mut bytes = 0u64;
                     let multiple = pages.len() > 1;
                     for page in pages {
-                        if !seen.insert(page.id.clone()) { continue; }
+                        if !seen.insert(page.id.clone()) {
+                            continue;
+                        }
                         cancel.check()?;
                         let markdown = notion::markdown(&page.id, || cancel.check())?;
                         bytes += markdown.len() as u64;
                         if bytes > quota.min(copy_out::DEFAULT_EXPORT_QUOTA) {
-                            return Err(ApiError::new("drag_error", "Notion files exceed the export quota"));
+                            return Err(ApiError::new(
+                                "drag_error",
+                                "Notion files exceed the export quota",
+                            ));
                         }
-                        let name = if multiple { format!("{:03}-{}", files.len() + 1, page.filename()) } else { page.filename() };
+                        let name = if multiple {
+                            format!("{:03}-{}", files.len() + 1, page.filename())
+                        } else {
+                            page.filename()
+                        };
                         files.push((name, markdown.into_bytes()));
                     }
                     cancel.check()?;
-                    let prepared = drag_session::prepare_named_drag(&root, &files, quota, &references)?;
+                    let prepared =
+                        drag_session::prepare_named_drag(&root, &files, quota, &references)?;
                     cancel.check()?;
                     Ok(PreparedWork::NotionDrag(prepared))
                 })?

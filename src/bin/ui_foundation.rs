@@ -18,11 +18,16 @@ pub(super) fn slider_scope<R>(ui: &mut egui::Ui, content: impl FnOnce(&mut egui:
         visuals.handle_shape = egui::style::HandleShape::Circle;
         visuals.slider_trailing_fill = true;
         let selection = visuals.selection.stroke.color.to_opaque();
-        for face in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+        for face in [
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+        ] {
             face.bg_stroke = egui::Stroke::new(1.0, selection);
         }
         content(ui)
-    }).inner
+    })
+    .inner
 }
 
 pub(super) fn slider(ui: &mut egui::Ui, enabled: bool, slider: egui::Slider<'_>) -> egui::Response {

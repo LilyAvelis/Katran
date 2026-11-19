@@ -62,12 +62,12 @@ pub mod media_playback;
 pub mod media_playback_mpv;
 pub mod media_runtime;
 mod media_service;
-pub mod open_file;
-pub mod origin;
-mod paste_service;
 pub mod notion;
 pub mod notion_reader;
 pub mod notion_rich;
+pub mod open_file;
+pub mod origin;
+mod paste_service;
 pub mod pinned;
 mod pinned_open;
 pub mod pinned_order;
@@ -920,7 +920,11 @@ impl Service {
             } => self.summon_captured_overlay(owner_window, capture),
             Command::SummonOverlay { owner_window } => self.summon_overlay(owner_window),
             Command::BeginPastePrevious { owner_window } => self.begin_paste_previous(owner_window),
-            Command::BeginPasteNotionPage { owner_window, page_id, title } => {
+            Command::BeginPasteNotionPage {
+                owner_window,
+                page_id,
+                title,
+            } => {
                 self.begin_paste_with_copy(owner_window, Command::CopyNotionPage { page_id, title })
             }
             Command::BeginPasteCollectionPage {
@@ -969,20 +973,28 @@ impl Service {
             Command::NotionStatus => Ok(serde_json::json!({"configured": notion::configured()})),
             Command::GetNotionReaderPreferences => {
                 use rusqlite::OptionalExtension;
-                let document: Option<String> = self.db.query_row(
-                    "SELECT document FROM preferences WHERE key='notion_reader'",
-                    [],
-                    |row| row.get(0),
-                ).optional()?;
+                let document: Option<String> = self
+                    .db
+                    .query_row(
+                        "SELECT document FROM preferences WHERE key='notion_reader'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
                 let preferences: settings::NotionReaderPreferences = document
                     .and_then(|document| serde_json::from_str(&document).ok())
-                    .filter(|value: &settings::NotionReaderPreferences| (80..=200).contains(&value.text_percent))
+                    .filter(|value: &settings::NotionReaderPreferences| {
+                        (80..=200).contains(&value.text_percent)
+                    })
                     .unwrap_or_default();
                 Ok(serde_json::json!(preferences))
             }
             Command::SetNotionReaderPreferences { preferences } => {
                 if !(80..=200).contains(&preferences.text_percent) {
-                    return Err(ApiError::new("invalid_settings", "Notion reader text scale must be between 80 and 200 percent"));
+                    return Err(ApiError::new(
+                        "invalid_settings",
+                        "Notion reader text scale must be between 80 and 200 percent",
+                    ));
                 }
                 let document = serde_json::json!(preferences);
                 self.db.execute("INSERT INTO preferences(key,document) VALUES('notion_reader',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document", [document.to_string()])?;
@@ -991,9 +1003,13 @@ impl Service {
             Command::ListSavedNotionPages { favorites } => {
                 let pages = notion::saved_pages(&self.root, favorites)?;
                 if favorites {
-                    Ok(serde_json::json!({"pages": pages, "history": notion::saved_favorites(&self.root)?}))
+                    Ok(
+                        serde_json::json!({"pages": pages, "history": notion::saved_favorites(&self.root)?}),
+                    )
                 } else {
-                    Ok(serde_json::json!({"pages": pages, "history": notion::saved_history(&self.root)?}))
+                    Ok(
+                        serde_json::json!({"pages": pages, "history": notion::saved_history(&self.root)?}),
+                    )
                 }
             }
             Command::RecordNotionDatabaseVisit { source_id, title } => {
@@ -1006,10 +1022,15 @@ impl Service {
                     return Err(ApiError::new("invalid_text", "Clipboard text contains NUL"));
                 }
                 let prepared = text_fragments::prepare(
-                    &self.root, self.quota, &text, "notion_reader", &self.ingest_origin,
+                    &self.root,
+                    self.quota,
+                    &text,
+                    "notion_reader",
+                    &self.ingest_origin,
                     &self.reference_paths()?,
                 )?;
-                let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
+                let id =
+                    storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
                 match self.publish_text_result(serde_json::json!({
                     "merged": true, "text": text, "items": [{"id": id}]
                 })) {
@@ -1017,7 +1038,9 @@ impl Service {
                         reply["saved_id"] = serde_json::json!(id);
                         Ok(reply)
                     }
-                    Err(error) => Ok(serde_json::json!({"saved_id":id,"text_copied":false,"clipboard_error":error.message})),
+                    Err(error) => Ok(
+                        serde_json::json!({"saved_id":id,"text_copied":false,"clipboard_error":error.message}),
+                    ),
                 }
             }
             Command::OpenNotionPage { page } => {
@@ -1034,9 +1057,9 @@ impl Service {
             Command::ToggleFavoriteNotionPage { page } => {
                 Ok(serde_json::json!({"favorite": notion::toggle_favorite(&self.root, &page)?}))
             }
-            Command::ToggleNotionDatabaseFavorite { source_id, title } => {
-                Ok(serde_json::json!({"favorite": notion::toggle_database_favorite(&self.root, &source_id, &title)?}))
-            }
+            Command::ToggleNotionDatabaseFavorite { source_id, title } => Ok(
+                serde_json::json!({"favorite": notion::toggle_database_favorite(&self.root, &source_id, &title)?}),
+            ),
             Command::SetNotionToken { token } => {
                 notion::set_token(token)?;
                 Ok(serde_json::json!({"configured": notion::configured()}))
@@ -1954,8 +1977,14 @@ impl Service {
                 Ok(serde_json::json!(self.interaction))
             }
             Command::SelectAll => {
-                if self.interaction.visible.iter().any(|id| notion::is_folder_page_id(*id)) {
-                    self.interaction.select_all(self.interaction.visible.clone());
+                if self
+                    .interaction
+                    .visible
+                    .iter()
+                    .any(|id| notion::is_folder_page_id(*id))
+                {
+                    self.interaction
+                        .select_all(self.interaction.visible.clone());
                 } else if self.interaction.tab == interaction::ShelfTab::All
                     && self.work_folder.current().is_none()
                 {
@@ -2219,40 +2248,67 @@ impl Service {
             .map_err(|_| ApiError::new("quicklook_busy", "Preview launcher lock poisoned"))?;
         quicklook::preview(&self.get(id)?, launcher.as_ref())
     }
-    fn copy_notion_page_fields(&self, pages: &[api::NotionPageFields]) -> Result<serde_json::Value> {
+    fn copy_notion_page_fields(
+        &self,
+        pages: &[api::NotionPageFields],
+    ) -> Result<serde_json::Value> {
         use std::fmt::Write;
         if !(1..=text_fragments::MAX_ITEMS).contains(&pages.len()) {
-            return Err(ApiError::new("invalid_argument", "Select at least one Notion page"));
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Select at least one Notion page",
+            ));
         }
         let mut text = String::new();
         for (index, page) in pages.iter().enumerate() {
             if page.title.len() > 8192 || page.fields.len() > 128 {
-                return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Notion fields exceed export limits",
+                ));
             }
-            if index != 0 { text.push('\n'); }
+            if index != 0 {
+                text.push('\n');
+            }
             let _ = writeln!(text, "{}", page.title);
             for (name, value) in &page.fields {
                 if name.len() > 4096 || value.len() > 16384 {
-                    return Err(ApiError::new("invalid_argument", "Notion field exceeds export limits"));
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Notion field exceeds export limits",
+                    ));
                 }
                 let _ = writeln!(text, "{name}: {value}");
                 if text.len() > text_fragments::MAX_MERGED_BYTES {
-                    return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+                    return Err(ApiError::new(
+                        "invalid_argument",
+                        "Notion fields exceed export limits",
+                    ));
                 }
             }
         }
         if text.len() > text_fragments::MAX_MERGED_BYTES {
-            return Err(ApiError::new("invalid_argument", "Notion fields exceed export limits"));
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Notion fields exceed export limits",
+            ));
         }
-        let sequence = self.text_clipboard.lock()
+        let sequence = self
+            .text_clipboard
+            .lock()
             .map_err(|_| ApiError::new("clipboard_error", "Text clipboard lock poisoned"))?
             .write(&text)?;
-        Ok(serde_json::json!({"text_copied":true,"count":pages.len(),"clipboard_sequence":sequence}))
+        Ok(
+            serde_json::json!({"text_copied":true,"count":pages.len(),"clipboard_sequence":sequence}),
+        )
     }
 
     fn get(&self, id: i64) -> Result<Event> {
         if notion::is_folder_page_id(id) {
-            return Err(ApiError::new("notion_remote_page", "Notion pages are remote and read-only"));
+            return Err(ApiError::new(
+                "notion_remote_page",
+                "Notion pages are remote and read-only",
+            ));
         }
         if pods::is_emoji_id(id) {
             return pods::emoji_event(id);

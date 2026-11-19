@@ -1,6 +1,6 @@
 [package]
 name = "katran"
-version = "4.0.0"
+version = "4.1.5"
 edition = "2024"
 autobins = false
 

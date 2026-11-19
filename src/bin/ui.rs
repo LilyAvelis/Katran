@@ -2098,8 +2098,9 @@ impl Shelf {
                     "Существующая папка назначения",
                     "Existing destination folder",
                 ));
-                let r =
-                    ui.add(ui_foundation::text_field(egui::TextEdit::singleline(&mut self.destination).desired_width(420.0)));
+                let r = ui.add(ui_foundation::text_field(
+                    egui::TextEdit::singleline(&mut self.destination).desired_width(420.0),
+                ));
                 r.request_focus();
                 if ui
                     .button(i18n::tr("Сохранить · Enter", "Save · Enter"))

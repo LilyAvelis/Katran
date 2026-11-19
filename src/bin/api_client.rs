@@ -1192,20 +1192,42 @@ impl Shelf {
         }
         let mut result = r["result"].clone();
         if notion_catalogue && let Some(actions) = result.as_array_mut() {
-            actions.retain(|action| action["id"].as_str().is_some_and(Self::notion_catalogue_action));
+            actions.retain(|action| {
+                action["id"]
+                    .as_str()
+                    .is_some_and(Self::notion_catalogue_action)
+            });
             for action in actions.iter_mut() {
                 let label = match action["id"].as_str() {
-                    Some("sort_arrival") => tr("По дате создания · новые сначала", "By creation date · newest first"),
-                    Some("sort_arrival_reverse") => tr("По дате создания · старые сначала", "By creation date · oldest first"),
-                    Some("copy") if self.notion_reader_active() => tr("Скопировать выделенный текст", "Copy selected text"),
+                    Some("sort_arrival") => tr(
+                        "По дате создания · новые сначала",
+                        "By creation date · newest first",
+                    ),
+                    Some("sort_arrival_reverse") => tr(
+                        "По дате создания · старые сначала",
+                        "By creation date · oldest first",
+                    ),
+                    Some("copy") if self.notion_reader_active() => {
+                        tr("Скопировать выделенный текст", "Copy selected text")
+                    }
                     Some("copy") => tr("Скопировать свойства страниц", "Copy page properties"),
-                    Some("paste_previous") => tr("Приложить текущую страницу как Markdown", "Attach current page as Markdown"),
-                    Some("open") => tr("Открыть текущую страницу в Notion", "Open current page in Notion"),
+                    Some("paste_previous") => tr(
+                        "Приложить текущую страницу как Markdown",
+                        "Attach current page as Markdown",
+                    ),
+                    Some("open") => tr(
+                        "Открыть текущую страницу в Notion",
+                        "Open current page in Notion",
+                    ),
                     Some("folder_favorites") => tr("Избранное Notion", "Notion favorites"),
                     Some("folder_history") => tr("История Notion", "Notion history"),
                     Some("shelf_search") => tr("Поиск страниц в базе", "Search pages in database"),
-                    Some("density_more") if self.notion_reader_active() => tr("Уменьшить текст", "Smaller text"),
-                    Some("density_less") if self.notion_reader_active() => tr("Увеличить текст", "Larger text"),
+                    Some("density_more") if self.notion_reader_active() => {
+                        tr("Уменьшить текст", "Smaller text")
+                    }
+                    Some("density_less") if self.notion_reader_active() => {
+                        tr("Увеличить текст", "Larger text")
+                    }
                     _ => continue,
                 };
                 action["label"] = Value::String(label.to_owned());
@@ -1218,9 +1240,18 @@ impl Shelf {
             }));
             if self.notion_reader_active() && notion_actions {
                 for (id, label) in [
-                    ("notion_reader_background", tr("Фон страницы…", "Page background…")),
-                    ("notion_reader_landscape", tr("Переключить Landscape", "Toggle Landscape")),
-                    ("notion_reader_cinema", tr("Переключить Cinema", "Toggle Cinema")),
+                    (
+                        "notion_reader_background",
+                        tr("Фон страницы…", "Page background…"),
+                    ),
+                    (
+                        "notion_reader_landscape",
+                        tr("Переключить Landscape", "Toggle Landscape"),
+                    ),
+                    (
+                        "notion_reader_cinema",
+                        tr("Переключить Cinema", "Toggle Cinema"),
+                    ),
                 ] {
                     actions.push(serde_json::json!({
                         "id": id, "label": label, "group": tr("Читалка Notion", "Notion reader"), "enabled": true

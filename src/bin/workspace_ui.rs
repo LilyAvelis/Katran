@@ -3,10 +3,10 @@ use super::i18n::tr;
 use super::*;
 use katran::domain_jobs::JobId;
 
-#[path = "workspace_notion_ui.rs"]
-mod notion_ui;
 #[path = "workspace_notion_database_ui.rs"]
 mod notion_database_ui;
+#[path = "workspace_notion_ui.rs"]
+mod notion_ui;
 
 /// Consume the physical switch and only its paired text event. Paste stays intact.
 fn take_neural_toggle(input: &mut egui::InputState) -> bool {
@@ -654,12 +654,32 @@ impl Shelf {
         let mut open_notion = false;
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 600.0);
         let modal = egui::Modal::new(egui::Id::new("workspace-picker"))
-            .area(egui::Modal::default_area(egui::Id::new("workspace-picker")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]))
-            .backdrop_color(Color32::from_black_alpha(24)).frame(crate::action_row::popup_frame(ctx)).show(ctx, |ui| {
+            .area(
+                egui::Modal::default_area(egui::Id::new("workspace-picker"))
+                    .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -58.0]),
+            )
+            .backdrop_color(Color32::from_black_alpha(24))
+            .frame(crate::action_row::popup_frame(ctx))
+            .show(ctx, |ui| {
                 ui.set_width(width);
                 let neural = state.mode == Mode::Search && state.neural;
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(match state.mode { Mode::Search if neural => tr("Нейропоиск папок · локально", "Neural folder search · local"), Mode::Search => tr("Найти папку · Everything", "Find a folder · Everything"), Mode::History => tr("История папок", "Folder history"), Mode::Favorites => tr("Избранные папки", "Favorite folders"), Mode::Standard => tr("Стандартные папки", "Standard folders") }).strong().size(15.0));
+                    ui.label(
+                        RichText::new(match state.mode {
+                            Mode::Search if neural => tr(
+                                "Нейропоиск папок · локально",
+                                "Neural folder search · local",
+                            ),
+                            Mode::Search => {
+                                tr("Найти папку · Everything", "Find a folder · Everything")
+                            }
+                            Mode::History => tr("История папок", "Folder history"),
+                            Mode::Favorites => tr("Избранные папки", "Favorite folders"),
+                            Mode::Standard => tr("Стандартные папки", "Standard folders"),
+                        })
+                        .strong()
+                        .size(15.0),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         open_notion = notion_ui::source_button(ui, false);
                     });
@@ -667,65 +687,204 @@ impl Shelf {
                 ui.add_space(6.0);
                 let mut mode_change = None;
                 ui.horizontal_wrapped(|ui| {
-                    for (mode, label) in [(Mode::Search, tr("Поиск", "Search")), (Mode::Favorites, tr("Избранное", "Favorites")), (Mode::History, tr("История", "History")), (Mode::Standard, tr("Стандартные папки", "Standard folders"))] {
-                        if ui.selectable_label(state.mode == mode, label).clicked() { mode_change = Some(mode); }
+                    for (mode, label) in [
+                        (Mode::Search, tr("Поиск", "Search")),
+                        (Mode::Favorites, tr("Избранное", "Favorites")),
+                        (Mode::History, tr("История", "History")),
+                        (Mode::Standard, tr("Стандартные папки", "Standard folders")),
+                    ] {
+                        if ui.selectable_label(state.mode == mode, label).clicked() {
+                            mode_change = Some(mode);
+                        }
                     }
                 });
-                if let Some(mode) = mode_change { ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode)); }
-                if state.incomplete { ui.weak(tr("Показаны частичные результаты", "Partial results shown")); }
+                if let Some(mode) = mode_change {
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-mode-change"), mode));
+                }
+                if state.incomplete {
+                    ui.weak(tr("Показаны частичные результаты", "Partial results shown"));
+                }
                 if neural {
-                    ui.weak(tr("По смыслу имён и путей · без чтения содержимого файлов", "Meaning of names and paths · file contents are not read"));
+                    ui.weak(tr(
+                        "По смыслу имён и путей · без чтения содержимого файлов",
+                        "Meaning of names and paths · file contents are not read",
+                    ));
                     if let Some(count) = state.indexed_count {
-                        ui.weak(format!("{}: {count}", tr("Папок в ограниченном индексе", "Folders in bounded index")));
+                        ui.weak(format!(
+                            "{}: {count}",
+                            tr("Папок в ограниченном индексе", "Folders in bounded index")
+                        ));
                     }
                 }
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - if neural { 300.0 } else { 240.0 }).clamp(40.0, 360.0)).show(ui, |ui| {
-                    for (index, path) in state.items.iter().enumerate() {
-                        let text = super::info_bar::friendly_path(&path.to_string_lossy());
-                        let detail = state.standard_details.get(index);
-                        let name = detail.map(|(name, _)| match name.as_str() {
-                            "desktop" => tr("Рабочий стол", "Desktop"), "downloads" => tr("Загрузки", "Downloads"),
-                            "documents" => tr("Документы", "Documents"), "pictures" => tr("Изображения", "Pictures"),
-                            "videos" => tr("Видео", "Videos"), "music" => tr("Музыка", "Music"), _ => name.as_str(),
-                        }.to_owned()).unwrap_or_else(|| path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| text.clone()));
-                        let detail_text = detail.and_then(|(_, error)| error.as_deref()).unwrap_or(&text);
-                        let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), egui::Sense::click());
-                        if index == state.selected || response.hovered() {
-                            let role = if index == state.selected { super::theme_ui::Role::Selection } else { super::theme_ui::Role::Raised };
-                            ui.painter().rect_filled(rect, 7.0, super::theme_ui::color(ui.ctx(), role, Color32::from_gray(74)));
+                egui::ScrollArea::vertical()
+                    .max_height(
+                        (ctx.content_rect().height() - if neural { 300.0 } else { 240.0 })
+                            .clamp(40.0, 360.0),
+                    )
+                    .show(ui, |ui| {
+                        for (index, path) in state.items.iter().enumerate() {
+                            let text = super::info_bar::friendly_path(&path.to_string_lossy());
+                            let detail = state.standard_details.get(index);
+                            let name = detail
+                                .map(|(name, _)| {
+                                    match name.as_str() {
+                                        "desktop" => tr("Рабочий стол", "Desktop"),
+                                        "downloads" => tr("Загрузки", "Downloads"),
+                                        "documents" => tr("Документы", "Documents"),
+                                        "pictures" => tr("Изображения", "Pictures"),
+                                        "videos" => tr("Видео", "Videos"),
+                                        "music" => tr("Музыка", "Music"),
+                                        _ => name.as_str(),
+                                    }
+                                    .to_owned()
+                                })
+                                .unwrap_or_else(|| {
+                                    path.file_name()
+                                        .map(|name| name.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| text.clone())
+                                });
+                            let detail_text = detail
+                                .and_then(|(_, error)| error.as_deref())
+                                .unwrap_or(&text);
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 54.0),
+                                egui::Sense::click(),
+                            );
+                            if index == state.selected || response.hovered() {
+                                let role = if index == state.selected {
+                                    super::theme_ui::Role::Selection
+                                } else {
+                                    super::theme_ui::Role::Raised
+                                };
+                                ui.painter().rect_filled(
+                                    rect,
+                                    7.0,
+                                    super::theme_ui::color(ui.ctx(), role, Color32::from_gray(74)),
+                                );
+                            }
+                            ui.scope_builder(
+                                egui::UiBuilder::new()
+                                    .max_rect(rect.shrink2(egui::vec2(10.0, 5.0)))
+                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                |ui| {
+                                    ui.add(
+                                        egui_lucide::Lucide::Folder
+                                            .size(21.0)
+                                            .image()
+                                            .tint(Color32::from_rgb(224, 188, 127)),
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.add(
+                                            egui::Label::new(RichText::new(name).size(14.0))
+                                                .truncate(),
+                                        );
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(detail_text)
+                                                    .size(11.0)
+                                                    .color(Color32::from_gray(183)),
+                                            )
+                                            .truncate(),
+                                        );
+                                    });
+                                },
+                            );
+                            if index == state.selected && state.scroll {
+                                response.scroll_to_me(None);
+                                state.scroll = false;
+                            }
+                            if response.clicked() && !state.loading && !path.as_os_str().is_empty()
+                            {
+                                chosen = Some(path.clone());
+                            }
+                            response.on_hover_text(detail_text);
                         }
-                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 5.0))).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                            ui.add(egui_lucide::Lucide::Folder.size(21.0).image().tint(Color32::from_rgb(224,188,127)));
-                            ui.vertical(|ui| { ui.add(egui::Label::new(RichText::new(name).size(14.0)).truncate()); ui.add(egui::Label::new(RichText::new(detail_text).size(11.0).color(Color32::from_gray(183))).truncate()); });
-                        });
-                        if index == state.selected && state.scroll { response.scroll_to_me(None); state.scroll = false; }
-                        if response.clicked() && !state.loading && !path.as_os_str().is_empty() { chosen = Some(path.clone()); }
-                        response.on_hover_text(detail_text);
-                    }
-                    if state.loading { ui.weak(if neural { tr("Подготовка локального индекса и поиск…", "Preparing local index and searching…") } else { tr("Поиск папок…", "Searching folders…") }); }
-                    else if let Some(error) = &state.error { ui.colored_label(Color32::LIGHT_RED, error); }
-                    else if state.items.is_empty() { ui.weak(if neural && state.submitted_query.is_none() { tr("Введите запрос и нажмите Enter", "Type a query and press Enter") } else if state.mode == Mode::Search && query.trim().is_empty() { tr("Введите имя или путь папки", "Enter a folder name or path") } else { tr("Папки не найдены", "No folders found") }); }
-                });
+                        if state.loading {
+                            ui.weak(if neural {
+                                tr(
+                                    "Подготовка локального индекса и поиск…",
+                                    "Preparing local index and searching…",
+                                )
+                            } else {
+                                tr("Поиск папок…", "Searching folders…")
+                            });
+                        } else if let Some(error) = &state.error {
+                            ui.colored_label(Color32::LIGHT_RED, error);
+                        } else if state.items.is_empty() {
+                            ui.weak(if neural && state.submitted_query.is_none() {
+                                tr(
+                                    "Введите запрос и нажмите Enter",
+                                    "Type a query and press Enter",
+                                )
+                            } else if state.mode == Mode::Search && query.trim().is_empty() {
+                                tr("Введите имя или путь папки", "Enter a folder name or path")
+                            } else {
+                                tr("Папки не найдены", "No folders found")
+                            });
+                        }
+                    });
                 ui.separator();
                 let gold = Color32::from_rgba_unmultiplied(229, 181, 74, 110);
                 let frame = egui::Frame::new().inner_margin(4).corner_radius(9.0);
                 let frame = if neural {
-                    frame.shadow(egui::Shadow { offset: [0, 0], blur: 16, spread: 1, color: gold })
+                    frame
+                        .shadow(egui::Shadow {
+                            offset: [0, 0],
+                            blur: 16,
+                            spread: 1,
+                            color: gold,
+                        })
                         .stroke(egui::Stroke::new(1.0, gold))
-                } else { frame };
-                let field = frame.show(ui, |ui| {
-                    ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut query).id(egui::Id::new("workspace-query")).hint_text(if neural { tr("Опишите, какую папку ищете…", "Describe the folder you need…") } else { tr("Имя или полный путь папки…", "Folder name or full path…") }).desired_width(f32::INFINITY)))
-                }).inner;
-                if state.focus { field.request_focus(); state.focus = false; }
+                } else {
+                    frame
+                };
+                let field = frame
+                    .show(ui, |ui| {
+                        ui.add(super::ui_foundation::text_field(
+                            egui::TextEdit::singleline(&mut query)
+                                .id(egui::Id::new("workspace-query"))
+                                .hint_text(if neural {
+                                    tr(
+                                        "Опишите, какую папку ищете…",
+                                        "Describe the folder you need…",
+                                    )
+                                } else {
+                                    tr("Имя или полный путь папки…", "Folder name or full path…")
+                                })
+                                .desired_width(f32::INFINITY),
+                        ))
+                    })
+                    .inner;
+                if state.focus {
+                    field.request_focus();
+                    state.focus = false;
+                }
                 let mut hints = vec![
-                    ("Enter", if neural { tr("Искать / открыть", "Search / open") } else { tr("Открыть", "Open") }),
+                    (
+                        "Enter",
+                        if neural {
+                            tr("Искать / открыть", "Search / open")
+                        } else {
+                            tr("Открыть", "Open")
+                        },
+                    ),
                     ("Ctrl .", tr("Закрепить", "Favorite")),
                     ("Ctrl F", tr("Избранное", "Favorites")),
                     ("Ctrl H", tr("История", "History")),
                     ("Esc", tr("Закрыть", "Close")),
                 ];
                 if state.mode == Mode::Search {
-                    hints.insert(1, ("\\", if neural { tr("Обычный поиск", "Everything") } else { tr("Нейропоиск", "Neural search") }));
+                    hints.insert(
+                        1,
+                        (
+                            "\\",
+                            if neural {
+                                tr("Обычный поиск", "Everything")
+                            } else {
+                                tr("Нейропоиск", "Neural search")
+                            },
+                        ),
+                    );
                     if neural && state.next_offset.is_some() {
                         hints.insert(2, ("↓", tr("Ещё 10 с конца списка", "10 more at end")));
                     }
@@ -813,7 +972,10 @@ mod tests {
         assert!(app.workspace.open);
         assert!(app.workspace.notion_source);
         send_workspace_key(&mut app, &egui::Context::default(), press);
-        assert!(app.workspace.notion_source, "direct search never toggles to Everything");
+        assert!(
+            app.workspace.notion_source,
+            "direct search never toggles to Everything"
+        );
     }
 
     #[test]

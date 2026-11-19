@@ -182,7 +182,15 @@ fn apply_global_hotkey(
 const AESTHETIC_SECTION: usize = 8;
 const AESTHETIC_LABEL: (&str, &str) = ("Эстетика", "Aesthetic");
 const SECTION_KEYS: [&str; SECTIONS.len()] = [
-    "general", "shortcuts", "tabs", "updates", "themes", "tags", "ai", "integrations", "aesthetic",
+    "general",
+    "shortcuts",
+    "tabs",
+    "updates",
+    "themes",
+    "tags",
+    "ai",
+    "integrations",
+    "aesthetic",
 ];
 const SECTIONS: [((&str, &str), Lucide); 9] = [
     (("Основные", "General"), Lucide::Settings),
@@ -197,7 +205,10 @@ const SECTIONS: [((&str, &str), Lucide); 9] = [
 ];
 
 fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
-    use super::{i18n::tr, theme_ui::{self, Role}};
+    use super::{
+        i18n::tr,
+        theme_ui::{self, Role},
+    };
     let ((ru, en), icon) = SECTIONS.get(index).unwrap_or(&SECTIONS[1]);
     let title = tr(ru, en);
     if !expanded {
@@ -210,15 +221,39 @@ fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
         return;
     }
     let description = match index {
-        0 => tr("Язык, запуск и поведение Катрана", "Language, startup, and app behavior"),
-        2 => tr("Видимость и горячие клавиши вкладок полки", "Shelf tabs and their global shortcuts"),
-        3 => tr("Версия Катрана и доступные обновления", "Your version of Katran and available updates"),
-        4 => tr("Цвета, фоны и оформление окна", "Colors, backgrounds, and window appearance"),
-        5 => tr("Названия и цвета тегов на полке", "Names and colors for shelf tags"),
-        6 => tr("Компоненты для поиска и обработки изображений", "Components for search and image processing"),
+        0 => tr(
+            "Язык, запуск и поведение Катрана",
+            "Language, startup, and app behavior",
+        ),
+        2 => tr(
+            "Видимость и горячие клавиши вкладок полки",
+            "Shelf tabs and their global shortcuts",
+        ),
+        3 => tr(
+            "Версия Катрана и доступные обновления",
+            "Your version of Katran and available updates",
+        ),
+        4 => tr(
+            "Цвета, фоны и оформление окна",
+            "Colors, backgrounds, and window appearance",
+        ),
+        5 => tr(
+            "Названия и цвета тегов на полке",
+            "Names and colors for shelf tags",
+        ),
+        6 => tr(
+            "Компоненты для поиска и обработки изображений",
+            "Components for search and image processing",
+        ),
         7 => tr("Подключение внешних сервисов", "Connect external services"),
-        AESTHETIC_SECTION => tr("Экспериментальные элементы интерфейса", "Optional interface experiments"),
-        _ => tr("Сочетания клавиш для команд Катрана", "Keyboard shortcuts for Katran commands"),
+        AESTHETIC_SECTION => tr(
+            "Экспериментальные элементы интерфейса",
+            "Optional interface experiments",
+        ),
+        _ => tr(
+            "Сочетания клавиш для команд Катрана",
+            "Keyboard shortcuts for Katran commands",
+        ),
     };
     ui.vertical_centered(|ui| {
         ui.add_space(8.0);
@@ -226,10 +261,16 @@ fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
         let fill = theme_ui::color(ui.ctx(), Role::Selection, Color32::from_gray(65));
         ui.painter().rect_filled(badge, 13.0, fill);
         let icon_rect = egui::Rect::from_center_size(badge.center(), egui::vec2(25.0, 25.0));
-        icon.size(25.0).image().tint(ui.visuals().text_color()).paint_at(ui, icon_rect);
+        icon.size(25.0)
+            .image()
+            .tint(ui.visuals().text_color())
+            .paint_at(ui, icon_rect);
         ui.add_space(5.0);
-        ui.label(RichText::new(title).size(27.0)
-            .family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into())));
+        ui.label(
+            RichText::new(title)
+                .size(27.0)
+                .family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into())),
+        );
         ui.add(egui::Label::new(RichText::new(description).size(13.0).weak()).wrap());
         ui.add_space(18.0);
     });
@@ -255,9 +296,13 @@ fn font_picker(ui: &mut egui::Ui, choice: &mut katran::settings::UiFont) -> bool
                     ui.selectable_value(choice, value, label);
                 }
             });
-        if ui.add_enabled(*choice != UiFont::Default, egui::Button::new(
-            tr("Вернуть исходный", "Restore original"),
-        )).clicked() {
+        if ui
+            .add_enabled(
+                *choice != UiFont::Default,
+                egui::Button::new(tr("Вернуть исходный", "Restore original")),
+            )
+            .clicked()
+        {
             *choice = UiFont::Default;
         }
     });
@@ -284,29 +329,45 @@ fn edit_section_order(ui: &mut egui::Ui, saved: &mut Vec<String>) {
     let mut drop = None;
     for &index in &order {
         let ((ru, en), icon) = SECTIONS[index];
-        let row = ui.push_id(index, |ui| {
-            ui.horizontal(|ui| {
-                ui.set_min_width(ui.available_width());
-                let handle = ui
-                    .add(egui::Button::image(Lucide::GripVertical.size(16.0).image())
-                        .frame(false).sense(egui::Sense::drag()))
-                    .on_hover_cursor(egui::CursorIcon::Grab)
-                    .on_hover_text(tr("Перетащить раздел", "Drag section"));
-                if handle.drag_started() {
-                    handle.dnd_set_drag_payload(SectionDrag(index));
-                }
-                ui.add(icon.size(16.0).image().tint(ui.visuals().text_color()));
-                ui.label(tr(ru, en));
-            }).response
-        }).inner;
+        let row = ui
+            .push_id(index, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    let handle = ui
+                        .add(
+                            egui::Button::image(Lucide::GripVertical.size(16.0).image())
+                                .frame(false)
+                                .sense(egui::Sense::drag()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::Grab)
+                        .on_hover_text(tr("Перетащить раздел", "Drag section"));
+                    if handle.drag_started() {
+                        handle.dnd_set_drag_payload(SectionDrag(index));
+                    }
+                    ui.add(icon.size(16.0).image().tint(ui.visuals().text_color()));
+                    ui.label(tr(ru, en));
+                })
+                .response
+            })
+            .inner;
         let target = ui.interact(row.rect, row.id.with("drop"), egui::Sense::hover());
         if let Some(pointer) = ui.input(|input| input.pointer.interact_pos()) {
             let after = pointer.y >= row.rect.center().y;
-            if target.dnd_hover_payload::<SectionDrag>().is_some_and(|drag| drag.0 != index) {
-                let y = if after { row.rect.bottom() } else { row.rect.top() };
-                ui.painter().hline(row.rect.x_range(), y, ui.visuals().selection.stroke);
+            if target
+                .dnd_hover_payload::<SectionDrag>()
+                .is_some_and(|drag| drag.0 != index)
+            {
+                let y = if after {
+                    row.rect.bottom()
+                } else {
+                    row.rect.top()
+                };
+                ui.painter()
+                    .hline(row.rect.x_range(), y, ui.visuals().selection.stroke);
             }
-            if let Some(drag) = target.dnd_release_payload::<SectionDrag>() && drag.0 != index {
+            if let Some(drag) = target.dnd_release_payload::<SectionDrag>()
+                && drag.0 != index
+            {
                 drop = Some((drag.0, index, after));
             }
         }
@@ -318,10 +379,19 @@ fn edit_section_order(ui: &mut egui::Ui, saved: &mut Vec<String>) {
         if order.iter().copied().eq(0..SECTIONS.len()) {
             saved.clear();
         } else {
-            *saved = order.into_iter().map(|index| SECTION_KEYS[index].to_owned()).collect();
+            *saved = order
+                .into_iter()
+                .map(|index| SECTION_KEYS[index].to_owned())
+                .collect();
         }
     }
-    if ui.add_enabled(!saved.is_empty(), egui::Button::new(tr("Вернуть исходный порядок", "Reset order"))).clicked() {
+    if ui
+        .add_enabled(
+            !saved.is_empty(),
+            egui::Button::new(tr("Вернуть исходный порядок", "Reset order")),
+        )
+        .clicked()
+    {
         saved.clear();
     }
 }
@@ -413,8 +483,21 @@ fn glass_section_button(
         size: Some(egui::vec2(size[1] * 0.5 - 8.0, 0.0)),
         ..Default::default()
     };
-    let response = ui.add_sized(size, egui::Button::new((cap_inset.clone(), image, label, egui::Atom::grow(), cap_inset))
-        .gap(8.0).truncate().frame(false).selected(selected).image_tint_follows_text_color(true));
+    let response = ui.add_sized(
+        size,
+        egui::Button::new((
+            cap_inset.clone(),
+            image,
+            label,
+            egui::Atom::grow(),
+            cap_inset,
+        ))
+        .gap(8.0)
+        .truncate()
+        .frame(false)
+        .selected(selected)
+        .image_tint_follows_text_color(true),
+    );
     if ui.is_rect_visible(response.rect) {
         let pill = avilon_egui::tabs::Pill::new(response.rect);
         let active = selected || response.hovered();
@@ -423,21 +506,35 @@ fn glass_section_button(
         } else {
             (Role::Raised, Role::Border)
         };
-        let fallback_fill = if active { ui.visuals().selection.bg_fill } else { Color32::from_gray(42) };
+        let fallback_fill = if active {
+            ui.visuals().selection.bg_fill
+        } else {
+            Color32::from_gray(42)
+        };
         let fallback_rim = if active || response.has_focus() {
             ui.visuals().selection.stroke.color
         } else {
             Color32::from_gray(100)
         };
-        painter.set(body, pill.body(theme_ui::color(ui.ctx(), fill_role, fallback_fill)));
-        if let Some(shape) = theme_ui::optical_shape_for(ui.ctx(), pill.rect, pill.radius, selected) {
+        painter.set(
+            body,
+            pill.body(theme_ui::color(ui.ctx(), fill_role, fallback_fill)),
+        );
+        if let Some(shape) = theme_ui::optical_shape_for(ui.ctx(), pill.rect, pill.radius, selected)
+        {
             painter.set(optics, shape);
         }
-        let border = if response.has_focus() { fallback_rim } else {
+        let border = if response.has_focus() {
+            fallback_rim
+        } else {
             theme_ui::color(ui.ctx(), border_role, fallback_rim)
         };
         painter.set(rim, pill.rim(border));
-        let highlight = if response.is_pointer_button_down_on() { 15 } else { 42 };
+        let highlight = if response.is_pointer_button_down_on() {
+            15
+        } else {
+            42
+        };
         painter.set(shine, pill.shine(Color32::from_white_alpha(highlight)));
     }
     response
@@ -477,8 +574,14 @@ fn navigation_keys(ctx: &egui::Context) -> (bool, i32) {
     ctx.input_mut(|input| {
         input.events.retain(|event| {
             let egui::Event::Key {
-                key, physical_key, pressed: true, repeat, modifiers, ..
-            } = event else {
+                key,
+                physical_key,
+                pressed: true,
+                repeat,
+                modifiers,
+                ..
+            } = event
+            else {
                 return true;
             };
             if !modifiers.ctrl || modifiers.alt || modifiers.mac_cmd {
@@ -615,8 +718,12 @@ fn selection_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePrefere
         |ui| {
             let available = ui.available_width();
             ui.spacing_mut().slider_width = (available - 64.0).clamp(80.0, 180.0);
-            changed |= super::ui_foundation::slider(ui, true, egui::Slider::new(&mut theme.selection_intensity, 0..=100).suffix(" %"))
-                .changed();
+            changed |= super::ui_foundation::slider(
+                ui,
+                true,
+                egui::Slider::new(&mut theme.selection_intensity, 0..=100).suffix(" %"),
+            )
+            .changed();
         },
     );
     changed
@@ -738,9 +845,12 @@ fn optical_settings(ui: &mut egui::Ui, theme: &mut katran::theme::ThemePreferenc
             ),
         ] {
             SettingsRow::show(ui, title, description, |ui| {
-                changed |= super::ui_foundation::slider(ui, true,
-                        egui::Slider::new(value, if max == 100 { 1 } else { 0 }..=max).suffix(" %"))
-                    .changed();
+                changed |= super::ui_foundation::slider(
+                    ui,
+                    true,
+                    egui::Slider::new(value, if max == 100 { 1 } else { 0 }..=max).suffix(" %"),
+                )
+                .changed();
             });
         }
     }
@@ -848,7 +958,10 @@ impl State {
         self.section = index;
         if index != 2
             && self.tab_hotkey_target.is_some()
-            && self.editor.as_ref().is_some_and(|editor| editor.uses_confirmation())
+            && self
+                .editor
+                .as_ref()
+                .is_some_and(|editor| editor.uses_confirmation())
         {
             if let Some(tab) = self.tab_hotkey_target.take() {
                 self.tab_hotkey_statuses.remove(&tab);
@@ -903,7 +1016,10 @@ impl State {
             }
         }
         ui.label(super::i18n::tr("Компоненты необязательны и устанавливаются только по вашему запросу. Обычный поиск работает без них.", "Components are optional and installed only when you request them. Ordinary search works without them."));
-        ui.weak(super::i18n::tr("Кнопки установки и проверки открывают отдельный терминал с журналом.", "Install and Verify open a separate terminal with a log."));
+        ui.weak(super::i18n::tr(
+            "Кнопки установки и проверки открывают отдельный терминал с журналом.",
+            "Install and Verify open a separate terminal with a log.",
+        ));
         if ui
             .button(super::i18n::tr("Обновить статусы", "Refresh status"))
             .clicked()
@@ -928,7 +1044,10 @@ impl State {
                 let operation = &item["operation"];
                 let receipt = &operation["receipt"];
                 if item["files_found"] != true {
-                    ui.weak(super::i18n::tr("Комплект неполный", "Component files are incomplete"));
+                    ui.weak(super::i18n::tr(
+                        "Комплект неполный",
+                        "Component files are incomplete",
+                    ));
                 } else if receipt["verified"] != true {
                     ui.weak(super::i18n::tr(
                         "Файлы найдены, требуется проверка",
@@ -980,7 +1099,11 @@ impl State {
                     .or_else(|| operation["log_path"].as_str())
                 {
                     ui.weak(super::i18n::tr("Журнал", "Log"));
-                    ui.add(egui::Label::new(super::info_bar::friendly_path(path)).selectable(true).wrap());
+                    ui.add(
+                        egui::Label::new(super::info_bar::friendly_path(path))
+                            .selectable(true)
+                            .wrap(),
+                    );
                 }
                 let available =
                     item["installer_available"] == true && operation["state"] != "running";
@@ -1542,16 +1665,23 @@ impl State {
             } else {
                 tr("Токен не настроен", "No token configured")
             });
-            let field = ui.add(
-                super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.notion_token)
+            let field = ui.add(super::ui_foundation::text_field(
+                egui::TextEdit::singleline(&mut self.notion_token)
                     .password(true)
-                    .hint_text(tr("Токен внутренней интеграции", "Internal integration token"))),
-            );
-            let save = ui.add_enabled(
-                !self.notion_token.trim().is_empty(),
-                egui::Button::new(tr("Сохранить токен", "Save token")),
-            ).clicked();
-            let remove = ui.add_enabled(configured, egui::Button::new(tr("Отключить", "Disconnect"))).clicked();
+                    .hint_text(tr(
+                        "Токен внутренней интеграции",
+                        "Internal integration token",
+                    )),
+            ));
+            let save = ui
+                .add_enabled(
+                    !self.notion_token.trim().is_empty(),
+                    egui::Button::new(tr("Сохранить токен", "Save token")),
+                )
+                .clicked();
+            let remove = ui
+                .add_enabled(configured, egui::Button::new(tr("Отключить", "Disconnect")))
+                .clicked();
             if save || remove {
                 let input = std::mem::take(&mut self.notion_token);
                 // The password editor's undo history can retain the previous contents.
@@ -1562,8 +1692,13 @@ impl State {
                 if reply["ok"] == true {
                     self.notion_configured = Some(reply["result"]["configured"] == true);
                 } else {
-                    self.notion_error = reply["error"]["message"].as_str()
-                        .unwrap_or(tr("Не удалось обновить токен", "Could not update the token")).into();
+                    self.notion_error = reply["error"]["message"]
+                        .as_str()
+                        .unwrap_or(tr(
+                            "Не удалось обновить токен",
+                            "Could not update the token",
+                        ))
+                        .into();
                 }
             }
             if !self.notion_error.is_empty() {
@@ -1647,15 +1782,35 @@ impl State {
         let mut refresh_sharex = false;
         let mut path_editing = false;
         let mut video_gpu_intent = None;
-        let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
-        let sidebar_glass = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_glass);
-        let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
-        let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
+        let sidebar_depth = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_sidebar_depth);
+        let sidebar_glass = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_sidebar_glass);
+        let compact_shortcuts = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_summon_popover);
+        let raised_keycaps = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_raised_keycaps);
         let raised_rows = self.draft.as_ref().is_some_and(|draft| {
-            draft.settings_raised_keycaps_in_rows.unwrap_or(draft.settings_raised_keycaps)
+            draft
+                .settings_raised_keycaps_in_rows
+                .unwrap_or(draft.settings_raised_keycaps)
         });
-        let section_headers = self.draft.as_ref().is_some_and(|draft| draft.settings_section_headers);
-        let section_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_section_depth);
+        let section_headers = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_section_headers);
+        let section_depth = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.settings_section_depth);
         let mut draft_before = self
             .draft
             .as_ref()
@@ -2371,8 +2526,11 @@ impl State {
                     }
                     Err(error) => {
                         if font_changed && let Some(draft) = self.draft.as_mut() {
-                            draft.ui_font = draft_before.as_ref()
-                                .and_then(|value| serde_json::from_value(value["ui_font"].clone()).ok())
+                            draft.ui_font = draft_before
+                                .as_ref()
+                                .and_then(|value| {
+                                    serde_json::from_value(value["ui_font"].clone()).ok()
+                                })
                                 .unwrap_or_default();
                         }
                         self.pending_save = None;
@@ -2506,9 +2664,13 @@ mod tests {
         use katran::interaction::ShelfTab;
         let root = tempfile::tempdir().unwrap();
         let mut api = Service::open(root.path(), 10000).unwrap();
-        let mut prefs: Settings = serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
+        let mut prefs: Settings =
+            serde_json::from_value(call(&mut api, Command::GetSettings)["result"].clone()).unwrap();
         prefs.settings_summon_popover = true;
-        assert_eq!(call(&mut api, Command::SetSettings { settings: prefs })["ok"], true);
+        assert_eq!(
+            call(&mut api, Command::SetSettings { settings: prefs })["ok"],
+            true
+        );
         call(&mut api, Command::ShowTabSettings);
         let ctx = egui::Context::default();
         ctx.set_embed_viewports(true);
@@ -2560,7 +2722,12 @@ mod tests {
             out.textures_delta.clear();
         }
         assert_eq!(state.tab_hotkey_target, Some(ShelfTab::Images));
-        assert!(state.editor.as_ref().is_some_and(|editor| editor.uses_confirmation()));
+        assert!(
+            state
+                .editor
+                .as_ref()
+                .is_some_and(|editor| editor.uses_confirmation())
+        );
         assert_eq!(
             call(&mut api, Command::Tabs)["result"]["tabs"]
                 .as_array()
@@ -2570,13 +2737,25 @@ mod tests {
                 .unwrap()["enabled"],
             before
         );
-        for (key, modifiers) in [(egui::Key::F9, egui::Modifiers::CTRL), (egui::Key::Enter, egui::Modifiers::NONE)] {
-            let mut out = ctx.run_ui(egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key, physical_key: Some(key), pressed: true, repeat: false, modifiers,
-                }],
-                ..Default::default()
-            }, |ui| { state.show(ui.ctx(), &mut api); });
+        for (key, modifiers) in [
+            (egui::Key::F9, egui::Modifiers::CTRL),
+            (egui::Key::Enter, egui::Modifiers::NONE),
+        ] {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    state.show(ui.ctx(), &mut api);
+                },
+            );
             out.textures_delta.clear();
             let saved = call(&mut api, Command::GetSettings);
             if key == egui::Key::F9 {

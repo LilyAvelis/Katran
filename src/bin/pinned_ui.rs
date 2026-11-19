@@ -182,11 +182,12 @@ impl Shelf {
                 });
                 ui.add_space(super::ui_foundation::tokens::SM);
                 ui.label(tr("Имя", "Name"));
-                let mut name = super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.name))
-                    .interactive(!saving)
-                    .id_salt("pinned-name")
-                    .desired_width(ui.available_width())
-                    .show(ui);
+                let mut name =
+                    super::ui_foundation::text_field(egui::TextEdit::singleline(&mut state.name))
+                        .interactive(!saving)
+                        .id_salt("pinned-name")
+                        .desired_width(ui.available_width())
+                        .show(ui);
                 #[cfg(test)]
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("pinned-name-rect"), name.response.rect)
