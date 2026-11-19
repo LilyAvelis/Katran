@@ -129,6 +129,8 @@ pub struct Settings {
     pub settings_sidebar_depth: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub settings_summon_popover: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub settings_raised_keycaps: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub settings_section_order: Vec<String>,
     /// Optional local Folder AI acceleration. Missing means CPU.
@@ -185,6 +187,7 @@ impl Settings {
             search_keyboard_only: false,
             settings_sidebar_depth: false,
             settings_summon_popover: false,
+            settings_raised_keycaps: false,
             settings_section_order: Vec::new(),
             link_favicons_online: false,
             folder_ai_gpu: false,

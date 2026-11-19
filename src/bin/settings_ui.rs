@@ -1524,6 +1524,8 @@ impl State {
         let mut path_editing = false;
         let mut video_gpu_intent = None;
         let sidebar_depth = self.draft.as_ref().is_some_and(|draft| draft.settings_sidebar_depth);
+        let compact_shortcuts = self.draft.as_ref().is_some_and(|draft| draft.settings_summon_popover);
+        let raised_keycaps = self.draft.as_ref().is_some_and(|draft| draft.settings_raised_keycaps);
         let mut draft_before = self
             .draft
             .as_ref()
@@ -1658,14 +1660,9 @@ impl State {
          if draft.settings_summon_popover {
           let title = super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window");
           let title = RichText::new(title).family(egui::FontFamily::Name(super::ui_fonts::BOLD_FAMILY.into()));
-          let keycap = if draft.overlay_hotkey.is_empty() {
-           super::i18n::tr("Назначить", "Set shortcut")
-          } else {
-           &draft.overlay_hotkey
-          };
           SettingsRow::show_with_title(ui, title, "", |ui| {
-           let button = egui::Button::new(RichText::new(keycap).monospace()).small();
-           let anchor = ui.add_enabled(self.tab_hotkey_target.is_none(), button)
+           let anchor = super::shortcuts_ui::binding_button(ui, Some(&draft.overlay_hotkey),
+            self.tab_hotkey_target.is_none(), raised_keycaps)
             .on_hover_text(super::i18n::tr("Изменить сочетание", "Change shortcut"));
            let opened = anchor.clicked();
            if opened {
@@ -1673,22 +1670,12 @@ impl State {
              "overlay_hotkey",
              super::i18n::tr("Вызов Katran", "Summon Katran"),
              draft.overlay_hotkey.clone(),
-            ).with_summon_confirmation());
+            ).with_physical_keys().with_confirmation());
             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
            }
            if let Some(editor) = self.editor.as_mut().filter(|editor| editor.id == "overlay_hotkey") {
-            let mut open = ui.is_rect_visible(anchor.rect);
-            let popup = egui::Popup::from_response(&anchor)
-             .open_bool(&mut open)
-             .gap(6.0)
-             .close_behavior(if opened {
-              egui::PopupCloseBehavior::IgnoreClicks
-             } else {
-              egui::PopupCloseBehavior::CloseOnClickOutside
-             });
-            if let Some(response) = popup.show(|ui| editor.render_summon_popover(ui)) {
-             global_intent = response.inner;
-            }
+            let (open, intent) = editor.show_popover(ui, &anchor, opened, Lucide::AppWindow, raised_keycaps);
+            global_intent = intent;
             if !open {
              self.editor = None;
              root_ctx.request_repaint_of(egui::ViewportId::ROOT);
@@ -1702,7 +1689,9 @@ impl State {
            }
           });
           if self.editor.as_ref().is_none_or(|editor| editor.id != "overlay_hotkey")
-           && !self.overlay_status.is_empty() { ui.weak(&self.overlay_status); }
+           && !self.overlay_status.is_empty()
+           && !self.overlay_status.starts_with("Active: ")
+           && !self.overlay_status.starts_with("Активно: ") { ui.weak(&self.overlay_status); }
          } else {
          let binding=if draft.overlay_hotkey.is_empty(){super::i18n::tr("Не назначена", "Not assigned")}else{draft.overlay_hotkey.as_str()};
          SettingsRow::show(ui,super::i18n::tr("Вызов Katran поверх окна", "Summon Katran over the current window"),binding,|ui|{
@@ -1996,9 +1985,12 @@ impl State {
         });
         SettingsSection::group(ui, super::i18n::tr("Горячие клавиши", "Shortcuts"), |ui| {
          ui.checkbox(&mut draft.settings_summon_popover, super::i18n::tr(
-          "Компактная запись сочетания вызова Katran",
-          "Compact Katran summon shortcut editor",
+          "Компактный редактор сочетаний",
+          "Compact shortcut editor",
          ));
+         ui.add_enabled_ui(draft.settings_summon_popover, |ui| {
+          ui.checkbox(&mut draft.settings_raised_keycaps, super::i18n::tr("Объёмные кейкапы", "Raised keycaps"));
+         });
         });
        }
       } else {
@@ -2011,6 +2003,47 @@ impl State {
          let shortcut_label = localized_shortcut_label(&shortcut.id, &shortcut.label);
          if !shortcut_label.to_lowercase().contains(&self.shortcut_filter.to_lowercase()) { continue; }
          ui.push_id(&shortcut.id,|ui|{
+          if compact_shortcuts {
+           let icon = super::action_icons::icon(&shortcut.id);
+           let mut intent = None;
+           SettingsRow::show_with_label(ui, |ui| {
+            ui.horizontal(|ui| {
+             ui.add(icon.size(16.0).image().tint(ui.visuals().text_color()));
+             ui.add(egui::Label::new(shortcut_label).wrap());
+            });
+           }, "", |ui| {
+            let anchor = super::shortcuts_ui::binding_button(ui, shortcut.binding.as_deref(),
+             shortcut.rebindable && self.tab_hotkey_target.is_none(), raised_keycaps);
+            let anchor = if shortcut.rebindable {
+             anchor.on_hover_text(super::i18n::tr("Изменить сочетание", "Change shortcut"))
+            } else {
+             anchor.on_disabled_hover_text(super::i18n::tr("Системное сочетание", "System shortcut"))
+            };
+            let opened = anchor.clicked();
+            if opened {
+             self.editor = Some(super::shortcuts_ui::Editor::new(
+              &shortcut.id, shortcut_label, shortcut.binding.clone().unwrap_or_default(),
+             ).with_confirmation());
+            }
+            if let Some(editor) = self.editor.as_mut().filter(|editor| editor.id == shortcut.id) {
+             let (open, action) = editor.show_popover(ui, &anchor, opened, icon, raised_keycaps);
+             intent = action;
+             if !open { self.editor = None; }
+            }
+            if shortcut.rebindable && ui.add(egui::Button::image(Lucide::RotateCcw.size(14.0).image()).small())
+             .on_hover_text(super::i18n::tr("Сбросить к исходному сочетанию", "Reset to default shortcut")).clicked()
+            {
+             let r = call(api, Command::SetShortcut {id: shortcut.id.clone(), binding: None, replace: false, reset: true});
+             self.error = r["error"]["message"].as_str().unwrap_or_default().into();
+            }
+           });
+           if let (Some(editor), Some(action)) = (self.editor.as_mut(), intent)
+            && apply_editor_intent(api, editor, action, &mut self.draft, self.tab_hotkey_target)
+           {
+            self.editor = None;
+           }
+           return;
+          }
           SettingsRow::show(ui,shortcut_label,shortcut.binding.as_deref().unwrap_or(super::i18n::tr("Не назначено", "Not assigned")),|ui|{
            ui.add(super::action_icons::icon(&shortcut.id).size(16.0).image());
            if shortcut.rebindable {

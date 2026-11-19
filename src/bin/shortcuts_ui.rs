@@ -1,6 +1,7 @@
 //! Input and presentation adapter shared by Actions and Settings.
 use super::i18n::tr;
 use eframe::egui::{self, Key};
+use egui_lucide::Lucide;
 use katran::shortcuts::{ShortcutInfo, normalize};
 pub fn apply(api: &mut katran::Service, editor: &mut Editor, intent: Intent) -> bool {
     match intent {
@@ -47,15 +48,14 @@ pub struct Editor {
     replaceable: bool,
     selected: Option<usize>,
     physical_keys: bool,
-    confirm_summon: bool,
-    pending_summon: Option<String>,
+    confirm_pending: bool,
+    pending_binding: Option<String>,
     held_modifiers: [bool; 8],
     alt_armed: bool,
 }
 impl Editor {
-    pub fn with_summon_confirmation(mut self) -> Self {
-        self.physical_keys = true;
-        self.confirm_summon = true;
+    pub fn with_confirmation(mut self) -> Self {
+        self.confirm_pending = true;
         self
     }
 
@@ -187,13 +187,18 @@ impl Editor {
             if key == Key::Backspace && m.ctrl && !m.alt && !m.shift && !m.mac_cmd {
                 return self.choice(2);
             }
-            if self.confirm_summon {
-                if key == Key::Enter && m.is_none() {
-                    return self.confirm_summon();
+            if self.confirm_pending {
+                if key == Key::Enter
+                    && m.is_none()
+                    && (self.pending_binding.is_some() || self.physical_keys)
+                {
+                    return self.confirm_pending();
                 }
                 if key != Key::Tab || m.ctrl || m.alt || m.mac_cmd {
-                    self.pending_summon = Some(chord(key, m));
+                    self.pending_binding = Some(chord(key, m));
                     self.error = None;
+                    self.replaceable = false;
+                    self.binding = None;
                 }
                 return None;
             }
@@ -230,67 +235,100 @@ impl Editor {
             })
         })
     }
-    fn confirm_summon(&self) -> Option<Intent> {
-        self.pending_summon.clone().map(|binding| Intent::Set {
+    fn confirm_pending(&self) -> Option<Intent> {
+        if self.replaceable {
+            return None;
+        }
+        self.pending_binding.clone().map(|binding| Intent::Set {
             binding,
             replace: false,
         })
     }
 
-    pub fn render_summon_popover(&mut self, ui: &mut egui::Ui) -> Option<Intent> {
+    pub fn show_popover(
+        &mut self,
+        ui: &egui::Ui,
+        anchor: &egui::Response,
+        opened: bool,
+        icon: Lucide,
+        raised: bool,
+    ) -> (bool, Option<Intent>) {
+        let mut open = ui.is_rect_visible(anchor.rect);
+        let intent = egui::Popup::from_response(anchor)
+            .open_bool(&mut open)
+            .gap(6.0)
+            .close_behavior(if opened {
+                egui::PopupCloseBehavior::IgnoreClicks
+            } else {
+                egui::PopupCloseBehavior::CloseOnClickOutside
+            })
+            .show(|ui| self.render_popover(ui, icon, raised))
+            .and_then(|response| response.inner);
+        (open, intent)
+    }
+
+    fn render_popover(&mut self, ui: &mut egui::Ui, icon: Lucide, raised: bool) -> Option<Intent> {
         use super::special_mode_bar;
         ui.set_width(360.0);
         let chord = self
-            .pending_summon
+            .pending_binding
             .as_deref()
             .unwrap_or(&self.current_binding);
-        summon_capture_field(ui, chord);
+        capture_field(ui, chord, raised);
         ui.separator();
         if let Some(error) = &self.error {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(error)
-                        .small()
-                        .color(egui::Color32::LIGHT_RED),
+            let mut replace = false;
+            ui.horizontal(|ui| {
+                if self.replaceable {
+                    replace = ui.button(tr("Заменить", "Replace")).clicked();
+                }
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(error)
+                            .small()
+                            .color(egui::Color32::LIGHT_RED),
+                    )
+                    .truncate(),
                 )
-                .truncate(),
-            )
-            .on_hover_text(error);
+                .on_hover_text(error);
+            });
+            if replace {
+                return self.choice(0);
+            }
         }
         special_mode_bar::show(ui, |ui| {
-            ui.label(egui::RichText::new(&self.label).small());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if special_mode_bar::action(
+                if keycap_button(
                     ui,
-                    "Enter",
-                    None,
-                    self.pending_summon.is_some(),
-                    false,
-                    66.0,
+                    "↵",
+                    self.pending_binding.is_some() && !self.replaceable,
+                    raised,
+                    true,
                 )
                 .on_hover_text(tr("Применить сочетание", "Apply shortcut"))
                 .clicked()
                 {
-                    return self.confirm_summon();
+                    return self.confirm_pending();
                 }
-                if special_mode_bar::action(ui, "Esc", None, true, false, 56.0)
+                if keycap_button(ui, "Esc", true, raised, true)
                     .on_hover_text(tr("Отмена", "Cancel"))
                     .clicked()
                 {
                     return Some(Intent::Cancel);
                 }
-                if special_mode_bar::action(
-                    ui,
-                    tr("Очистить", "Clear"),
-                    None,
-                    !self.current_binding.is_empty(),
-                    false,
-                    82.0,
-                )
-                .clicked()
+                if keycap_button(ui, "⌫", !self.current_binding.is_empty(), raised, true)
+                    .on_hover_text(tr("Очистить · Ctrl+Backspace", "Clear · Ctrl+Backspace"))
+                    .clicked()
                 {
                     return self.choice(2);
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(icon.size(16.0).image().tint(ui.visuals().text_color()));
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(&self.label).size(14.0)).truncate(),
+                    )
+                    .on_hover_text(&self.label);
+                });
                 None
             })
             .inner
@@ -340,7 +378,65 @@ impl Editor {
     }
 }
 
-fn summon_capture_field(ui: &mut egui::Ui, binding: &str) {
+pub fn binding_button(
+    ui: &mut egui::Ui,
+    binding: Option<&str>,
+    enabled: bool,
+    raised: bool,
+) -> egui::Response {
+    keycap_button(
+        ui,
+        binding
+            .filter(|binding| !binding.is_empty())
+            .unwrap_or(tr("Назначить", "Set shortcut")),
+        enabled,
+        raised,
+        false,
+    )
+}
+
+fn keycap_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    enabled: bool,
+    raised: bool,
+    small: bool,
+) -> egui::Response {
+    let painter = ui.painter().clone();
+    let shadow = raised.then(|| painter.add(egui::Shape::Noop));
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = egui::vec2(if small { 7.0 } else { 11.0 }, 3.0);
+            let mut text = egui::RichText::new(label).size(if small { 13.0 } else { 15.0 });
+            if raised && enabled && !small {
+                text = text.color(egui::Color32::from_rgb(247, 125, 116));
+            }
+            ui.add_enabled(
+                enabled,
+                egui::Button::new(text)
+                    .min_size(egui::vec2(28.0, if small { 23.0 } else { 30.0 }))
+                    .corner_radius(5.0)
+                    .stroke(ui.visuals().widgets.inactive.bg_stroke),
+            )
+        })
+        .inner;
+    if let Some(shadow) = shadow
+        && enabled
+        && !response.is_pointer_button_down_on()
+    {
+        painter.set(
+            shadow,
+            egui::Shape::rect_filled(
+                response.rect.translate(egui::vec2(0.0, 2.0)),
+                5.0,
+                egui::Color32::from_black_alpha(120),
+            ),
+        );
+    }
+    response
+}
+
+fn capture_field(ui: &mut egui::Ui, binding: &str, raised: bool) {
     use super::theme_ui::{self, Role};
     use egui::{Color32, FontId};
     let (rect, _) = ui.allocate_exact_size(
@@ -362,7 +458,7 @@ fn summon_capture_field(ui: &mut egui::Ui, binding: &str) {
     let color = ui.visuals().text_color();
     let keys: Vec<_> = binding
         .split_whitespace()
-        .map(|key| painter.layout_no_wrap(key.to_owned(), FontId::monospace(22.0), color))
+        .map(|key| painter.layout_no_wrap(key.to_owned(), FontId::proportional(23.0), color))
         .collect();
     if keys.is_empty() {
         painter.text(
@@ -383,6 +479,13 @@ fn summon_capture_field(ui: &mut egui::Ui, binding: &str) {
             egui::pos2(left, rect.center().y - 22.0),
             egui::vec2(width(&key), 44.0),
         );
+        if raised {
+            painter.rect_filled(
+                bounds.translate(egui::vec2(0.0, 3.0)),
+                7.0,
+                Color32::from_black_alpha(130),
+            );
+        }
         painter.rect(
             bounds,
             7.0,
@@ -540,8 +643,9 @@ mod tests {
     #[test]
     fn summon_popover_confirms_only_a_recorded_candidate() {
         let ctx = egui::Context::default();
-        let mut editor =
-            Editor::new("overlay_hotkey", "Summon Katran", "Alt E").with_summon_confirmation();
+        let mut editor = Editor::new("overlay_hotkey", "Summon Katran", "Alt E")
+            .with_physical_keys()
+            .with_confirmation();
         let mut press = |key, modifiers| {
             recorder_frame(
                 &ctx,
@@ -565,15 +669,16 @@ mod tests {
     #[test]
     fn summon_popover_can_replace_a_rejected_candidate_or_cancel() {
         let ctx = egui::Context::default();
-        let mut editor =
-            Editor::new("overlay_hotkey", "Summon Katran", "Alt E").with_summon_confirmation();
+        let mut editor = Editor::new("overlay_hotkey", "Summon Katran", "Alt E")
+            .with_physical_keys()
+            .with_confirmation();
         recorder_frame(
             &ctx,
             &mut editor,
             vec![key_event(Key::A, true, egui::Modifiers::NONE)],
         );
         editor.failed("A".into(), "Invalid shortcut".into(), false);
-        assert_eq!(editor.pending_summon.as_deref(), Some("A"));
+        assert_eq!(editor.pending_binding.as_deref(), Some("A"));
         assert!(
             recorder_frame(
                 &ctx,
@@ -582,7 +687,7 @@ mod tests {
             )
             .is_none()
         );
-        assert_eq!(editor.pending_summon.as_deref(), Some("Alt R"));
+        assert_eq!(editor.pending_binding.as_deref(), Some("Alt R"));
         assert!(editor.error.is_none());
         assert!(matches!(
             recorder_frame(
@@ -592,6 +697,40 @@ mod tests {
             ),
             Some(Intent::Cancel)
         ));
+    }
+
+    #[test]
+    fn compact_shortcut_conflict_requires_explicit_replacement() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new("copy", "Copy", "Ctrl C").with_confirmation();
+        let enter = |editor: &mut Editor| {
+            recorder_frame(
+                &ctx,
+                editor,
+                vec![
+                    key_event(Key::Enter, true, egui::Modifiers::NONE),
+                    key_event(Key::Enter, false, egui::Modifiers::NONE),
+                ],
+            )
+        };
+        assert!(enter(&mut editor).is_none());
+        assert!(
+            matches!(enter(&mut editor), Some(Intent::Set { binding, replace: false }) if binding == "Enter")
+        );
+        editor.failed("Enter".into(), "In use".into(), true);
+        assert!(enter(&mut editor).is_none());
+        assert!(
+            matches!(editor.choice(0), Some(Intent::Set { binding, replace: true }) if binding == "Enter")
+        );
+        recorder_frame(
+            &ctx,
+            &mut editor,
+            vec![key_event(Key::R, true, egui::Modifiers::ALT)],
+        );
+        assert!(!editor.replaceable);
+        assert!(
+            matches!(enter(&mut editor), Some(Intent::Set { binding, replace: false }) if binding == "Alt R")
+        );
     }
     #[test]
     fn physical_recording_recovers_shift_and_other_held_modifiers() {

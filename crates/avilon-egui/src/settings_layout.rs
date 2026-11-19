@@ -71,7 +71,12 @@ impl SettingsRow {
         description: &str,
         controls: impl FnOnce(&mut egui::Ui),
     ) -> RowGeometry {
-        Self::show_with_title(ui, egui::RichText::new(title).strong(), description, controls)
+        Self::show_with_title(
+            ui,
+            egui::RichText::new(title).strong(),
+            description,
+            controls,
+        )
     }
 
     pub fn show_with_title(
@@ -80,11 +85,27 @@ impl SettingsRow {
         description: &str,
         controls: impl FnOnce(&mut egui::Ui),
     ) -> RowGeometry {
+        Self::show_with_label(
+            ui,
+            |ui| {
+                ui.add(egui::Label::new(title).wrap());
+            },
+            description,
+            controls,
+        )
+    }
+
+    pub fn show_with_label(
+        ui: &mut egui::Ui,
+        title: impl FnOnce(&mut egui::Ui),
+        description: &str,
+        controls: impl FnOnce(&mut egui::Ui),
+    ) -> RowGeometry {
         let width = ui.available_width();
         let stacked = width < tokens::CONTROL_COLUMN + tokens::LABEL_MIN + tokens::LG;
         let labels = |ui: &mut egui::Ui| {
             ui.set_min_width(ui.available_width());
-            ui.add(egui::Label::new(title).wrap());
+            title(ui);
             if !description.is_empty() {
                 ui.add(
                     egui::Label::new(
