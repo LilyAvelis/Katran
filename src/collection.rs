@@ -198,7 +198,7 @@ pub(crate) fn pack_links(
     })
 }
 
-fn prepare_links(
+pub(crate) fn prepare_links(
     entries: &[Link],
     name: &str,
     root: &Path,

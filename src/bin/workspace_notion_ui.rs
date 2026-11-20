@@ -48,7 +48,7 @@ impl ResultItem {
 
 #[derive(Default)]
 pub(super) struct State {
-    mode: Mode,
+    pub(super) mode: Mode,
     query: String,
     pages: Vec<katran::notion::Page>,
     sources: Vec<katran::notion::Page>,
@@ -432,22 +432,18 @@ impl Shelf {
         if reply.is_null() {
             state.error = Some(self.message.clone());
         } else {
-            state.pages = serde_json::from_value(reply["pages"].clone()).unwrap_or_default();
-            {
-                state.history = if let Some(history) = reply["history"].as_array() {
-                    history.iter().filter_map(ResultItem::from_value).collect()
-                } else {
-                    state
-                        .pages
-                        .iter()
-                        .cloned()
-                        .map(|page| ResultItem {
-                            page,
-                            database: false,
-                        })
-                        .collect()
-                };
-            }
+            state.history = if let Some(history) = reply["history"].as_array() {
+                history.iter().filter_map(ResultItem::from_value).collect()
+            } else {
+                serde_json::from_value::<Vec<katran::notion::Page>>(reply["pages"].clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|page| ResultItem {
+                        page,
+                        database: false,
+                    })
+                    .collect()
+            };
             state.selected = state.selected.min(state.results().len().saturating_sub(1));
         }
     }
@@ -478,11 +474,12 @@ impl Shelf {
             state.focus = true;
             ctx.request_repaint_after(Duration::from_millis(300));
         }
-        let (favorites, history, pin) = ctx.input_mut(|i| {
+        let (favorites, history, pin, copy_link) = ctx.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::F),
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::H),
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::Period),
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::L),
             )
         });
         if favorites || history {
@@ -494,6 +491,26 @@ impl Shelf {
                 },
                 ctx,
             );
+        } else if copy_link {
+            let state = &self.workspace.notion;
+            if let Some(item) = state.results().get(state.selected).cloned() {
+                let command = if item.database {
+                    Command::CopyNotionSourceId {
+                        source_id: item.page.id,
+                    }
+                } else {
+                    Command::CopyNotionPageLinks {
+                        pages: vec![item.page],
+                    }
+                };
+                let notice = self.notion_copy_reference(command);
+                self.workspace.notion.notice = notice;
+                self.workspace.notion.error = if notice.is_none() {
+                    Some(self.message.clone())
+                } else {
+                    None
+                };
+            }
         } else if pin {
             let state = &self.workspace.notion;
             if let Some(item) = state.results().get(state.selected).cloned() {
@@ -849,6 +866,7 @@ impl Shelf {
                     }
                 }
                 hints.extend([
+                    ("Ctrl L", tr("Скопировать ссылку или ID", "Copy link or ID")),
                     ("Ctrl .", tr("Закрепить", "Pin")),
                     ("Ctrl F", tr("Избранное", "Favorites")),
                     ("Ctrl H", tr("История", "History")),

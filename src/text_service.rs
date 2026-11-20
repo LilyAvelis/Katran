@@ -1,6 +1,89 @@
 use crate::{ApiError, Result, SelectionRef, Service};
 use serde_json::{Value, json};
 impl Service {
+    pub(crate) fn copy_notion_page_links(
+        &mut self,
+        pages: &[crate::notion::Page],
+    ) -> Result<Value> {
+        use crate::{collection, copy_out, link_fragments, storage};
+        use baloh_collection::links::{Link, MAX_TITLE_BYTES};
+
+        self.check_links_enabled()?;
+        if !(1..=baloh_collection::MAX_ENTRIES).contains(&pages.len()) {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Invalid number of Notion pages",
+            ));
+        }
+        let sequence = crate::capture::sequence_number();
+        let references = self.reference_paths()?;
+        let prepared = if let [page] = pages {
+            let url = page.browser_url()?;
+            let blob = link_fragments::prepare(
+                &self.root,
+                self.quota,
+                &url,
+                "notion_page",
+                &self.ingest_origin,
+                &references,
+            )?;
+            let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, blob)?;
+            return Ok(
+                match self.publish_text_result(json!({
+                    "merged": true, "text": url, "items": [{"id": id}], "saved_id": id
+                })) {
+                    Ok(reply) => reply,
+                    Err(error) => {
+                        json!({"saved_id":id,"text_copied":false,"clipboard_error":error.message})
+                    }
+                },
+            );
+        } else {
+            let mut entries = Vec::with_capacity(pages.len());
+            for page in pages {
+                let url = page.browser_url()?;
+                let title: String = page
+                    .title
+                    .chars()
+                    .map(|ch| if ch.is_control() { ' ' } else { ch })
+                    .collect();
+                entries.push(Link {
+                    url,
+                    title: title[..title.floor_char_boundary(MAX_TITLE_BYTES)].to_owned(),
+                    description: String::new(),
+                    preview_png: None,
+                });
+            }
+            collection::prepare_links(
+                &entries,
+                "Notion pages.bull",
+                &self.root,
+                self.quota,
+                &references,
+            )?
+        };
+        let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
+        let publication = (|| -> Result<_> {
+            let event = self.get(id)?;
+            let mut plan = copy_out::prepare_with_budget(&self.root, &[event], self.quota)
+                .map_err(|error| ApiError::new("copy_error", error))?;
+            plan.protect_references(&references)
+                .map_err(|error| ApiError::new("copy_error", error))?;
+            let mut sink =
+                copy_out::PreparedNativeClipboard::prepare_files_if_current(&plan.paths, sequence);
+            self.commit_media_copy_plan(&plan, &mut sink)
+                .map_err(|error| ApiError::new("clipboard_error", error))
+        })();
+        Ok(match publication {
+            Ok(receipt) if receipt.count == 1 && receipt.failures.is_empty() => {
+                self.record_selection_publication(receipt.sequence, &[id]);
+                json!({"saved_id":id,"copied":1,"clipboard_sequence":receipt.sequence})
+            }
+            Ok(receipt) => json!({"saved_id":id,"copied":0,"failures":receipt.failures}),
+            Err(error) => json!({"saved_id":id,"copied":0,"clipboard_error":error.message}),
+        })
+    }
+
     pub(crate) fn get_document_text(&self, id: i64) -> Result<Value> {
         use std::io::Read;
         let event = self.get(id)?;

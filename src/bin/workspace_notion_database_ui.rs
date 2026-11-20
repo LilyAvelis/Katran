@@ -817,6 +817,59 @@ impl Shelf {
         }
     }
 
+    pub(super) fn copy_notion_database_links(&mut self) {
+        let Some(database) = self.workspace.database.as_ref() else {
+            return;
+        };
+        let ids = if let Some(preview) = self.state["preview"].as_i64() {
+            vec![preview]
+        } else {
+            self.selected_ids()
+        };
+        let command = if ids.is_empty() {
+            Command::CopyNotionSourceId {
+                source_id: database.id.clone(),
+            }
+        } else {
+            let rows = self.selected_notion_rows(&ids);
+            if rows.len() != ids.len() {
+                self.message = tr("Выбор страниц устарел", "Page selection is out of date").into();
+                return;
+            }
+            Command::CopyNotionPageLinks {
+                pages: rows.into_iter().map(|row| row.page.clone()).collect(),
+            }
+        };
+        self.notion_copy_reference(command);
+    }
+
+    pub(super) fn notion_copy_reference(&mut self, command: Command) -> Option<&'static str> {
+        let source = matches!(command, Command::CopyNotionSourceId { .. });
+        let reply = self.call(command);
+        let notice = if source && reply["text_copied"] == true {
+            tr("ID источника скопирован", "Data source ID copied")
+        } else if reply["text_copied"] == true {
+            tr(
+                "Ссылка скопирована и сохранена в Links",
+                "Link copied and saved to Links",
+            )
+        } else if reply["copied"] == 1 {
+            tr(
+                "BULL скопирован и сохранён в Links",
+                "BULL copied and saved to Links",
+            )
+        } else if reply["saved_id"].is_number() {
+            tr(
+                "Сохранено в Links, буфер обмена недоступен",
+                "Saved to Links; clipboard unavailable",
+            )
+        } else {
+            return None;
+        };
+        self.message = notice.into();
+        Some(notice)
+    }
+
     pub(super) fn pin_notion_database_page(&mut self) {
         let Some(page) = self.current_notion_page() else {
             return;

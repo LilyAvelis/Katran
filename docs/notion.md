@@ -16,7 +16,8 @@ still has an older PATH.
    history for Notion-shaped tokens before attempting any upload. The
    scanner reports only its result, without token values.
 4. From the app that should receive the text, summon Katran with its overlay
-   hotkey. Press **Ctrl+Shift+N** in Katran to go straight to Notion, or use
+   hotkey. Press **Ctrl+Shift+N** to switch to Notion Search from any picker
+   mode. **Ctrl+Shift+K** switches to filesystem search. You can also use
    **Ctrl+N** or the round **N** icon inside **Ctrl+Shift+K**. Type a page
    title and use **↓** or click a result to focus the list. **Space**
    opens or closes the page reader. **Enter** attaches a UTF-8 `.md` file in the previous window
@@ -26,6 +27,11 @@ still has an older PATH.
 5. **Ctrl+.** pins or unpins a selected page. **Ctrl+F** shows favorites and
    **Ctrl+H** shows the last 100 distinct previewed, opened or exported pages.
    Katran saves their IDs and titles locally and fetches content on demand.
+6. **Ctrl+L** on a page in the picker, the database shelf, or the reader
+   copies its Notion URL and saves it to **Links**. Select several database
+   rows to save one Links BULL and copy it as a file. On a data source in
+   the picker, or in an open database with no page selected, **Ctrl+L**
+   copies the data source ID.
 
 Search requests match page titles and return up to 25 items. Notion's public
 title search is not an exhaustive inventory of the pages shared with the

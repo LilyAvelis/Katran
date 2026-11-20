@@ -1035,6 +1035,13 @@ impl Service {
                 Ok(serde_json::json!({"recorded": true}))
             }
             Command::CopyNotionPageFields { pages } => self.copy_notion_page_fields(&pages),
+            Command::CopyNotionPageLinks { pages } => self.copy_notion_page_links(&pages),
+            Command::CopyNotionSourceId { source_id } => {
+                let id = notion::canonical_id(&source_id).ok_or_else(|| {
+                    ApiError::new("notion_source", "Invalid Notion data source ID")
+                })?;
+                self.publish_text_result(serde_json::json!({"merged":true,"text":id}))
+            }
             Command::CopyNotionReaderSelection { text } => {
                 if text.contains('\0') {
                     return Err(ApiError::new("invalid_text", "Clipboard text contains NUL"));

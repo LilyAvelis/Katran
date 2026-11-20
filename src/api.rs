@@ -258,6 +258,12 @@ pub enum Command {
     CopyNotionPageFields {
         pages: Vec<NotionPageFields>,
     },
+    CopyNotionPageLinks {
+        pages: Vec<crate::notion::Page>,
+    },
+    CopyNotionSourceId {
+        source_id: String,
+    },
     CopyNotionReaderSelection {
         text: String,
     },

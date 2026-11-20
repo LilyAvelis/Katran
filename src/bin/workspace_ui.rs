@@ -378,14 +378,10 @@ impl Shelf {
             && !self.open_apps.open
         {
             self.actions = false;
-            let already_in_notion = self.workspace.open && self.workspace.notion_source;
             self.workspace.open = true;
             self.workspace.opened_frame = ctx.cumulative_frame_nr();
-            if already_in_notion {
-                self.workspace_notion_mode(Mode::Search, ctx);
-            } else {
-                self.workspace_mode(Mode::Search, ctx);
-            }
+            self.workspace.neural = false;
+            self.workspace_mode(Mode::Search, ctx);
         }
         if (self.workspace.open || !self.modal_owns_input())
             && self.state["settings_open"] != true
@@ -394,7 +390,7 @@ impl Shelf {
             })
         {
             self.workspace.open = true;
-            self.workspace_open_notion(ctx);
+            self.workspace_notion_mode(Mode::Search, ctx);
         }
         if self.workspace.open
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::N))
@@ -430,6 +426,14 @@ impl Shelf {
         }
         if self.workspace.open && self.workspace.notion_source {
             self.workspace_notion_input(ctx);
+            return;
+        }
+        if self.notion_database_active()
+            && !self.modal_owns_input()
+            && self.state["settings_open"] != true
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::L))
+        {
+            self.copy_notion_database_links();
             return;
         }
         if self.workspace.open {
@@ -973,11 +977,28 @@ mod tests {
         send_workspace_key(&mut app, &egui::Context::default(), press.clone());
         assert!(app.workspace.open);
         assert!(app.workspace.notion_source);
-        send_workspace_key(&mut app, &egui::Context::default(), press);
-        assert!(
-            app.workspace.notion_source,
-            "direct search never toggles to Everything"
+        for mode in [Mode::Favorites, Mode::History] {
+            let ctx = egui::Context::default();
+            app.workspace_notion_mode(mode, &ctx);
+            send_workspace_key(&mut app, &ctx, press.clone());
+            assert!(app.workspace.notion_source);
+            assert!(app.workspace.notion.mode == Mode::Search);
+        }
+        app.workspace.neural = true;
+        send_workspace_key(
+            &mut app,
+            &egui::Context::default(),
+            egui::Event::Key {
+                key: egui::Key::K,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+            },
         );
+        assert!(!app.workspace.notion_source);
+        assert!(!app.workspace.neural);
+        assert!(app.workspace.mode == Mode::Search);
     }
 
     #[test]

@@ -343,7 +343,7 @@ fn page_id(id: &str) -> bool {
         })
 }
 
-fn canonical_id(value: &str) -> Option<String> {
+pub(crate) fn canonical_id(value: &str) -> Option<String> {
     if page_id(value) {
         return Some(value.to_ascii_lowercase());
     }

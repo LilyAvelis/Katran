@@ -49,6 +49,80 @@ impl katran::text_fragments::ClipboardSink for Sink {
     }
 }
 struct FakeDrag(Arc<Mutex<Vec<(String, String)>>>);
+
+#[derive(Default)]
+struct BullClipboard(Arc<Mutex<Vec<baloh_collection::links::Link>>>);
+
+impl katran::copy_out::ClipboardSink for BullClipboard {
+    fn write(&mut self, paths: &[PathBuf]) -> Result<(u32, Vec<String>), String> {
+        let [path] = paths else {
+            return Err("Expected one BULL file".into());
+        };
+        let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+        *self.0.lock().unwrap() =
+            baloh_collection::links::read(file).map_err(|error| error.to_string())?;
+        Ok((78, vec![]))
+    }
+}
+
+#[test]
+fn notion_references_copy_single_urls_source_ids_and_ordered_links_bull() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 2_000_000).unwrap();
+    enabled(&mut api, ShelfTab::Links);
+    let writes = Arc::new(Mutex::new(Vec::new()));
+    api.set_text_clipboard_sink(Box::new(Sink(writes.clone())));
+    let sink = BullClipboard::default();
+    let entries = sink.0.clone();
+    api.set_media_capture_clipboard_sink(Box::new(sink));
+
+    let first = katran::notion::Page {
+        id: "12345678-1234-5678-9000-123456789001".into(),
+        title: "First".into(),
+    };
+    let second = katran::notion::Page {
+        id: "12345678-1234-5678-9000-123456789002".into(),
+        title: "Second\nrow".into(),
+    };
+    let url = "https://www.notion.so/12345678123456789000123456789001";
+    let single = call(
+        &mut api,
+        Command::CopyNotionPageLinks {
+            pages: vec![first.clone()],
+        },
+    );
+    assert_eq!(single["text_copied"], true);
+    let id = single["saved_id"].as_i64().unwrap();
+    assert_eq!(call(&mut api, Command::GetLink { id })["url"], url);
+
+    let source = call(
+        &mut api,
+        Command::CopyNotionSourceId {
+            source_id: first.id.clone(),
+        },
+    );
+    assert_eq!(source["text_copied"], true);
+    assert!(source["saved_id"].is_null());
+    assert_eq!(*writes.lock().unwrap(), [url, first.id.as_str()]);
+
+    let batch = call(
+        &mut api,
+        Command::CopyNotionPageLinks {
+            pages: vec![second, first],
+        },
+    );
+    assert_eq!(batch["copied"], 1);
+    let id = batch["saved_id"].as_i64().unwrap();
+    assert_eq!(
+        call(&mut api, Command::Get { id })["source"],
+        "link_collection"
+    );
+    let entries = entries.lock().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].title, "Second row");
+    assert_eq!(entries[1].url, url);
+}
+
 impl Runner for FakeDrag {
     fn run(&mut self, paths: &[PathBuf], _: Option<&Preview>, _: u64) -> Result<Outcome, String> {
         for p in paths {
