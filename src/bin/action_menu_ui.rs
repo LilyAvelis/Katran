@@ -296,47 +296,25 @@ impl Editor {
                         self.rename = None;
                     }
                 } else {
-                    let rename_width = 28.0;
-                    let can_remove = group.id.starts_with("custom/") && group.commands.is_empty();
-                    let controls_width = if can_remove {
-                        2.0 * rename_width + ui.spacing().item_spacing.x
-                    } else {
-                        rename_width
-                    };
-                    let label_width =
-                        (ui.available_width() - controls_width - ui.spacing().item_spacing.x)
-                            .max(1.0);
-                    ui.add_sized(
-                        [label_width, ui.spacing().interact_size.y],
-                        egui::Label::new(egui::RichText::new(&title).strong()).truncate(),
-                    )
-                    .on_hover_text(&title);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized(
-                                [rename_width, ui.spacing().interact_size.y],
-                                egui::Button::image(Lucide::Pencil.size(14.0).image()).frame(false),
+                    ui.label(egui::RichText::new(&title).strong());
+                    if ui
+                        .add(egui::Button::image(Lucide::Pencil.size(14.0).image()).frame(false))
+                        .on_hover_text(tr("Переименовать категорию", "Rename category"))
+                        .clicked()
+                    {
+                        self.rename = Some((group.id.clone(), title));
+                    }
+                    if group.id.starts_with("custom/")
+                        && group.commands.is_empty()
+                        && ui
+                            .add(
+                                egui::Button::image(Lucide::Trash2.size(14.0).image()).frame(false),
                             )
-                            .on_hover_text(tr("Переименовать категорию", "Rename category"))
+                            .on_hover_text(tr("Удалить пустую категорию", "Delete empty category"))
                             .clicked()
-                        {
-                            self.rename = Some((group.id.clone(), title));
-                        }
-                        if can_remove
-                            && ui
-                                .add(
-                                    egui::Button::image(Lucide::Trash2.size(14.0).image())
-                                        .frame(false),
-                                )
-                                .on_hover_text(tr(
-                                    "Удалить пустую категорию",
-                                    "Delete empty category",
-                                ))
-                                .clicked()
-                        {
-                            remove = Some(index);
-                        }
-                    });
+                    {
+                        remove = Some(index);
+                    }
                 }
                 ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
             });
