@@ -29,6 +29,17 @@ impl Service {
                         .tab_enabled(crate::interaction::ShelfTab::Screenshots),
             ),
             (
+                SourceId::SnippingTool,
+                self.settings
+                    .snipping_tool_folder
+                    .clone()
+                    .unwrap_or_default(),
+                self.settings.snipping_tool_folder.is_some()
+                    && self
+                        .settings
+                        .tab_enabled(crate::interaction::ShelfTab::Screenshots),
+            ),
+            (
                 SourceId::Downloads,
                 downloads,
                 self.settings
@@ -57,27 +68,34 @@ impl Service {
                 })?,
                 None => 1,
             };
-            // A new ShareX folder replaces the old live catalogue. Remove only
-            // Katran's source-owned rows; the original image files stay intact.
-            if source_id == SourceId::Sharex
+            // Replace only the catalogue rows belonging to the changed screenshot root.
+            if source_id.is_screenshot()
                 && previous
                     .as_ref()
                     .is_some_and(|(_, old_root, _)| old_root != &encoded)
             {
                 let tx = self.db.unchecked_transaction()?;
                 tx.execute(
-                    "DELETE FROM events WHERE source='sharex' AND json_extract(delete_policy_json,'$.kind')='live_original' AND json_extract(delete_policy_json,'$.source_id')='sharex'",
-                    [],
+                    "DELETE FROM events WHERE source=?1 AND json_extract(delete_policy_json,'$.kind')='live_original' AND json_extract(delete_policy_json,'$.source_id')=?1",
+                    [source_id.as_str()],
                 )?;
-                tx.execute("DELETE FROM source_projection WHERE source_id='sharex'", [])?;
-                tx.execute("DELETE FROM source_receipts WHERE source_id='sharex'", [])?;
+                tx.execute(
+                    "DELETE FROM source_projection WHERE source_id=?1",
+                    [source_id.as_str()],
+                )?;
+                tx.execute(
+                    "DELETE FROM source_receipts WHERE source_id=?1",
+                    [source_id.as_str()],
+                )?;
                 tx.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
                 tx.commit()?;
             } else {
                 self.db.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
             }
+            if source_id.is_screenshot() {
+                self.db.execute("DELETE FROM classification_work WHERE kind='source' AND (source_generation<>?1 OR ?2=0) AND event_id IN (SELECT id FROM events WHERE source=?3)",params![generation,enabled,source_id.as_str()])?;
+            }
             if source_id == SourceId::Sharex {
-                self.db.execute("DELETE FROM classification_work WHERE kind='source' AND (source_generation<>?1 OR ?2=0)",params![generation,enabled])?;
                 self.db.execute(
                     "DELETE FROM verified_source_digests WHERE source_generation<>?1 OR ?2=0",
                     params![generation, enabled],
@@ -150,7 +168,8 @@ impl Service {
                 && self
                     .settings
                     .tab_enabled(crate::interaction::ShelfTab::Screenshots)
-                && self.settings.sharex_folder.is_some(),
+                && (self.settings.sharex_folder.is_some()
+                    || self.settings.snipping_tool_folder.is_some()),
         )?;
         Ok(
             serde_json::json!({"classification_changed":classification["classification_changed"],"classification":classification,"scanned":true,"items":items,"sources":batch.statuses,"source_errors":batch.errors,"refresh":snapshot_changed}),

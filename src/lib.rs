@@ -1953,6 +1953,7 @@ impl Service {
                     self.downloads_scanner = Default::default();
                 }
                 let sources_changed = self.settings.sharex_folder != settings.sharex_folder
+                    || self.settings.snipping_tool_folder != settings.snipping_tool_folder
                     || self.settings.downloads_enabled != settings.downloads_enabled
                     || self.settings.downloads_folder != settings.downloads_folder
                     || self.settings.hidden_tabs != settings.hidden_tabs;

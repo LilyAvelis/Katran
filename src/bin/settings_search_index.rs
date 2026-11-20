@@ -21,7 +21,7 @@ const SETTINGS_SEARCH_INDEX: &[SearchEntry] = &[
     SearchEntry { section: 0, ru: "Папки и хранение", en: "Folders and storage", group_ru: "Папки и хранение", group_en: "Folders and storage" },
     SearchEntry { section: 0, ru: "Папка ShareX", en: "ShareX folder", group_ru: "Папки и хранение", group_en: "Folders and storage" },
     SearchEntry { section: 0, ru: "Папка скриншотов", en: "Screenshots folder", group_ru: "Папки и хранение", group_en: "Folders and storage" },
-    SearchEntry { section: 0, ru: "Ножницы Windows", en: "Windows Snipping Tool", group_ru: "Папки и хранение", group_en: "Folders and storage" },
+    SearchEntry { section: 0, ru: "Папка Ножниц Windows", en: "Windows Snipping Tool folder", group_ru: "Папки и хранение", group_en: "Folders and storage" },
     SearchEntry { section: 0, ru: "Папка Downloads", en: "Downloads folder", group_ru: "Папки и хранение", group_en: "Folders and storage" },
     SearchEntry { section: 0, ru: "Квота кэша · МиБ", en: "Cache quota · MiB", group_ru: "Папки и хранение", group_en: "Folders and storage" },
     SearchEntry { section: 0, ru: "История Folder", en: "Folder history", group_ru: "История Folder", group_en: "Folder history" },

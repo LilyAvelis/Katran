@@ -11,6 +11,19 @@ struct Computed {
     generation: u64,
     digest: Option<String>,
 }
+
+/// An exact match needs a current, projected Windows screenshot of this revision.
+pub(crate) fn snipping_match(digest: &str) -> String {
+    format!("EXISTS (
+        SELECT 1 FROM source_configurations c
+        JOIN classification_work s ON s.source_generation=c.generation
+        JOIN source_projection p ON p.event_id=s.event_id AND p.source_id=c.source_id AND p.generation=c.generation
+        JOIN events e ON e.id=p.event_id
+        WHERE c.source_id='snipping_tool' AND c.enabled=1 AND p.available=1
+          AND s.kind='source' AND s.state='done' AND s.digest={digest}
+          AND s.revision='ref:'||e.reference_hash
+    )")
+}
 /// Called once when the single writer opens, independently of schema migrations.
 pub(crate) fn recover_startup(db: &Connection) -> Result<()> {
     db.execute(
@@ -44,6 +57,12 @@ impl ClassificationRuntime {
                         if !current {
                             continue;
                         }
+                        if result.kind == "source" && !tx.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM source_configurations WHERE source_id=?1 AND enabled=1 AND generation=?2)",
+                            params![result.event.source, result.generation], |row| row.get::<_, bool>(0),
+                        )? {
+                            continue;
+                        }
                         let error = if result.digest.is_none() {
                             Some("unreadable_changed_or_unsupported")
                         } else {
@@ -51,10 +70,22 @@ impl ClassificationRuntime {
                         };
                         tx.execute("UPDATE classification_work SET state=?1,digest=?2,error=?3 WHERE event_id=?4 AND revision=?5 AND kind=?6 AND source_generation=?7",params![if error.is_some(){"failed"}else{"done"},result.digest,error,result.event.id,result.event.revision,result.kind,result.generation])?;
                         if let Some(digest) = result.digest {
-                            if result.kind=="source" {
-       let inserted=tx.execute("INSERT OR IGNORE INTO verified_source_digests SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM source_configurations WHERE source_id='sharex' AND generation=?2 AND enabled=1)",params![digest,result.generation])?;
-       if inserted>0 && tx.query_row("SELECT EXISTS(SELECT 1 FROM classification_work WHERE digest=?1 AND kind='clipboard' AND state='done')",params![digest],|r|r.get::<_,bool>(0))? {changed+=1;}
-      } else if tx.query_row("SELECT EXISTS(SELECT 1 FROM verified_source_digests d JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation WHERE d.digest=?1)",params![digest],|r|r.get::<_,bool>(0))? {changed+=1;}
+                            let affects_shelf = if result.kind == "source" {
+                                let new_match = result.event.source != "sharex" || tx.execute(
+                                    "INSERT OR IGNORE INTO verified_source_digests VALUES(?1,?2)",
+                                    params![digest, result.generation],
+                                )? > 0;
+                                new_match && tx.query_row(
+                                    "SELECT EXISTS(SELECT 1 FROM classification_work WHERE digest=?1 AND kind='clipboard' AND state='done')",
+                                    [&digest], |row| row.get::<_, bool>(0),
+                                )?
+                            } else {
+                                tx.query_row(
+                                    &format!("SELECT EXISTS(SELECT 1 FROM verified_source_digests d JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation WHERE d.digest=?1) OR {}", snipping_match("?1")),
+                                    [&digest], |row| row.get::<_, bool>(0),
+                                )?
+                            };
+                            changed += usize::from(affects_shelf);
                         }
                     }
                     tx.commit()?;
@@ -68,7 +99,7 @@ impl ClassificationRuntime {
         }
         if allow_new_work && self.pending.is_none() {
             let tasks = {
-                let mut stmt=db.prepare("SELECT w.event_id,w.kind,w.source_generation FROM classification_work w WHERE w.state='queued' AND (w.kind='clipboard' OR EXISTS(SELECT 1 FROM source_configurations c WHERE c.source_id='sharex' AND c.enabled=1 AND c.generation=w.source_generation)) ORDER BY w.event_id LIMIT 8")?;
+                let mut stmt=db.prepare("SELECT w.event_id,w.kind,w.source_generation FROM classification_work w WHERE w.state='queued' AND (w.kind='clipboard' OR EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=w.event_id AND p.generation=w.source_generation)) ORDER BY w.event_id LIMIT 8")?;
                 stmt.query_map([], |r| {
                     Ok((
                         r.get::<_, i64>(0)?,

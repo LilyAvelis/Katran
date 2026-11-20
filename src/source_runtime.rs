@@ -64,17 +64,12 @@ impl SourceRuntime {
         Self::default()
     }
     pub fn configure(&mut self, configurations: Vec<SourceConfiguration>) -> Result<()> {
-        if configurations.len() > 2
-            || configurations.iter().enumerate().any(|(i, c)| {
-                configurations[..i]
-                    .iter()
-                    .any(|other| other.source_id == c.source_id)
-            })
-        {
-            return Err(ApiError::new(
-                "invalid_argument",
-                "Sources must be unique and at most two",
-            ));
+        if configurations.iter().enumerate().any(|(i, c)| {
+            configurations[..i]
+                .iter()
+                .any(|other| other.source_id == c.source_id)
+        }) {
+            return Err(ApiError::new("invalid_argument", "Sources must be unique"));
         }
         for slot in &mut self.slots {
             if !configurations

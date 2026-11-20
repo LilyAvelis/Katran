@@ -497,7 +497,7 @@ fn slice_projection(
     }
     let category = match tab {
         ShelfTab::All => "0".to_owned(),
-        ShelfTab::Screenshots => "e.source='sharex'".into(),
+        ShelfTab::Screenshots => "e.source IN ('sharex','snipping_tool')".into(),
         ShelfTab::Downloads => "e.source='downloads'".into(),
         ShelfTab::Text => text_shelf_predicate().into(),
         ShelfTab::Pages => "0".into(),
@@ -508,7 +508,7 @@ fn slice_projection(
         ShelfTab::Links => link_shelf_predicate().into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Images => format!(
-            "{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
+            "{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','snipping_tool','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
             image_shelf_predicate()
         ),
     };
@@ -669,14 +669,16 @@ fn sql() -> String {
     // Separate source branches bind all leading browse-index columns. CROSS
     // JOIN keeps projection first; an events-first plan scans ordinary history
     // just to discover that the live source has no rows.
-    let live = |source: &str, app: &str| {
+    let live = |source: crate::source_policy::SourceId, shelf: &str, additional: &str| {
+        let app = source.display_name();
+        let source = source.as_str();
         format!(
             r#"
         SELECT p.event_id AS id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,
           json_set(CASE WHEN json_valid(e.origin_json) THEN e.origin_json ELSE '{{}}' END,'$.source_app','{app}'),
           e.reference_hash,e.delete_policy_json,p.available AS projected_available,NULL AS text_preview,0 AS is_link,0 AS is_table,e.modified_at_ms
         FROM source_projection p CROSS JOIN events e ON e.id=p.event_id
-        WHERE ?2=0 AND (?3='' OR ?3='{source}') AND p.source_id='{source}' AND p.available=1
+        WHERE ?2=0 AND (?3='' OR ?3='{shelf}') AND p.source_id='{source}' AND p.available=1
           AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id)
           AND p.generation=(SELECT generation FROM source_configurations WHERE source_id='{source}' AND enabled=1)
           AND p.event_id <= ?4
@@ -684,6 +686,7 @@ fn sql() -> String {
           AND json_extract(e.delete_policy_json,'$.source_id')=p.source_id
           AND json_extract(e.delete_policy_json,'$.generation')=p.generation
           AND {search}
+          {additional}
     "#,
             search = search_predicate(&format!("'{app}'"), "")
         )
@@ -709,13 +712,18 @@ fn sql() -> String {
               )
               AND NOT EXISTS (
                   SELECT 1 FROM classification_work w
-                  JOIN verified_source_digests d ON d.digest=w.digest
-                  JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation
                   WHERE w.event_id=e.id AND w.kind='clipboard' AND w.state='done'
                     AND w.revision=CASE WHEN e.blob_hash IS NOT NULL THEN 'blob:'||e.blob_hash WHEN e.reference_hash IS NOT NULL THEN 'ref:'||e.reference_hash ELSE '' END
+                    AND (EXISTS (
+                        SELECT 1 FROM verified_source_digests d
+                        JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation
+                        WHERE d.digest=w.digest
+                    ) OR {snipping_match})
               )
             UNION ALL
             {sharex}
+            UNION ALL
+            {snipping_tool}
             UNION ALL
             {downloads}
         ORDER BY id DESC LIMIT ?6
@@ -725,8 +733,16 @@ fn sql() -> String {
             "CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END",
             "",
         ),
-        sharex = live("sharex", "ShareX folder"),
-        downloads = live("downloads", "Downloads")
+        snipping_match = crate::classification_runtime::snipping_match("w.digest"),
+        sharex = live(crate::source_policy::SourceId::Sharex, "sharex", ""),
+        snipping_tool = live(
+            crate::source_policy::SourceId::SnippingTool,
+            "sharex",
+            "AND NOT EXISTS (SELECT 1 FROM source_projection x JOIN source_configurations c
+                ON c.source_id=x.source_id AND c.generation=x.generation AND c.enabled=1
+                WHERE x.source_id='sharex' AND x.path_key=p.path_key AND x.available=1)"
+        ),
+        downloads = live(crate::source_policy::SourceId::Downloads, "downloads", "")
     )
 }
 

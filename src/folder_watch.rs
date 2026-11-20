@@ -32,6 +32,7 @@ pub(crate) fn is_recovery_dir(root: &std::path::Path, directory: &std::path::Pat
 #[serde(rename_all = "snake_case")]
 pub enum FolderSource {
     Sharex,
+    SnippingTool,
     Downloads,
 }
 #[derive(Clone, Debug)]
@@ -286,7 +287,7 @@ impl Root {
         }
         if self.due.is_some_and(|due| Instant::now() >= due) {
             let paths = match self.source {
-                FolderSource::Sharex => self.shots.scan(&self.root),
+                FolderSource::Sharex | FolderSource::SnippingTool => self.shots.scan(&self.root),
                 FolderSource::Downloads => self.downloads.scan(&self.root),
             };
             match paths {

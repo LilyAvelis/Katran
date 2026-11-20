@@ -4,6 +4,120 @@ use katran::sharex::SharexScanner;
 use std::fs;
 
 #[test]
+fn screenshot_folders_merge_and_classify_clipboard_copies_independently() {
+    use katran::{Command, Service, interaction::ShelfTab, settings::Settings};
+    use source_api::{call, poll_until};
+
+    let data = tempfile::tempdir().unwrap();
+    let sharex = tempfile::tempdir().unwrap();
+    let snipping = tempfile::tempdir().unwrap();
+    let replacement = tempfile::tempdir().unwrap();
+    let sharex_image = sharex.path().join("sharex.png");
+    let snipping_image = snipping.path().join("snip.png");
+    for (path, shade) in [(&sharex_image, 45), (&snipping_image, 91)] {
+        image::RgbaImage::from_pixel(2, 3, image::Rgba([shade, 20, 30, 255]))
+            .save(path)
+            .unwrap();
+    }
+    let mut api = Service::open(data.path(), 100_000).unwrap();
+    let mut settings = Settings::defaults(100_000);
+    settings.sharex_folder = Some(sharex.path().into());
+    settings.snipping_tool_folder = Some(snipping.path().into());
+    settings.downloads_enabled = false;
+    call(
+        &mut api,
+        Command::SetSettings {
+            settings: settings.clone(),
+        },
+    );
+    let browse = |api: &mut Service, tab| {
+        call(api, Command::SetTab { tab });
+        call(
+            api,
+            Command::BrowseShelf {
+                query: String::new(),
+                limit: 20,
+                after_id: None,
+            },
+        )["events"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let ingest_copy = |api: &mut Service, path: &std::path::Path| {
+        call(
+            api,
+            Command::IngestBytes {
+                name: "clipboard.png".into(),
+                bytes: fs::read(path).unwrap(),
+                source: "clipboard_image".into(),
+            },
+        )["id"]
+            .clone()
+    };
+    let sharex_copy = ingest_copy(&mut api, &sharex_image);
+    poll_until(
+        &mut api,
+        "two screenshot originals and the ShareX match",
+        |api, batch| {
+            assert!(
+                batch["source_errors"].as_array().unwrap().is_empty(),
+                "{batch}"
+            );
+            browse(api, ShelfTab::Screenshots).len() == 2
+                && batch["classification"]["queued"] == 0
+                && browse(api, ShelfTab::Images).is_empty()
+        },
+    );
+    let screenshots = browse(&mut api, ShelfTab::Screenshots);
+    let sharex_id = screenshots
+        .iter()
+        .find(|row| row["source"] == "sharex")
+        .unwrap()["id"]
+        .clone();
+    assert!(
+        screenshots
+            .iter()
+            .any(|row| row["source"] == "snipping_tool")
+    );
+
+    // The Snipping Tool original is already indexed when its clipboard copy arrives.
+    let snipping_copy = ingest_copy(&mut api, &snipping_image);
+    poll_until(&mut api, "Snipping Tool clipboard match", |api, batch| {
+        batch["classification"]["queued"] == 0 && browse(api, ShelfTab::Images).is_empty()
+    });
+    settings.snipping_tool_folder = Some(replacement.path().into());
+    call(
+        &mut api,
+        Command::SetSettings {
+            settings: settings.clone(),
+        },
+    );
+    let remaining = browse(&mut api, ShelfTab::Screenshots);
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0]["id"], sharex_id);
+    let images = browse(&mut api, ShelfTab::Images);
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0]["id"], snipping_copy);
+    assert_ne!(images[0]["id"], sharex_copy);
+    assert!(snipping_image.is_file());
+
+    // Pointing both sources at the same folder still displays one card per path.
+    settings.snipping_tool_folder = Some(sharex.path().into());
+    call(&mut api, Command::SetSettings { settings });
+    poll_until(&mut api, "overlapping source projection", |_, batch| {
+        batch["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["event"]["source"] == "snipping_tool")
+    });
+    let screenshots = browse(&mut api, ShelfTab::Screenshots);
+    assert_eq!(screenshots.len(), 1);
+    assert_eq!(screenshots[0]["id"], sharex_id);
+}
+
+#[test]
 fn stable_files_are_offered_once_and_updates_wait_again() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("capture.PNG");

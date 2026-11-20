@@ -1,6 +1,6 @@
 //! Private prepared receipts issued by SourceRuntime; never deserialized from a client.
 use crate::{
-    source_policy::{DeletePolicy, OriginalDeleteMode, SourceId},
+    source_policy::{DeletePolicy, OriginalDeleteMode},
     *,
 };
 impl Service {
@@ -70,10 +70,7 @@ impl Service {
         let policy = DeletePolicy::LiveOriginal {
             source_id: configuration.source_id,
             generation: configuration.generation,
-            mode: match configuration.source_id {
-                SourceId::Sharex => OriginalDeleteMode::Recycle,
-                SourceId::Downloads => OriginalDeleteMode::Recycle,
-            },
+            mode: OriginalDeleteMode::Recycle,
         };
         let tx = self.db.unchecked_transaction()?;
         // A pre-hardening reference is reused only after this worker verified the actual file.
@@ -86,14 +83,7 @@ impl Service {
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| ApiError::new("invalid_argument", "Non-Unicode filename"))?;
             let origin = origin::Origin {
-                source_app: Some(
-                    if configuration.source_id == SourceId::Sharex {
-                        "ShareX folder"
-                    } else {
-                        "Downloads"
-                    }
-                    .into(),
-                ),
+                source_app: Some(configuration.source_id.display_name().into()),
                 source_domain: None,
             };
             tx.execute("INSERT INTO events(detected_at_ms,source,name,path,size,blob_hash,origin_json,reference_hash) VALUES(?1,?2,?3,?4,?5,NULL,?6,?7)",params![now_ms(),source,name,path.to_string_lossy(),item.size,serde_json::to_string(&origin).unwrap(),item.content_hash])?;
@@ -105,7 +95,7 @@ impl Service {
         )?;
         tx.execute("INSERT INTO source_projection VALUES(?1,?2,?3,?4,1) ON CONFLICT(source_id,generation,path_key) DO UPDATE SET event_id=excluded.event_id,available=1",params![source,configuration.generation,key,id])?;
         tx.execute("INSERT INTO source_receipts VALUES(?1,?2,?3,?4,?5) ON CONFLICT(source_id,root_key,path_key) DO UPDATE SET hash=excluded.hash,event_id=excluded.event_id",params![source,root_key,key,item.content_hash,id])?;
-        if configuration.source_id == SourceId::Sharex && file_types::is_native_image(&path) {
+        if configuration.source_id.is_screenshot() && file_types::is_native_image(&path) {
             tx.execute("INSERT OR IGNORE INTO classification_work(event_id,revision,kind,source_generation) VALUES(?1,?2,'source',?3)",params![id,format!("ref:{}",item.content_hash),configuration.generation])?;
         }
         tx.commit()?;

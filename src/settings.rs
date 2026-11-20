@@ -184,6 +184,8 @@ pub struct Settings {
     pub downloads_enabled: bool,
     pub downloads_folder: Option<std::path::PathBuf>,
     pub sharex_folder: Option<std::path::PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snipping_tool_folder: Option<std::path::PathBuf>,
     pub card_width: f32,
     pub default_view: View,
     pub capture_on_start: bool,
@@ -260,6 +262,7 @@ impl Settings {
             tables_enabled: false,
             pods_enabled: false,
             sharex_folder: None,
+            snipping_tool_folder: None,
             downloads_enabled: true,
             downloads_folder: None,
             card_width: 280.0,
@@ -469,6 +472,13 @@ impl Settings {
             && !folder.is_absolute()
         {
             return Err("ShareX: укажите абсолютную папку".into());
+        }
+        if self
+            .snipping_tool_folder
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute())
+        {
+            return Err("Windows Snipping Tool: absolute folder required".into());
         }
         if self
             .downloads_folder

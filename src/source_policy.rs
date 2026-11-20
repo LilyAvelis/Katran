@@ -7,13 +7,25 @@ use std::path::PathBuf;
 #[serde(rename_all = "snake_case")]
 pub enum SourceId {
     Sharex,
+    SnippingTool,
     Downloads,
 }
 impl SourceId {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sharex => "sharex",
+            Self::SnippingTool => "snipping_tool",
             Self::Downloads => "downloads",
+        }
+    }
+    pub fn is_screenshot(self) -> bool {
+        matches!(self, Self::Sharex | Self::SnippingTool)
+    }
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Sharex => "ShareX folder",
+            Self::SnippingTool => "Windows Snipping Tool",
+            Self::Downloads => "Downloads",
         }
     }
 }
@@ -21,6 +33,7 @@ impl From<crate::folder_watch::FolderSource> for SourceId {
     fn from(value: crate::folder_watch::FolderSource) -> Self {
         match value {
             crate::folder_watch::FolderSource::Sharex => Self::Sharex,
+            crate::folder_watch::FolderSource::SnippingTool => Self::SnippingTool,
             crate::folder_watch::FolderSource::Downloads => Self::Downloads,
         }
     }
@@ -29,6 +42,7 @@ impl From<SourceId> for crate::folder_watch::FolderSource {
     fn from(value: SourceId) -> Self {
         match value {
             SourceId::Sharex => Self::Sharex,
+            SourceId::SnippingTool => Self::SnippingTool,
             SourceId::Downloads => Self::Downloads,
         }
     }

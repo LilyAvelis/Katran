@@ -40,6 +40,7 @@ pub struct State {
     overlay_retry: bool,
     shortcut_filter: String,
     sharex_folder: String,
+    snipping_tool_folder: String,
     downloads_folder: String,
     refresh_links_requested: bool,
     pending_save: Option<Instant>,
@@ -1851,6 +1852,7 @@ impl State {
             self.media_runtime = None;
             self.emoji_fonts = None;
             self.sharex_folder.clear();
+            self.snipping_tool_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
             self.tab_hotkey_target = None;
@@ -1889,6 +1891,15 @@ impl State {
                 .unwrap_or_default();
         }
         if let Some(draft) = self.draft.as_ref()
+            && self.snipping_tool_folder.is_empty()
+        {
+            self.snipping_tool_folder = draft
+                .snipping_tool_folder
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+        if let Some(draft) = self.draft.as_ref()
             && self.downloads_folder.is_empty()
         {
             self.downloads_folder = draft
@@ -1904,7 +1915,7 @@ impl State {
         let mut theme_intent = None;
         let mut explicit_save = false;
         let mut font_changed = false;
-        let mut refresh_sharex = false;
+        let mut refresh_source = None;
         let mut path_editing = false;
         let mut video_gpu_intent = None;
         let sidebar_depth = self
@@ -2198,14 +2209,23 @@ impl State {
          }
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
-         SettingsRow::show(ui,super::i18n::tr("Папка скриншотов", "Screenshots folder"),super::i18n::tr("Укажи папку автосохранения из ShareX или «Ножниц» Windows. Katran показывает оригиналы в Screenshots и скрывает их точные копии из буфера в Images. Пустое поле отключает импорт.", "Use the autosave folder from ShareX or Windows Snipping Tool. Katran shows originals in Screenshots and hides their exact clipboard copies in Images. Leave empty to disable import."),|ui|{
-          let response=ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")));
-          path_editing |= response.has_focus();
-          if response.changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}
-          if ui.button(super::i18n::tr("Обновить", "Refresh")).clicked() {
-           refresh_sharex=true;
-          }
-         });
+         use katran::source_policy::SourceId;
+         let tr = super::i18n::tr;
+         for (source, title, text, folder) in [
+          (SourceId::Sharex, tr("Папка ShareX", "ShareX folder"), &mut self.sharex_folder, &mut draft.sharex_folder),
+          (SourceId::SnippingTool, tr("Папка Ножниц Windows", "Windows Snipping Tool folder"), &mut self.snipping_tool_folder, &mut draft.snipping_tool_folder),
+         ] {
+          SettingsRow::show(ui, title, tr("Оригиналы из этой папки появятся в Screenshots. Пустое поле отключает источник.", "Originals from this folder appear in Screenshots. Leave empty to disable this source."), |ui| {
+           let response = ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(text).hint_text(tr("Папка автосохранения", "Autosave folder"))));
+           path_editing |= response.has_focus();
+           if response.changed() {
+            *folder = (!text.trim().is_empty()).then(|| std::path::PathBuf::from(text.trim()));
+           }
+           if ui.add_enabled(folder.is_some(), egui::Button::new(tr("Обновить", "Refresh"))).clicked() {
+            refresh_source = Some(source);
+           }
+          });
+         }
          SettingsRow::show(ui,super::i18n::tr("Папка Downloads", "Downloads folder"),super::i18n::tr("Пустое поле использует системную папку загрузок Windows. Можно указать другую абсолютную папку.", "Leave empty to use the Windows Downloads folder, or enter another absolute path."),|ui|{
           let response=ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.downloads_folder).hint_text(super::i18n::tr("Системная папка Downloads", "System Downloads folder"))));
           path_editing |= response.has_focus();
@@ -2647,7 +2667,7 @@ impl State {
         }
         let save_now = explicit_save
             || font_changed
-            || refresh_sharex
+            || refresh_source.is_some()
             || close
             || (!path_editing
                 && self
@@ -2668,13 +2688,8 @@ impl State {
                                 egui::ViewportCommand::Resizable(saved.window_resizable),
                             );
                         }
-                        if refresh_sharex {
-                            let result = call(
-                                api,
-                                Command::RescanSource {
-                                    source_id: katran::source_policy::SourceId::Sharex,
-                                },
-                            );
+                        if let Some(source_id) = refresh_source {
+                            let result = call(api, Command::RescanSource { source_id });
                             self.error = if result["ok"] == true {
                                 super::i18n::tr(
                                     "Обновление снимков запущено",
@@ -2722,6 +2737,7 @@ impl State {
             self.pending_save = None;
             self.custom_backgrounds = None;
             self.sharex_folder.clear();
+            self.snipping_tool_folder.clear();
             self.downloads_folder.clear();
             self.editor = None;
             ctx.request_repaint();

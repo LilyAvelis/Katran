@@ -639,7 +639,7 @@ pub(crate) fn visible_collection_input(
         ShelfTab::Pages => "0".into(),
         ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
         ShelfTab::Images => format!(
-            "{} AND NOT {membership} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
+            "{} AND NOT {membership} AND e.source NOT IN ('sharex','snipping_tool','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id)",
             crate::catalogue_query::image_shelf_predicate()
         ),
         _ => return Ok(false),
