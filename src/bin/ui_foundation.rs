@@ -46,18 +46,39 @@ impl SettingsSection {
         ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false))
     }
 
+    pub fn scroll_to_group(ctx: &egui::Context, title: &str) {
+        let id = egui::Id::new(("settings-scroll-group", ctx.viewport_id()));
+        ctx.data_mut(|data| data.insert_temp(id, title.to_owned()));
+    }
+
+    pub fn clear_scroll_target(ctx: &egui::Context) {
+        let id = egui::Id::new(("settings-scroll-group", ctx.viewport_id()));
+        ctx.data_mut(|data| {
+            data.remove::<String>(id);
+        });
+    }
+
     /// A named group keeps related preferences in one raised panel.
     pub fn group(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui::Ui)) {
         ui.add_space(tokens::SM);
-        if Self::depth(ui) {
-            ui.label(
+        let target_id = egui::Id::new(("settings-scroll-group", ui.ctx().viewport_id()));
+        let target = ui.data(|data| data.get_temp::<String>(target_id));
+        let heading = if Self::depth(ui) {
+            let heading = ui.label(
                 RichText::new(title)
                     .size(17.0)
                     .family(egui::FontFamily::Name(crate::ui_fonts::BOLD_FAMILY.into())),
             );
             section_rule(ui);
+            heading
         } else {
-            ui.label(RichText::new(title).strong());
+            ui.label(RichText::new(title).strong())
+        };
+        if target.as_deref() == Some(title) {
+            heading.scroll_to_me(Some(egui::Align::TOP));
+            ui.data_mut(|data| {
+                data.remove::<String>(target_id);
+            });
         }
         ui.add_space(tokens::XS);
         Self::show(ui, content);

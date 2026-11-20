@@ -540,32 +540,97 @@ fn glass_section_button(
     response
 }
 
-/// Search routes to the owning page, including settings inside named groups.
-fn section_matches_query(index: usize, label: &str, query: &str) -> bool {
-    let terms = match index {
-        0 => {
-            "general language язык запуск startup controls управление вызов katran захват capture поиск search сортировка ссылки значки favicon обновление плитки pods links галерея поток столбцы строки шрифт эмодзи папка sharex downloads кэш quota квота история folder gpu нейроиндекс neural index видеокарта"
-        }
-        1 => "shortcuts команда клавиатура сочетание shortcut hotkey",
-        2 => "tabs доступные вкладки включить выключить сбор данных",
-        3 => "updates версия установка обновить",
-        4 => {
-            "themes тема цвета акцент выделение интенсивность окно compact компактное стекло оптика gpu преломление размытие фон background лилии изображение видео components компоненты сглаживать стык декор линии прокрутка scrollbar полоса"
-        }
-        5 => "tags метки теги tag",
-        6 => {
-            "ai ии нейропоиск модели models emoji folder cuda gpu install установка компоненты перевод изображений translate image японский japanese китайский chinese корейский korean ocr язык language"
-        }
-        7 => "integrations интеграции notion pages токен token",
-        AESTHETIC_SECTION => {
-            "aesthetic эстетика experimental effects экспериментальные эффекты sidebar боковая панель icons иконки raised объём кнопок section order порядок разделов compact summon запись сочетания вызова"
-        }
-        _ => "",
+#[derive(Clone, Copy)]
+struct SearchEntry {
+    section: usize,
+    ru: &'static str,
+    en: &'static str,
+    group_ru: &'static str,
+    group_en: &'static str,
+}
+include!("settings_search_index.rs");
+
+fn search_results(query: &str) -> Vec<(SearchEntry, bool)> {
+    let query = query.to_lowercase();
+    let words: Vec<_> = query.split_whitespace().collect();
+    if words.is_empty() {
+        return Vec::new();
+    }
+
+    let matches = |text: &str| {
+        let text = text.to_lowercase();
+        words.iter().all(|word| text.contains(word))
     };
-    let query = query.trim().to_lowercase();
-    query
-        .split_whitespace()
-        .all(|word| label.to_lowercase().contains(word) || terms.contains(word))
+    let mut results = Vec::new();
+    for &entry in SETTINGS_SEARCH_INDEX {
+        let ((page_ru, page_en), _) = SECTIONS[entry.section];
+        let title = format!("{} {}", entry.ru, entry.en);
+        let title_matches = matches(&title);
+        if title_matches
+            || matches(&format!(
+                "{title} {} {} {page_ru} {page_en}",
+                entry.group_ru, entry.group_en
+            ))
+        {
+            results.push((entry, false, title_matches));
+        }
+    }
+    for action in katran::actions::DEFS
+        .iter()
+        .filter(|action| !action.id.starts_with("sort_"))
+    {
+        let en = english_shortcut_label(action.id, action.label);
+        if matches(&format!("{} {en}", action.label)) {
+            results.push((
+                SearchEntry {
+                    section: 1,
+                    ru: action.label,
+                    en,
+                    group_ru: "",
+                    group_en: "",
+                },
+                true,
+                true,
+            ));
+        }
+    }
+    results.sort_by_key(|(_, _, title_matches)| !title_matches);
+    results
+        .into_iter()
+        .map(|(entry, shortcut, _)| (entry, shortcut))
+        .collect()
+}
+
+#[cfg(test)]
+mod settings_search_tests {
+    use super::*;
+
+    #[test]
+    fn searches_individual_settings_in_both_languages() {
+        for (query, section, label) in [
+            ("glass navigation buttons", 8, "Glass navigation buttons"),
+            ("стеклянные кнопки навигации", 8, "Glass navigation buttons"),
+            ("gpu acceleration", 0, "GPU acceleration for video"),
+            ("downloads folder", 0, "Downloads folder"),
+            ("notion", 7, "Notion"),
+        ] {
+            assert!(
+                search_results(query)
+                    .iter()
+                    .any(|(entry, _)| entry.section == section && entry.en == label),
+                "missing search result for {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn searches_individual_shortcut_commands() {
+        assert!(
+            search_results("rename")
+                .iter()
+                .any(|(entry, shortcut)| *shortcut && entry.section == 1 && entry.en == "Rename…")
+        );
+    }
 }
 
 fn navigation_keys(ctx: &egui::Context) -> (bool, i32) {
@@ -605,33 +670,37 @@ fn navigation_keys(ctx: &egui::Context) -> (bool, i32) {
 
 fn localized_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
     if super::i18n::is_english() {
-        let direct = match id {
-            "pods" => "Tab: Pods",
-            "search_with_ai" => "Search with AI",
-            "folder_favorites" => "Favorite folders",
-            "folder_history" => "Folder history",
-            "files" => "Tab: Files",
-            "tables" => "Tab: Tables",
-            "text" => "Tab: Text",
-            "links" => "Tab: Links",
-            "downloads" => "Tab: Downloads",
-            "all" => "Tab: Folder",
-            "images" => "Tab: Images",
-            "screenshots" => "Tab: Screenshots",
-            "tab_toggle" => "Folder / previous tab",
-            "toggle_pinned_view" => "All / pinned in category",
-            "capture" => "Toggle capture",
-            "commands" => "Open commands",
-            _ => "",
-        };
-        if !direct.is_empty() {
-            return direct;
-        }
-        let english = katran::actions::english_label(id, "");
-        if english.is_empty() { russian } else { english }
+        english_shortcut_label(id, russian)
     } else {
         russian
     }
+}
+
+fn english_shortcut_label<'a>(id: &str, russian: &'a str) -> &'a str {
+    let direct = match id {
+        "pods" => "Tab: Pods",
+        "search_with_ai" => "Search with AI",
+        "folder_favorites" => "Favorite folders",
+        "folder_history" => "Folder history",
+        "files" => "Tab: Files",
+        "tables" => "Tab: Tables",
+        "text" => "Tab: Text",
+        "links" => "Tab: Links",
+        "downloads" => "Tab: Downloads",
+        "all" => "Tab: Folder",
+        "images" => "Tab: Images",
+        "screenshots" => "Tab: Screenshots",
+        "tab_toggle" => "Folder / previous tab",
+        "toggle_pinned_view" => "All / pinned in category",
+        "capture" => "Toggle capture",
+        "commands" => "Open commands",
+        _ => "",
+    };
+    if !direct.is_empty() {
+        return direct;
+    }
+    let english = katran::actions::english_label(id, "");
+    if english.is_empty() { russian } else { english }
 }
 
 fn localized_tab_label(label: &str) -> &str {
@@ -1853,6 +1922,7 @@ impl State {
    };
    let surface=super::theme_ui::color(ctx,super::theme_ui::Role::Surface,Color32::from_gray(69));
    let background=super::theme_ui::color(ctx,super::theme_ui::Role::Background,Color32::from_gray(65));
+   let mut scroll_to_page_top = false;
    egui::CentralPanel::default().frame(egui::Frame::new().fill(surface)).show(ctx,|ui| {
     let (_,drag)=ui.allocate_exact_size(egui::vec2(ui.available_width(),8.0),egui::Sense::drag());
     if drag.drag_started(){ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);}
@@ -1878,10 +1948,9 @@ impl State {
       .id(search_id)
       .hint_text(super::i18n::tr("Поиск настроек…", "Search settings…")));
      ui.add_sized([ui.available_width(), 36.0], search).on_hover_text("Ctrl+T");
+     if self.query.trim().is_empty() {
      let order = self.draft.as_ref().map_or(&[][..], |draft| draft.settings_section_order.as_slice());
-     let shown = section_order(order).into_iter().filter(|&index| {
-      section_matches_query(index, SECTIONS[index].0.0, &self.query)
-     }).collect::<Vec<_>>();
+     let shown = section_order(order);
      let keyboard_target = if direction != 0 && !shown.is_empty() {
       let position = shown.iter().position(|&index| index == self.section);
       let next = match position {
@@ -1922,11 +1991,45 @@ impl State {
         }
        }
       });
+     } else {
+      ui.add_space(16.0);
+      ui.label(RichText::new(super::i18n::tr("РЕЗУЛЬТАТЫ", "RESULTS")).size(10.0).color(Color32::from_gray(173)));
+      ui.add_space(8.0);
+      let results = search_results(&self.query);
+      let footer_height = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+      egui::ScrollArea::vertical().id_salt("settings-search-results")
+       .max_height((ui.available_height() - footer_height).max(0.0)).show(ui, |ui| {
+        if results.is_empty() { ui.weak(super::i18n::tr("Ничего не найдено", "No settings found")); }
+        for (entry, shortcut) in results {
+         let ((page_ru, page_en), _) = SECTIONS[entry.section];
+         let title = super::i18n::tr(entry.ru, entry.en);
+         let page = super::i18n::tr(page_ru, page_en);
+         let group = super::i18n::tr(entry.group_ru, entry.group_en);
+         let label = if group.is_empty() || group == title {
+          format!("{}\n{}", title, page)
+         } else {
+          format!("{}\n{} · {}", title, page, group)
+         };
+         if ui.add_sized([ui.available_width(), 42.0], egui::Button::new(label).wrap()).clicked() {
+          self.switch_section(entry.section);
+          if entry.section == 1 {
+           self.shortcut_filter = if shortcut { title.to_owned() } else { String::new() };
+           self.editor = None;
+          }
+          scroll_to_page_top = group.is_empty();
+          if !scroll_to_page_top { SettingsSection::scroll_to_group(ui.ctx(), group); }
+          root_ctx.request_repaint_of(egui::ViewportId::ROOT);
+         }
+        }
+       });
+     }
      ui.with_layout(egui::Layout::bottom_up(egui::Align::Min),|ui|{ui.weak(crate::BUILD_LABEL).on_hover_text(super::i18n::tr("Ctrl+, — закрыть настройки", "Ctrl+, — close settings"));});
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(egui::Margin::symmetric(0, 24))).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
-    egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]).show(ui,|ui|{
+    let page_scroll = egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]);
+    let page_scroll = if scroll_to_page_top { page_scroll.vertical_scroll_offset(0.0) } else { page_scroll };
+    page_scroll.show(ui,|ui|{
      egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
       section_heading(ui, self.section, section_headers);
       if self.section != 2 && self.tab_hotkey_target.is_some() && let Some(editor)=self.editor.as_mut() {
@@ -2410,6 +2513,7 @@ impl State {
       if !self.error.is_empty(){super::ui_foundation::message(ui,&self.error,false);}
      });
      });
+     SettingsSection::clear_scroll_target(ui.ctx());
     });
    });
   });
