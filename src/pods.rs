@@ -113,6 +113,12 @@ pub(crate) fn register_sql(db: &rusqlite::Connection) -> crate::Result<()> {
 
 // Stable, reserved session IDs; they never address stored events or Folder files.
 const EMOJI_ID_BASE: i64 = -(1_i64 << 61);
+
+pub fn catalogue_emoji() -> impl Iterator<Item = &'static str> {
+    crate::pod_metadata::emoji_entries()
+        .iter()
+        .map(|entry| entry.text.as_str())
+}
 pub(crate) fn emoji_id_for_text(text: &str) -> Option<i64> {
     static IDS: std::sync::OnceLock<std::collections::HashMap<&'static str, i64>> =
         std::sync::OnceLock::new();

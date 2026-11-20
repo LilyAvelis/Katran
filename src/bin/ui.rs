@@ -410,6 +410,7 @@ struct Shelf {
     next_cursor: Option<String>,
     preloaded_has_more: bool,
     tab_preload: tab_preload_ui::State,
+    startup_visuals: tab_preload_ui::StartupVisuals,
     sorting_input: sorting_input::State,
     pending_sort: Option<String>,
     glass_active: bool,
@@ -789,8 +790,38 @@ impl Shelf {
             ctx.request_repaint_after(Duration::from_millis(200).saturating_sub(shown.elapsed()));
         }
     }
+    fn configure_pods_font(&mut self, settings: &Value) {
+        if let Some(font_id) = settings["emoji_font"].as_str()
+            && self.pods_ui.font_selection() != Some(font_id)
+        {
+            let font_id = font_id.to_owned();
+            let resolved = self.call(Command::ResolveEmojiFont {
+                id: font_id.clone(),
+            });
+            let available = resolved["available"] == true;
+            let path = if available {
+                resolved["path"].as_str().map(PathBuf::from)
+            } else {
+                None
+            };
+            let error = (!available).then(|| {
+                let label = resolved["label"].as_str().unwrap_or(&font_id);
+                if i18n::is_english() {
+                    format!("Emoji font {label} unavailable; using the system font.")
+                } else {
+                    format!("Шрифт эмодзи {label} недоступен; используется системный.")
+                }
+            });
+            if let Some(error) = &error {
+                self.message = error.clone();
+            }
+            self.pods_ui.configure_font(font_id, path, error);
+        }
+    }
     fn render(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        self.startup_visuals
+            .upload(&ctx, &mut self.images, &mut self.pods_ui);
         self.save_notion_reader_copy(&ctx);
         if self.transfer_input_reserved() {
             root.disable();
@@ -815,32 +846,7 @@ impl Shelf {
                 .set_online(settings["link_favicons_online"] == true);
             self.experimental_glass_tabs = settings["theme"]["experimental_glass_tabs"] == true
                 && settings["theme"]["preset"] == "blue_experimental";
-            if let Some(font_id) = settings["emoji_font"].as_str()
-                && self.pods_ui.font_selection() != Some(font_id)
-            {
-                let font_id = font_id.to_owned();
-                let resolved = self.call(Command::ResolveEmojiFont {
-                    id: font_id.clone(),
-                });
-                let available = resolved["available"] == true;
-                let path = if available {
-                    resolved["path"].as_str().map(PathBuf::from)
-                } else {
-                    None
-                };
-                let error = (!available).then(|| {
-                    let label = resolved["label"].as_str().unwrap_or(&font_id);
-                    if i18n::is_english() {
-                        format!("Emoji font {label} unavailable; using the system font.")
-                    } else {
-                        format!("Шрифт эмодзи {label} недоступен; используется системный.")
-                    }
-                });
-                if let Some(error) = &error {
-                    self.message = error.clone();
-                }
-                self.pods_ui.configure_font(font_id, path, error);
-            }
+            self.configure_pods_font(&settings);
             if let Ok(theme) =
                 serde_json::from_value::<katran::theme::ThemePreferences>(settings["theme"].clone())
             {
@@ -2446,8 +2452,6 @@ fn main() -> eframe::Result {
     let preview_warmup = warmup["result"]["job_id"]
         .as_u64()
         .map(katran::domain_jobs::JobId);
-    // Materialize bundled emoji once before the first frame, preserving a user font.
-    let _ = katran::emoji_fonts::resolve(&root, "apple");
     let logger = katran::diagnostics::Logger::start(&root).ok();
     if let Some(logger) = &logger {
         api.attach_logger(logger.clone());
@@ -2529,6 +2533,7 @@ fn main() -> eframe::Result {
         next_cursor: None,
         preloaded_has_more: false,
         tab_preload: Default::default(),
+        startup_visuals: Default::default(),
         sorting_input: Default::default(),
         pending_sort: None,
         glass_active: false,
@@ -2553,6 +2558,7 @@ fn main() -> eframe::Result {
         last_poll: Instant::now(),
         scroll: false,
     };
+    app.state = app.call(Command::Interaction);
     app.refresh();
     let settings = app.call(Command::GetSettings);
     let theme: katran::theme::ThemePreferences =
@@ -2562,6 +2568,9 @@ fn main() -> eframe::Result {
     app.video_play_hidden = theme.video_play_hidden;
     let glass_start = theme.preset == katran::theme::Preset::BlueExperimental && theme.glass;
     app.transparent_viewport = glass_start;
+    app.configure_pods_font(&settings);
+    let startup_settings = serde_json::from_value(settings).unwrap_or_default();
+    app.prepare_startup_visuals(&startup_settings);
     eframe::run_native(
         "Katran",
         eframe::NativeOptions {
@@ -2617,7 +2626,8 @@ fn main() -> eframe::Result {
             ui_style::install(&cc.egui_ctx);
             ui_fonts::apply(&cc.egui_ctx, ui_font);
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            app.start_tab_preload(&cc.egui_ctx);
+            app.startup_visuals
+                .upload(&cc.egui_ctx, &mut app.images, &mut app.pods_ui);
             Ok(Box::new(app))
         }),
     )
@@ -2963,6 +2973,7 @@ mod tests {
             next_cursor: None,
             preloaded_has_more: false,
             tab_preload: Default::default(),
+            startup_visuals: Default::default(),
             sorting_input: Default::default(),
             pending_sort: None,
             glass_active: false,

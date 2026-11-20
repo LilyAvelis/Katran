@@ -8,6 +8,46 @@ use std::{
 
 // A key describes the event contents, not merely its potentially reusable row ID.
 type ImageKey = (i64, u32, String, u64);
+pub(super) type WarmKey = (i64, u32, String);
+
+pub(super) fn startup_image(event: &Value, edge: u32) -> Option<(WarmKey, Command)> {
+    let id = event["id"].as_i64().filter(|id| *id > 0)?;
+    if event["available"] == false
+        || (event["kind"] != "managed_image"
+            && !(event["kind"] == "file_reference"
+                && event["name"].as_str().is_some_and(|name| {
+                    katran::file_types::is_native_image(std::path::Path::new(name))
+                })))
+    {
+        return None;
+    }
+    let revision = event["revision"].as_str()?.to_owned();
+    let key = (id, edge, revision.clone(), 0);
+    Some(((id, edge, revision), work_command(&key, None, false)))
+}
+
+pub(super) fn startup_pixels(event: &Value, key: &WarmKey) -> Option<egui::ColorImage> {
+    let result = &event["result"];
+    if event["ok"] != true
+        || result["revision"].as_str() != Some(key.2.as_str())
+        || matches!(
+            result["visual_kind"].as_str(),
+            Some("shell_thumbnail" | "shell_icon" | "generic_icon")
+        )
+    {
+        return None;
+    }
+    let width = usize::try_from(result["width"].as_u64()?).ok()?;
+    let height = usize::try_from(result["height"].as_u64()?).ok()?;
+    if width == 0 || height == 0 || width.max(height) > key.1 as usize {
+        return None;
+    }
+    let rgba = base64::engine::general_purpose::STANDARD
+        .decode(result["rgba_base64"].as_str()?)
+        .ok()?;
+    (width.checked_mul(height)?.checked_mul(4)? == rgba.len())
+        .then(|| egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba))
+}
 
 /// Identity of the browse context, independent of cursor movement.
 pub(super) fn preview_context(state: &Value) -> String {
@@ -179,12 +219,32 @@ pub(super) struct Images {
     active: HashSet<ImageKey>,
     requested: HashSet<ImageKey>,
     textures: HashMap<ImageKey, Entry>,
+    warmed: HashMap<WarmKey, egui::TextureHandle>,
+    warm_bytes: usize,
     clock: u64,
     preview_geometry: PreviewGeometryCache,
     context: String,
     context_epoch: u64,
 }
 impl Images {
+    pub(super) fn warm_startup(
+        &mut self,
+        ctx: &egui::Context,
+        key: WarmKey,
+        image: egui::ColorImage,
+    ) {
+        let bytes = image.pixels.len() * 4;
+        if self.warmed.contains_key(&key) || self.warm_bytes + bytes > 24 * 1024 * 1024 {
+            return;
+        }
+        let texture = ctx.load_texture(
+            format!("preloaded-image-{key:?}"),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.warm_bytes += bytes;
+        self.warmed.insert(key, texture);
+    }
     pub(super) fn prefetch(&mut self, ctx: &egui::Context, event: &Value, edge: u32) {
         if matches!(
             event["source"].as_str(),
@@ -208,6 +268,7 @@ impl Images {
             return;
         };
         self.active.insert(key.clone());
+        self.adopt_warm(&key);
         if self
             .textures
             .get(&key)
@@ -228,6 +289,27 @@ impl Images {
             }
         }
     }
+    fn adopt_warm(&mut self, key: &ImageKey) {
+        if self.textures.contains_key(key) || self.requested.contains(key) {
+            return;
+        }
+        if let Some(texture) = self.warmed.remove(&(key.0, key.1, key.2.clone())) {
+            let size = texture.size();
+            self.warm_bytes = self.warm_bytes.saturating_sub(size[0] * size[1] * 4);
+            self.textures.insert(
+                key.clone(),
+                Entry {
+                    texture: Some(texture),
+                    icon: false,
+                    visual_status: "image",
+                    touched: self.clock,
+                    retry_after: Instant::now(),
+                    reveal_start: Some(f64::NEG_INFINITY),
+                },
+            );
+        }
+    }
+
     pub(super) fn new(root: PathBuf) -> Self {
         let queue = Arc::new((
             Mutex::new(Queue {
@@ -276,6 +358,8 @@ impl Images {
             active: HashSet::new(),
             requested: HashSet::new(),
             textures: HashMap::new(),
+            warmed: HashMap::new(),
+            warm_bytes: 0,
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
             context: String::new(),
@@ -595,6 +679,7 @@ impl Images {
             return;
         };
         self.active.insert(key.clone());
+        self.adopt_warm(&key);
         self.clock = self.clock.wrapping_add(1);
         let retry = self
             .textures
@@ -772,6 +857,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn startup_thumbnail_is_reused_only_for_the_exact_event_revision_and_edge() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = egui::Context::default();
+        let mut images = Images::new(root.path().into());
+        let warmed = (7, 512, "blob:startup".to_owned());
+        images.warm_startup(
+            &ctx,
+            warmed,
+            egui::ColorImage::filled([2, 2], Color32::WHITE),
+        );
+        images.set_context(&serde_json::json!({"tab":"images","view_generation":3}));
+        let changed = (7, 512, "blob:changed".to_owned(), images.context_epoch);
+        let other_size = (7, 320, "blob:startup".to_owned(), images.context_epoch);
+        images.adopt_warm(&changed);
+        images.adopt_warm(&other_size);
+        assert!(images.textures.is_empty());
+        let exact = (7, 512, "blob:startup".to_owned(), images.context_epoch);
+        images.adopt_warm(&exact);
+        assert_eq!(
+            images.textures[&exact].reveal_start,
+            Some(f64::NEG_INFINITY)
+        );
+        assert_eq!(images.warm_bytes, 0);
+    }
+
+    #[test]
     fn bs_badge_requires_managed_source_and_exact_extension() {
         use serde_json::json;
         assert!(is_bs(
@@ -880,6 +991,8 @@ mod tests {
             active: HashSet::new(),
             requested: HashSet::new(),
             textures: HashMap::new(),
+            warmed: HashMap::new(),
+            warm_bytes: 0,
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
             context: String::new(),
@@ -990,6 +1103,8 @@ mod tests {
             active: HashSet::new(),
             requested: HashSet::new(),
             textures: HashMap::new(),
+            warmed: HashMap::new(),
+            warm_bytes: 0,
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
             context: String::new(),
@@ -1153,6 +1268,8 @@ mod tests {
             active: HashSet::new(),
             requested: HashSet::new(),
             textures: HashMap::new(),
+            warmed: HashMap::new(),
+            warm_bytes: 0,
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
             context: String::new(),
@@ -1284,6 +1401,8 @@ mod tests {
             active: HashSet::new(),
             requested: HashSet::new(),
             textures: HashMap::new(),
+            warmed: HashMap::new(),
+            warm_bytes: 0,
             clock: 0,
             preview_geometry: PreviewGeometryCache::default(),
             context: String::new(),

@@ -305,6 +305,39 @@ mod platform {
         }
     }
 
+    type PrivateFont = (Vec<u16>, Option<IDWriteFontCollection>);
+    type CachedFont = (
+        std::path::PathBuf,
+        u64,
+        Option<std::time::SystemTime>,
+        PrivateFont,
+    );
+    thread_local! {
+        static RENDER_FONT: std::cell::RefCell<Option<CachedFont>> = const { std::cell::RefCell::new(None) };
+    }
+
+    fn render_collection(
+        factory: &IDWriteFactory,
+        path: &std::path::Path,
+    ) -> Result<PrivateFont, String> {
+        let metadata =
+            std::fs::metadata(path).map_err(|e| format!("Emoji font unavailable: {e}"))?;
+        RENDER_FONT.with_borrow_mut(|cache| {
+            let modified = metadata.modified().ok();
+            if let Some((cached_path, size, stamp, font)) = cache.as_ref()
+                && modified.is_some()
+                && cached_path == path
+                && *size == metadata.len()
+                && *stamp == modified
+            {
+                return Ok(font.clone());
+            }
+            let font = private_collection(factory, path)?;
+            *cache = Some((path.to_owned(), metadata.len(), modified, font.clone()));
+            Ok(font)
+        })
+    }
+
     pub fn probe_font(path: &std::path::Path) -> Result<String, String> {
         let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if initialized.is_err() && initialized.0 != 0x80010106u32 as i32 {
@@ -335,7 +368,7 @@ mod platform {
             let dwrite: IDWriteFactory =
                 DirectWrite::DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).map_err(err)?;
             let (family, collection) = if let Some(path) = font_file {
-                private_collection(&dwrite, path)?
+                render_collection(&dwrite, path)?
             } else {
                 (
                     "Segoe UI Emoji".encode_utf16().chain(Some(0)).collect(),

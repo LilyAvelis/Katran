@@ -1,4 +1,55 @@
 use super::*;
+use katran::interaction::{ShelfTab, View};
+
+const STARTUP_WAIT: Duration = Duration::from_millis(1250);
+
+enum StartupVisual {
+    Image(images::WarmKey, egui::ColorImage),
+    Emoji(u64, String, katran::emoji_render::Rendered),
+}
+
+#[derive(Default)]
+pub(super) struct StartupVisuals {
+    rx: Option<mpsc::Receiver<StartupVisual>>,
+    ready: Vec<StartupVisual>,
+}
+
+impl StartupVisuals {
+    fn collect(&mut self) {
+        if let Some(rx) = &self.rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(visual) => self.ready.push(visual),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn upload(
+        &mut self,
+        ctx: &egui::Context,
+        images: &mut images::Images,
+        pods: &mut pods_ui::State,
+    ) {
+        self.collect();
+        for visual in self.ready.drain(..) {
+            match visual {
+                StartupVisual::Image(key, pixels) => images.warm_startup(ctx, key, pixels),
+                StartupVisual::Emoji(font, text, pixels) => {
+                    pods.warm_startup(ctx, font, text, pixels)
+                }
+            }
+        }
+        if self.rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(24));
+        }
+    }
+}
 
 struct Ready {
     tab: katran::interaction::ShelfTab,
@@ -21,7 +72,7 @@ impl State {
         root: PathBuf,
         tabs: Vec<katran::interaction::ShelfTab>,
         stamp: Value,
-        ctx: egui::Context,
+        ctx: Option<egui::Context>,
     ) {
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
@@ -39,7 +90,7 @@ impl State {
                     command: Command::BrowseTabSnapshot {
                         tab,
                         query: String::new(),
-                        limit: 1000,
+                        limit: 128,
                     },
                 });
                 if response["ok"] == true
@@ -51,10 +102,14 @@ impl State {
                         })
                         .is_ok()
                 {
-                    ctx.request_repaint();
+                    if let Some(ctx) = &ctx {
+                        ctx.request_repaint();
+                    }
                 }
             }
-            ctx.request_repaint();
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
         });
     }
 
@@ -88,6 +143,10 @@ impl State {
 
 impl Shelf {
     pub(super) fn start_tab_preload(&mut self, ctx: &egui::Context) {
+        self.preload_tab_pages(Some(ctx.clone()));
+    }
+
+    fn preload_tab_pages(&mut self, ctx: Option<egui::Context>) {
         let Some(root) = self.launch_root.clone() else {
             return;
         };
@@ -121,7 +180,133 @@ impl Shelf {
             });
         }
         let stamp = self.call(Command::CatalogueStamp);
-        self.tab_preload.start(root, tabs, stamp, ctx.clone());
+        self.tab_preload.start(root, tabs, stamp, ctx);
+    }
+
+    /// Run while the native window is still being created. A busy disk or a
+    /// missing font must never leave the launcher waiting indefinitely.
+    pub(super) fn prepare_startup_visuals(&mut self, settings: &katran::settings::Settings) {
+        let Some(root) = self.launch_root.clone() else {
+            return;
+        };
+        let deadline = Instant::now() + STARTUP_WAIT;
+        self.preload_tab_pages(None);
+        let metadata_deadline = Instant::now() + Duration::from_millis(150);
+        while !self.tab_preload.finished && Instant::now() < metadata_deadline {
+            self.tab_preload.poll();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let current =
+            serde_json::from_value::<ShelfTab>(self.state["tab"].clone()).unwrap_or(ShelfTab::All);
+        let mut image_jobs = Vec::new();
+        let mut emoji_jobs = Vec::new();
+        let mut image_keys = HashSet::new();
+        let mut emoji_texts = HashSet::new();
+        let current_events = (current, self.events.iter());
+        let pages = self
+            .tab_preload
+            .pages
+            .iter()
+            .filter(|(tab, _)| **tab != current)
+            .filter_map(|(&tab, page)| Some((tab, page["events"].as_array()?.iter())));
+        for (tab, events) in std::iter::once(current_events).chain(pages) {
+            let gallery = if tab == current {
+                self.state["view"] == "gallery"
+            } else {
+                settings.tab_preferences(tab).view == View::Gallery
+            };
+            if tab == ShelfTab::Pods && gallery {
+                for text in events
+                    .take(72)
+                    .filter_map(|event| event["text_preview"].as_str())
+                {
+                    if !text.is_empty() && emoji_texts.insert(text) {
+                        emoji_jobs.push(text.to_owned());
+                    }
+                }
+            } else if tab != ShelfTab::Pods {
+                let edge = if gallery && tab != ShelfTab::Links {
+                    512
+                } else {
+                    320
+                };
+                let visible = if gallery { 24 } else { 6 };
+                for (position, (key, command)) in events
+                    .take(visible)
+                    .filter_map(|event| images::startup_image(event, edge))
+                    .enumerate()
+                {
+                    if image_keys.insert(key.clone()) {
+                        image_jobs.push((position, key, command));
+                    }
+                }
+            }
+        }
+        if settings.tab_enabled(ShelfTab::Pods)
+            && settings.tab_preferences(ShelfTab::Pods).view == View::Gallery
+        {
+            for text in katran::pods::catalogue_emoji().take(56) {
+                if emoji_texts.insert(text) {
+                    emoji_jobs.push(text.to_owned());
+                }
+            }
+        }
+        let (tx, rx) = mpsc::sync_channel(12);
+        if !emoji_jobs.is_empty() {
+            let tx = tx.clone();
+            let (generation, font) = self.pods_ui.startup_font();
+            std::thread::spawn(move || {
+                for text in emoji_jobs {
+                    if let Ok(pixels) = katran::emoji_render::render_with_font(
+                        &text,
+                        pods_ui::GALLERY_RASTER as f32,
+                        font.as_deref(),
+                    ) && tx
+                        .send(StartupVisual::Emoji(generation, text, pixels))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        }
+        let mut image_lanes = [Vec::new(), Vec::new()];
+        image_jobs.sort_by_key(|(position, _, _)| *position);
+        for (index, (_, key, command)) in image_jobs.into_iter().enumerate() {
+            image_lanes[index % 2].push((key, command));
+        }
+        for image_jobs in image_lanes.into_iter().filter(|lane| !lane.is_empty()) {
+            let tx = tx.clone();
+            let root = root.clone();
+            std::thread::spawn(move || {
+                let Ok(mut api) = Service::open_read_only(&root) else {
+                    return;
+                };
+                let mut image_bytes = 0;
+                for (key, command) in image_jobs {
+                    let reply = api.execute(Request {
+                        api_version: 1,
+                        request_id: "startup-thumbnail".into(),
+                        command,
+                    });
+                    if let Some(pixels) = images::startup_pixels(&reply, &key) {
+                        image_bytes += pixels.pixels.len() * 4;
+                        if image_bytes > 12 * 1024 * 1024
+                            || tx.send(StartupVisual::Image(key, pixels)).is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+        drop(tx);
+        self.startup_visuals.rx = Some(rx);
+        while self.startup_visuals.rx.is_some() && Instant::now() < deadline {
+            self.startup_visuals.collect();
+            self.tab_preload.poll();
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     pub(super) fn show_preloaded_tab(&mut self, ctx: &egui::Context) -> bool {

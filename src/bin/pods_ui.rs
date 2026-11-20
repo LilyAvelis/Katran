@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 type Key = (String, u32, String, u64);
 type Job = (Key, Option<PathBuf>, egui::Context);
 type RenderResult = Result<katran::emoji_render::Rendered, String>;
+pub(super) const GALLERY_RASTER: u32 = 128;
 struct Entry {
     texture: egui::TextureHandle,
     size: Vec2,
@@ -61,6 +62,58 @@ impl State {
     }
     pub(super) fn font_selection(&self) -> Option<&str> {
         self.font_id.as_deref()
+    }
+    pub(super) fn startup_font(&self) -> (u64, Option<PathBuf>) {
+        (self.font_generation, self.font_path.clone())
+    }
+
+    pub(super) fn warm_startup(
+        &mut self,
+        ctx: &egui::Context,
+        generation: u64,
+        text: String,
+        image: katran::emoji_render::Rendered,
+    ) {
+        if generation != self.font_generation {
+            return;
+        }
+        let key = (
+            text,
+            GALLERY_RASTER,
+            self.font_id.clone().unwrap_or_else(|| "system".into()),
+            self.font_generation,
+        );
+        if self.cache.contains_key(&key) || self.pending.contains(&key) {
+            return;
+        }
+        self.insert_texture(ctx, key, image, Some(f64::NEG_INFINITY));
+    }
+
+    fn insert_texture(
+        &mut self,
+        ctx: &egui::Context,
+        key: Key,
+        image: katran::emoji_render::Rendered,
+        reveal_start: Option<f64>,
+    ) {
+        let texture = ctx.load_texture(
+            format!("pod:{}:{}:{}:{}", key.0, key.1, key.2, key.3),
+            egui::ColorImage::from_rgba_unmultiplied(
+                [image.width as usize, image.height as usize],
+                &image.rgba,
+            ),
+            egui::TextureOptions::LINEAR,
+        );
+        self.cache.insert(
+            key,
+            Entry {
+                texture,
+                size: egui::vec2(image.width as f32, image.height as f32),
+                touched: self.clock,
+                reveal_start,
+                bytes: image.rgba.len(),
+            },
+        );
     }
     pub(super) fn configure_font(
         &mut self,
@@ -118,7 +171,8 @@ impl State {
         self.receiver = Some(receiver);
     }
     pub(super) fn paint(&mut self, ui: &egui::Ui, event: &Value, rect: egui::Rect) {
-        self.paint_gallery(ui, event, rect, GalleryEntrance::default());
+        let text = event["text_preview"].as_str().unwrap_or("");
+        self.paint_text(ui, text, rect, rect.height() * 0.55, false, None);
     }
 
     pub(super) fn paint_gallery(
@@ -129,12 +183,12 @@ impl State {
         entrance: GalleryEntrance,
     ) {
         let text = event["text_preview"].as_str().unwrap_or("");
-        self.paint_text(ui, text, rect, rect.height() * 0.55, false, entrance);
+        self.paint_text(ui, text, rect, rect.height() * 0.55, false, Some(entrance));
     }
 
     pub(crate) fn paint_inline(&mut self, ui: &egui::Ui, text: &str, rect: egui::Rect, size: f32) {
         if ui.is_rect_visible(rect) {
-            self.paint_text(ui, text, rect, size, true, GalleryEntrance::default());
+            self.paint_text(ui, text, rect, size, true, None);
         }
     }
 
@@ -145,10 +199,15 @@ impl State {
         rect: egui::Rect,
         point_size: f32,
         inline: bool,
-        entrance: GalleryEntrance,
+        entrance: Option<GalleryEntrance>,
     ) {
         let ppp = ui.ctx().pixels_per_point();
-        let size = (point_size * ppp).clamp(12.0, 128.0).round() as u32;
+        let display_size = (point_size * ppp).clamp(12.0, 128.0).round() as u32;
+        let size = if entrance.is_some() {
+            GALLERY_RASTER
+        } else {
+            display_size
+        };
         let key = (
             text.to_owned(),
             size,
@@ -165,26 +224,7 @@ impl State {
             match result {
                 Ok(image) => {
                     self.failed.remove(&key);
-                    let texture = ui.ctx().load_texture(
-                        format!("pod:{}:{}:{}:{}", key.0, key.1, key.2, key.3),
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [image.width as usize, image.height as usize],
-                            &image.rgba,
-                        ),
-                        egui::TextureOptions::LINEAR,
-                    );
-                    self.cache.insert(
-                        key,
-                        Entry {
-                            texture,
-                            size: egui::vec2(image.width as f32, image.height as f32),
-                            touched: self.clock,
-                            reveal_start: None,
-                            bytes: (image.width as usize)
-                                .saturating_mul(image.height as usize)
-                                .saturating_mul(4),
-                        },
-                    );
+                    self.insert_texture(ui.ctx(), key, image, None);
                 }
                 Err(_) => {
                     if self.failed.len() >= 64 {
@@ -198,13 +238,16 @@ impl State {
         self.clock = self.clock.wrapping_add(1);
         if let Some(entry) = self.cache.get_mut(&key) {
             entry.touched = self.clock;
-            let natural = entry.size / ppp;
+            let natural = entry.size / ppp * (display_size as f32 / size as f32);
             let scale = (rect.width() / natural.x)
                 .min(rect.height() / natural.y)
                 .min(1.0);
             let draw = egui::Rect::from_center_size(rect.center(), natural * scale);
             let mut painter = ui.painter_at(rect);
-            let draw = entrance.apply(ui, &mut painter, draw, &mut entry.reveal_start);
+            let draw =
+                entrance
+                    .unwrap_or_default()
+                    .apply(ui, &mut painter, draw, &mut entry.reveal_start);
             painter.image(
                 entry.texture.id(),
                 draw,
@@ -217,7 +260,7 @@ impl State {
                 .get(&key)
                 .is_some_and(|until| Instant::now() < *until);
             if failed || inline {
-                let mut font_size = (size as f32 / ppp).min(point_size);
+                let mut font_size = (display_size as f32 / ppp).min(point_size);
                 let mut galley = ui.painter().layout_no_wrap(
                     text.to_owned(),
                     egui::FontId::proportional(font_size),
@@ -273,7 +316,7 @@ mod tests {
         };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 80.0));
         for n in 0..80 {
-            let key = (format!("emoji-{n}"), 44, "system".into(), 0);
+            let key = (format!("emoji-{n}"), GALLERY_RASTER, "system".into(), 0);
             let image = egui::ColorImage::filled([44, 44], Color32::WHITE);
             let texture =
                 ctx.load_texture(format!("working-{n}"), image, egui::TextureOptions::LINEAR);
