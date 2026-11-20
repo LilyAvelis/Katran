@@ -2,7 +2,11 @@
 use super::ui_foundation::{SettingsRow, SettingsSection};
 use eframe::egui::{self, Color32, RichText};
 use egui_lucide::Lucide;
-use katran::{Command, Request, Service, interaction::View, settings::Settings};
+use katran::{
+    Command, Request, Service,
+    interaction::View,
+    settings::{GalleryReveal, INTERFACE_SETTINGS_SECTION, Settings},
+};
 use std::time::{Duration, Instant};
 
 #[derive(Default)]
@@ -22,6 +26,7 @@ pub struct State {
     restart_requested: bool,
     updates: super::updates_ui::State,
     tags: super::tag_settings_ui::State,
+    action_menu: super::action_menu_ui::Editor,
     confirm_history: bool,
     query: String,
     section: usize,
@@ -179,8 +184,8 @@ fn apply_global_hotkey(
         false
     }
 }
-const AESTHETIC_SECTION: usize = 8;
-const AESTHETIC_LABEL: (&str, &str) = ("Эстетика", "Aesthetic");
+const INTERFACE_LABEL: (&str, &str) = ("Интерфейс", "Interface");
+const GALLERY_LABEL: (&str, &str) = ("Анимация галереи", "Gallery animation");
 const SECTION_KEYS: [&str; SECTIONS.len()] = [
     "general",
     "shortcuts",
@@ -201,7 +206,7 @@ const SECTIONS: [((&str, &str), Lucide); 9] = [
     (("Теги", "Tags"), Lucide::Tag),
     (("AI", "AI"), Lucide::Sparkles),
     (("Интеграции", "Integrations"), Lucide::Plug),
-    (AESTHETIC_LABEL, Lucide::Gem),
+    (INTERFACE_LABEL, Lucide::Gem),
 ];
 
 fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
@@ -214,7 +219,7 @@ fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
     if !expanded {
         ui.heading(title);
         match index {
-            0 | 1 | AESTHETIC_SECTION => ui.add_space(16.0),
+            0 | 1 | INTERFACE_SETTINGS_SECTION => ui.add_space(16.0),
             2 | 4 => ui.add_space(8.0),
             _ => {}
         }
@@ -246,7 +251,7 @@ fn section_heading(ui: &mut egui::Ui, index: usize, expanded: bool) {
             "Components for search and image processing",
         ),
         7 => tr("Подключение внешних сервисов", "Connect external services"),
-        AESTHETIC_SECTION => tr(
+        INTERFACE_SETTINGS_SECTION => tr(
             "Экспериментальные элементы интерфейса",
             "Optional interface experiments",
         ),
@@ -932,6 +937,50 @@ fn call(api: &mut Service, command: Command) -> serde_json::Value {
         request_id: "settings-ui".into(),
         command,
     })
+}
+
+fn gallery_animation_settings(ui: &mut egui::Ui, draft: &mut Settings) {
+    use super::i18n::tr;
+    let styles = [
+        (GalleryReveal::Off, tr("Выключено", "Off")),
+        (GalleryReveal::Fade, tr("Из дымки", "Fade in")),
+        (GalleryReveal::Rise, tr("Подъём", "Rise")),
+        (GalleryReveal::Grow, tr("Расширение", "Grow")),
+        (GalleryReveal::Unfold, tr("Разворот", "Unfold")),
+    ];
+    SettingsRow::show(
+        ui,
+        tr("Появление миниатюр", "Thumbnail entrance"),
+        "",
+        |ui| {
+            let label = styles
+                .iter()
+                .find(|(style, _)| *style == draft.gallery_reveal)
+                .map_or(styles[0].1, |(_, label)| *label);
+            egui::ComboBox::from_id_salt("gallery-entrance")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    for (style, label) in styles {
+                        ui.selectable_value(&mut draft.gallery_reveal, style, label);
+                    }
+                });
+        },
+    );
+    SettingsRow::show(
+        ui,
+        tr(
+            "Длительность анимации галереи",
+            "Gallery animation duration",
+        ),
+        "",
+        |ui| {
+            super::ui_foundation::slider(
+                ui,
+                draft.gallery_reveal != GalleryReveal::Off,
+                egui::Slider::new(&mut draft.gallery_reveal_ms, 100..=600).suffix(tr(" мс", " ms")),
+            );
+        },
+    );
 }
 fn merge_tab_settings(draft: &mut Settings, current: &Settings) {
     draft.tab_order = current.tab_order.clone();
@@ -1793,6 +1842,7 @@ impl State {
                 ctx.request_repaint();
             }
             self.tags.reset();
+            self.action_menu = Default::default();
             self.confirm_history = false;
             self.draft = None;
             self.pending_save = None;
@@ -1816,9 +1866,14 @@ impl State {
         let requested = interaction["result"]["settings_section"]
             .as_u64()
             .unwrap_or(0) as usize;
+        let jump_to_actions =
+            requested == INTERFACE_SETTINGS_SECTION && self.requested_section != Some(requested);
         if self.requested_section != Some(requested) {
             self.section = requested;
             self.requested_section = Some(requested);
+        }
+        if jump_to_actions {
+            self.query.clear();
         }
         if self.draft.is_none() {
             self.draft =
@@ -2027,6 +2082,10 @@ impl State {
     });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(surface).inner_margin(egui::Margin::symmetric(0, 24))).show(ui,|ui|{
      super::theme_ui::decorate(ui,ui.max_rect());
+    if jump_to_actions {
+     let (ru, en) = super::action_menu_ui::GROUP_LABELS;
+     SettingsSection::scroll_to_group(ui.ctx(), super::i18n::tr(ru, en));
+    }
     let page_scroll = egui::ScrollArea::vertical().id_salt(("settings-page", self.section)).auto_shrink([false,false]);
     let page_scroll = if scroll_to_page_top { page_scroll.vertical_scroll_offset(0.0) } else { page_scroll };
     page_scroll.show(ui,|ui|{
@@ -2391,8 +2450,15 @@ impl State {
        self.show_ai_components(ui,api);
       } else if self.section==7 {
        self.show_integrations(ui,api);
-      } else if self.section == AESTHETIC_SECTION {
+      } else if self.section == INTERFACE_SETTINGS_SECTION {
        if let Some(draft) = self.draft.as_mut() {
+        SettingsSection::group(ui, super::i18n::tr(GALLERY_LABEL.0, GALLERY_LABEL.1), |ui| {
+         gallery_animation_settings(ui, draft);
+        });
+        let (ru, en) = super::action_menu_ui::GROUP_LABELS;
+        SettingsSection::group(ui, super::i18n::tr(ru, en), |ui| {
+         self.action_menu.show(ui, &mut draft.action_menu);
+        });
         SettingsSection::group(ui, super::i18n::tr("Шрифт интерфейса", "Interface font"), |ui| {
          font_changed = font_picker(ui, &mut draft.ui_font);
         });

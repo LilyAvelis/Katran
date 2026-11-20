@@ -1981,8 +1981,13 @@ impl Service {
                 self.configure_sources(self.source_runtime_started)?;
                 Ok(serde_json::json!(self.settings))
             }
-            Command::ShowSettings => {
-                self.interaction.settings_section = 0;
+            Command::ShowSettings | Command::ShowActionsSettings => {
+                self.interaction.settings_section =
+                    if matches!(command, Command::ShowActionsSettings) {
+                        settings::INTERFACE_SETTINGS_SECTION
+                    } else {
+                        0
+                    };
                 self.interaction.settings_open = true;
                 Ok(serde_json::json!(self.interaction))
             }

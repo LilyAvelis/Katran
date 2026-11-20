@@ -653,7 +653,11 @@ impl Shelf {
                                         ) {
                                             text_preview_ui::paint_card(ui, event, zones.image);
                                         } else {
-                                            self.images.paint_at(ui, event, zones.image, 512);
+                                            let rows_from_top = ((item.top - viewport.top()).max(0.0) / item.height.max(1.0)).floor() as u16;
+                                            self.images.paint_gallery(ui, event, zones.image, images::GalleryEntrance {
+                                                delay_ms: rows_from_top.min(4) * 18,
+                                                ..self.gallery_entrance
+                                            });
                                         }
                                         let title = if let Some(name) =
                                             event["properties"]["display_name"].as_str()

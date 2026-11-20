@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod action_icons;
+mod action_menu_ui;
 mod action_row;
 mod api_client;
 mod app_identity;
@@ -398,6 +399,7 @@ struct Shelf {
     stream_rows: u8,
     pending_density: Vec<String>,
     images: Images,
+    gallery_entrance: images::GalleryEntrance,
     text_preview: text_preview_ui::TextPreview,
     text_draft_preview_dirty: bool,
     link_cards: link_card_ui::State,
@@ -795,6 +797,12 @@ impl Shelf {
         }
         if self.api.is_some() {
             let settings = self.call(Command::GetSettings);
+            self.gallery_entrance.style =
+                serde_json::from_value(settings["gallery_reveal"].clone()).unwrap_or_default();
+            self.gallery_entrance.duration_ms = settings["gallery_reveal_ms"]
+                .as_u64()
+                .unwrap_or(350)
+                .clamp(100, 600) as u16;
             let ui_font = serde_json::from_value(settings["ui_font"].clone()).unwrap_or_default();
             ui_fonts::apply(&ctx, ui_font);
             i18n::set(if settings["language"] == "en" {
@@ -2510,6 +2518,7 @@ fn main() -> eframe::Result {
         stream_rows: 3,
         pending_density: Vec::new(),
         images: Images::new(root.clone()),
+        gallery_entrance: images::GalleryEntrance::default(),
         text_preview: text_preview_ui::TextPreview::new(root.clone()),
         text_draft_preview_dirty: false,
         details_metadata: details_metadata_ui::DetailsMetadata::new(root.clone()),
@@ -2943,6 +2952,7 @@ mod tests {
             stream_rows: 3,
             pending_density: Vec::new(),
             images: Images::new(root.into()),
+            gallery_entrance: images::GalleryEntrance::default(),
             text_preview: text_preview_ui::TextPreview::new(root.into()),
             text_draft_preview_dirty: false,
             details_metadata: details_metadata_ui::DetailsMetadata::new(root.into()),

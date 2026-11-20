@@ -4,9 +4,10 @@ use super::*;
 fn action_matches(action: &Value, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
-        return !action["id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("sort_"));
+        return action["show_in_empty_query"] == true
+            || !action["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("sort_"));
     }
     let haystack = format!(
         "{} {} {}",
@@ -61,15 +62,20 @@ impl Shelf {
             return;
         }
         let catalogue = self.call(Command::Actions);
+        let mut actions = match catalogue {
+            Value::Array(actions) => actions,
+            _ => Vec::new(),
+        };
+        if let Ok(menu) =
+            serde_json::from_value(self.call(Command::GetSettings)["action_menu"].clone())
+        {
+            super::action_menu_ui::customize(&mut actions, &menu);
+        }
         let in_bull = self.upscale.collection_can_fullscreen();
-        let actions: Vec<_> = catalogue
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|action| in_bull || action["id"] != "collection_fullscreen")
-            .filter(|a| action_matches(a, &self.action_query))
-            .cloned()
-            .collect();
+        actions.retain(|action| {
+            (in_bull || action["id"] != "collection_fullscreen")
+                && action_matches(action, &self.action_query)
+        });
         let count = actions.len();
         self.action_selected = self.action_selected.min(count.saturating_sub(1));
         if self.shortcut_editor.is_none()
@@ -128,6 +134,7 @@ impl Shelf {
         self.scroll_actions |= previous_selection != self.action_selected || self.focus_actions;
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
         let mut picked = None;
+        let mut configure = false;
         // Use the actual trigger rectangle, independent of footer height and DPI.
         let trigger = (!in_bull)
             .then(|| {
@@ -139,11 +146,11 @@ impl Shelf {
         let anchor = trigger
             .map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
             .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
-        // Reserve space for the header, search field, footer and frame above the trigger.
+        // Reserve space for the search, footer button, wrapped hints and frame.
         let scroll_height = if context_anchor.is_some() {
-            (ctx.content_rect().height() - 175.0).clamp(24.0, 320.0)
+            (ctx.content_rect().height() - 215.0).clamp(24.0, 320.0)
         } else {
-            (anchor.y - ctx.content_rect().top() - 165.0).clamp(24.0, 320.0)
+            (anchor.y - ctx.content_rect().top() - 205.0).clamp(24.0, 320.0)
         };
         let mut optical_slot = None;
         let result = egui::Modal::new(egui::Id::new("actions"))
@@ -183,12 +190,13 @@ impl Shelf {
                     .show(ui, |ui| {
                         let mut group = String::new();
                         for (index, a) in actions.iter().enumerate() {
-                            let next = a["group"].as_str().unwrap_or("");
+                            let title = a["group"].as_str().unwrap_or("");
+                            let next = a["menu_group_id"].as_str().unwrap_or(title);
                             if group != next {
                                 group = next.into();
                                 ui.add_space(3.0);
                                 ui.label(
-                                    RichText::new(&group)
+                                    RichText::new(title)
                                         .size(11.0)
                                         .color(theme_ui::color(ctx,theme_ui::Role::Muted,Color32::from_gray(185))),
                                 );
@@ -230,7 +238,10 @@ impl Shelf {
                         }
                     });
                 ui.separator();
-                ui.weak(tr("↑↓ выбрать · Enter выполнить · Esc закрыть", "↑↓ select · Enter run · Esc close"));
+                ui.horizontal_wrapped(|ui| {
+                    configure = ui.button(tr("Настроить команды…", "Customize actions…")).clicked();
+                    ui.weak(tr("↑↓ выбрать · Enter выполнить · Esc закрыть", "↑↓ select · Enter run · Esc close"));
+                });
             });
         if let Some((painter, index)) = optical_slot
             && let Some(shape) = theme_ui::optical_shape(ctx, result.response.rect, 12.0)
@@ -244,6 +255,12 @@ impl Shelf {
                 result.response.rect,
             )
         });
+        if configure {
+            self.actions = false;
+            self.state = self.call(Command::ShowActionsSettings);
+            ctx.request_repaint();
+            return;
+        }
         if enter && picked.is_none() {
             picked = actions
                 .get(self.action_selected)

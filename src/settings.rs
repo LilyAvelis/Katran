@@ -93,6 +93,51 @@ impl Default for NotionReaderPreferences {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ActionMenu {
+    pub groups: Vec<ActionMenuGroup>,
+    pub command_visibility: BTreeMap<String, bool>,
+}
+
+pub const INTERFACE_SETTINGS_SECTION: usize = 8;
+
+impl ActionMenu {
+    pub fn is_default(&self) -> bool {
+        self.groups.is_empty() && self.command_visibility.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ActionMenuGroup {
+    pub id: String,
+    pub title: Option<String>,
+    pub hidden: bool,
+    pub commands: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GalleryReveal {
+    #[default]
+    Off,
+    Fade,
+    Rise,
+    Grow,
+    Unfold,
+}
+
+impl GalleryReveal {
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+}
+
+fn is_default_gallery_duration(value: &u16) -> bool {
+    *value == 350
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -163,6 +208,12 @@ pub struct Settings {
     pub ui_font: UiFont,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub settings_section_order: Vec<String>,
+    #[serde(skip_serializing_if = "ActionMenu::is_default")]
+    pub action_menu: ActionMenu,
+    #[serde(skip_serializing_if = "GalleryReveal::is_off")]
+    pub gallery_reveal: GalleryReveal,
+    #[serde(skip_serializing_if = "is_default_gallery_duration")]
+    pub gallery_reveal_ms: u16,
     /// Optional local Folder AI acceleration. Missing means CPU.
     #[serde(skip_serializing_if = "is_false")]
     pub folder_ai_gpu: bool,
@@ -224,6 +275,9 @@ impl Settings {
             settings_section_depth: false,
             ui_font: UiFont::Default,
             settings_section_order: Vec::new(),
+            action_menu: ActionMenu::default(),
+            gallery_reveal: GalleryReveal::Off,
+            gallery_reveal_ms: 350,
             link_favicons_online: false,
             folder_ai_gpu: false,
             video_gpu_acceleration: false,

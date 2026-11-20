@@ -1261,22 +1261,9 @@ impl Shelf {
                     action["label"] = label.into();
                 }
             }
-            for (id, label) in [
-                (
-                    "notion_reader_background",
-                    tr("Фон страницы…", "Page background…"),
-                ),
-                (
-                    "notion_reader_landscape",
-                    tr("Переключить Landscape", "Toggle Landscape"),
-                ),
-                (
-                    "notion_reader_cinema",
-                    tr("Переключить Cinema", "Toggle Cinema"),
-                ),
-            ] {
+            for &(id, ru, en) in super::action_menu_ui::READER_COMMANDS {
                 actions.push(serde_json::json!({
-                    "id": id, "label": label, "group": tr("Читалка", "Reader"), "enabled": true
+                    "id": id, "label": tr(ru, en), "group": tr("Читалка", "Reader"), "enabled": true
                 }));
             }
         }

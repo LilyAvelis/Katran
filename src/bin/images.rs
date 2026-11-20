@@ -1,5 +1,6 @@
 use super::i18n::tr;
 use super::*;
+use katran::settings::GalleryReveal;
 use std::{
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex},
@@ -35,6 +36,59 @@ struct Entry {
     visual_status: &'static str,
     touched: u64,
     retry_after: Instant,
+    reveal_start: Option<f64>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct GalleryEntrance {
+    pub style: GalleryReveal,
+    pub duration_ms: u16,
+    pub delay_ms: u16,
+}
+
+impl GalleryEntrance {
+    fn progress(self, elapsed: f64) -> f32 {
+        let duration = f64::from(self.duration_ms.clamp(100, 600)) / 1000.0;
+        let time = elapsed / duration;
+        1.0 - (1.0 - time.clamp(0.0, 1.0) as f32).powi(3)
+    }
+
+    fn image_rect(self, rect: egui::Rect, progress: f32) -> egui::Rect {
+        let remaining = 1.0 - progress;
+        match self.style {
+            GalleryReveal::Rise => rect.translate(egui::vec2(0.0, 12.0 * remaining)),
+            GalleryReveal::Grow => {
+                egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.14 * remaining))
+            }
+            GalleryReveal::Unfold => egui::Rect::from_center_size(
+                rect.center(),
+                rect.size() * egui::vec2(1.0, 1.0 - 0.62 * remaining),
+            ),
+            GalleryReveal::Off | GalleryReveal::Fade => rect,
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn gallery_reveal_finishes_at_the_original_geometry() {
+    let rect = egui::Rect::from_min_size(egui::pos2(3.0, 5.0), egui::vec2(100.0, 80.0));
+    for style in [
+        GalleryReveal::Fade,
+        GalleryReveal::Rise,
+        GalleryReveal::Grow,
+        GalleryReveal::Unfold,
+    ] {
+        let reveal = GalleryEntrance {
+            style,
+            duration_ms: 350,
+            delay_ms: 0,
+        };
+        assert_eq!(reveal.progress(-0.02), 0.0);
+        assert!(reveal.progress(0.12) > 0.0 && reveal.progress(0.12) < 1.0);
+        assert_eq!(reveal.progress(0.36), 1.0);
+        assert_eq!(reveal.image_rect(rect, 1.0), rect);
+    }
 }
 fn preview_command(id: i64, edge: u32) -> Command {
     if edge <= 512 {
@@ -251,6 +305,7 @@ impl Images {
                 visual_status: "image",
                 touched: 0,
                 retry_after: Instant::now(),
+                reveal_start: None,
             },
         );
         id
@@ -360,6 +415,7 @@ impl Images {
                     visual_status,
                     touched: self.clock,
                     retry_after: Instant::now() + Duration::from_secs(3),
+                    reveal_start: None,
                 },
             );
         }
@@ -404,7 +460,7 @@ impl Images {
                     image,
                 )
             });
-        self.paint_image(ui, event, canvas, 1400, image);
+        self.paint_image(ui, event, canvas, 1400, image, GalleryEntrance::default());
     }
     pub(super) fn visual_status(&self, event: &Value, edge: u32) -> &'static str {
         let (Some(id), Some(revision)) = (event["id"].as_i64(), event["revision"].as_str()) else {
@@ -424,6 +480,27 @@ impl Images {
         event: &Value,
         rect: egui::Rect,
         edge: u32,
+    ) {
+        self.paint_card(ui, event, rect, edge, GalleryEntrance::default());
+    }
+
+    pub(super) fn paint_gallery(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        rect: egui::Rect,
+        entrance: GalleryEntrance,
+    ) {
+        self.paint_card(ui, event, rect, 512, entrance);
+    }
+
+    fn paint_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        event: &Value,
+        rect: egui::Rect,
+        edge: u32,
+        entrance: GalleryEntrance,
     ) {
         if matches!(
             event["source"].as_str(),
@@ -457,7 +534,7 @@ impl Images {
             } else {
                 rect
             };
-        self.paint_image(ui, event, cover_rect, edge, None);
+        self.paint_image(ui, event, cover_rect, edge, None, entrance);
         if is_bs(event) {
             let size = egui::vec2(30.0_f32.min(rect.width()), 20.0_f32.min(rect.height()));
             paint_bs_badge(
@@ -477,6 +554,7 @@ impl Images {
         rect: egui::Rect,
         edge: u32,
         image: Option<egui::Rect>,
+        entrance: GalleryEntrance,
     ) {
         let Some(id) = event["id"].as_i64() else {
             return;
@@ -533,9 +611,11 @@ impl Images {
             };
             self.textures.remove(&oldest);
         }
-        if let Some(Some(texture)) = self.textures.get(&key).map(|e| &e.texture) {
+        if let Some(entry) = self.textures.get_mut(&key)
+            && let Some(texture) = &entry.texture
+        {
             let image = image.unwrap_or_else(|| {
-                let rect = if self.textures.get(&key).is_some_and(|entry| entry.icon) {
+                let rect = if entry.icon {
                     egui::Rect::from_center_size(
                         rect.center(),
                         Vec2::splat(96.0_f32.min(rect.width()).min(rect.height())),
@@ -545,16 +625,33 @@ impl Images {
                 };
                 super::gallery_card::fit_rect(rect, texture.size_vec2())
             });
-            ui.painter_at(rect).image(
+            let mut painter = ui.painter_at(rect);
+            let mut image = image;
+            if entrance.style != GalleryReveal::Off {
+                let now = ui.input(|input| input.time);
+                let start = *entry
+                    .reveal_start
+                    .get_or_insert_with(|| now + f64::from(entrance.delay_ms) / 1000.0);
+                let progress = entrance.progress(now - start);
+                if progress < 1.0 {
+                    painter.multiply_opacity(progress);
+                    image = entrance.image_rect(image, progress);
+                    ui.ctx().request_repaint_after(Duration::from_millis(16));
+                }
+            }
+            painter.image(
                 texture.id(),
                 image,
                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
         } else {
-            ui.painter_at(rect)
-                .rect_filled(rect, 6.0, Color32::from_gray(34));
-            if !is_managed_collection(event) || self.textures.contains_key(&key) {
+            let failed = self.textures.contains_key(&key);
+            if entrance.style == GalleryReveal::Off || failed {
+                ui.painter_at(rect)
+                    .rect_filled(rect, 6.0, Color32::from_gray(34));
+            }
+            if failed || (entrance.style == GalleryReveal::Off && !is_managed_collection(event)) {
                 ui.painter_at(rect).text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -796,6 +893,7 @@ mod tests {
                 visual_status: "image",
                 touched: 1,
                 retry_after: Instant::now(),
+                reveal_start: None,
             },
         );
         images.textures.insert(
@@ -806,6 +904,7 @@ mod tests {
                 visual_status: "shell_icon",
                 touched: 1,
                 retry_after: Instant::now(),
+                reveal_start: None,
             },
         );
         images.textures.insert(
@@ -816,6 +915,7 @@ mod tests {
                 visual_status: "shell_thumbnail",
                 touched: 1,
                 retry_after: Instant::now(),
+                reveal_start: None,
             },
         );
         images.requested.insert(pending.clone());
@@ -898,6 +998,7 @@ mod tests {
                 visual_status: "image",
                 touched: 0,
                 retry_after: Instant::now(),
+                reveal_start: None,
             },
         );
         let pending = (2, 320, "blob:pending".to_owned(), epoch);

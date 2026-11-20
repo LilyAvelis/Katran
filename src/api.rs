@@ -721,6 +721,7 @@ pub enum Command {
         settings: settings::Settings,
     },
     ShowSettings,
+    ShowActionsSettings,
     CloseSettings,
     Search {
         query: String,
