@@ -98,7 +98,7 @@ impl Service {
         }
         let encoded =
             serde_json::to_string(&ids).map_err(|e| ApiError::new("invalid_argument", e))?;
-        let mut statement = self.db.prepare("SELECT CAST(j.value AS INTEGER), a.slot_number FROM json_each(?1) j LEFT JOIN katran_properties p ON p.event_id=CAST(j.value AS INTEGER) AND p.pinned=1 LEFT JOIN tag_scoped_assignments a ON a.event_id=p.event_id AND a.scope=?2 ORDER BY CAST(j.key AS INTEGER)")?;
+        let mut statement = self.db.prepare("SELECT CAST(j.value AS INTEGER), a.slot_number FROM json_each(?1) j LEFT JOIN katran_properties p ON p.event_id=CAST(j.value AS INTEGER) AND p.pinned=1 LEFT JOIN tag_scoped_assignments a ON a.event_id=CAST(j.value AS INTEGER) AND a.scope=?2 AND (?2='images' OR p.event_id IS NOT NULL) ORDER BY CAST(j.key AS INTEGER)")?;
         let items = statement
             .query_map(rusqlite::params![encoded, scope], |row| {
                 Ok(json!({"id":row.get::<_,i64>(0)?,"slot":row.get::<_,Option<u8>>(1)?}))

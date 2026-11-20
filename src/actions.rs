@@ -27,6 +27,9 @@ pub fn palette_order(id: &str) -> usize {
         "move_to_pages",
         "open_pages_vault",
         "open_with",
+        "rename",
+        "toggle_pin",
+        "tag_menu",
         "quicklook",
         "reveal",
         "search_image_google_lens",
@@ -100,6 +103,9 @@ pub fn palette_group(id: &str, fallback: &'static str) -> &'static str {
         | "move_to_pages"
         | "open_pages_vault"
         | "open_with"
+        | "rename"
+        | "toggle_pin"
+        | "tag_menu"
         | "quicklook"
         | "reveal"
         | "search_image_google_lens"
@@ -222,6 +228,9 @@ pub fn english_group(id: &str, fallback: &'static str) -> &'static str {
 
 pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     match id {
+        "rename" => "Rename…",
+        "toggle_pin" => "Pin / unpin",
+        "tag_menu" => "Tags · filter and assign",
         "video_pause" => "Pause / Resume video",
         "capture_video_frame" => "Extract current frame",
         "extract_video_audio" => "Extract audio",
@@ -315,6 +324,30 @@ pub fn english_label(id: &str, fallback: &'static str) -> &'static str {
     }
 }
 pub const DEFS: &[Definition] = &[
+    Definition {
+        id: "rename",
+        label: "Переименовать…",
+        default_binding: "Ctrl E",
+        rebindable: false,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "toggle_pin",
+        label: "Закрепить / открепить",
+        default_binding: "",
+        rebindable: false,
+        group: "Файл",
+        in_palette: true,
+    },
+    Definition {
+        id: "tag_menu",
+        label: "Теги · фильтр и назначение",
+        default_binding: "",
+        rebindable: false,
+        group: "Файл",
+        in_palette: true,
+    },
     Definition {
         id: "collection_fullscreen",
         label: "Полноэкранный просмотр коллекции",
@@ -1313,6 +1346,9 @@ pub fn resolve(id: &str, state: &Interaction, capture: bool) -> Option<Dispatch>
             tab: crate::interaction::ShelfTab::Screenshots,
         }),
         "preview" => command(Command::TogglePreview),
+        "rename" => Dispatch::Intent(serde_json::json!({"intent":"rename"})),
+        "toggle_pin" => Dispatch::Intent(serde_json::json!({"intent":"toggle_pin"})),
+        "tag_menu" => Dispatch::Intent(serde_json::json!({"intent":"tag_menu"})),
         "cleanup" => command(Command::MaintainCache),
         "open_with" => command(Command::ListOpenApps {
             id: state

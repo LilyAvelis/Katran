@@ -77,7 +77,7 @@ fn notion_references_copy_single_urls_source_ids_and_ordered_links_bull() {
     api.set_media_capture_clipboard_sink(Box::new(sink));
 
     let first = katran::notion::Page {
-        id: "12345678-1234-5678-9000-123456789001".into(),
+        id: "12345678123456789000123456789001".into(),
         title: "First".into(),
     };
     let second = katran::notion::Page {
@@ -98,12 +98,15 @@ fn notion_references_copy_single_urls_source_ids_and_ordered_links_bull() {
     let source = call(
         &mut api,
         Command::CopyNotionSourceId {
-            source_id: first.id.clone(),
+            source_id: format!("collection://{}", first.id),
         },
     );
     assert_eq!(source["text_copied"], true);
     assert!(source["saved_id"].is_null());
-    assert_eq!(*writes.lock().unwrap(), [url, first.id.as_str()]);
+    assert_eq!(
+        *writes.lock().unwrap(),
+        [url, "12345678-1234-5678-9000-123456789001"]
+    );
 
     let batch = call(
         &mut api,

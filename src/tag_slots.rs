@@ -339,8 +339,8 @@ pub(crate) fn assign(
             let pinned: Option<bool> = tx.query_row("SELECT COALESCE(p.pinned,0) FROM events e LEFT JOIN katran_properties p ON p.event_id=e.id WHERE e.id=?1", [id], |r| r.get(0)).optional()?;
             match pinned {
                 None => Outcome::NotFound,
-                Some(false) => Outcome::NotPinned,
-                Some(true) => {
+                Some(false) if scope != "images" => Outcome::NotPinned,
+                Some(_) => {
                     if let Some(number) = slot {
                         let current: Option<u8> = tx
                             .query_row(
@@ -373,21 +373,21 @@ pub(crate) fn assign(
     Ok(results)
 }
 
-/// Invoke after changing pins inside the very same transaction. Only IDs that
-/// are now unpinned are affected; pinned IDs are never cleared accidentally.
+/// Invoke after changing pins inside the very same transaction. Images keep
+/// their scoped tag when unpinned. Other scopes still require a pin.
 /// The caller must propagate errors and roll back the encompassing transaction.
 pub(crate) fn clear_after_unpin(db: &Connection, ids: &[i64]) -> rusqlite::Result<usize> {
     let mut deleted = 0;
-    let mut statement = db.prepare("DELETE FROM tag_scoped_assignments WHERE event_id=?1 AND NOT EXISTS (SELECT 1 FROM katran_properties p WHERE p.event_id=?1 AND p.pinned=1)")?;
+    let mut statement = db.prepare("DELETE FROM tag_scoped_assignments WHERE event_id=?1 AND scope!='images' AND NOT EXISTS (SELECT 1 FROM katran_properties p WHERE p.event_id=?1 AND p.pinned=1)")?;
     for id in ids {
         deleted += statement.execute([id])?;
     }
     Ok(deleted)
 }
 
-/// Defense in depth for incomplete/legacy state: unpinned objects expose no tag.
+/// Only the Images scope exposes tags independently of pins.
 pub(crate) fn visible_slot(db: &Connection, scope: &str, id: i64) -> Result<Option<u8>> {
-    Ok(db.query_row("SELECT a.slot_number FROM tag_scoped_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.event_id=?1 AND a.scope=?2", params![id,scope], |r| r.get(0)).optional()?)
+    Ok(db.query_row("SELECT a.slot_number FROM tag_scoped_assignments a LEFT JOIN katran_properties p ON p.event_id=a.event_id WHERE a.event_id=?1 AND a.scope=?2 AND (?2='images' OR p.pinned=1)", params![id,scope], |r| r.get(0)).optional()?)
 }
 
 /// Domain filter data; the caller intersects these IDs with its category/query.
@@ -397,7 +397,7 @@ pub(crate) fn visible_ids(db: &Connection, scope: &str, slot: u8) -> Result<Vec<
     if !valid_slot_number(slot) {
         return Err(StoreError::Invalid("slot must be 1..9"));
     }
-    let mut stmt = db.prepare("SELECT a.event_id FROM tag_scoped_assignments a JOIN katran_properties p ON p.event_id=a.event_id AND p.pinned=1 WHERE a.slot_number=?1 AND a.scope=?2 ORDER BY a.event_id DESC")?;
+    let mut stmt = db.prepare("SELECT a.event_id FROM tag_scoped_assignments a LEFT JOIN katran_properties p ON p.event_id=a.event_id WHERE a.slot_number=?1 AND a.scope=?2 AND (?2='images' OR p.pinned=1) ORDER BY a.event_id DESC")?;
     let ids = stmt
         .query_map(params![slot, scope], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;

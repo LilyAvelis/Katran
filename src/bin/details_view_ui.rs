@@ -11,6 +11,11 @@ pub(super) fn display_title(event: &Value, tab: &str) -> String {
     {
         return name.to_owned();
     }
+    if event["kind"] == "link_fragment"
+        && let Some(url) = event["text_preview"].as_str().filter(|url| !url.is_empty())
+    {
+        return url.to_owned();
+    }
     if tab == "text" && event["kind"] == "text_fragment" {
         let title = katran::text_fragments::title(event["text_preview"].as_str().unwrap_or(""));
         return if title.is_empty() {
@@ -235,13 +240,14 @@ impl Shelf {
                                     .collect();
                                 self.start_drag(ids, ctx);
                             }
+                            self.open_item_actions(id, &response, ctx);
                             if response.clicked() || response.double_clicked() {
                                 self.state = self.call(Command::Select {
                                     id,
                                     mode: mode(ctx.input(|i| i.modifiers)),
                                 });
                                 if response.double_clicked() {
-                                    if event["source"] == "notion_page" {
+                                    if is_notion_row(event) {
                                         self.run("open".into(), ctx);
                                     } else {
                                         self.start_job(
@@ -268,7 +274,7 @@ impl Shelf {
             ui.weak(tr("Выберите объект", "Choose an item"));
             return;
         };
-        if event["source"] == "notion_page" {
+        if is_notion_row(event) {
             egui::ScrollArea::vertical()
                 .id_salt("details-metadata")
                 .auto_shrink([false, false])
@@ -395,7 +401,7 @@ impl Shelf {
                         (preview_rect, ui.id(), ui.clip_rect()),
                     )
                 });
-                if event["source"] == "notion_page" {
+                if is_notion_row(event) {
                     if let Some(fields) = event["notion_fields"].as_array() {
                         for field in fields {
                             if let Some(name) = field["name"].as_str() {
@@ -471,11 +477,11 @@ mod tests {
             enabled: true,
         });
         app.text_preview.set_enabled(true);
-        let first_url = "https://example.test/first";
+        let first_url = "https://www.notion.so/12345678123456789000123456789001";
         let second_url = format!("https://example.test/{}", "long-segment/".repeat(30));
         let first = app.call(Command::IngestLink {
             url: first_url.into(),
-            source: "synthetic".into(),
+            source: "notion_page".into(),
         });
         let second = app.call(Command::IngestLink {
             url: second_url.clone(),

@@ -27,7 +27,7 @@ fn browse(api: &mut Service) -> Vec<Value> {
 
 #[cfg(windows)]
 #[test]
-fn explicit_move_writes_flat_pages_and_observes_external_edits() {
+fn explicit_move_writes_one_markdown_and_observes_external_edits() {
     use katran::interaction::SelectionMode;
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
@@ -73,7 +73,7 @@ fn explicit_move_writes_flat_pages_and_observes_external_edits() {
         },
     );
     call(&mut api, Command::SetVisible { ids: ids.clone() });
-    for id in &ids {
+    for id in ids.iter().rev() {
         call(
             &mut api,
             Command::Select {
@@ -82,7 +82,9 @@ fn explicit_move_writes_flat_pages_and_observes_external_edits() {
             },
         );
     }
-    assert_eq!(call(&mut api, Command::MoveToPages)["pages_moved"], 2);
+    let moved = call(&mut api, Command::MoveToPages);
+    assert_eq!(moved["pages_moved"], 2);
+    assert_eq!(moved["pages_created"], 1);
     assert!(browse(&mut api).is_empty());
     call(
         &mut api,
@@ -91,7 +93,7 @@ fn explicit_move_writes_flat_pages_and_observes_external_edits() {
         },
     );
     let notes = browse(&mut api);
-    assert_eq!(notes.len(), 2);
+    assert_eq!(notes.len(), 1);
     let paths: Vec<_> = notes
         .iter()
         .map(|item| std::path::PathBuf::from(item["path"].as_str().unwrap()))
@@ -101,14 +103,16 @@ fn explicit_move_writes_flat_pages_and_observes_external_edits() {
             .iter()
             .all(|path| path.parent().unwrap().ends_with("Katran Pages"))
     );
-    for text in texts {
-        assert!(
-            paths
-                .iter()
-                .any(|path| std::fs::read_to_string(path).unwrap() == text)
-        );
-    }
+    assert_eq!(
+        std::fs::read_to_string(&paths[0]).unwrap(),
+        format!("{}\n\n{}", texts[1], texts[0])
+    );
     std::fs::write(&paths[0], "# Edited in Obsidian").unwrap();
+    std::fs::write(
+        paths[0].with_file_name("Created in Obsidian.md"),
+        "# Second note",
+    )
+    .unwrap();
     let refreshed = browse(&mut api);
     let note = refreshed
         .iter()
@@ -181,6 +185,68 @@ fn explicit_move_writes_flat_pages_and_observes_external_edits() {
             .iter()
             .all(|note| note["name"].as_str().unwrap().ends_with(".md"))
     );
+}
+
+#[test]
+fn shift_move_follows_both_directions_of_visible_order() {
+    use katran::interaction::SelectionMode;
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let tab = ShelfTab::Text;
+    call(&mut api, Command::SetTabEnabled { tab, enabled: true });
+    for reverse in [false, true] {
+        call(&mut api, Command::SetTab { tab });
+        let texts = if reverse {
+            ["four", "five", "six"]
+        } else {
+            ["one", "two", "three"]
+        };
+        let ids: Vec<_> = texts
+            .iter()
+            .map(|text| {
+                call(
+                    &mut api,
+                    Command::IngestText {
+                        text: (*text).into(),
+                        source: "test".into(),
+                    },
+                )["id"]
+                    .as_i64()
+                    .unwrap()
+            })
+            .collect();
+        call(&mut api, Command::SetVisible { ids: ids.clone() });
+        let (anchor, end) = if reverse { (2, 0) } else { (0, 2) };
+        call(
+            &mut api,
+            Command::Select {
+                id: ids[anchor],
+                mode: SelectionMode::Replace,
+            },
+        );
+        call(
+            &mut api,
+            Command::Select {
+                id: ids[end],
+                mode: SelectionMode::Range,
+            },
+        );
+        assert_eq!(call(&mut api, Command::MoveToPages)["pages_created"], 1);
+        call(
+            &mut api,
+            Command::SetTab {
+                tab: ShelfTab::Pages,
+            },
+        );
+        let expected = if reverse {
+            texts.into_iter().rev().collect::<Vec<_>>().join("\n\n")
+        } else {
+            texts.join("\n\n")
+        };
+        assert!(browse(&mut api).iter().any(|event| {
+            std::fs::read_to_string(event["path"].as_str().unwrap()).unwrap() == expected
+        }));
+    }
 }
 
 #[test]

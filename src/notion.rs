@@ -33,11 +33,10 @@ pub struct Page {
 
 impl Page {
     pub(crate) fn browser_url(&self) -> Result<String> {
-        self.validate()?;
-        Ok(format!(
-            "https://www.notion.so/{}",
-            self.id.replace('-', "")
-        ))
+        let id = canonical_id(self.id.trim())
+            .filter(|_| self.title.len() <= 8192)
+            .ok_or_else(|| ApiError::new("notion_page", "Invalid Notion page"))?;
+        Ok(format!("https://www.notion.so/{}", id.replace('-', "")))
     }
 
     pub(crate) fn validate(&self) -> Result<()> {

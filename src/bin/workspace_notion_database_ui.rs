@@ -237,7 +237,7 @@ impl Shelf {
     pub(crate) fn close_notion_database(&mut self) {
         if let Some(mut database) = self.workspace.database.take() {
             self.cancel_notion_database_jobs(&mut database);
-            self.events.retain(|event| event["source"] != "notion_page");
+            self.events.retain(|event| !is_notion_row(event));
             if self.state["tab"] == "folder" {
                 self.next_cursor = None;
                 self.call(Command::ClearSelection);

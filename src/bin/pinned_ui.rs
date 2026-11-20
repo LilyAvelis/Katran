@@ -40,61 +40,64 @@ impl Shelf {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::E)) {
-            let Some(id) = self.selected_ids().first().copied() else {
-                return;
-            };
-            let result = if id > 0 {
-                self.call(Command::GetPinnedProperties { id })
-            } else {
-                Value::Null
-            };
-            if result["properties"]["pinned"] != true {
-                let event = self.call(Command::Get { id });
-                if super::images::is_bull(&event) || super::images::is_bs(&event) {
-                    let info = self.call(Command::CollectionRenameInfo { id });
-                    if let (Some(name), Some(revision)) =
-                        (info["name"].as_str(), info["revision"].as_str())
-                    {
-                        self.pinned_ui = State {
-                            open: true,
-                            focus_name: true,
-                            id: Some(id),
-                            name: name.into(),
-                            collection_revision: Some(revision.into()),
-                            ..Default::default()
-                        };
-                    }
-                    return;
+            self.open_rename(ctx);
+        }
+    }
+    pub(super) fn open_rename(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_ids().first().copied() else {
+            return;
+        };
+        let result = if id > 0 {
+            self.call(Command::GetPinnedProperties { id })
+        } else {
+            Value::Null
+        };
+        if result["properties"]["pinned"] != true {
+            let event = self.call(Command::Get { id });
+            if super::images::is_bull(&event) || super::images::is_bs(&event) {
+                let info = self.call(Command::CollectionRenameInfo { id });
+                if let (Some(name), Some(revision)) =
+                    (info["name"].as_str(), info["revision"].as_str())
+                {
+                    self.pinned_ui = State {
+                        open: true,
+                        focus_name: true,
+                        id: Some(id),
+                        name: name.into(),
+                        collection_revision: Some(revision.into()),
+                        ..Default::default()
+                    };
                 }
-                self.message = tr(
-                    "Ctrl+E доступен коллекциям и закреплённым объектам",
-                    "Ctrl+E is available for collections and pinned items",
-                )
-                .into();
                 return;
             }
-            self.pinned_ui = State {
-                open: true,
-                focus_name: true,
-                id: Some(id),
-                name: result["properties"]["display_name"]
-                    .as_str()
-                    .unwrap_or("")
-                    .into(),
-                opener: result["properties"]["opener"].as_str().map(str::to_owned),
-                ..Default::default()
-            };
-            let result = self.call(Command::BeginJob {
-                command: Box::new(Command::ListOpenApps { id }),
-            });
-            if result["state"] == "succeeded" {
-                self.pinned_accept_apps(&result["result"]);
-            } else if let Some(id) = result["job_id"].as_u64() {
-                self.pinned_ui.job = Some(JobId(id));
-                ctx.request_repaint();
-            } else {
-                self.pinned_ui.error = self.message.clone();
-            }
+            self.message = tr(
+                "Ctrl+E доступен коллекциям и закреплённым объектам",
+                "Ctrl+E is available for collections and pinned items",
+            )
+            .into();
+            return;
+        }
+        self.pinned_ui = State {
+            open: true,
+            focus_name: true,
+            id: Some(id),
+            name: result["properties"]["display_name"]
+                .as_str()
+                .unwrap_or("")
+                .into(),
+            opener: result["properties"]["opener"].as_str().map(str::to_owned),
+            ..Default::default()
+        };
+        let result = self.call(Command::BeginJob {
+            command: Box::new(Command::ListOpenApps { id }),
+        });
+        if result["state"] == "succeeded" {
+            self.pinned_accept_apps(&result["result"]);
+        } else if let Some(id) = result["job_id"].as_u64() {
+            self.pinned_ui.job = Some(JobId(id));
+            ctx.request_repaint();
+        } else {
+            self.pinned_ui.error = self.message.clone();
         }
     }
     fn pinned_accept_apps(&mut self, result: &Value) {
@@ -368,6 +371,17 @@ mod tests {
             app.call(Command::GetPinnedProperties { id })["properties"]["pinned"],
             false
         );
+        let actions = app.call(Command::Actions);
+        let rename = actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["id"] == "rename")
+            .unwrap();
+        assert_eq!(rename["shortcut"], "Ctrl E");
+        app.run("rename".into(), &ctx);
+        assert!(app.pinned_ui.open);
+        assert_eq!(app.pinned_ui.name, "New");
     }
 
     fn setup() -> (tempfile::TempDir, Shelf, i64) {

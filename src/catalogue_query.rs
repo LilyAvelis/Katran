@@ -269,7 +269,7 @@ fn query_sorted_slice_inner(
         (
             match scope {
                 "images" => {
-                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='images' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
+                    "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='images'"
                 }
                 "screenshots" => {
                     "LEFT JOIN tag_scoped_assignments a ON a.event_id=p.id AND a.scope='screenshots' AND EXISTS(SELECT 1 FROM katran_properties tp WHERE tp.event_id=p.id AND tp.pinned=1)"
@@ -526,11 +526,16 @@ fn slice_projection(
     let slot_filter = tag_slot
         .map(|number| format!("AND EXISTS(SELECT 1 FROM tag_scoped_assignments a WHERE a.event_id=e.id AND a.scope='{scope}' AND a.slot_number={number})"))
         .unwrap_or_default();
+    let from = if !pinned && tab == ShelfTab::Images {
+        "events e LEFT JOIN katran_properties k ON k.event_id=e.id"
+    } else {
+        "katran_properties k JOIN events e ON e.id=k.event_id AND k.pinned=1"
+    };
     format!("SELECT e.id,e.detected_at_ms,e.source,e.name,e.path,e.size,e.blob_hash,e.origin_json,e.reference_hash,e.delete_policy_json,
       CASE WHEN json_extract(e.delete_policy_json,'$.kind')='live_original' THEN EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation AND c.enabled=1 WHERE p.event_id=e.id AND p.available=1) ELSE NULL END AS projected_available,
       COALESCE((SELECT preview FROM text_fragments f WHERE f.event_id=e.id),(SELECT preview FROM link_fragments f WHERE f.event_id=e.id),(SELECT preview FROM table_fragments f WHERE f.event_id=e.id)) AS text_preview,
       EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AS is_link,EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AS is_table,e.modified_at_ms
-      FROM katran_properties k JOIN events e ON e.id=k.event_id WHERE k.pinned=1 AND {category} AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id) AND e.id <= ?4 {tag_filter} {slot_filter}
+      FROM {from} WHERE {category} AND NOT EXISTS(SELECT 1 FROM bull_members bm WHERE bm.member_id=e.id) AND NOT EXISTS(SELECT 1 FROM page_moves pm WHERE pm.event_id=e.id) AND e.id <= ?4 {tag_filter} {slot_filter}
       AND (?1 OR ?2 OR ?3='' OR ?3!='') AND {} ORDER BY id DESC LIMIT ?6", search_predicate("CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END", "OR katran_contains(COALESCE(k.display_name,''),?5)"))
 }
 

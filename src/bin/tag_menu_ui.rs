@@ -361,10 +361,14 @@ impl State {
             }
             if self.slots.iter().any(|slot| slot.number == number) {
                 if assign && !eligible {
-                    self.error = tr(
-                        "Для назначения выделите только закреплённые объекты",
-                        "Select only pinned items to assign a tag",
-                    )
+                    self.error = if self.tab == ShelfTab::Images {
+                        tr("Выберите изображения", "Select images")
+                    } else {
+                        tr(
+                            "Для назначения выделите только закреплённые объекты",
+                            "Select only pinned items to assign a tag",
+                        )
+                    }
                     .into();
                 } else {
                     self.close(ctx);
@@ -412,7 +416,7 @@ impl State {
                 if !self.error.is_empty() {
                     ui.colored_label(Color32::LIGHT_RED, &self.error);
                 }
-                if !eligible {
+                if !eligible && self.tab != ShelfTab::Images {
                     ui.weak(tr(
                         "Для назначения все выбранные объекты должны быть закреплены.",
                         "All selected items must be pinned to assign a tag.",
@@ -518,7 +522,8 @@ impl super::Shelf {
         let eligible = !ids.is_empty()
             && ids.iter().all(|id| {
                 self.events.iter().any(|event| {
-                    event["id"].as_i64() == Some(*id) && event["properties"]["pinned"] == true
+                    event["id"].as_i64() == Some(*id)
+                        && (self.state["tab"] == "images" || event["properties"]["pinned"] == true)
                 })
             });
         let active = self.state["tag_slot_filter"]
@@ -1338,9 +1343,9 @@ mod tests {
     fn partial_assignment_retries_only_failed_items() {
         let root = tempfile::tempdir().unwrap();
         let mut app = super::super::tests::test_shelf(root.path());
-        app.state = app.call(katran::Command::SetTab {
-            tab: katran::interaction::ShelfTab::Images,
-        });
+        let tab = katran::interaction::ShelfTab::Screenshots;
+        app.call(katran::Command::SetTabEnabled { tab, enabled: true });
+        app.state = app.call(katran::Command::SetTab { tab });
         let make = |app: &mut super::super::Shelf, name: &str| {
             app.call(katran::Command::IngestBytes {
                 name: name.into(),

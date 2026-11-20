@@ -439,6 +439,12 @@ fn effective_gallery_columns(width: f32, desired: u8) -> usize {
         .max(1.0) as usize;
     usize::from(desired.clamp(1, 12)).min(fit)
 }
+fn is_notion_row(event: &Value) -> bool {
+    event["id"]
+        .as_i64()
+        .is_some_and(katran::notion::is_folder_page_id)
+}
+
 fn mode(m: egui::Modifiers) -> SelectionMode {
     if m.shift {
         SelectionMode::Range
@@ -1300,6 +1306,9 @@ impl Shelf {
                 self.focus_actions = self.actions;
                 self.action_query.clear();
                 self.action_selected = 0;
+                ctx.data_mut(|data| {
+                    data.remove::<egui::Pos2>(egui::Id::new("item-actions-anchor"))
+                });
             }
             if self.shortcut_editor.is_none()
                 && !self.pods_ui.selector_open
@@ -1703,6 +1712,9 @@ impl Shelf {
                             data.insert_temp(egui::Id::new("actions-button-rect"), response.rect)
                         });
                         if response.clicked() {
+                            ctx.data_mut(|data| {
+                                data.remove::<egui::Pos2>(egui::Id::new("item-actions-anchor"))
+                            });
                             self.actions = !self.actions;
                             self.focus_actions = self.actions;
                             self.action_query.clear();
@@ -4907,6 +4919,62 @@ mod tests {
         app.run("sort_arrival".into(), &ctx);
         assert!(app.sort_notice.is_none());
     }
+    #[test]
+    fn right_click_on_card_selects_it_and_opens_the_actions_palette() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = test_shelf(root.path());
+        app.call(Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        });
+        let id = app.call(Command::IngestBytes {
+            name: "image3.png".into(),
+            bytes: vec![3],
+            source: "test".into(),
+        })["id"]
+            .as_i64()
+            .unwrap();
+        app.refresh();
+        let ctx = egui::Context::default();
+        ui_style::install(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(940.0, 680.0));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        output.textures_delta.clear();
+        let pos = ctx.data(|data| {
+            data.get_temp::<Vec<egui::Rect>>(egui::Id::new("test-shelf-card-rects"))
+                .unwrap()[0]
+                .center()
+        });
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| app.render(ui));
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.selected_ids(), vec![id]);
+        assert!(app.actions);
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<egui::Pos2>(egui::Id::new("item-actions-anchor"))),
+            Some(pos)
+        );
+    }
+
     #[test]
     fn actions_popup_tracks_actual_status_bar_trigger() {
         let root = tempfile::tempdir().unwrap();

@@ -1037,9 +1037,11 @@ impl Service {
             Command::CopyNotionPageFields { pages } => self.copy_notion_page_fields(&pages),
             Command::CopyNotionPageLinks { pages } => self.copy_notion_page_links(&pages),
             Command::CopyNotionSourceId { source_id } => {
-                let id = notion::canonical_id(&source_id).ok_or_else(|| {
-                    ApiError::new("notion_source", "Invalid Notion data source ID")
-                })?;
+                let input = source_id.trim();
+                let id = notion::canonical_id(input.strip_prefix("collection://").unwrap_or(input))
+                    .ok_or_else(|| {
+                        ApiError::new("notion_source", "Invalid Notion data source ID")
+                    })?;
                 self.publish_text_result(serde_json::json!({"merged":true,"text":id}))
             }
             Command::CopyNotionReaderSelection { text } => {

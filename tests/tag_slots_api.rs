@@ -21,6 +21,9 @@ fn call(api: &mut Service, command: Command) -> Value {
 fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
     let root = tempfile::tempdir().unwrap();
     let mut api = Service::open(root.path(), 100_000).unwrap();
+    let tab = katran::interaction::ShelfTab::Screenshots;
+    call(&mut api, Command::SetTabEnabled { tab, enabled: true });
+    call(&mut api, Command::SetTab { tab });
     let slots = call(&mut api, Command::ListTagSlots);
     assert_eq!(slots["slots"].as_array().unwrap().len(), 9);
     let slot = Slot {
@@ -71,6 +74,7 @@ fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
     assert!(call(&mut api, Command::GetTagSlot { id })["slot"].is_null());
     drop(api);
     let mut api = Service::open(root.path(), 100_000).unwrap();
+    call(&mut api, Command::SetTab { tab });
     assert_eq!(
         call(&mut api, Command::ListTagSlots)["slots"][0]["name"],
         "Работа"
@@ -80,6 +84,77 @@ fn tag_slots_require_pin_and_unpin_clears_assignment_but_not_slot_definition() {
         72
     );
     assert!(call(&mut api, Command::GetTagSlot { id })["slot"].is_null());
+}
+
+#[test]
+fn image_tag_filter_keeps_unpinned_matches_and_pinned_sort_promotes_only_matching_pins() {
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: katran::interaction::ShelfTab::Images,
+        },
+    );
+    let make = |api: &mut Service, name: &str| {
+        call(
+            api,
+            Command::IngestBytes {
+                name: format!("{name}.png"),
+                bytes: name.as_bytes().to_vec(),
+                source: "test".into(),
+            },
+        )["id"]
+            .as_i64()
+            .unwrap()
+    };
+    let pin = make(&mut api, "matching-pin");
+    let unpinned = make(&mut api, "matching-unpinned");
+    let other = make(&mut api, "other-pin");
+    call(
+        &mut api,
+        Command::TogglePins {
+            ids: vec![pin, other],
+        },
+    );
+    let result = call(
+        &mut api,
+        Command::AssignTagSlot {
+            ids: vec![pin, unpinned],
+            slot: Some(2),
+        },
+    );
+    assert_eq!(result["items"][1]["outcome"], "applied");
+    call(&mut api, Command::FilterTagSlot { slot: Some(2) });
+    call(
+        &mut api,
+        Command::RunAction {
+            id: "sort_pinned".into(),
+        },
+    );
+    let browse = |api: &mut Service| {
+        let page = call(
+            api,
+            Command::BrowseShelfSorted {
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            },
+        );
+        page["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["id"].as_i64().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(browse(&mut api), vec![pin, unpinned]);
+    call(&mut api, Command::TogglePinnedView);
+    assert_eq!(browse(&mut api), vec![pin]);
+    call(&mut api, Command::TogglePinnedView);
+    call(&mut api, Command::TogglePins { ids: vec![pin] });
+    assert_eq!(call(&mut api, Command::GetTagSlot { id: pin })["slot"], 2);
+    assert_eq!(browse(&mut api), vec![unpinned, pin]);
 }
 
 #[test]

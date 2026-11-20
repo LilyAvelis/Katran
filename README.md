@@ -267,6 +267,16 @@ cards to preserve 96 px column / 72 px row minimums. Settings expose both values
 
 ## Controls
 
+Right-click a card to open the same Actions menu as **Ctrl+K**. Actions
+includes **Rename** for collections and pinned items, **Pin / unpin**, and
+**Tags** where available. In **Images**, each card can have one tag
+independently of its pin. Filter by a tag from the **Tags** button, then
+choose the pinned order in **Sort** to put matching pinned images first.
+
+In **Text**, **Actions → Move to Pages** combines selected snippets into
+one Markdown note. Shift selection follows the direction of the range,
+and Ctrl-click follows the order of your clicks.
+
 **Shift+Tab moves** the selection between a
 category and Folder. **Ctrl+Tab copies**, preserving the current view and
 selection so repeated presses make additional copies. Folder image imports are

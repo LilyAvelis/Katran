@@ -41,9 +41,9 @@ fn unpin_clears_assignment_and_preserves_slot_settings() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("test.sqlite");
     let mut db = fixture(&path);
-    save_slot(&db, "images", &slot(1)).unwrap();
-    save_slot(&db, "images", &slot(2)).unwrap();
-    let results = assign(&mut db, "images", &[1, 2, 99, 1, 3], Some(1)).unwrap();
+    save_slot(&db, "text", &slot(1)).unwrap();
+    save_slot(&db, "text", &slot(2)).unwrap();
+    let results = assign(&mut db, "text", &[1, 2, 99, 1, 3], Some(1)).unwrap();
     assert_eq!(
         results.iter().map(|r| r.outcome).collect::<Vec<_>>(),
         vec![
@@ -54,12 +54,12 @@ fn unpin_clears_assignment_and_preserves_slot_settings() {
             Outcome::Applied
         ]
     );
-    assert_eq!(visible_ids(&db, "images", 1).unwrap(), vec![3, 1]);
+    assert_eq!(visible_ids(&db, "text", 1).unwrap(), vec![3, 1]);
     assert_eq!(
-        assign(&mut db, "images", &[1], Some(2)).unwrap()[0].outcome,
+        assign(&mut db, "text", &[1], Some(2)).unwrap()[0].outcome,
         Outcome::Applied
     );
-    assert_eq!(visible_slot(&db, "images", 1).unwrap(), Some(2));
+    assert_eq!(visible_slot(&db, "text", 1).unwrap(), Some(2));
     {
         let tx = db.transaction().unwrap();
         tx.execute("UPDATE katran_properties SET pinned=0 WHERE event_id=1", [])
@@ -67,14 +67,14 @@ fn unpin_clears_assignment_and_preserves_slot_settings() {
         assert_eq!(clear_after_unpin(&tx, &[1, 3]).unwrap(), 1);
         tx.commit().unwrap();
     }
-    assert_eq!(visible_slot(&db, "images", 1).unwrap(), None);
-    assert!(visible_ids(&db, "images", 2).unwrap().is_empty());
+    assert_eq!(visible_slot(&db, "text", 1).unwrap(), None);
+    assert!(visible_ids(&db, "text", 2).unwrap().is_empty());
     assert_eq!(
-        assign(&mut db, "images", &[1], Some(1)).unwrap()[0].outcome,
+        assign(&mut db, "text", &[1], Some(1)).unwrap()[0].outcome,
         Outcome::NotPinned
     );
     assert_eq!(
-        assign(&mut db, "images", &[1], None).unwrap()[0].outcome,
+        assign(&mut db, "text", &[1], None).unwrap()[0].outcome,
         Outcome::NotPinned
     );
     drop(db);
@@ -83,22 +83,22 @@ fn unpin_clears_assignment_and_preserves_slot_settings() {
         "PRAGMA foreign_keys=ON; UPDATE katran_properties SET pinned=1 WHERE event_id=1;",
     )
     .unwrap();
-    assert_eq!(list_slots(&db, "images").unwrap(), vec![slot(1), slot(2)]);
-    assert_eq!(visible_slot(&db, "images", 1).unwrap(), None);
+    assert_eq!(list_slots(&db, "text").unwrap(), vec![slot(1), slot(2)]);
+    assert_eq!(visible_slot(&db, "text", 1).unwrap(), None);
     assert_eq!(
-        assign(&mut db, "images", &[1], None).unwrap()[0].outcome,
+        assign(&mut db, "text", &[1], None).unwrap()[0].outcome,
         Outcome::Applied
     );
-    assert_eq!(visible_slot(&db, "images", 1).unwrap(), None);
-    assert_eq!(visible_slot(&db, "images", 3).unwrap(), Some(1));
+    assert_eq!(visible_slot(&db, "text", 1).unwrap(), None);
+    assert_eq!(visible_slot(&db, "text", 3).unwrap(), Some(1));
 }
 
 #[test]
 fn unpin_and_assignment_clear_roll_back_together() {
     let root = tempfile::tempdir().unwrap();
     let mut db = fixture(&root.path().join("test.sqlite"));
-    save_slot(&db, "images", &slot(1)).unwrap();
-    assign(&mut db, "images", &[1], Some(1)).unwrap();
+    save_slot(&db, "text", &slot(1)).unwrap();
+    assign(&mut db, "text", &[1], Some(1)).unwrap();
     {
         let tx = db.transaction().unwrap();
         tx.execute("UPDATE katran_properties SET pinned=0 WHERE event_id=1", [])
@@ -106,7 +106,7 @@ fn unpin_and_assignment_clear_roll_back_together() {
         assert_eq!(clear_after_unpin(&tx, &[1]).unwrap(), 1);
         tx.rollback().unwrap();
     }
-    assert_eq!(visible_slot(&db, "images", 1).unwrap(), Some(1));
+    assert_eq!(visible_slot(&db, "text", 1).unwrap(), Some(1));
 }
 
 #[test]

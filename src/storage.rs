@@ -717,11 +717,17 @@ pub(crate) fn commit_shelf_collection(
         )?;
         tx.execute("UPDATE katran_pinned_order SET position=(SELECT MIN(position)-1 FROM katran_pinned_order) WHERE event_id=?1", [id])?;
         if same_tags {
-            if let Some(slot) = first_slot {
-                tx.execute("INSERT INTO tag_scoped_assignments(event_id,slot_number,scope) VALUES(?1,?2,?3)", params![id, slot, scope])?;
-            }
             tx.execute("INSERT INTO katran_tags(event_id,tag_key,tag_display) SELECT ?1,tag_key,tag_display FROM katran_tags WHERE event_id=?2", params![id, first])?;
         }
+    }
+    if same_tags
+        && (pinned || scope == "images")
+        && let Some(slot) = first_slot
+    {
+        tx.execute(
+            "INSERT INTO tag_scoped_assignments(event_id,slot_number,scope) VALUES(?1,?2,?3)",
+            params![id, slot, scope],
+        )?;
     }
     let mut obsolete = HashSet::new();
     for input in packed.inputs {

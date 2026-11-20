@@ -182,6 +182,30 @@ impl Service {
 
     pub(crate) fn action_available(&self, id: &str, background: BackgroundActions) -> bool {
         match id {
+            "rename" if self.interaction.tab == ShelfTab::Desktop => false,
+            "rename" => self
+                .interaction
+                .selected
+                .first()
+                .copied()
+                .or(self.interaction.cursor)
+                .and_then(|id| self.get(id).ok().map(|event| (id, event)))
+                .is_some_and(|(id, event)| {
+                    crate::collection_rename::can_rename(&event)
+                        || id > 0
+                            && crate::pinned::properties(&self.db, id)
+                                .is_ok_and(|properties| properties.pinned)
+                }),
+            "toggle_pin" => {
+                self.interaction.tab != ShelfTab::All
+                    && self.interaction.tab != ShelfTab::Pages
+                    && !self.interaction.emoji_catalogue
+                    && (!self.interaction.selected.is_empty() || self.interaction.cursor.is_some())
+            }
+            "tag_menu" => {
+                !self.interaction.emoji_catalogue
+                    && crate::tag_service::scope(self.interaction.tab).is_ok()
+            }
             "apply_text_draft" => self.text_card_for_obsidian(),
             "show_text_vault" => self.interaction.tab == ShelfTab::Text,
             "move_to_pages" => self.can_move_to_pages(),

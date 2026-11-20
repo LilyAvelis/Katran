@@ -23,7 +23,7 @@ impl Service {
                 &self.root,
                 self.quota,
                 &url,
-                "notion_page",
+                "notion_link",
                 &self.ingest_origin,
                 &references,
             )?;

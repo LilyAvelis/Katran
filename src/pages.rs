@@ -253,6 +253,7 @@ impl Service {
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut total = 0;
+        let mut snippets_only = true;
         let mut entries = Vec::with_capacity(items.len());
         for item in &items {
             let event = storage::get_event(&tx, item.id)?;
@@ -264,6 +265,7 @@ impl Service {
                     "A selected Text card has changed",
                 ));
             }
+            snippets_only &= event.kind == EventKind::TextFragment;
             let entry = read_entry(&event)?;
             total += entry.bytes.len();
             if total > baloh_collection::bs::MAX_TOTAL_BYTES {
@@ -273,6 +275,25 @@ impl Service {
                 ));
             }
             entries.push(entry);
+        }
+        let merged = snippets_only && entries.len() > 1;
+        if merged {
+            let size = total + 2 * (entries.len() - 1);
+            if size > text_fragments::MAX_TEXT_BYTES {
+                return Err(ApiError::new(
+                    "pages_size_limit",
+                    "Combined Markdown exceeds the page size limit",
+                ));
+            }
+            let name = entries[0].name.clone();
+            let mut bytes = Vec::with_capacity(size);
+            for (index, entry) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    bytes.extend_from_slice(b"\n\n");
+                }
+                bytes.extend(entry.bytes);
+            }
+            entries = vec![FileEntry { name, bytes }];
         }
         let publication =
             crate::folder_collection::prepare_flat_extraction(&root, entries)?.publish();
@@ -286,7 +307,8 @@ impl Service {
                 ),
             ));
         }
-        for (item, path) in items.iter().zip(&publication.paths) {
+        for (index, item) in items.iter().enumerate() {
+            let path = &publication.paths[if merged { 0 } else { index }];
             tx.execute(
                 "INSERT INTO page_moves(event_id, filename) VALUES (?1, ?2)",
                 rusqlite::params![
@@ -298,7 +320,11 @@ impl Service {
         tx.commit()?;
         let ids: Vec<_> = items.iter().map(|item| item.id).collect();
         self.interaction.replace_collection_rows(&ids, None);
-        Ok(json!({"pages_moved":ids.len(),"interaction":self.interaction}))
+        Ok(json!({
+            "pages_moved":ids.len(),
+            "pages_created":publication.paths.len(),
+            "interaction":self.interaction
+        }))
     }
 
     pub(crate) fn open_pages_vault(&self, in_obsidian: bool) -> Result<Value> {

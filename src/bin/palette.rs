@@ -19,8 +19,45 @@ fn action_matches(action: &Value, query: &str) -> bool {
 }
 
 impl Shelf {
+    pub(super) fn open_item_actions(
+        &mut self,
+        id: i64,
+        response: &egui::Response,
+        ctx: &egui::Context,
+    ) {
+        if !response.secondary_clicked()
+            || self.modal_owns_input()
+            || self.api.is_none()
+            || self.state["settings_open"] == true
+        {
+            return;
+        }
+        if !self.state["selected"]
+            .as_array()
+            .is_some_and(|ids| ids.iter().any(|value| value.as_i64() == Some(id)))
+        {
+            let selection = self.call(Command::Select {
+                id,
+                mode: katran::interaction::SelectionMode::Replace,
+            });
+            if selection.is_null() {
+                return;
+            }
+            self.state = selection;
+        }
+        let position = response
+            .interact_pointer_pos()
+            .unwrap_or(response.rect.center());
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("item-actions-anchor"), position));
+        self.actions = true;
+        self.focus_actions = false;
+        self.action_query.clear();
+        self.action_selected = 0;
+    }
+
     pub(super) fn palette(&mut self, ctx: &egui::Context) {
         if !self.actions {
+            ctx.data_mut(|data| data.remove::<egui::Pos2>(egui::Id::new("item-actions-anchor")));
             return;
         }
         let catalogue = self.call(Command::Actions);
@@ -97,17 +134,23 @@ impl Shelf {
                 ctx.data(|data| data.get_temp::<egui::Rect>(egui::Id::new("actions-button-rect")))
             })
             .flatten();
+        let context_anchor =
+            ctx.data(|data| data.get_temp::<egui::Pos2>(egui::Id::new("item-actions-anchor")));
         let anchor = trigger
             .map(|rect| rect.right_top() + egui::vec2(0.0, -6.0))
             .unwrap_or(ctx.content_rect().right_bottom() - egui::vec2(8.0, 40.0));
         // Reserve space for the header, search field, footer and frame above the trigger.
-        let scroll_height = (anchor.y - ctx.content_rect().top() - 165.0).clamp(24.0, 320.0);
+        let scroll_height = if context_anchor.is_some() {
+            (ctx.content_rect().height() - 175.0).clamp(24.0, 320.0)
+        } else {
+            (anchor.y - ctx.content_rect().top() - 165.0).clamp(24.0, 320.0)
+        };
         let mut optical_slot = None;
         let result = egui::Modal::new(egui::Id::new("actions"))
             .area(
                 egui::Area::new(egui::Id::new("actions")).order(egui::Order::Foreground)
-                    .pivot(egui::Align2::RIGHT_BOTTOM)
-                    .fixed_pos(anchor),
+                    .pivot(if context_anchor.is_some() { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_BOTTOM })
+                    .fixed_pos(context_anchor.unwrap_or(anchor)),
             )
             .backdrop_color(Color32::from_black_alpha(24))
             .frame(crate::action_row::popup_frame(ctx))

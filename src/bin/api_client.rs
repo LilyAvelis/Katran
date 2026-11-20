@@ -2378,6 +2378,24 @@ impl Shelf {
         if self.run_notion_database_action(&id, ctx) {
             return;
         }
+        match id.as_str() {
+            "rename" => {
+                self.actions = false;
+                self.open_rename(ctx);
+                return;
+            }
+            "toggle_pin" => {
+                self.actions = false;
+                self.toggle_shelf_pins();
+                return;
+            }
+            "tag_menu" => {
+                self.actions = false;
+                self.open_tag_menu();
+                return;
+            }
+            _ => {}
+        }
         if id == "collection_fullscreen" {
             if self.upscale.collection_can_fullscreen()
                 && self.call(Command::RunAction { id })["intent"] == "toggle_collection_fullscreen"
@@ -2495,9 +2513,9 @@ impl Shelf {
         }
         if id == "move_to_pages" {
             let result = self.call(Command::MoveToPages);
-            if let Some(count) = result["pages_moved"].as_u64() {
+            if let Some(count) = result["pages_created"].as_u64() {
                 self.state = result["interaction"].clone();
-                self.message = format!("{} · {count}", tr("Перенесено в Pages", "Moved to Pages"));
+                self.message = format!("{} · {count}", tr("Создано страниц", "Pages created"));
                 self.refresh();
             }
             self.actions = false;

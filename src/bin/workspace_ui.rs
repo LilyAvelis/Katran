@@ -513,40 +513,33 @@ impl Shelf {
                     ));
                 }
             } else {
-                let ids = self.state["selected"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_i64)
-                    .collect::<Vec<_>>();
-                let ids = if ids.is_empty() {
-                    self.state["cursor"].as_i64().into_iter().collect()
-                } else {
-                    ids
-                };
-                let before = self.call(Command::Interaction);
-                let result = self.call(Command::TogglePins { ids });
-                if result.is_null() {
-                    return;
-                }
-                let failures = result["items"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|item| !item["error"].is_null())
-                    .count();
-                self.message = if failures > 0 {
-                    format!(
-                        "{}: {failures}",
-                        tr("Не удалось изменить закрепление", "Could not change pins")
-                    )
-                } else {
-                    tr("Закрепление обновлено", "Pins updated").into()
-                };
-                let after = self.call(Command::Interaction);
-                self.accept_item_metadata_update(&before, after);
+                self.toggle_shelf_pins();
             }
         }
+    }
+    pub(super) fn toggle_shelf_pins(&mut self) {
+        let ids = self.selected_ids();
+        let before = self.call(Command::Interaction);
+        let result = self.call(Command::TogglePins { ids });
+        if result.is_null() {
+            return;
+        }
+        let failures = result["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| !item["error"].is_null())
+            .count();
+        self.message = if failures > 0 {
+            format!(
+                "{}: {failures}",
+                tr("Не удалось изменить закрепление", "Could not change pins")
+            )
+        } else {
+            tr("Закрепление обновлено", "Pins updated").into()
+        };
+        let after = self.call(Command::Interaction);
+        self.accept_item_metadata_update(&before, after);
     }
     pub(super) fn workspace_tick(&mut self, ctx: &egui::Context) {
         if !self.workspace.open {

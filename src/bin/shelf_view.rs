@@ -144,7 +144,7 @@ impl Shelf {
                 }
                 if let Some(id) = self.state["preview"].as_i64() {
                     if let Some(event) = visible.iter().find(|e| e["id"] == id) {
-                        if event["source"] == "notion_page" {
+                        if is_notion_row(event) {
                             self.show_notion_folder_reader(ui);
                         } else if let Some(target) = super::media_preview_ui::target(event, &self.state, true) {
                             if let Some(api) = self.api.as_mut() {
@@ -659,7 +659,7 @@ impl Shelf {
                                             event["properties"]["display_name"].as_str()
                                         {
                                             name.to_owned()
-                                        } else if event["source"] == "notion_page" {
+                                        } else if is_notion_row(event) {
                                             event["name"].as_str().unwrap_or("").to_owned()
                                         } else if event["kind"] == "table_fragment" {
                                             table_preview_ui::card_title(event)
@@ -794,7 +794,7 @@ impl Shelf {
                                                 event["properties"]["display_name"].as_str()
                                             {
                                                 name.to_owned()
-                                            } else if event["source"] == "notion_page" {
+                                            } else if is_notion_row(event) {
                                                 event["name"].as_str().unwrap_or("").to_owned()
                                             } else if event["kind"] == "table_fragment" {
                                                 table_preview_ui::card_title(event)
@@ -949,13 +949,14 @@ impl Shelf {
                                             .collect();
                                         self.start_drag(ids, ctx);
                                     }
+                                    self.open_item_actions(id, &response, ctx);
                                     if response.clicked() || response.double_clicked() {
                                         self.state = self.call(Command::Select {
                                             id,
                                             mode: mode(ctx.input(|i| i.modifiers)),
                                         });
                                         if response.double_clicked() {
-                                            if event["source"] == "notion_page" {
+                                            if is_notion_row(event) {
                                                 self.run("open".into(), ctx);
                                             } else {
                                                 self.start_job(Command::RunAction { id: "open".into() }, false, ctx.clone());
