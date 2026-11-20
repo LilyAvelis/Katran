@@ -2198,7 +2198,7 @@ impl State {
          }
         });
         SettingsSection::group(ui,super::i18n::tr("Папки и хранение", "Folders and storage"),|ui|{
-         SettingsRow::show(ui,super::i18n::tr("Папка ShareX", "ShareX folder"),super::i18n::tr("Абсолютный путь к папке снимков. Пустое поле отключает импорт; изменения поступают из Windows.", "Absolute path to the screenshots folder. Leave empty to disable import. Changes are received from Windows."),|ui|{
+         SettingsRow::show(ui,super::i18n::tr("Папка скриншотов", "Screenshots folder"),super::i18n::tr("Укажи папку автосохранения из ShareX или «Ножниц» Windows. Katran показывает оригиналы в Screenshots и скрывает их точные копии из буфера в Images. Пустое поле отключает импорт.", "Use the autosave folder from ShareX or Windows Snipping Tool. Katran shows originals in Screenshots and hides their exact clipboard copies in Images. Leave empty to disable import."),|ui|{
           let response=ui.add(super::ui_foundation::text_field(egui::TextEdit::singleline(&mut self.sharex_folder).hint_text("C:\\Screenshots")));
           path_editing |= response.has_focus();
           if response.changed(){draft.sharex_folder=if self.sharex_folder.trim().is_empty(){None}else{Some(std::path::PathBuf::from(self.sharex_folder.trim()))};}

@@ -173,6 +173,31 @@ fn move_command(groups: &mut [ActionMenuGroup], movement: MoveCommand) {
 #[derive(Clone)]
 struct DragCommand(String);
 
+#[derive(Clone)]
+struct DragGroup(usize);
+
+fn move_group(groups: &mut Vec<ActionMenuGroup>, source: usize, target: usize, after: bool) {
+    let group = groups.remove(source);
+    let target = target - usize::from(source < target);
+    groups.insert(target + usize::from(after), group);
+}
+
+fn paint_drop_edge(ui: &egui::Ui, rect: egui::Rect, after: bool) {
+    let y = if after { rect.bottom() } else { rect.top() };
+    ui.painter()
+        .hline(rect.x_range(), y, ui.visuals().selection.stroke);
+}
+
+fn grip(ui: &mut egui::Ui, tooltip: &str) -> egui::Response {
+    ui.add(
+        egui::Button::image(Lucide::GripVertical.size(16.0).image())
+            .frame(false)
+            .sense(egui::Sense::drag()),
+    )
+    .on_hover_cursor(egui::CursorIcon::Grab)
+    .on_hover_text(tooltip)
+}
+
 fn eye(ui: &mut egui::Ui, visible: bool, tooltip: &str) -> egui::Response {
     let icon = if visible { Lucide::Eye } else { Lucide::EyeOff };
     ui.add(egui::Button::image(icon.size(16.0).image()))
@@ -190,6 +215,7 @@ impl Editor {
         let mut groups = resolved_groups(menu, &catalogue);
         let mut edited_groups = false;
         let mut movement = None;
+        let mut category_drop = None;
         let mut remove = None;
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -223,8 +249,8 @@ impl Editor {
             }
         });
         ui.label(tr(
-            "Глазик управляет показом в меню. Сочетания клавиш продолжают работать.",
-            "The eye controls menu visibility. Keyboard shortcuts still work.",
+            "Глазик скрывает категорию, иконка команды — саму команду. Сочетания клавиш продолжают работать.",
+            "Click the eye to hide a category or a command’s icon to hide that command. Keyboard shortcuts still work.",
         ));
         for (index, group) in groups.iter_mut().enumerate() {
             let title = group_title(group, &catalogue).to_owned();
@@ -235,6 +261,8 @@ impl Editor {
                 false,
             )
             .show_header(ui, |ui| {
+                grip(ui, tr("Перетащить категорию", "Drag category"))
+                    .dnd_set_drag_payload(DragGroup(index));
                 if eye(
                     ui,
                     !group.hidden,
@@ -268,25 +296,47 @@ impl Editor {
                         self.rename = None;
                     }
                 } else {
-                    ui.label(egui::RichText::new(&title).strong());
-                    if ui
-                        .add(egui::Button::image(Lucide::Pencil.size(14.0).image()).frame(false))
-                        .on_hover_text(tr("Переименовать категорию", "Rename category"))
-                        .clicked()
-                    {
-                        self.rename = Some((group.id.clone(), title));
-                    }
-                    if group.id.starts_with("custom/")
-                        && group.commands.is_empty()
-                        && ui
-                            .add(
-                                egui::Button::image(Lucide::Trash2.size(14.0).image()).frame(false),
+                    let rename_width = 28.0;
+                    let can_remove = group.id.starts_with("custom/") && group.commands.is_empty();
+                    let controls_width = if can_remove {
+                        2.0 * rename_width + ui.spacing().item_spacing.x
+                    } else {
+                        rename_width
+                    };
+                    let label_width =
+                        (ui.available_width() - controls_width - ui.spacing().item_spacing.x)
+                            .max(1.0);
+                    ui.add_sized(
+                        [label_width, ui.spacing().interact_size.y],
+                        egui::Label::new(egui::RichText::new(&title).strong()).truncate(),
+                    )
+                    .on_hover_text(&title);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized(
+                                [rename_width, ui.spacing().interact_size.y],
+                                egui::Button::image(Lucide::Pencil.size(14.0).image()).frame(false),
                             )
-                            .on_hover_text(tr("Удалить пустую категорию", "Delete empty category"))
+                            .on_hover_text(tr("Переименовать категорию", "Rename category"))
                             .clicked()
-                    {
-                        remove = Some(index);
-                    }
+                        {
+                            self.rename = Some((group.id.clone(), title));
+                        }
+                        if can_remove
+                            && ui
+                                .add(
+                                    egui::Button::image(Lucide::Trash2.size(14.0).image())
+                                        .frame(false),
+                                )
+                                .on_hover_text(tr(
+                                    "Удалить пустую категорию",
+                                    "Delete empty category",
+                                ))
+                                .clicked()
+                        {
+                            remove = Some(index);
+                        }
+                    });
                 }
                 ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
             });
@@ -298,35 +348,44 @@ impl Editor {
                     let row = ui
                         .push_id(command, |ui| {
                             ui.horizontal(|ui| {
-                                let handle = ui
-                                    .add(
-                                        egui::Button::image(
-                                            Lucide::GripVertical.size(16.0).image(),
-                                        )
-                                        .frame(false)
-                                        .sense(egui::Sense::drag()),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::Grab)
-                                    .on_hover_text(tr("Перетащить команду", "Drag command"));
+                                let handle = grip(ui, tr("Перетащить команду", "Drag command"));
                                 handle.dnd_set_drag_payload(DragCommand(command.clone()));
                                 let visible = menu
                                     .command_visibility
                                     .get(command)
                                     .copied()
                                     .unwrap_or(true);
-                                if eye(
-                                    ui,
-                                    visible,
-                                    tr(
-                                        "Показать или скрыть команду в меню",
-                                        "Show or hide command in the menu",
-                                    ),
-                                )
-                                .clicked()
-                                {
+                                let icon_color = if visible {
+                                    ui.visuals().text_color()
+                                } else {
+                                    ui.visuals().error_fg_color
+                                };
+                                let icon = super::action_icons::icon(command)
+                                    .size(16.0)
+                                    .image()
+                                    .tint(icon_color);
+                                let hint = if visible {
+                                    tr("Скрыть команду в меню", "Hide command in the menu")
+                                } else {
+                                    tr("Показать команду в меню", "Show command in the menu")
+                                };
+                                let toggle = ui.add(egui::Button::image(icon)).on_hover_text(hint);
+                                toggle.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        format!("{} · {hint}", action.label),
+                                    )
+                                });
+                                if toggle.clicked() {
                                     menu.command_visibility.insert(command.clone(), !visible);
                                 }
-                                ui.label(action.label);
+                                let label = egui::RichText::new(action.label);
+                                ui.label(if visible {
+                                    label
+                                } else {
+                                    label.weak().strikethrough()
+                                });
                                 ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
                             })
                             .response
@@ -339,16 +398,7 @@ impl Editor {
                             .dnd_hover_payload::<DragCommand>()
                             .is_some_and(|drag| drag.0 != *command)
                         {
-                            let y = if after {
-                                row.rect.bottom()
-                            } else {
-                                row.rect.top()
-                            };
-                            ui.painter().hline(
-                                row.rect.x_range(),
-                                y,
-                                ui.visuals().selection.stroke,
-                            );
+                            paint_drop_edge(ui, row.rect, after);
                         }
                         if let Some(drag) = target.dnd_release_payload::<DragCommand>()
                             && drag.0 != *command
@@ -364,11 +414,7 @@ impl Editor {
             });
             let target = ui.interact(header.response.rect, id.with("drop"), egui::Sense::hover());
             if target.dnd_hover_payload::<DragCommand>().is_some() {
-                ui.painter().hline(
-                    target.rect.x_range(),
-                    target.rect.bottom(),
-                    ui.visuals().selection.stroke,
-                );
+                paint_drop_edge(ui, target.rect, true);
             }
             if let Some(drag) = target.dnd_release_payload::<DragCommand>() {
                 movement = Some(MoveCommand {
@@ -377,6 +423,20 @@ impl Editor {
                     neighbor: None,
                 });
             }
+            if let Some(pointer) = ui.input(|input| input.pointer.interact_pos()) {
+                let after = pointer.y >= target.rect.center().y;
+                if target
+                    .dnd_hover_payload::<DragGroup>()
+                    .is_some_and(|drag| drag.0 != index)
+                {
+                    paint_drop_edge(ui, target.rect, after);
+                }
+                if let Some(drag) = target.dnd_release_payload::<DragGroup>()
+                    && drag.0 != index
+                {
+                    category_drop = Some((drag.0, index, after));
+                }
+            }
         }
         if let Some(movement) = movement {
             move_command(&mut groups, movement);
@@ -384,6 +444,9 @@ impl Editor {
         }
         if let Some(index) = remove {
             groups.remove(index);
+            edited_groups = true;
+        } else if let Some((source, target, after)) = category_drop {
+            move_group(&mut groups, source, target, after);
             edited_groups = true;
         }
         if edited_groups {
@@ -396,6 +459,32 @@ impl Editor {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reordering_categories_changes_the_palette_order_without_moving_their_commands() {
+        let mut menu = ActionMenu::default();
+        menu.groups = resolved_groups(&menu, &catalogue());
+        let selection = menu
+            .groups
+            .iter()
+            .position(|group| group.commands.iter().any(|id| id == "rename"))
+            .unwrap();
+        let application = menu
+            .groups
+            .iter()
+            .position(|group| group.commands.iter().any(|id| id == "settings"))
+            .unwrap();
+        let mut contextual = vec![json!({"id":"rename"}), json!({"id":"settings"})];
+        move_group(&mut menu.groups, application, selection, false);
+        customize(&mut contextual, &menu);
+        assert_eq!(contextual[0]["id"], "settings");
+        assert_eq!(contextual[1]["id"], "rename");
+
+        move_group(&mut menu.groups, selection, selection + 1, true);
+        customize(&mut contextual, &menu);
+        assert_eq!(contextual[0]["id"], "rename");
+        assert_eq!(contextual[1]["id"], "settings");
+    }
 
     #[test]
     fn customized_palette_reorders_available_commands_and_hides_whole_groups() {
