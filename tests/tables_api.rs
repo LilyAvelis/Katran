@@ -111,6 +111,54 @@ fn poll(api: &mut Service, id: u64) -> Value {
     }
 }
 #[test]
+fn notion_table_saves_csv_and_publishes_grid_through_the_standard_clipboard() {
+    let (_root, mut api) = fixture();
+    let calls = sink(&mut api, true, true);
+    let result = call(
+        &mut api,
+        Command::CopyNotionTable {
+            rows: rows(&[&["Имя", "Количество"], &["Чай"]]),
+        },
+    );
+    assert_eq!(result["copied"], 1);
+    assert_eq!(result["table_copied"], true);
+    let id = result["saved_id"].as_i64().unwrap();
+    let table = call(&mut api, Command::GetTable { id });
+    let expected = rows(&[&["Имя", "Количество"], &["Чай", ""]]);
+    assert_eq!(table["table"]["rows"], json!(expected));
+    let csv = table["csv_text"].as_str().unwrap();
+    assert!(csv.starts_with('\u{feff}'));
+    assert_eq!(table_fragments::parse_csv(csv).unwrap().rows, expected);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        table_fragments::parse_tsv(&calls[0].0, true).unwrap().rows,
+        expected
+    );
+    assert!(String::from_utf8_lossy(&calls[0].1).contains("<table>"));
+}
+
+#[test]
+fn notion_table_preserves_saved_card_when_clipboard_rejects_both_formats() {
+    let (_root, mut api) = fixture();
+    let calls = sink(&mut api, false, false);
+    let saved = call(
+        &mut api,
+        Command::CopyNotionTable {
+            rows: rows(&[&["A", "B"]]),
+        },
+    );
+    assert_eq!(saved["copied"], 0);
+    assert!(saved["clipboard_error"].is_string());
+    let id = saved["saved_id"].as_i64().unwrap();
+    assert_eq!(
+        call(&mut api, Command::GetTable { id })["table"]["rows"],
+        json!([["A", "B"]])
+    );
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn values_persist_search_and_blob_dedup_and_visibility_is_functional() {
     let (root, mut api) = fixture();
     let values = rows(&[&["Имя", "🐄"], &["=1+1", ""], &["multiline\ncell", "a\tb"]]);

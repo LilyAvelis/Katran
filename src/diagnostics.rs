@@ -239,6 +239,7 @@ pub fn summarize_command(command: &crate::Command) -> Value {
         crate::Command::CopyNotionPageFields { .. } => json!({"type":"copy_notion_page_fields"}),
         crate::Command::CopyNotionPageLinks { .. } => json!({"type":"copy_notion_page_links"}),
         crate::Command::CopyNotionSourceId { .. } => json!({"type":"copy_notion_source_id"}),
+        crate::Command::CopyNotionTable { .. } => json!({"type":"copy_notion_table"}),
         crate::Command::CopyNotionReaderSelection { .. } => {
             json!({"type":"copy_notion_reader_selection"})
         }

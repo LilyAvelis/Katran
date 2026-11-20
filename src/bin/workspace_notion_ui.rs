@@ -12,6 +12,8 @@ pub(crate) fn show_reader_scaled(
     reader::show_scaled(ui, blocks, scale, emoji);
 }
 
+pub(crate) use reader::show_scaled_with_tables as show_notion_reader_scaled;
+
 pub(super) use reader::arm_copy as arm_reader_copy;
 pub(super) use reader::label as reader_label;
 pub(crate) use reader::{arm_selection_copy, reader_column};
@@ -778,7 +780,13 @@ impl Shelf {
                                 } else {
                                     self.pods_ui.begin_frame();
                                     ui.push_id(&page.page.id, |ui| {
-                                        reader::show_scaled(ui, blocks, 1.0, &mut self.pods_ui)
+                                        reader::show_scaled_with_tables(
+                                            ui,
+                                            blocks,
+                                            1.0,
+                                            &mut self.pods_ui,
+                                            true,
+                                        )
                                     });
                                     self.pods_ui.end_frame();
                                 }

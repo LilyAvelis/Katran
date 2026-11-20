@@ -613,6 +613,7 @@ impl Service {
         }
         if let Command::DeleteSelection { ids, .. } = &command
             && ids.iter().any(|id| *id < 0)
+            && !ids.iter().all(|id| crate::pages::is_id(*id))
         {
             let value = self.dispatch(command)?;
             return self.ready_value_job(value);
@@ -2285,7 +2286,12 @@ impl Service {
                 return self.ready_value_job(value);
             }
             Command::DeleteSelection { ids, confirmed } => {
-                match self.begin_delete_selection(ids, confirmed)? {
+                let start = if ids.iter().all(|id| crate::pages::is_id(*id)) {
+                    self.begin_pages_delete(ids, confirmed)?
+                } else {
+                    self.begin_delete_selection(ids, confirmed)?
+                };
+                match start {
                     delete_jobs::DeleteStart::Immediate(value) => {
                         return self.ready_value_job(value);
                     }

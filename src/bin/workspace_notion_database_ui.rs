@@ -548,11 +548,12 @@ impl Shelf {
                             .size(15.0 * scale),
                         );
                     } else {
-                        super::notion_ui::show_reader_scaled(
+                        super::notion_ui::show_notion_reader_scaled(
                             ui,
                             &preview.blocks,
                             scale,
                             &mut self.pods_ui,
+                            true,
                         );
                     }
                 });
@@ -568,6 +569,27 @@ impl Shelf {
     }
 
     pub(crate) fn save_notion_reader_copy(&mut self, ctx: &egui::Context) {
+        let table = ctx.data_mut(|data| {
+            data.remove_temp::<Option<(egui::Id, Vec<Vec<String>>)>>(egui::Id::new(
+                "notion-table-copy-request",
+            ))
+            .flatten()
+        });
+        if let Some((id, rows)) = table {
+            let reply = self.call(Command::CopyNotionTable { rows });
+            let feedback = if let Some(error) = reply["clipboard_error"].as_str() {
+                format!("{} · {error}", tr("Сохранено в Tables", "Saved in Tables"))
+            } else if reply["saved_id"].is_number() || reply["saved_id"].is_string() {
+                tr(
+                    "Скопировано и сохранено в Tables",
+                    "Copied and saved in Tables",
+                )
+                .to_owned()
+            } else {
+                self.message.clone()
+            };
+            ctx.data_mut(|data| data.insert_temp(id, feedback));
+        }
         let text =
             ctx.data_mut(|data| data.remove_temp::<String>(egui::Id::new("notion-reader-copied")));
         if let Some(text) = text {

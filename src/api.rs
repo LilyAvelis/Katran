@@ -264,6 +264,9 @@ pub enum Command {
     CopyNotionSourceId {
         source_id: String,
     },
+    CopyNotionTable {
+        rows: Vec<Vec<String>>,
+    },
     CopyNotionReaderSelection {
         text: String,
     },

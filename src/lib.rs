@@ -1036,6 +1036,7 @@ impl Service {
             }
             Command::CopyNotionPageFields { pages } => self.copy_notion_page_fields(&pages),
             Command::CopyNotionPageLinks { pages } => self.copy_notion_page_links(&pages),
+            Command::CopyNotionTable { rows } => self.copy_notion_table(rows),
             Command::CopyNotionSourceId { source_id } => {
                 let input = source_id.trim();
                 let id = notion::canonical_id(input.strip_prefix("collection://").unwrap_or(input))
@@ -1819,7 +1820,9 @@ impl Service {
                         "Emoji catalogue entries are read-only",
                     ));
                 }
-                if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
+                if ids.iter().any(|id| pages::is_id(*id)) {
+                    self.delete_pages_selection(ids, confirmed)
+                } else if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
                     self.delete_desktop_selection(ids, confirmed)
                 } else if ids.iter().any(|id| *id < 0) {
                     self.delete_folder_selection(ids, confirmed)

@@ -15,6 +15,7 @@ struct Meta {
     ids: Vec<i64>,
     permanent: bool,
     recycle: bool,
+    pages: bool,
 }
 pub(crate) struct DeleteRequest {
     meta: Meta,
@@ -35,6 +36,7 @@ pub(crate) struct AuthorizedDelete {
 struct PreparedItem {
     event: Event,
     original: Original,
+    hash: Option<String>,
 }
 enum Original {
     Shelf,
@@ -101,15 +103,91 @@ impl Service {
                 ids,
                 permanent,
                 recycle,
+                pages: false,
             },
             items,
         }))
+    }
+    pub(crate) fn begin_pages_delete(
+        &mut self,
+        ids: Vec<i64>,
+        confirmed: bool,
+    ) -> Result<DeleteStart> {
+        let mut seen = std::collections::HashSet::new();
+        let ids: Vec<_> = ids.into_iter().filter(|id| seen.insert(*id)).collect();
+        if ids.is_empty() || ids.len() > 1000 || ids.iter().any(|id| !crate::pages::is_id(*id)) {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Expected only Pages item IDs",
+            ));
+        }
+        if ids.len() > 1 && !confirmed {
+            return Ok(DeleteStart::Immediate(
+                json!({"confirmation_required":true,"ids":ids,"original_files":true,"permanent_files":false,"recycle_bin":true,"deleted":0}),
+            ));
+        }
+        if self.interaction.tab != interaction::ShelfTab::Pages {
+            return Err(ApiError::new("stale_selection", "Pages is not active"));
+        }
+        let root = crate::pages::vault(&self.root)?;
+        let items = ids
+            .iter()
+            .map(|&id| {
+                let input = self.get(id).and_then(|event| {
+                    if event.path.parent() != Some(root.as_path())
+                        || !crate::pages::is_document(&event.path)
+                    {
+                        return Err(ApiError::new(
+                            "unsafe_source",
+                            "Page escaped the Pages vault",
+                        ));
+                    }
+                    if self.folder_path_pinned(&event.path)? {
+                        return Err(ApiError::new(
+                            "skipped_pinned",
+                            "Page has a pinned shelf reference",
+                        ));
+                    }
+                    Ok(Input {
+                        event,
+                        root: Some(root.clone()),
+                    })
+                });
+                (id, input)
+            })
+            .collect();
+        Ok(DeleteStart::Prepare(DeleteRequest {
+            meta: Meta {
+                ids,
+                permanent: false,
+                recycle: true,
+                pages: true,
+            },
+            items,
+        }))
+    }
+    pub(crate) fn delete_pages_selection(
+        &mut self,
+        ids: Vec<i64>,
+        confirmed: bool,
+    ) -> Result<Value> {
+        match self.begin_pages_delete(ids, confirmed)? {
+            DeleteStart::Immediate(value) => Ok(value),
+            DeleteStart::Prepare(request) => {
+                let prepared = prepare(request);
+                let authorized = self.authorize_delete(prepared);
+                let deleted = apply(authorized, Arc::clone(&self.trash));
+                self.finish_delete(deleted)
+            }
+        }
     }
     pub(crate) fn authorize_delete(&self, prepared: PreparedDelete) -> AuthorizedDelete {
         let items=prepared.items.into_iter().map(|(id,result)| {
             let result=result.and_then(|item| {
                 let current=self.get(id)?;
-                if crate::delete_shelf::protected_by_pin(&self.db,id)? {return Err(ApiError::new("skipped_pinned","Pinned record or pinned file alias is protected"));}
+                if prepared.meta.pages {
+                    if self.interaction.tab != interaction::ShelfTab::Pages || crate::pages::vault(&self.root).ok().as_deref() != item.event.path.parent() || self.folder_path_pinned(&item.event.path)? || current.path != item.event.path { return Err(ApiError::new("stale_selection", "Page or vault changed during preparation")); }
+                } else if crate::delete_shelf::protected_by_pin(&self.db,id)? {return Err(ApiError::new("skipped_pinned","Pinned record or pinned file alias is protected"));}
                 if current.revision!=item.event.revision || current.delete_policy!=item.event.delete_policy {return Err(ApiError::new("stale_selection","Delete selection or ownership changed during preparation"));}
                 if let DeletePolicy::LiveOriginal{source_id,generation,..}=current.delete_policy {
                     let current:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM source_projection p JOIN source_configurations c ON c.source_id=p.source_id AND c.generation=p.generation WHERE p.source_id=?1 AND p.generation=?2 AND p.event_id=?3 AND c.enabled=1)",params![source_id.as_str(),generation,id],|row|row.get(0))?;
@@ -126,6 +204,7 @@ impl Service {
     pub(crate) fn finish_delete(&mut self, deleted: DeletedBatch) -> Result<Value> {
         let mut count = 0;
         let mut items = Vec::new();
+        let mut removed_pages = Vec::new();
         for (id, result) in deleted.items {
             match result {
                 Ok(receipt) => {
@@ -133,6 +212,12 @@ impl Service {
                         && !recycle.recycled
                     {
                         items.push(json!({"ok":false,"id":id,"skipped_pinned":false,"original_removed":receipt.removed,"recovery_path":recycle.recovery_path,"error":{"code":"recycle_failed","message":recycle.error},"recycle":recycle}));
+                        continue;
+                    }
+                    if deleted.meta.pages {
+                        removed_pages.push(id);
+                        count += 1;
+                        items.push(json!({"ok":true,"id":id,"original_removed":receipt.removed,"recycle":receipt.recycle}));
                         continue;
                     }
                     let exists: bool = self.db.query_row(
@@ -162,6 +247,10 @@ impl Service {
                 }
             }
         }
+        if !removed_pages.is_empty() {
+            self.interaction
+                .replace_collection_rows(&removed_pages, None);
+        }
         Ok(
             json!({"ids":deleted.meta.ids,"confirmation_required":false,"deleted":count,"items":items,"original_files":true,"permanent_files":deleted.meta.permanent,"recycle_bin":deleted.meta.recycle}),
         )
@@ -172,6 +261,7 @@ fn prepare_input(input: Input) -> Result<PreparedItem> {
         return Ok(PreparedItem {
             event: input.event,
             original: Original::Shelf,
+            hash: None,
         });
     };
     let root = root.canonicalize()?;
@@ -212,6 +302,7 @@ fn prepare_input(input: Input) -> Result<PreparedItem> {
             return Ok(PreparedItem {
                 event,
                 original: Original::Missing,
+                hash: None,
             });
         }
         Err(error) => return Err(error.into()),
@@ -230,21 +321,41 @@ fn prepare_input(input: Input) -> Result<PreparedItem> {
             "Original escaped configured source",
         ));
     }
-    let expected = event.revision.strip_prefix("ref:").ok_or_else(|| {
-        ApiError::new(
-            "stale_selection",
-            "Original has no recorded content identity",
-        )
-    })?;
+    let page = crate::pages::is_id(event.id);
+    if page {
+        open_file::validate(&event)?;
+    }
+    let page_hash = if page {
+        Some(preview::content_hash(&event.path)?)
+    } else {
+        None
+    };
+    let expected = page_hash
+        .as_deref()
+        .or_else(|| event.revision.strip_prefix("ref:"))
+        .ok_or_else(|| {
+            ApiError::new(
+                "stale_selection",
+                "Original has no recorded content identity",
+            )
+        })?;
     let locked = crate::delete_selection::prepare_locked_original(&path, &root, expected)?;
-    if !matches!(event.delete_policy, DeletePolicy::LiveOriginal { .. }) {
+    if !page && !matches!(event.delete_policy, DeletePolicy::LiveOriginal { .. }) {
         return Err(ApiError::new(
             "unsafe_source",
             "Unsupported original deletion policy",
         ));
     }
+    let hash = expected.to_owned();
+    if page {
+        open_file::validate(&event)?;
+    }
     let original = Original::Recycle { locked, root };
-    Ok(PreparedItem { event, original })
+    Ok(PreparedItem {
+        event,
+        original,
+        hash: Some(hash),
+    })
 }
 pub(crate) fn prepare(request: DeleteRequest) -> PreparedDelete {
     let items = request
@@ -273,7 +384,7 @@ pub(crate) fn apply(
                         let trash = trash.lock().map_err(|_| {
                             ApiError::new("recycle_failed", "Trash adapter lock poisoned")
                         })?;
-                        let hash = item.event.revision.strip_prefix("ref:").ok_or_else(|| {
+                        let hash = item.hash.as_deref().ok_or_else(|| {
                             ApiError::new(
                                 "stale_selection",
                                 "Original has no recorded content identity",
@@ -329,6 +440,7 @@ mod tests {
                 ids: vec![id],
                 permanent: false,
                 recycle: false,
+                pages: false,
             },
             items: vec![(id, Ok(input))],
         };
@@ -340,5 +452,97 @@ mod tests {
         assert_eq!(result["deleted"], 0);
         assert_eq!(result["items"][0]["skipped_pinned"], true);
         assert!(service.get(id).is_ok());
+    }
+    #[test]
+    fn pages_delete_prepares_both_types_and_rejects_changed_source() {
+        let root = tempfile::tempdir().unwrap();
+        let mut service = Service::open(root.path(), 1024 * 1024).unwrap();
+        let vault = crate::pages::vault(&service.root).unwrap();
+        std::fs::write(vault.join("note.md"), "note").unwrap();
+        std::fs::write(vault.join("bundle.bull"), "fixture").unwrap();
+        service.pages.borrow_mut().choose(&vault).unwrap();
+        service.interaction.tab = interaction::ShelfTab::Pages;
+        let listing = service
+            .pages
+            .borrow()
+            .browse("", 30, None, Default::default())
+            .unwrap();
+        let ids: Vec<i64> = listing["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["id"].as_i64().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        let confirmation = service.begin_pages_delete(ids.clone(), false).unwrap();
+        assert!(
+            matches!(confirmation, DeleteStart::Immediate(value) if value["confirmation_required"] == true)
+        );
+        let request = match service.begin_pages_delete(ids.clone(), true).unwrap() {
+            DeleteStart::Prepare(request) => request,
+            _ => panic!("expected preparation"),
+        };
+        std::fs::write(vault.join("note.md"), "changed contents").unwrap();
+        let prepared = prepare(request);
+        assert_eq!(
+            prepared
+                .items
+                .iter()
+                .filter(|(_, result)| result.is_ok())
+                .count(),
+            1
+        );
+        assert_eq!(
+            prepared
+                .items
+                .iter()
+                .filter(|(_, result)| result.is_err())
+                .count(),
+            1
+        );
+        assert!(vault.join("note.md").exists());
+        assert!(vault.join("bundle.bull").exists());
+        drop(prepared);
+        struct FixtureTrash;
+        impl downloads::Trash for FixtureTrash {
+            fn recycle(&self, path: &Path) -> Result<()> {
+                std::fs::remove_file(path)?;
+                Ok(())
+            }
+        }
+        service.set_trash(Box::new(FixtureTrash));
+        let listing = service
+            .pages
+            .borrow()
+            .browse("", 30, None, Default::default())
+            .unwrap();
+        let ids: Vec<i64> = listing["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["id"].as_i64().unwrap())
+            .collect();
+        let job = service
+            .begin_job(Command::DeleteSelection {
+                ids,
+                confirmed: true,
+            })
+            .unwrap();
+        assert_eq!(job["state"], "queued");
+        let job_id = serde_json::from_value(job["job_id"].clone()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let result = loop {
+            let value = service.dispatch(Command::PollJob { job_id }).unwrap();
+            match value["state"].as_str() {
+                Some("succeeded") => break value["result"].clone(),
+                Some("queued" | "running" | "ready") => {}
+                _ => panic!("{value}"),
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(result["deleted"], 2);
+        assert!(!vault.join("note.md").exists());
+        assert!(!vault.join("bundle.bull").exists());
     }
 }

@@ -148,6 +148,9 @@ impl Service {
         }
     }
     pub(crate) fn ingest_table(&mut self, table: Table, source: &str) -> Result<Value> {
+        Ok(json!(self.store_table(table, source)?))
+    }
+    fn store_table(&mut self, table: Table, source: &str) -> Result<Event> {
         self.check_tables_enabled()?;
         let prepared = prepare(
             &self.root,
@@ -158,7 +161,7 @@ impl Service {
             &self.reference_paths()?,
         )?;
         let id = storage::commit_prepared_bytes(&mut self.db, &self.root, self.quota, prepared)?;
-        Ok(json!(self.get(id)?))
+        self.get(id)
     }
     pub(crate) fn get_table(&self, id: i64) -> Result<Value> {
         let event = self.get(id)?;
@@ -168,6 +171,36 @@ impl Service {
         Ok(
             json!({"id":id,"revision":event.revision,"title":event.name,"table":table,"csv_text":csv_text}),
         )
+    }
+    pub(crate) fn copy_notion_table(&mut self, mut rows: Vec<Vec<String>>) -> Result<Value> {
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        if !(1..=table_fragments::MAX_ROWS).contains(&rows.len())
+            || !(1..=table_fragments::MAX_COLUMNS).contains(&width)
+            || rows.len() * width > table_fragments::MAX_CELLS
+        {
+            return Err(invalid("Notion table exceeds the table limits"));
+        }
+        for row in &mut rows {
+            row.resize(width, String::new());
+        }
+        let event = self.store_table(Table { rows }, "notion_table")?;
+        let id = event.id;
+        let selection = SelectionRef {
+            id,
+            revision: event.revision,
+        };
+        match self.copy_tables(vec![selection]) {
+            Ok(mut result) => {
+                result["saved_id"] = json!(id);
+                let published = result["html_written"] == true || result["text_written"] == true;
+                result["copied"] = json!(u32::from(published));
+                if !published {
+                    result["clipboard_error"] = json!("Clipboard did not accept the table");
+                }
+                Ok(result)
+            }
+            Err(error) => Ok(json!({"saved_id":id,"copied":0,"clipboard_error":error.message})),
+        }
     }
     pub(crate) fn selection_is_tables(&self, items: &[SelectionRef]) -> Result<bool> {
         if items.is_empty() || items.len() > 1000 {

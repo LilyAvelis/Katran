@@ -158,6 +158,16 @@ pub(super) fn show(ui: &mut egui::Ui, blocks: &[Block]) {
 }
 
 pub(super) fn show_scaled(ui: &mut egui::Ui, blocks: &[Block], scale: f32, emoji: &mut EmojiCache) {
+    show_scaled_with_tables(ui, blocks, scale, emoji, false);
+}
+
+pub(crate) fn show_scaled_with_tables(
+    ui: &mut egui::Ui,
+    blocks: &[Block],
+    scale: f32,
+    emoji: &mut EmojiCache,
+    copy_tables: bool,
+) {
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
     } else {
@@ -190,7 +200,9 @@ pub(super) fn show_scaled(ui: &mut egui::Ui, blocks: &[Block], scale: f32, emoji
                             {
                                 label(ui, emoji, icon, egui::FontId::proportional(16.0 * scale));
                             }
-                            ui.vertical(|ui| show_scaled(ui, children, scale, emoji));
+                            ui.vertical(|ui| {
+                                show_scaled_with_tables(ui, children, scale, emoji, copy_tables)
+                            });
                         });
                     });
             }
@@ -212,14 +224,44 @@ pub(super) fn show_scaled(ui: &mut egui::Ui, blocks: &[Block], scale: f32, emoji
                     .show_header(ui, |ui| {
                         label(ui, emoji, title, egui::FontId::proportional(body_size));
                     })
-                    .body(|ui| show_scaled(ui, children, scale, emoji));
+                    .body(|ui| show_scaled_with_tables(ui, children, scale, emoji, copy_tables));
                 } else {
                     egui::CollapsingHeader::new(RichText::new(title).size(body_size))
                         .id_salt("notion-toggle")
-                        .show(ui, |ui| show_scaled(ui, children, scale, emoji));
+                        .show(ui, |ui| {
+                            show_scaled_with_tables(ui, children, scale, emoji, copy_tables)
+                        });
                 }
             }
-            Block::Table { rows } => show_table(ui, rows, scale, emoji),
+            Block::Table { rows } => {
+                show_table(ui, rows, scale, emoji);
+                if copy_tables && rows.iter().any(|row| !row.is_empty()) {
+                    let id = ui.make_persistent_id("notion-table-copy-feedback");
+                    if ui
+                        .add(
+                            egui::Button::image_and_text(
+                                egui_lucide::Lucide::Copy.size(14.0).image(),
+                                super::tr("Копировать таблицу", "Copy table"),
+                            )
+                            .small(),
+                        )
+                        .clicked()
+                    {
+                        let values = table_values(rows);
+                        ui.ctx().data_mut(|data| {
+                            data.remove_temp::<String>(id);
+                            data.insert_temp(
+                                egui::Id::new("notion-table-copy-request"),
+                                Some((id, values)),
+                            );
+                        });
+                        ui.ctx().request_repaint();
+                    }
+                    if let Some(feedback) = ui.ctx().data(|data| data.get_temp::<String>(id)) {
+                        ui.weak(feedback);
+                    }
+                }
+            }
             Block::Reference { kind, title, url } => {
                 let label = match kind {
                     ReferenceKind::Database => super::tr("База Notion", "Notion database"),
@@ -501,6 +543,28 @@ fn callout_color(color: Option<&str>) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
+fn table_values(rows: &[Vec<Cell>]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| {
+                    cell.document
+                        .lines
+                        .iter()
+                        .map(|line| {
+                            line.runs
+                                .iter()
+                                .map(|run| run.text.as_str())
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>], scale: f32, emoji: &mut EmojiCache) {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     if columns == 0 {
@@ -548,6 +612,21 @@ fn show_table(ui: &mut egui::Ui, rows: &[Vec<Cell>], scale: f32, emoji: &mut Emo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_copy_uses_visible_text_and_preserves_empty_cells() {
+        let blocks = katran::notion_reader::parse(
+            "| **Bold** | <b>Rich</b> |\n| --- | --- |\n| [Link](https://example.com) |  |",
+        )
+        .unwrap();
+        let Block::Table { rows } = &blocks[0] else {
+            panic!("expected table")
+        };
+        assert_eq!(
+            table_values(rows),
+            vec![vec!["Bold", "Rich"], vec!["Link", ""]]
+        );
+    }
 
     #[test]
     fn reader_copy_expands_emoji_and_owns_only_armed_output() {
