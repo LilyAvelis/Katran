@@ -87,7 +87,7 @@ impl Service {
         match self.interaction.tab {
             ShelfTab::All | ShelfTab::Pages => "0".into(),
             ShelfTab::Downloads => "e.source='downloads'".into(),
-            ShelfTab::Screenshots => "e.source='sharex'".into(),
+            ShelfTab::Screenshots => crate::catalogue_query::SCREENSHOT_SOURCES.into(),
             ShelfTab::Text => crate::catalogue_query::text_shelf_predicate().into(),
             ShelfTab::Pods => crate::catalogue_query::pods_shelf_predicate().into(),
             ShelfTab::Files => crate::catalogue_query::files_shelf_predicate().into(),
@@ -98,9 +98,11 @@ impl Service {
                 "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into()
             }
             ShelfTab::Images => format!(
-                "{} AND NOT {} AND e.source NOT IN ('sharex','downloads') AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
+                "{} AND NOT {} AND {} AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AND {}",
                 crate::catalogue_query::image_shelf_predicate(),
-                crate::catalogue_query::TRANSLATION_MEMBERSHIP
+                crate::catalogue_query::TRANSLATION_MEMBERSHIP,
+                crate::catalogue_query::NON_FOLDER_IMAGE_SOURCES,
+                crate::catalogue_query::visible_clipboard_images()
             ),
         }
     }

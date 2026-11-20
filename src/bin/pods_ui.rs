@@ -1,4 +1,5 @@
 //! Bounded background color rasterization for Pods cards; never accesses clipboard.
+use super::images::GalleryEntrance;
 use super::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -11,6 +12,7 @@ struct Entry {
     size: Vec2,
     touched: u64,
     bytes: usize,
+    reveal_start: Option<f64>,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -116,13 +118,23 @@ impl State {
         self.receiver = Some(receiver);
     }
     pub(super) fn paint(&mut self, ui: &egui::Ui, event: &Value, rect: egui::Rect) {
+        self.paint_gallery(ui, event, rect, GalleryEntrance::default());
+    }
+
+    pub(super) fn paint_gallery(
+        &mut self,
+        ui: &egui::Ui,
+        event: &Value,
+        rect: egui::Rect,
+        entrance: GalleryEntrance,
+    ) {
         let text = event["text_preview"].as_str().unwrap_or("");
-        self.paint_text(ui, text, rect, rect.height() * 0.55, false);
+        self.paint_text(ui, text, rect, rect.height() * 0.55, false, entrance);
     }
 
     pub(crate) fn paint_inline(&mut self, ui: &egui::Ui, text: &str, rect: egui::Rect, size: f32) {
         if ui.is_rect_visible(rect) {
-            self.paint_text(ui, text, rect, size, true);
+            self.paint_text(ui, text, rect, size, true, GalleryEntrance::default());
         }
     }
 
@@ -133,6 +145,7 @@ impl State {
         rect: egui::Rect,
         point_size: f32,
         inline: bool,
+        entrance: GalleryEntrance,
     ) {
         let ppp = ui.ctx().pixels_per_point();
         let size = (point_size * ppp).clamp(12.0, 128.0).round() as u32;
@@ -166,6 +179,7 @@ impl State {
                             texture,
                             size: egui::vec2(image.width as f32, image.height as f32),
                             touched: self.clock,
+                            reveal_start: None,
                             bytes: (image.width as usize)
                                 .saturating_mul(image.height as usize)
                                 .saturating_mul(4),
@@ -189,14 +203,14 @@ impl State {
                 .min(rect.height() / natural.y)
                 .min(1.0);
             let draw = egui::Rect::from_center_size(rect.center(), natural * scale);
-            ui.painter()
-                .with_clip_rect(ui.clip_rect().intersect(rect))
-                .image(
-                    entry.texture.id(),
-                    draw,
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
+            let mut painter = ui.painter_at(rect);
+            let draw = entrance.apply(ui, &mut painter, draw, &mut entry.reveal_start);
+            painter.image(
+                entry.texture.id(),
+                draw,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
         } else {
             let failed = self
                 .failed
@@ -270,17 +284,24 @@ mod tests {
                     size: egui::vec2(44.0, 44.0),
                     touched: 0,
                     bytes: 44 * 44 * 4,
+                    reveal_start: None,
                 },
             );
         }
-        for _ in 0..2 {
+        let active_entrance = GalleryEntrance {
+            style: katran::settings::GalleryReveal::Fade,
+            duration_ms: 350,
+            ..Default::default()
+        };
+        for entrance in [GalleryEntrance::default(), active_entrance, active_entrance] {
             state.begin_frame();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 for n in 0..80 {
-                    state.paint(
+                    state.paint_gallery(
                         ui,
                         &serde_json::json!({"text_preview":format!("emoji-{n}")}),
                         rect,
+                        entrance,
                     );
                 }
             });
@@ -288,6 +309,10 @@ mod tests {
             state.end_frame();
             assert_eq!(state.cache.len(), 80);
             assert!(state.pending.is_empty());
+            assert!(state.cache.values().all(|entry| {
+                entry.reveal_start.is_some()
+                    == (entrance.style != katran::settings::GalleryReveal::Off)
+            }));
         }
         assert_eq!(
             state.cache.values().map(|entry| entry.bytes).sum::<usize>(),
@@ -312,6 +337,7 @@ mod tests {
                     size: Vec2::splat(1.0),
                     touched: n,
                     bytes: 20 * 1024 * 1024,
+                    reveal_start: None,
                 },
             );
             if n == 0 {

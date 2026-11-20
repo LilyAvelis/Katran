@@ -21,6 +21,13 @@ impl SourceId {
     pub fn is_screenshot(self) -> bool {
         matches!(self, Self::Sharex | Self::SnippingTool)
     }
+    pub(crate) fn classification_kind(self) -> &'static str {
+        if self == Self::SnippingTool {
+            "snipping_tool"
+        } else {
+            "source"
+        }
+    }
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Sharex => "ShareX folder",

@@ -390,6 +390,7 @@ impl Shelf {
             })
         {
             self.workspace.open = true;
+            self.workspace_close_notion_preview();
             self.workspace_notion_mode(Mode::Search, ctx);
         }
         if self.workspace.open

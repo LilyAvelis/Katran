@@ -159,6 +159,25 @@ fn notion_table_preserves_saved_card_when_clipboard_rejects_both_formats() {
 }
 
 #[test]
+fn notion_table_reports_partial_clipboard_publication() {
+    for (html, text) in [(true, false), (false, true)] {
+        let (_root, mut api) = fixture();
+        sink(&mut api, html, text);
+        let result = call(
+            &mut api,
+            Command::CopyNotionTable {
+                rows: rows(&[&["A", "B"]]),
+            },
+        );
+        assert!(result["saved_id"].is_number());
+        assert_eq!(result["partial"], true);
+        assert_eq!(result["copied"], 0);
+        assert_eq!(result["html_written"], html);
+        assert_eq!(result["text_written"], text);
+    }
+}
+
+#[test]
 fn values_persist_search_and_blob_dedup_and_visibility_is_functional() {
     let (root, mut api) = fixture();
     let values = rows(&[&["Имя", "🐄"], &["=1+1", ""], &["multiline\ncell", "a\tb"]]);

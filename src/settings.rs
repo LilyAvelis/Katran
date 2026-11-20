@@ -102,6 +102,79 @@ pub struct ActionMenu {
 
 pub const INTERFACE_SETTINGS_SECTION: usize = 8;
 
+const EXTENSION_KEY: &str = "interface_4_3";
+const EXTENSION_FIELDS: [&str; 4] = [
+    "action_menu",
+    "gallery_reveal",
+    "gallery_reveal_ms",
+    "snipping_tool_folder",
+];
+
+pub(crate) fn read_profile(
+    db: &rusqlite::Connection,
+    fallback: impl FnOnce() -> Settings,
+) -> crate::Result<(Settings, bool)> {
+    use rusqlite::OptionalExtension;
+    use serde_json::{Map, Value};
+
+    let document = |key| -> crate::Result<Option<Map<String, Value>>> {
+        let raw: Option<String> = db
+            .query_row(
+                "SELECT document FROM preferences WHERE key=?1",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        raw.map(|raw| {
+            serde_json::from_str(&raw).map_err(|e| crate::ApiError::new("settings_error", e))
+        })
+        .transpose()
+    };
+    let Some(mut general) = document("general")? else {
+        return Ok((fallback(), false));
+    };
+    let migrate = EXTENSION_FIELDS
+        .iter()
+        .any(|field| general.contains_key(*field));
+    if let Some(extension) = document(EXTENSION_KEY)? {
+        for (key, value) in extension {
+            if EXTENSION_FIELDS.contains(&key.as_str()) {
+                general.entry(key).or_insert(value);
+            }
+        }
+    }
+    let settings = serde_json::from_value(Value::Object(general))
+        .map_err(|e| crate::ApiError::new("settings_error", e))?;
+    Ok((settings, migrate))
+}
+
+pub(crate) fn write_profile(db: &rusqlite::Connection, settings: &Settings) -> crate::Result<()> {
+    use serde_json::Value;
+    let Value::Object(mut general) =
+        serde_json::to_value(settings).map_err(|e| crate::ApiError::new("settings_error", e))?
+    else {
+        return Err(crate::ApiError::new(
+            "settings_error",
+            "Expected a settings object",
+        ));
+    };
+    let mut extension = serde_json::Map::new();
+    for field in EXTENSION_FIELDS {
+        if let Some(value) = general.remove(field) {
+            extension.insert(field.into(), value);
+        }
+    }
+    let tx = db.unchecked_transaction()?;
+    for (key, fields) in [("general", general), (EXTENSION_KEY, extension)] {
+        tx.execute(
+            "INSERT INTO preferences(key,document) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET document=excluded.document",
+            rusqlite::params![key, Value::Object(fields).to_string()],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 impl ActionMenu {
     pub fn is_default(&self) -> bool {
         self.groups.is_empty() && self.command_visibility.is_empty()
@@ -502,7 +575,58 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::*;
+
+    #[test]
+    fn profile_extension_survives_a_legacy_general_settings_write() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE preferences(key TEXT PRIMARY KEY,document TEXT NOT NULL)")
+            .unwrap();
+        let mut settings = Settings {
+            gallery_reveal: GalleryReveal::Grow,
+            gallery_reveal_ms: 420,
+            snipping_tool_folder: Some(std::env::temp_dir()),
+            ..Settings::default()
+        };
+        settings
+            .action_menu
+            .command_visibility
+            .insert("rename".into(), false);
+        db.execute(
+            "INSERT INTO preferences VALUES('general',?1)",
+            [serde_json::to_string(&settings).unwrap()],
+        )
+        .unwrap();
+        let (loaded, migrate) = read_profile(&db, Settings::default).unwrap();
+        assert!(migrate);
+        write_profile(&db, &loaded).unwrap();
+        let raw: String = db
+            .query_row(
+                "SELECT document FROM preferences WHERE key='general'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut general: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(
+            EXTENSION_FIELDS
+                .iter()
+                .all(|field| general.get(field).is_none())
+        );
+        general["capture_on_start"] = false.into();
+        db.execute(
+            "UPDATE preferences SET document=?1 WHERE key='general'",
+            [general.to_string()],
+        )
+        .unwrap();
+        let (loaded, migrate) = read_profile(&db, Settings::default).unwrap();
+        assert!(!migrate);
+        assert!(!loaded.capture_on_start);
+        assert_eq!(loaded.gallery_reveal_ms, 420);
+        assert_eq!(loaded.gallery_reveal, GalleryReveal::Grow);
+        assert_eq!(loaded.snipping_tool_folder, settings.snipping_tool_folder);
+        assert_eq!(loaded.action_menu, settings.action_menu);
+    }
 
     #[test]
     fn window_resizable_defaults_off_and_round_trips() {

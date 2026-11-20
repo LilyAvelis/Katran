@@ -93,7 +93,7 @@ impl Service {
                 self.db.execute("INSERT INTO source_configurations VALUES(?1,?2,?3,?4) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,root=excluded.root,enabled=excluded.enabled",params![source_id.as_str(),generation,encoded,enabled])?;
             }
             if source_id.is_screenshot() {
-                self.db.execute("DELETE FROM classification_work WHERE kind='source' AND (source_generation<>?1 OR ?2=0) AND event_id IN (SELECT id FROM events WHERE source=?3)",params![generation,enabled,source_id.as_str()])?;
+                self.db.execute("DELETE FROM classification_work WHERE kind=?4 AND (source_generation<>?1 OR ?2=0) AND event_id IN (SELECT id FROM events WHERE source=?3)",params![generation,enabled,source_id.as_str(),source_id.classification_kind()])?;
             }
             if source_id == SourceId::Sharex {
                 self.db.execute(

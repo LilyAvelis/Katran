@@ -47,6 +47,34 @@ pub(super) struct GalleryEntrance {
 }
 
 impl GalleryEntrance {
+    pub(super) fn for_row(self, top: f32, viewport_top: f32, height: f32) -> Self {
+        let rows_from_top = ((top - viewport_top).max(0.0) / height.max(1.0)).floor() as u16;
+        Self {
+            delay_ms: rows_from_top.min(4) * 18,
+            ..self
+        }
+    }
+
+    pub(super) fn apply(
+        self,
+        ui: &egui::Ui,
+        painter: &mut egui::Painter,
+        image: egui::Rect,
+        start: &mut Option<f64>,
+    ) -> egui::Rect {
+        if self.style == GalleryReveal::Off {
+            return image;
+        }
+        let now = ui.input(|input| input.time);
+        let start = *start.get_or_insert_with(|| now + f64::from(self.delay_ms) / 1000.0);
+        let progress = self.progress(now - start);
+        if progress < 1.0 {
+            painter.multiply_opacity(progress);
+            ui.ctx().request_repaint_after(Duration::from_millis(16));
+        }
+        self.image_rect(image, progress)
+    }
+
     fn progress(self, elapsed: f64) -> f32 {
         let duration = f64::from(self.duration_ms.clamp(100, 600)) / 1000.0;
         let time = elapsed / duration;
@@ -626,19 +654,7 @@ impl Images {
                 super::gallery_card::fit_rect(rect, texture.size_vec2())
             });
             let mut painter = ui.painter_at(rect);
-            let mut image = image;
-            if entrance.style != GalleryReveal::Off {
-                let now = ui.input(|input| input.time);
-                let start = *entry
-                    .reveal_start
-                    .get_or_insert_with(|| now + f64::from(entrance.delay_ms) / 1000.0);
-                let progress = entrance.progress(now - start);
-                if progress < 1.0 {
-                    painter.multiply_opacity(progress);
-                    image = entrance.image_rect(image, progress);
-                    ui.ctx().request_repaint_after(Duration::from_millis(16));
-                }
-            }
+            let image = entrance.apply(ui, &mut painter, image, &mut entry.reveal_start);
             painter.image(
                 texture.id(),
                 image,

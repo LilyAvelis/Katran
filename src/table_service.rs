@@ -193,7 +193,7 @@ impl Service {
             Ok(mut result) => {
                 result["saved_id"] = json!(id);
                 let published = result["html_written"] == true || result["text_written"] == true;
-                result["copied"] = json!(u32::from(published));
+                result["copied"] = json!(u32::from(result["table_copied"] == true));
                 if !published {
                     result["clipboard_error"] = json!("Clipboard did not accept the table");
                 }

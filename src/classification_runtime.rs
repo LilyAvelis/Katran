@@ -20,12 +20,14 @@ pub(crate) fn snipping_match(digest: &str) -> String {
         JOIN source_projection p ON p.event_id=s.event_id AND p.source_id=c.source_id AND p.generation=c.generation
         JOIN events e ON e.id=p.event_id
         WHERE c.source_id='snipping_tool' AND c.enabled=1 AND p.available=1
-          AND s.kind='source' AND s.state='done' AND s.digest={digest}
+          AND s.kind='snipping_tool' AND s.state='done' AND s.digest={digest}
           AND s.revision='ref:'||e.reference_hash
     )")
 }
 /// Called once when the single writer opens, independently of schema migrations.
 pub(crate) fn recover_startup(db: &Connection) -> Result<()> {
+    // Keep 4.2's ShareX worker from treating Windows screenshots as ShareX matches on rollback.
+    db.execute("UPDATE classification_work SET kind='snipping_tool' WHERE kind='source' AND event_id IN (SELECT id FROM events WHERE source='snipping_tool')", [])?;
     db.execute(
         "UPDATE classification_work SET state='queued',error=NULL WHERE state='inflight'",
         [],
@@ -57,7 +59,7 @@ impl ClassificationRuntime {
                         if !current {
                             continue;
                         }
-                        if result.kind == "source" && !tx.query_row(
+                        if result.kind != "clipboard" && !tx.query_row(
                             "SELECT EXISTS(SELECT 1 FROM source_configurations WHERE source_id=?1 AND enabled=1 AND generation=?2)",
                             params![result.event.source, result.generation], |row| row.get::<_, bool>(0),
                         )? {
@@ -70,7 +72,7 @@ impl ClassificationRuntime {
                         };
                         tx.execute("UPDATE classification_work SET state=?1,digest=?2,error=?3 WHERE event_id=?4 AND revision=?5 AND kind=?6 AND source_generation=?7",params![if error.is_some(){"failed"}else{"done"},result.digest,error,result.event.id,result.event.revision,result.kind,result.generation])?;
                         if let Some(digest) = result.digest {
-                            let affects_shelf = if result.kind == "source" {
+                            let affects_shelf = if result.kind != "clipboard" {
                                 let new_match = result.event.source != "sharex" || tx.execute(
                                     "INSERT OR IGNORE INTO verified_source_digests VALUES(?1,?2)",
                                     params![digest, result.generation],

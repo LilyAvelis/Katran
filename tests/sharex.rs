@@ -70,6 +70,29 @@ fn screenshot_folders_merge_and_classify_clipboard_copies_independently() {
         },
     );
     let screenshots = browse(&mut api, ShelfTab::Screenshots);
+    let snipping_id = screenshots
+        .iter()
+        .find(|row| row["source"] == "snipping_tool")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    call(
+        &mut api,
+        Command::TogglePins {
+            ids: vec![snipping_id],
+        },
+    );
+    call(
+        &mut api,
+        Command::SetPinnedTags {
+            id: snipping_id,
+            tags: vec!["Capture".into()],
+        },
+    );
+    assert_eq!(
+        call(&mut api, Command::PinnedTags)["items"][0]["display"],
+        "Capture"
+    );
     let sharex_id = screenshots
         .iter()
         .find(|row| row["source"] == "sharex")
@@ -82,10 +105,34 @@ fn screenshot_folders_merge_and_classify_clipboard_copies_independently() {
     );
 
     // The Snipping Tool original is already indexed when its clipboard copy arrives.
+    call(
+        &mut api,
+        Command::SetTab {
+            tab: ShelfTab::Images,
+        },
+    );
     let snipping_copy = ingest_copy(&mut api, &snipping_image);
+    call(
+        &mut api,
+        Command::AssignTagSlot {
+            ids: vec![snipping_copy.as_i64().unwrap()],
+            slot: Some(1),
+        },
+    );
     poll_until(&mut api, "Snipping Tool clipboard match", |api, batch| {
         batch["classification"]["queued"] == 0 && browse(api, ShelfTab::Images).is_empty()
     });
+    call(&mut api, Command::FilterTagSlot { slot: Some(1) });
+    let tagged = call(
+        &mut api,
+        Command::BrowseShelfSorted {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        },
+    );
+    assert_eq!(tagged["events"].as_array().unwrap().len(), 0);
+    call(&mut api, Command::FilterTagSlot { slot: None });
     settings.snipping_tool_folder = Some(replacement.path().into());
     call(
         &mut api,

@@ -95,6 +95,38 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
+    fn direct_notion_search_closes_the_loaded_reader_and_preserves_query() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        app.workspace.open = true;
+        app.workspace.notion_source = true;
+        app.workspace.notion.mode = Mode::Search;
+        app.workspace.notion.query = "fixture".into();
+        app.workspace.notion.preview_open = true;
+        app.workspace.notion.preview = Some(katran::notion_reader::parse("Content").unwrap());
+        let modifiers = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+        let ctx = egui::Context::default();
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::N,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ui| app.workspace_input(ui.ctx()),
+        )
+        .textures_delta
+        .clear();
+        assert!(!app.workspace.notion.preview_open);
+        assert!(app.workspace.notion.preview.is_none());
+        assert_eq!(app.workspace.notion.query, "fixture");
+    }
+
+    #[test]
     fn source_button_uploads_bundled_png_without_an_image_loader() {
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -401,6 +433,18 @@ fn monochrome(ui: &mut egui::Ui) {
 }
 
 impl Shelf {
+    pub(super) fn workspace_close_notion_preview(&mut self) {
+        if self
+            .workspace
+            .notion
+            .job
+            .is_some_and(|(_, operation)| matches!(operation, Operation::Preview))
+        {
+            self.workspace_cancel_notion();
+        }
+        self.workspace.notion.preview_open = false;
+        self.workspace.notion.preview = None;
+    }
     pub(super) fn workspace_open_notion(&mut self, ctx: &egui::Context) {
         self.workspace_cancel();
         let configured = self.call(Command::NotionStatus)["configured"] == true;

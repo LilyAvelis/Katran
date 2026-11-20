@@ -485,6 +485,36 @@ fn search_predicate(app: &str, additional: &str) -> String {
     )
 }
 
+pub(crate) const SCREENSHOT_SOURCES: &str = "e.source IN ('sharex','snipping_tool')";
+pub(crate) const NON_FOLDER_IMAGE_SOURCES: &str =
+    "e.source NOT IN ('sharex','snipping_tool','downloads')";
+
+pub(crate) fn visible_clipboard_images() -> String {
+    format!(
+        r#"NOT ({image} AND e.source IN ('clipboard','clipboard_image','clipboard_file')
+                  AND lower(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END)='sharex')
+              AND NOT EXISTS (
+                  SELECT 1 FROM verified_screenshot_matches m
+                  JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=m.source_generation
+                  WHERE m.clipboard_id=e.id AND m.clipboard_revision=
+                    CASE WHEN e.blob_hash IS NOT NULL THEN 'blob:'||e.blob_hash
+                         WHEN e.reference_hash IS NOT NULL THEN 'ref:'||e.reference_hash ELSE '' END
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM classification_work w
+                  WHERE w.event_id=e.id AND w.kind='clipboard' AND w.state='done'
+                    AND w.revision=CASE WHEN e.blob_hash IS NOT NULL THEN 'blob:'||e.blob_hash WHEN e.reference_hash IS NOT NULL THEN 'ref:'||e.reference_hash ELSE '' END
+                    AND (EXISTS (
+                        SELECT 1 FROM verified_source_digests d
+                        JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation
+                        WHERE d.digest=w.digest
+                    ) OR {snipping_match})
+              )"#,
+        image = image_shelf_predicate(),
+        snipping_match = crate::classification_runtime::snipping_match("w.digest"),
+    )
+}
+
 fn slice_projection(
     pinned: bool,
     tag: Option<&str>,
@@ -497,7 +527,7 @@ fn slice_projection(
     }
     let category = match tab {
         ShelfTab::All => "0".to_owned(),
-        ShelfTab::Screenshots => "e.source IN ('sharex','snipping_tool')".into(),
+        ShelfTab::Screenshots => SCREENSHOT_SOURCES.into(),
         ShelfTab::Downloads => "e.source='downloads'".into(),
         ShelfTab::Text => text_shelf_predicate().into(),
         ShelfTab::Pages => "0".into(),
@@ -508,8 +538,9 @@ fn slice_projection(
         ShelfTab::Links => link_shelf_predicate().into(),
         ShelfTab::Tables => "EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)".into(),
         ShelfTab::Images => format!(
-            "{} AND NOT {TRANSLATION_MEMBERSHIP} AND e.source NOT IN ('sharex','snipping_tool','downloads') AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id)",
-            image_shelf_predicate()
+            "{} AND NOT {TRANSLATION_MEMBERSHIP} AND {NON_FOLDER_IMAGE_SOURCES} AND NOT EXISTS(SELECT 1 FROM files_pointers f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM text_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM link_fragments f WHERE f.event_id=e.id) AND NOT EXISTS(SELECT 1 FROM table_fragments f WHERE f.event_id=e.id) AND {}",
+            image_shelf_predicate(),
+            visible_clipboard_images()
         ),
     };
     // Literal quoting is restricted to this optional tag value; all search and
@@ -701,25 +732,7 @@ fn sql() -> String {
               AND {ordinary_search}
               AND json_extract(e.delete_policy_json,'$.kind')='shelf_only'
               AND (?2=0 OR {image})
-              AND NOT ({image} AND e.source IN ('clipboard','clipboard_image','clipboard_file')
-                  AND lower(CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END)='sharex')
-              AND NOT EXISTS (
-                  SELECT 1 FROM verified_screenshot_matches m
-                  JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=m.source_generation
-                  WHERE m.clipboard_id=e.id AND m.clipboard_revision=
-                    CASE WHEN e.blob_hash IS NOT NULL THEN 'blob:'||e.blob_hash
-                         WHEN e.reference_hash IS NOT NULL THEN 'ref:'||e.reference_hash ELSE '' END
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM classification_work w
-                  WHERE w.event_id=e.id AND w.kind='clipboard' AND w.state='done'
-                    AND w.revision=CASE WHEN e.blob_hash IS NOT NULL THEN 'blob:'||e.blob_hash WHEN e.reference_hash IS NOT NULL THEN 'ref:'||e.reference_hash ELSE '' END
-                    AND (EXISTS (
-                        SELECT 1 FROM verified_source_digests d
-                        JOIN source_configurations c ON c.source_id='sharex' AND c.enabled=1 AND c.generation=d.source_generation
-                        WHERE d.digest=w.digest
-                    ) OR {snipping_match})
-              )
+              AND {clipboards}
             UNION ALL
             {sharex}
             UNION ALL
@@ -733,7 +746,7 @@ fn sql() -> String {
             "CASE WHEN json_valid(e.origin_json) THEN COALESCE(json_extract(e.origin_json,'$.source_app'),'') ELSE '' END",
             "",
         ),
-        snipping_match = crate::classification_runtime::snipping_match("w.digest"),
+        clipboards = visible_clipboard_images(),
         sharex = live(crate::source_policy::SourceId::Sharex, "sharex", ""),
         snipping_tool = live(
             crate::source_policy::SourceId::SnippingTool,

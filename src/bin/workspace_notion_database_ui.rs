@@ -579,7 +579,21 @@ impl Shelf {
             let reply = self.call(Command::CopyNotionTable { rows });
             let feedback = if let Some(error) = reply["clipboard_error"].as_str() {
                 format!("{} · {error}", tr("Сохранено в Tables", "Saved in Tables"))
-            } else if reply["saved_id"].is_number() || reply["saved_id"].is_string() {
+            } else if reply["partial"] == true {
+                if reply["html_written"] == true {
+                    tr(
+                        "Сохранено в Tables · скопирован только HTML",
+                        "Saved in Tables · only HTML was copied",
+                    )
+                    .to_owned()
+                } else {
+                    tr(
+                        "Сохранено в Tables · скопирован только текст",
+                        "Saved in Tables · only plain text was copied",
+                    )
+                    .to_owned()
+                }
+            } else if reply["table_copied"] == true {
                 tr(
                     "Скопировано и сохранено в Tables",
                     "Copied and saved in Tables",
@@ -846,7 +860,12 @@ impl Shelf {
         let ids = if let Some(preview) = self.state["preview"].as_i64() {
             vec![preview]
         } else {
-            self.selected_ids()
+            self.state["selected"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_i64)
+                .collect()
         };
         let command = if ids.is_empty() {
             Command::CopyNotionSourceId {
@@ -1093,6 +1112,23 @@ mod tests {
             *self.0.lock().unwrap() = text.to_owned();
             Ok(1)
         }
+    }
+
+    #[test]
+    fn copy_database_id_with_a_cursor_and_no_explicit_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let clipboard = Arc::new(Mutex::new(String::new()));
+        app.api
+            .as_mut()
+            .unwrap()
+            .set_text_clipboard_sink(Box::new(Clipboard(clipboard.clone())));
+        let id = "12345678-1234-5678-9000-123456789001";
+        app.workspace.database = Some(State::new(id.into(), "Fixture".into()));
+        app.state["selected"] = serde_json::json!([]);
+        app.state["cursor"] = serde_json::json!(-42);
+        app.copy_notion_database_links();
+        assert_eq!(*clipboard.lock().unwrap(), id);
     }
 
     #[test]

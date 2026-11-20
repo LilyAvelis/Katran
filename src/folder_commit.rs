@@ -96,7 +96,7 @@ impl Service {
         tx.execute("INSERT INTO source_projection VALUES(?1,?2,?3,?4,1) ON CONFLICT(source_id,generation,path_key) DO UPDATE SET event_id=excluded.event_id,available=1",params![source,configuration.generation,key,id])?;
         tx.execute("INSERT INTO source_receipts VALUES(?1,?2,?3,?4,?5) ON CONFLICT(source_id,root_key,path_key) DO UPDATE SET hash=excluded.hash,event_id=excluded.event_id",params![source,root_key,key,item.content_hash,id])?;
         if configuration.source_id.is_screenshot() && file_types::is_native_image(&path) {
-            tx.execute("INSERT OR IGNORE INTO classification_work(event_id,revision,kind,source_generation) VALUES(?1,?2,'source',?3)",params![id,format!("ref:{}",item.content_hash),configuration.generation])?;
+            tx.execute("INSERT OR IGNORE INTO classification_work(event_id,revision,kind,source_generation) VALUES(?1,?2,?3,?4)",params![id,format!("ref:{}",item.content_hash),configuration.source_id.classification_kind(),configuration.generation])?;
         }
         tx.commit()?;
         Ok(Some(self.get(id)?))

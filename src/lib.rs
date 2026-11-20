@@ -189,6 +189,7 @@ pub struct Service {
     capture_enabled: bool,
     clipboard_sequence: u32,
     recent_clipboard_image: Option<capture::RecentClipboardImage>,
+    pages_delete_confirmation: Option<Vec<SelectionRef>>,
     owned_table_tokens: std::collections::VecDeque<String>,
     interaction: Interaction,
     settings: settings::Settings,
@@ -288,22 +289,16 @@ impl Service {
         catalogue_schema::migrate(&db)?;
         classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
-        let stored: Option<String> = db
-            .query_row(
-                "SELECT document FROM preferences WHERE key='general'",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let mut settings: settings::Settings = match stored {
-            Some(s) => serde_json::from_str(&s).map_err(|e| ApiError::new("settings_error", e))?,
-            None => settings::Settings::defaults(quota),
-        };
+        let (mut settings, migrate_preferences) =
+            settings::read_profile(&db, || settings::Settings::defaults(quota))?;
         settings.hide_excess_numbered_tabs();
         settings
             .validate(0)
             .map_err(|e| ApiError::new("settings_error", e))?;
         settings.materialize_tab_preferences();
+        if migrate_preferences {
+            settings::write_profile(&db, &settings)?;
+        }
         let mut interaction = Interaction::default();
         if !settings.tab_enabled(interaction.tab) {
             interaction.tab = interaction::ShelfTab::All;
@@ -382,6 +377,7 @@ impl Service {
             capture_enabled: settings.capture_on_start,
             clipboard_sequence: 0,
             recent_clipboard_image: None,
+            pages_delete_confirmation: None,
             owned_table_tokens: Default::default(),
             interaction,
             settings,
@@ -398,18 +394,7 @@ impl Service {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
         storage::register_sql(&db)?;
-        let stored: Option<String> = db
-            .query_row(
-                "SELECT document FROM preferences WHERE key='general'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let mut settings: settings::Settings = match stored {
-            Some(document) => serde_json::from_str(&document)
-                .map_err(|error| ApiError::new("settings_error", error))?,
-            None => settings::Settings::default(),
-        };
+        let (mut settings, _) = settings::read_profile(&db, settings::Settings::default)?;
         settings.hide_excess_numbered_tabs();
         settings
             .validate(0)
@@ -480,6 +465,7 @@ impl Service {
             capture_enabled: false,
             clipboard_sequence: 0,
             recent_clipboard_image: None,
+            pages_delete_confirmation: None,
             owned_table_tokens: Default::default(),
             interaction: Interaction::default(),
             settings,
@@ -1944,9 +1930,7 @@ impl Service {
                 settings
                     .validate(self.usage()?)
                     .map_err(|e| ApiError::new("invalid_settings", e))?;
-                let document = serde_json::to_string(&settings)
-                    .map_err(|e| ApiError::new("settings_error", e))?;
-                self.db.execute("INSERT INTO preferences(key,document) VALUES('general',?1) ON CONFLICT(key) DO UPDATE SET document=excluded.document",[document])?;
+                settings::write_profile(&self.db, &settings)?;
                 if self.settings.sharex_folder != settings.sharex_folder {
                     self.sharex_scanner = Default::default();
                 }

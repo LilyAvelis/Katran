@@ -6,7 +6,6 @@
 //! before and after worker work and before reusing a cached page. Reader and
 //! writer PRAGMA data_version values cannot be compared across connections.
 use crate::{ApiError, Result, Service, interaction::ShelfTab};
-use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 
 impl Service {
@@ -35,18 +34,8 @@ impl Service {
         let transaction = self.db.unchecked_transaction()?;
         // A long-lived preview reader's startup settings may be stale. Read the
         // document inside this snapshot, together with all of its catalogue data.
-        let document: Option<String> = transaction
-            .query_row(
-                "SELECT document FROM preferences WHERE key='general'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let mut settings: crate::settings::Settings = match document {
-            Some(document) => serde_json::from_str(&document)
-                .map_err(|error| ApiError::new("settings_error", error))?,
-            None => self.settings.clone(),
-        };
+        let (mut settings, _) =
+            crate::settings::read_profile(&transaction, || self.settings.clone())?;
         settings.hide_excess_numbered_tabs();
         if !settings.tab_enabled(tab) {
             return Err(ApiError::new(

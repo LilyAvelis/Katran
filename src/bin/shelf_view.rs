@@ -553,6 +553,7 @@ impl Shelf {
                                     ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0, Color32::from_white_alpha(28)));
                                 }
                                 category_divider::Kind::Cards(range) => {
+                            let entrance = self.gallery_entrance.for_row(item.top, viewport.top(), item.height);
                             ui.scope_builder(egui::UiBuilder::new().id_salt(("shelf-row", row)).max_rect(rect), |ui| ui.horizontal(|ui| {
                                 #[cfg(test)]
                                 if compact && row == 0 {
@@ -636,7 +637,7 @@ impl Shelf {
                                         super::tag_material_ui::paint(ui, rect, slot);
                                     }
                                     if pods && compact {
-                                        self.pods_ui.paint(ui, event, rect.shrink(6.0));
+                                        self.pods_ui.paint_gallery(ui, event, rect.shrink(6.0), entrance);
                                     } else if links && compact && event["source"] == "link_collection" {
                                         self.images.paint_at(ui, event, rect.shrink(6.0), 320);
                                     } else if links && compact {
@@ -644,7 +645,7 @@ impl Shelf {
                                     } else if gallery {
                                         let zones = gallery_card::geometry(rect);
                                         if self.state["tab"] == "pods" {
-                                            self.pods_ui.paint(ui, event, zones.image);
+                                            self.pods_ui.paint_gallery(ui, event, zones.image, entrance);
                                         } else if event["kind"] == "table_fragment" {
                                             table_preview_ui::paint_card(ui, event, zones.image);
                                         } else if matches!(
@@ -653,11 +654,7 @@ impl Shelf {
                                         ) {
                                             text_preview_ui::paint_card(ui, event, zones.image);
                                         } else {
-                                            let rows_from_top = ((item.top - viewport.top()).max(0.0) / item.height.max(1.0)).floor() as u16;
-                                            self.images.paint_gallery(ui, event, zones.image, images::GalleryEntrance {
-                                                delay_ms: rows_from_top.min(4) * 18,
-                                                ..self.gallery_entrance
-                                            });
+                                            self.images.paint_gallery(ui, event, zones.image, entrance);
                                         }
                                         let title = if let Some(name) =
                                             event["properties"]["display_name"].as_str()
