@@ -207,6 +207,12 @@ pub(crate) struct PreparedBlob {
     table: bool,
 }
 impl PreparedBlob {
+    pub(crate) fn hash(&self) -> &str {
+        &self.hash
+    }
+    pub(crate) fn origin(&self) -> &Origin {
+        &self.origin
+    }
     pub(crate) fn mark_text(&mut self, text: String) {
         self.text = Some(text);
     }

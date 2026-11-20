@@ -4,7 +4,28 @@ use crate::{
     origin::{self, Origin},
 };
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+
+const SNIP_REPEAT_WINDOW: Duration = Duration::from_secs(1);
+
+pub(crate) struct RecentClipboardImage {
+    id: i64,
+    hash: String,
+    sequence: u32,
+    committed_at: Instant,
+    snipping_tool: Option<bool>,
+}
+
+fn snipping_tool_origin(origin: &Origin) -> Option<bool> {
+    origin.source_app.as_deref().map(|app| {
+        ["SnippingTool", "ScreenClippingHost", "ScreenSketch"]
+            .iter()
+            .any(|name| app.eq_ignore_ascii_case(name))
+    })
+}
 
 /// Private owned worker receipt: never deserialize clipboard assertions from a client.
 pub(crate) struct CaptureSnapshot {
@@ -641,12 +662,37 @@ impl Service {
                     self.clipboard_sequence = sequence;
                     return Ok(json!({"captured":0,"state":"images_disabled"}));
                 }
+                let snipping_tool = snipping_tool_origin(prepared.origin());
+                let committed_at = Instant::now();
+                if let Some(recent) = self.recent_clipboard_image.as_mut()
+                    && recent.sequence == self.clipboard_sequence
+                    && committed_at.duration_since(recent.committed_at) <= SNIP_REPEAT_WINDOW
+                    && recent.hash == prepared.hash()
+                    && matches!(
+                        (recent.snipping_tool, snipping_tool),
+                        (Some(true), Some(true) | None) | (None, Some(true))
+                    )
+                    && crate::storage::get_event(&self.db, recent.id).is_ok()
+                {
+                    recent.sequence = sequence;
+                    recent.snipping_tool = Some(true);
+                    self.clipboard_sequence = sequence;
+                    return Ok(json!({"captured":0,"state":"duplicate_snip"}));
+                }
+                let hash = prepared.hash().to_owned();
                 let id = crate::storage::commit_prepared_bytes(
                     &mut self.db,
                     &self.root,
                     self.quota,
                     prepared,
                 )?;
+                self.recent_clipboard_image = Some(RecentClipboardImage {
+                    id,
+                    hash,
+                    sequence,
+                    committed_at,
+                    snipping_tool,
+                });
                 json!({"captured":1,"event":self.get(id)?})
             }
             CapturePayload::PreparedTable(prepared) => {
@@ -850,6 +896,89 @@ fn prepare_owned_snapshot(
         references,
         (images, text, links, false, false, true),
     )
+}
+
+#[cfg(test)]
+mod snip_tests {
+    use super::*;
+    use image::ImageEncoder;
+
+    fn image(api: &mut Service, sequence: u32, owner: Option<&str>, shade: u8) -> Value {
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(&[shade, 20, 30, 255], 1, 1, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let prepared = crate::storage::prepare_bytes(
+            &api.root,
+            api.quota,
+            crate::storage::ByteIngest {
+                name: "snip.png",
+                source: "clipboard_image",
+                bytes: &png,
+                origin: &Origin {
+                    source_app: owner.map(str::to_owned),
+                    source_domain: None,
+                },
+            },
+            &[],
+        )
+        .unwrap();
+        api.commit_capture_snapshot(
+            CaptureSnapshot {
+                sequence,
+                payload: CapturePayload::PreparedImage(prepared),
+            },
+            sequence,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn repeated_windows_snips_consume_the_sequence_without_another_card() {
+        let data = tempfile::tempdir().unwrap();
+        let mut api = Service::open(data.path(), 10_000).unwrap();
+        api.capture_enabled = true;
+
+        assert_eq!(image(&mut api, 10, None, 1)["captured"], 1);
+        assert_eq!(
+            image(&mut api, 12, Some("ScreenClippingHost"), 1)["state"],
+            "duplicate_snip"
+        );
+        assert_eq!(
+            image(&mut api, 13, Some("SnippingTool"), 1)["state"],
+            "duplicate_snip"
+        );
+        assert_eq!(api.clipboard_sequence, 13);
+        assert_eq!(
+            api.db
+                .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, u32>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn edits_other_apps_and_later_identical_snips_remain_separate() {
+        let data = tempfile::tempdir().unwrap();
+        let mut api = Service::open(data.path(), 10_000).unwrap();
+        api.capture_enabled = true;
+        let tool = Some("SnippingTool");
+        assert_eq!(image(&mut api, 10, tool, 1)["captured"], 1);
+        assert_eq!(image(&mut api, 11, tool, 2)["captured"], 1);
+        assert_eq!(image(&mut api, 12, Some("Paint"), 2)["captured"], 1);
+        assert_eq!(image(&mut api, 13, tool, 2)["captured"], 1);
+        api.recent_clipboard_image.as_mut().unwrap().committed_at -= Duration::from_secs(2);
+        assert_eq!(image(&mut api, 14, tool, 2)["captured"], 1);
+        api.commit_capture_snapshot(
+            CaptureSnapshot {
+                sequence: 15,
+                payload: CapturePayload::Unsupported,
+            },
+            15,
+        )
+        .unwrap();
+        assert_eq!(image(&mut api, 16, tool, 2)["captured"], 1);
+    }
 }
 
 #[cfg(test)]
