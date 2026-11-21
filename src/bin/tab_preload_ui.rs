@@ -101,10 +101,9 @@ impl State {
                             result: response["result"].clone(),
                         })
                         .is_ok()
+                    && let Some(ctx) = &ctx
                 {
-                    if let Some(ctx) = &ctx {
-                        ctx.request_repaint();
-                    }
+                    ctx.request_repaint();
                 }
             }
             if let Some(ctx) = ctx {
