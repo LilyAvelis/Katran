@@ -2152,9 +2152,13 @@ impl Service {
                 }
                 collection_rename::full_name(&event, &name)?;
                 let tab = self.interaction.tab;
-                let folder = (tab == interaction::ShelfTab::All)
-                    .then(|| self.work_folder.current().map(std::path::Path::to_path_buf))
-                    .flatten();
+                let folder = match tab {
+                    interaction::ShelfTab::All => {
+                        self.work_folder.current().map(std::path::Path::to_path_buf)
+                    }
+                    interaction::ShelfTab::Pages => Some(crate::pages::vault(&self.root)?),
+                    _ => None,
+                };
                 let generation = self.interaction.view_generation;
                 self.jobs.submit(Lane::Foreground, move |cancel| {
                     cancel.check()?;
@@ -2437,8 +2441,19 @@ impl Service {
                 "Select a BULL or BS collection",
             ));
         }
-        if tab == interaction::ShelfTab::All {
-            if event.source != "work_folder" || event.path.parent() != self.work_folder.current() {
+        if tab == interaction::ShelfTab::Pages {
+            let root = crate::pages::vault(&self.root)?;
+            if !crate::pages::is_id(id) || event.path.parent() != Some(root.as_path()) {
+                return Err(ApiError::new(
+                    "stale_selection",
+                    "Select a document from Pages",
+                ));
+            }
+        } else if tab == interaction::ShelfTab::All {
+            if crate::pages::is_id(id)
+                || event.source != "work_folder"
+                || event.path.parent() != self.work_folder.current()
+            {
                 return Err(ApiError::new(
                     "stale_folder",
                     "Select a collection from the current Folder",
@@ -2469,7 +2484,10 @@ impl Service {
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or(&event.name);
-        Ok(json!({"id":id,"name":name,"revision":Self::collection_rename_revision(&event)}))
+        Ok(
+            json!({"id":id,"name":name,"revision":Self::collection_rename_revision(&event),
+            "page_document":crate::pages::is_id(id)}),
+        )
     }
 
     pub(crate) fn saved_collection(&self, id: i64, revision: &str) -> Result<Event> {
@@ -3151,13 +3169,34 @@ impl Service {
                 PreparedWork::RenameFolderCollection { prepared, generation } => {
                     let event = prepared.event();
                     let current = self.collection_rename_target(event.id)?;
-                    if self.interaction.view_generation != generation || self.work_folder.current() != Some(prepared.folder())
+                    let pages = self.interaction.tab == interaction::ShelfTab::Pages;
+                    let same_folder = if pages {
+                        crate::pages::vault(&self.root)? == prepared.folder()
+                    } else {
+                        self.work_folder.current() == Some(prepared.folder())
+                    };
+                    if self.interaction.view_generation != generation || !same_folder
                         || current.path != event.path || current.revision != event.revision || current.name != event.name
                     {
                         return Err(ApiError::new("stale_folder", "Folder or collection changed before rename"));
                     }
                     let id = event.id;
                     self.jobs.authorize_claimed_effect(ready)?;
+                    #[cfg(windows)]
+                    let path = if pages {
+                        let tx = self.db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                        crate::pages::rename_metadata(&tx, &current.path, prepared.destination())?;
+                        let path = prepared.publish()?;
+                        if let Err(error) = tx.commit() {
+                            self.interaction.replace_collection_rows(&[id], None);
+                            return Err(ApiError::new("rename_metadata_failed",
+                                format!("File renamed but pin and tag metadata could not be saved: {error}")));
+                        }
+                        path
+                    } else {
+                        prepared.publish()?
+                    };
+                    #[cfg(not(windows))]
                     let path = prepared.publish()?;
                     if path != current.path {
                         self.interaction.replace_collection_rows(&[id], None);

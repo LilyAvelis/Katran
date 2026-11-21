@@ -60,6 +60,24 @@ fn pin_key(path: &Path) -> String {
         .into_owned()
 }
 
+#[cfg(windows)]
+pub(crate) fn rename_metadata(db: &Connection, source: &Path, destination: &Path) -> Result<()> {
+    let old = pin_key(source);
+    let new = pin_key(destination);
+    if old != new {
+        db.execute("DELETE FROM pages_pins WHERE filename=?1", [&new])?;
+        db.execute(
+            "UPDATE pages_pins SET filename=?2 WHERE filename=?1",
+            params![old, new],
+        )?;
+        db.execute(
+            "UPDATE page_moves SET filename=?2 WHERE filename=?1",
+            params![old, new],
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn pin(db: &Connection, path: &Path) -> Result<Option<Pin>> {
     pin_by_name(db, &pin_key(path))
 }

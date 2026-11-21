@@ -1,4 +1,4 @@
-//! Rename whole collections without changing their contents or membership.
+//! Rename collections and Pages documents without changing their contents.
 use crate::{ApiError, Event, Result, domain_jobs::Cancellation, interaction::ShelfTab};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::{
@@ -8,7 +8,8 @@ use std::{
 
 /// Metadata-only capability; external bytes are validated on the worker.
 pub(crate) fn can_rename(event: &Event) -> bool {
-    crate::collection::is_managed(event)
+    (crate::pages::is_id(event.id) && crate::pages::is_document(&event.path))
+        || crate::collection::is_managed(event)
         || crate::bs_collection::is_managed(event)
         || (event.id < 0
             && event.source == "work_folder"
@@ -19,7 +20,9 @@ fn suffix(event: &Event) -> Result<&str> {
         .extension()
         .and_then(|s| s.to_str())
         .ok_or_else(|| ApiError::new("invalid_collection", "Collection suffix missing"))?;
-    if extension.eq_ignore_ascii_case("bull") {
+    if crate::pages::is_id(event.id) && crate::file_types::is_markdown(&event.path) {
+        Ok(extension)
+    } else if extension.eq_ignore_ascii_case("bull") {
         Ok("bull")
     } else if extension.eq_ignore_ascii_case("bs") {
         Ok("bs")
@@ -72,24 +75,24 @@ pub(crate) fn full_name(event: &Event, requested: &str) -> Result<String> {
     if !can_rename(event) {
         return Err(ApiError::new(
             "unsupported_collection",
-            "Expected a collection",
+            "Expected a collection or Pages document",
         ));
     }
     let ext = suffix(event)?;
     if requested.is_empty() || requested.trim() != requested || requested.ends_with(['.', ' ']) {
-        return Err(ApiError::new(
-            "invalid_argument",
-            "Enter a safe collection name",
-        ));
+        return Err(ApiError::new("invalid_argument", "Enter a safe filename"));
     }
     let incoming = Path::new(requested).extension().and_then(|s| s.to_str());
     if incoming.is_some_and(|s| {
-        (s.eq_ignore_ascii_case("bs") || s.eq_ignore_ascii_case("bull"))
+        (s.eq_ignore_ascii_case("bs")
+            || s.eq_ignore_ascii_case("bull")
+            || (crate::pages::is_id(event.id)
+                && crate::file_types::is_markdown(Path::new(requested))))
             && !s.eq_ignore_ascii_case(ext)
     }) {
         return Err(ApiError::new(
             "invalid_argument",
-            "Collection extension cannot be changed",
+            "File extension cannot be changed",
         ));
     }
     let result = if incoming.is_some_and(|s| s.eq_ignore_ascii_case(ext)) {
@@ -228,6 +231,10 @@ impl PreparedFolderRename {
         &self.folder
     }
     #[cfg(windows)]
+    pub(crate) fn destination(&self) -> &Path {
+        &self.destination
+    }
+    #[cfg(windows)]
     pub(crate) fn publish(mut self) -> Result<PathBuf> {
         if crate::delete_selection::locked_path(&self.original)?
             != self.event.path.canonicalize()?
@@ -310,7 +317,9 @@ pub(crate) fn prepare_folder(
         ));
     }
     crate::open_file::validate(&event)?;
-    validate_collection(&event, cancel)?;
+    if !crate::pages::is_id(event.id) || !crate::file_types::is_markdown(&event.path) {
+        validate_collection(&event, cancel)?;
+    }
     cancel.check()?;
     Ok(PreparedFolderRename {
         event,

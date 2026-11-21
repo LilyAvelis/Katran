@@ -13,6 +13,7 @@ pub(super) struct State {
     error: String,
     focus_name: bool,
     collection_revision: Option<String>,
+    page_document: bool,
 }
 impl Shelf {
     pub(super) fn pinned_close(&mut self) {
@@ -54,7 +55,10 @@ impl Shelf {
         };
         if result["properties"]["pinned"] != true {
             let event = self.call(Command::Get { id });
-            if super::images::is_bull(&event) || super::images::is_bs(&event) {
+            if self.state["tab"] == "pages"
+                || super::images::is_bull(&event)
+                || super::images::is_bs(&event)
+            {
                 let info = self.call(Command::CollectionRenameInfo { id });
                 if let (Some(name), Some(revision)) =
                     (info["name"].as_str(), info["revision"].as_str())
@@ -65,6 +69,7 @@ impl Shelf {
                         id: Some(id),
                         name: name.into(),
                         collection_revision: Some(revision.into()),
+                        page_document: info["page_document"] == true,
                         ..Default::default()
                     };
                 }
@@ -178,7 +183,9 @@ impl Shelf {
             .show(ctx, |ui| {
                 optical = Some((ui.painter().clone(), ui.painter().add(egui::Shape::Noop)));
                 ui.set_width((ctx.content_rect().width() - 48.0).clamp(1.0, 420.0));
-                ui.heading(if collection {
+                ui.heading(if state.page_document {
+                    tr("Переименовать файл", "Rename file")
+                } else if collection {
                     tr("Переименовать коллекцию", "Rename collection")
                 } else {
                     tr("Свойства закреплённого объекта", "Pinned item properties")
@@ -317,6 +324,95 @@ impl Shelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn ctrl_e_renames_pages_file_and_keeps_pin_and_tag() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = crate::tests::test_shelf(root.path());
+        let tab = katran::interaction::ShelfTab::Pages;
+        app.call(Command::SetTabEnabled { tab, enabled: true });
+        app.call(Command::SetTab { tab });
+        let vault = root.path().join("Katran Pages");
+        std::fs::create_dir_all(&vault).unwrap();
+        let original = vault.join("Old.md");
+        let taken = vault.join("Taken.md");
+        std::fs::write(&original, "# New title\n\n![[image.png]]").unwrap();
+        std::fs::write(&taken, "Existing note").unwrap();
+        let browse = |app: &mut Shelf| {
+            app.call(Command::BrowseShelfSorted {
+                query: String::new(),
+                limit: 10,
+                cursor: None,
+            })
+        };
+        let page = browse(&mut app);
+        let find_id = |page: &Value, name: &str| {
+            page["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|event| event["name"] == name)
+                .unwrap()["id"]
+                .as_i64()
+                .unwrap()
+        };
+        let id = find_id(&page, "Old.md");
+        app.call(Command::TogglePins { ids: vec![id] });
+        app.call(Command::AssignTagSlot {
+            ids: vec![id],
+            slot: Some(2),
+        });
+        app.call(Command::SetVisible { ids: vec![id] });
+        app.call(Command::Select {
+            id,
+            mode: katran::interaction::SelectionMode::Replace,
+        });
+        app.state = app.call(Command::Interaction);
+        let ctx = egui::Context::default();
+        let input = |key| egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input(egui::Key::E), |ui| app.pinned_input(ui.ctx()));
+        output.textures_delta.clear();
+        assert!(app.pinned_ui.page_document);
+        assert_eq!(app.pinned_ui.name, "Old");
+        let save = |app: &mut Shelf| {
+            let mut output = ctx.run_ui(input(egui::Key::Enter), |ui| app.pinned_panel(ui.ctx()));
+            output.textures_delta.clear();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while app.pinned_ui.job.is_some() {
+                assert!(std::time::Instant::now() < deadline);
+                app.pinned_tick(&ctx);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        app.pinned_ui.name = "Taken".into();
+        save(&mut app);
+        assert!(app.pinned_ui.open);
+        assert!(original.is_file());
+        assert_eq!(std::fs::read_to_string(taken).unwrap(), "Existing note");
+        assert_eq!(app.call(Command::GetTagSlot { id })["slot"], 2);
+        app.pinned_ui.name = "Моя страница".into();
+        save(&mut app);
+        assert!(!app.pinned_ui.open, "{}", app.pinned_ui.error);
+        assert!(!original.exists());
+        assert_eq!(
+            std::fs::read_to_string(vault.join("Моя страница.md")).unwrap(),
+            "# New title\n\n![[image.png]]"
+        );
+        app.call(Command::TogglePinnedView);
+        let page = browse(&mut app);
+        let renamed = find_id(&page, "Моя страница.md");
+        assert_eq!(app.call(Command::GetTagSlot { id: renamed })["slot"], 2);
+    }
+
     #[test]
     fn ctrl_e_renames_unpinned_collection_without_loading_openers() {
         let root = tempfile::tempdir().unwrap();
