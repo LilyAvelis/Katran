@@ -18,6 +18,9 @@ impl Service {
                 "Folder has no pinned order",
             ));
         }
+        if self.interaction.tab == ShelfTab::Pages {
+            return self.move_page_pin(id, direction);
+        }
         if self.interaction.tab == ShelfTab::Desktop {
             let events = crate::desktop_projection::list(&self.root)?;
             let mut ranks = std::collections::HashMap::new();

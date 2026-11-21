@@ -25,6 +25,106 @@ fn browse(api: &mut Service) -> Vec<Value> {
         .clone()
 }
 
+#[test]
+fn pages_pins_and_tags_survive_edits_and_restart() {
+    use katran::sorting::SortMode;
+    let root = tempfile::tempdir().unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    let tab = ShelfTab::Pages;
+    call(&mut api, Command::SetTabEnabled { tab, enabled: true });
+    call(&mut api, Command::SetTab { tab });
+    assert!(browse(&mut api).is_empty());
+    let vault = root.path().join("Katran Pages");
+    let note = vault.join("Заметка.md");
+    std::fs::write(&note, "First version").unwrap();
+    std::fs::write(vault.join("Other.md"), "Unpinned note").unwrap();
+    let page = browse(&mut api)
+        .into_iter()
+        .find(|row| row["name"] == "Заметка.md")
+        .unwrap();
+    let id = page["id"].as_i64().unwrap();
+    let tag = |slot| Command::AssignTagSlot {
+        ids: vec![id],
+        slot,
+    };
+    assert_eq!(
+        call(&mut api, tag(Some(2)))["items"][0]["outcome"],
+        "not_pinned"
+    );
+    assert_eq!(
+        call(&mut api, Command::TogglePins { ids: vec![id] })["items"][0]["pinned"],
+        true
+    );
+    assert_eq!(
+        call(&mut api, tag(Some(2)))["items"][0]["outcome"],
+        "applied"
+    );
+    let slots = call(&mut api, Command::ListTagSlots);
+    assert_eq!(slots["slots"].as_array().unwrap().len(), 9);
+    call(
+        &mut api,
+        Command::ReorderTagSlots {
+            tab,
+            order: vec![2, 1, 3, 4, 5, 6, 7, 8, 9],
+            expected_revision: slots["revision"].as_str().unwrap().to_owned(),
+        },
+    );
+    assert_eq!(
+        call(&mut api, Command::GetTagSlots { ids: vec![id] })["items"][0]["slot"],
+        1
+    );
+    call(
+        &mut api,
+        Command::SetSort {
+            mode: SortMode::Tags,
+            reverse: false,
+            seed: None,
+        },
+    );
+    assert_eq!(browse(&mut api)[0]["id"], id);
+    call(&mut api, Command::FilterTagSlot { slot: Some(1) });
+    assert_eq!(browse(&mut api).len(), 1);
+    call(&mut api, Command::FilterTagSlot { slot: Some(1) });
+    call(&mut api, Command::TogglePinnedView);
+    assert_eq!(browse(&mut api).len(), 1);
+    let result = call(
+        &mut api,
+        Command::DeleteSelection {
+            ids: vec![id],
+            confirmed: false,
+        },
+    );
+    assert_eq!(result["items"][0]["skipped_pinned"], true);
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "First version");
+    drop(api);
+
+    std::fs::write(&note, "Edited in the vault").unwrap();
+    // Change the directory ordering so a saved session ID could not pass.
+    std::fs::write(vault.join("A.md"), "New note").unwrap();
+    let mut api = Service::open(root.path(), 100_000).unwrap();
+    call(&mut api, Command::SetTab { tab });
+    let page = &browse(&mut api)[0];
+    let reopened = page["id"].as_i64().unwrap();
+    assert_ne!(reopened, id);
+    assert_eq!(page["name"], "Заметка.md");
+    assert_eq!(page["properties"]["pinned"], true);
+    assert_eq!(
+        call(&mut api, Command::GetTagSlot { id: reopened })["slot"],
+        1
+    );
+    call(
+        &mut api,
+        Command::TogglePins {
+            ids: vec![reopened],
+        },
+    );
+    assert!(call(&mut api, Command::GetTagSlot { id: reopened })["slot"].is_null());
+    assert_eq!(
+        std::fs::read_to_string(&note).unwrap(),
+        "Edited in the vault"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn explicit_move_writes_one_markdown_and_observes_external_edits() {

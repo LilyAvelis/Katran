@@ -17,7 +17,7 @@ fn error(value: tag_slots::StoreError) -> ApiError {
 pub(crate) fn scope(tab: crate::interaction::ShelfTab) -> Result<&'static str> {
     use crate::interaction::ShelfTab::*;
     Ok(match tab {
-        All | Pages => {
+        All => {
             return Err(ApiError::new(
                 "folder_has_no_tags",
                 "Folder has no tag slots",
@@ -27,6 +27,7 @@ pub(crate) fn scope(tab: crate::interaction::ShelfTab) -> Result<&'static str> {
         Screenshots => "screenshots",
         Downloads => "downloads",
         Text => "text",
+        Pages => "pages",
         Links => "links",
         Tables => "tables",
         Pods => "pods",
@@ -64,6 +65,26 @@ impl Service {
         ids: Vec<i64>,
     ) -> Result<Value> {
         let scope = scope(tab)?;
+        if scope == "pages" {
+            if ids.len() > 1000 || ids.iter().any(|&id| !crate::pages::is_id(id)) {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Expected at most 1000 Pages item IDs",
+                ));
+            }
+            let pages = self.pages.borrow();
+            let mut items = Vec::new();
+            for id in ids {
+                let slot = match pages.cached_name(id) {
+                    Some(name) => {
+                        crate::pages::pin_by_name(&self.db, &name)?.and_then(|pin| pin.slot)
+                    }
+                    None => None,
+                };
+                items.push(json!({"id":id,"slot":slot}));
+            }
+            return Ok(json!({"items":items}));
+        }
         if ids
             .iter()
             .any(|id| crate::desktop_projection::is_desktop_id(*id))
@@ -180,7 +201,9 @@ impl Service {
 
     pub(crate) fn assign_tag_slot(&mut self, ids: Vec<i64>, slot: Option<u8>) -> Result<Value> {
         let scope = scope(self.interaction.tab)?;
-        if ids
+        let items = if scope == "pages" {
+            self.assign_page_tag(&ids, slot)?
+        } else if ids
             .iter()
             .any(|id| crate::desktop_projection::is_desktop_id(*id))
         {
@@ -202,16 +225,10 @@ impl Service {
             for id in &ids {
                 crate::desktop_projection::get(&self.root, *id)?;
             }
-            let items = crate::desktop_pins::assign_slot(&self.db, &ids, slot)?;
-            if items
-                .iter()
-                .any(|item| item.outcome == tag_slots::Outcome::Applied)
-            {
-                self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
-            }
-            return Ok(json!({"items":items,"slot":slot,"atomic":false}));
-        }
-        let items = tag_slots::assign(&mut self.db, scope, &ids, slot).map_err(error)?;
+            crate::desktop_pins::assign_slot(&self.db, &ids, slot)?
+        } else {
+            tag_slots::assign(&mut self.db, scope, &ids, slot).map_err(error)?
+        };
         if items
             .iter()
             .any(|item| item.outcome == tag_slots::Outcome::Applied)
@@ -223,6 +240,17 @@ impl Service {
 
     pub(crate) fn get_tag_slot(&self, id: i64) -> Result<Value> {
         let scope = scope(self.interaction.tab)?;
+        if scope == "pages" {
+            if !crate::pages::is_id(id) {
+                return Err(ApiError::new(
+                    "invalid_argument",
+                    "Expected a Pages item ID",
+                ));
+            }
+            let event = self.get(id)?;
+            let slot = crate::pages::pin(&self.db, &event.path)?.and_then(|pin| pin.slot);
+            return Ok(json!({"slot":slot}));
+        }
         if crate::desktop_projection::is_desktop_id(id) && scope != "desktop" {
             return Err(ApiError::new(
                 "invalid_argument",

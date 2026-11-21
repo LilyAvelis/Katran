@@ -42,6 +42,11 @@ impl Service {
                 "Wait for active operations before changing pins",
             ));
         }
+        if self.interaction.tab == interaction::ShelfTab::Pages
+            || ids.iter().any(|id| pages::is_id(*id))
+        {
+            return self.toggle_page_pins(ids);
+        }
         if ids.iter().any(|id| desktop_projection::is_desktop_id(*id)) {
             if ids.iter().any(|id| !desktop_projection::is_desktop_id(*id)) {
                 return Err(ApiError::new(

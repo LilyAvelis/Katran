@@ -76,7 +76,11 @@ pub struct Cache {
     pub assignments: std::collections::HashMap<i64, u8>,
 }
 fn taggable_event_id(id: i64, tab: &str) -> bool {
-    if tab == "desktop" { id < 0 } else { id > 0 }
+    if matches!(tab, "desktop" | "pages") {
+        id < 0
+    } else {
+        id > 0
+    }
 }
 impl super::Shelf {
     pub(super) fn seed_preloaded_tags(&mut self, page: &serde_json::Value) {

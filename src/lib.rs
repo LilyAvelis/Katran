@@ -287,6 +287,7 @@ impl Service {
         }
         storage::initialize(&db, &root)?;
         catalogue_schema::migrate(&db)?;
+        pages::ensure_pins(&db)?;
         classification_runtime::recover_startup(&db)?;
         db.execute_batch("CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, document TEXT NOT NULL);")?;
         let (mut settings, migrate_preferences) =
@@ -1525,14 +1526,11 @@ impl Service {
                 seed,
             } => {
                 if mode == sorting::SortMode::Tags
-                    && matches!(
-                        self.interaction.tab,
-                        interaction::ShelfTab::All | interaction::ShelfTab::Pages
-                    )
+                    && matches!(self.interaction.tab, interaction::ShelfTab::All)
                 {
                     return Err(ApiError::new(
                         "folder_has_no_tags",
-                        "Folder and Pages do not support tag sorting",
+                        "Folder does not support tag sorting",
                     ));
                 }
                 let mut settings = self.settings.clone();
@@ -2096,10 +2094,7 @@ impl Service {
                     .filter(|d| {
                         d.in_palette
                             && !(d.id == "sort_tags"
-                                && matches!(
-                                    self.interaction.tab,
-                                    interaction::ShelfTab::All | interaction::ShelfTab::Pages
-                                ))
+                                && matches!(self.interaction.tab, interaction::ShelfTab::All))
                             && if sort_only {
                                 d.id.starts_with("sort_")
                             } else {

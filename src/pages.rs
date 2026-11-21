@@ -5,14 +5,17 @@ use crate::{
 };
 use baloh_collection::bs::{FileEntry, MAX_FILE_BYTES};
 use pulldown_cmark::{Event as MarkdownEvent, Options, Parser, Tag};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::{Value, json};
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     io::Read,
     path::{Component, Path, PathBuf},
 };
 
 pub(crate) const ID_BASE: i64 = -(1 << 50);
+pub(crate) const VAULT_NAME: &str = "Katran Pages";
 pub(crate) fn is_id(id: i64) -> bool {
     (ID_BASE - (1 << 40)..ID_BASE).contains(&id)
 }
@@ -26,7 +29,63 @@ pub(crate) fn is_document(path: &Path) -> bool {
 }
 
 pub(crate) fn vault(root: &Path) -> Result<PathBuf> {
-    text_vault::directory(&root.canonicalize()?, "Katran Pages", true)
+    text_vault::directory(&root.canonicalize()?, VAULT_NAME, true)
+}
+
+// The Pages projection IDs last for one session. Store local metadata by vault
+// filename so edits to the contents don't change the pin or touch Markdown.
+pub(crate) fn ensure_pins(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS pages_pins(
+            filename TEXT PRIMARY KEY NOT NULL,
+            position INTEGER NOT NULL,
+            slot_number INTEGER CHECK(slot_number BETWEEN 1 AND 9)
+        );
+        INSERT OR IGNORE INTO tag_scoped_slots
+            SELECT 'pages',number,name,color,material,scale,intensity,angle,seed,opacity FROM tag_slots;",
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Pin {
+    pub(crate) position: i64,
+    pub(crate) slot: Option<u8>,
+}
+
+fn pin_key(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub(crate) fn pin(db: &Connection, path: &Path) -> Result<Option<Pin>> {
+    pin_by_name(db, &pin_key(path))
+}
+
+pub(crate) fn pin_by_name(db: &Connection, name: &str) -> Result<Option<Pin>> {
+    Ok(db
+        .prepare_cached("SELECT position,slot_number FROM pages_pins WHERE filename=?1")?
+        .query_row([name], |row| {
+            Ok(Pin {
+                position: row.get(0)?,
+                slot: row.get(1)?,
+            })
+        })
+        .optional()?)
+}
+
+pub(crate) struct BrowsePins {
+    pub(crate) entries: HashMap<String, Pin>,
+    pub(crate) pinned_only: bool,
+    pub(crate) slot: Option<u8>,
+}
+
+impl BrowsePins {
+    pub(crate) fn get(&self, event: &Event) -> Option<Pin> {
+        self.entries.get(&event.name).copied()
+    }
 }
 
 fn filename(event: &Event, title: &str, extension: &str) -> String {
@@ -195,12 +254,206 @@ impl Service {
         limit: u32,
         cursor: Option<&str>,
     ) -> Result<Value> {
+        self.browse_pages_with_pins(
+            query,
+            limit,
+            cursor,
+            self.interaction.sort,
+            self.interaction.pinned_only,
+        )
+    }
+
+    fn browse_pages_with_pins(
+        &self,
+        query: &str,
+        limit: u32,
+        cursor: Option<&str>,
+        sort: crate::sorting::SortSpec,
+        pinned_only: bool,
+    ) -> Result<Value> {
         let root = vault(&self.root)?;
         let mut pages = self.pages.borrow_mut();
         if pages.current() != Some(root.as_path()) {
             pages.choose(&root)?;
         }
-        pages.browse(query, limit, cursor, self.interaction.sort)
+        let mut statement = self
+            .db
+            .prepare("SELECT filename,position,slot_number FROM pages_pins")?;
+        let entries = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    Pin {
+                        position: row.get(1)?,
+                        slot: row.get(2)?,
+                    },
+                ))
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        pages.browse_with_pins(
+            query,
+            limit,
+            cursor,
+            sort,
+            Some(&BrowsePins {
+                entries,
+                pinned_only,
+                slot: self.interaction.tag_slot_filter,
+            }),
+        )
+    }
+
+    pub(crate) fn resolve_page_pins(&self, ids: &[i64]) -> Result<Vec<Event>> {
+        if ids.len() > 1000 || ids.iter().any(|&id| !is_id(id)) {
+            return Err(ApiError::new(
+                "invalid_argument",
+                "Expected at most 1000 Pages item IDs",
+            ));
+        }
+        ids.iter().map(|&id| self.get(id)).collect()
+    }
+
+    pub(crate) fn toggle_page_pins(&mut self, ids: Vec<i64>) -> Result<Value> {
+        let mut seen = HashSet::new();
+        let ids: Vec<_> = ids.into_iter().filter(|id| seen.insert(*id)).collect();
+        if self.interaction.tab != ShelfTab::Pages || ids.is_empty() {
+            return Err(ApiError::new("invalid_selection", "Select items in Pages"));
+        }
+        let events = self.resolve_page_pins(&ids)?;
+        let tx = Transaction::new_unchecked(&self.db, TransactionBehavior::Immediate)?;
+        let mut any_unpinned = false;
+        for event in &events {
+            any_unpinned |= pin(&tx, &event.path)?.is_none();
+        }
+        let mut items = Vec::new();
+        for event in events {
+            let key = pin_key(&event.path);
+            if any_unpinned {
+                tx.execute(
+                    "INSERT OR IGNORE INTO pages_pins(filename,position)
+                     VALUES(?1,(SELECT COALESCE(MAX(position),0)+1 FROM pages_pins))",
+                    [&key],
+                )?;
+            } else {
+                tx.execute("DELETE FROM pages_pins WHERE filename=?1", [&key])?;
+            }
+            items.push(crate::pinned::ItemResult {
+                id: event.id,
+                pinned: Some(any_unpinned),
+                error: None,
+            });
+        }
+        tx.commit()?;
+        self.interaction.view_generation = self.interaction.view_generation.wrapping_add(1);
+        Ok(json!({"items":items}))
+    }
+
+    pub(crate) fn assign_page_tag(
+        &self,
+        ids: &[i64],
+        slot: Option<u8>,
+    ) -> Result<Vec<crate::tag_slots::ItemOutcome>> {
+        use crate::tag_slots::{ItemOutcome, Outcome};
+        if ids.is_empty() || slot.is_some_and(|n| !(1..=9).contains(&n)) {
+            return Err(ApiError::new(
+                "invalid_tag_slot",
+                "Select Pages items and a slot in 1..9",
+            ));
+        }
+        let events = self.resolve_page_pins(ids)?;
+        let tx = Transaction::new_unchecked(&self.db, TransactionBehavior::Immediate)?;
+        let mut seen = HashSet::new();
+        let mut items = Vec::new();
+        for event in events {
+            let outcome = if !seen.insert(event.id) {
+                Outcome::Duplicate
+            } else if let Some(current) = pin(&tx, &event.path)? {
+                let next = if current.slot == slot { None } else { slot };
+                tx.execute(
+                    "UPDATE pages_pins SET slot_number=?2 WHERE filename=?1",
+                    params![pin_key(&event.path), next],
+                )?;
+                Outcome::Applied
+            } else {
+                Outcome::NotPinned
+            };
+            items.push(ItemOutcome {
+                id: event.id,
+                outcome,
+            });
+        }
+        tx.commit()?;
+        Ok(items)
+    }
+
+    pub(crate) fn move_page_pin(
+        &self,
+        id: i64,
+        direction: crate::pinned_order::Direction,
+    ) -> Result<crate::pinned_order::MoveResult> {
+        use crate::{
+            pinned_order::{Direction, MoveResult},
+            sorting::{SortMode, SortSpec},
+        };
+        let sort = SortSpec {
+            mode: SortMode::Pinned,
+            reverse: false,
+            seed: 0,
+        };
+        let mut ids = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self.browse_pages_with_pins(
+                &self.interaction.browse_query,
+                1000,
+                cursor.as_deref(),
+                sort,
+                true,
+            )?;
+            ids.extend(
+                page["events"]
+                    .as_array()
+                    .iter()
+                    .flat_map(|events| events.iter())
+                    .filter_map(|event| event["id"].as_i64()),
+            );
+            cursor = page["next_cursor"].as_str().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let index = ids
+            .iter()
+            .position(|&candidate| candidate == id)
+            .ok_or_else(|| {
+                ApiError::new("not_visible", "Pinned page is outside the current view")
+            })?;
+        let other = match direction {
+            Direction::Up => index.checked_sub(1),
+            Direction::Down => (index + 1 < ids.len()).then_some(index + 1),
+        }
+        .map_or(id, |i| ids[i]);
+        let [event, neighbour] = [self.get(id)?, self.get(other)?];
+        let tx = Transaction::new_unchecked(&self.db, TransactionBehavior::Immediate)?;
+        let rank = |event: &Event| {
+            pin(&tx, &event.path)?
+                .map(|pin| pin.position)
+                .ok_or_else(|| ApiError::new("not_pinned", "Page is not pinned"))
+        };
+        let current = rank(&event)?;
+        let target = rank(&neighbour)?;
+        if id != other {
+            tx.execute(
+                "UPDATE pages_pins SET position=CASE WHEN filename=?1 THEN ?2 ELSE ?3 END WHERE filename IN (?1,?4)",
+                params![pin_key(&event.path),target,current,pin_key(&neighbour.path)],
+            )?;
+        }
+        tx.commit()?;
+        Ok(MoveResult {
+            moved: id != other,
+            rank: target,
+            generation: 0,
+        })
     }
 
     pub(crate) fn pages_collection_available(&self) -> bool {

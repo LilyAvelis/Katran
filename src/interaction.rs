@@ -104,7 +104,7 @@ impl Interaction {
         self.set_preview(None);
     }
     pub fn select_position(&mut self, tab: ShelfTab) {
-        if self.tab == tab && !matches!(tab, ShelfTab::All | ShelfTab::Pages) {
+        if self.tab == tab && tab != ShelfTab::All {
             self.toggle_pinned_only();
         } else {
             self.set_tab(tab);

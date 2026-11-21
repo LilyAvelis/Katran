@@ -198,7 +198,6 @@ impl Service {
                 }),
             "toggle_pin" => {
                 self.interaction.tab != ShelfTab::All
-                    && self.interaction.tab != ShelfTab::Pages
                     && !self.interaction.emoji_catalogue
                     && (!self.interaction.selected.is_empty() || self.interaction.cursor.is_some())
             }

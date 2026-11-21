@@ -187,6 +187,9 @@ impl Service {
                             "Page escaped the Pages vault",
                         ));
                     }
+                    if crate::pages::pin(&self.db, &event.path)?.is_some() {
+                        return Err(ApiError::new("skipped_pinned", "Pinned page is protected"));
+                    }
                     Ok(Input {
                         event,
                         root: Some(root.clone()),
@@ -237,6 +240,7 @@ impl Service {
                 let current=self.get(id)?;
                 if prepared.meta.pages {
                     if !pages_current || pages_vault.as_deref() != item.event.path.parent() || current.path != item.event.path { return Err(ApiError::new("stale_selection", "Page or pinned references changed during preparation")); }
+                    if crate::pages::pin(&self.db, &current.path)?.is_some() { return Err(ApiError::new("skipped_pinned", "Pinned page is protected")); }
                 } else if crate::delete_shelf::protected_by_pin(&self.db,id)? {return Err(ApiError::new("skipped_pinned","Pinned record or pinned file alias is protected"));}
                 if current.revision!=item.event.revision || current.delete_policy!=item.event.delete_policy {return Err(ApiError::new("stale_selection","Delete selection or ownership changed during preparation"));}
                 if let DeletePolicy::LiveOriginal{source_id,generation,..}=current.delete_policy {

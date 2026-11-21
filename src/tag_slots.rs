@@ -278,6 +278,8 @@ pub(crate) fn reorder(
             &format!("UPDATE desktop_scoped_assignments SET slot_number={cases}"),
             [],
         )?;
+    } else if scope == "pages" {
+        tx.execute(&format!("UPDATE pages_pins SET slot_number={cases}"), [])?;
     } else {
         tx.execute(
             &format!("UPDATE tag_scoped_assignments SET slot_number={cases} WHERE scope=?1"),

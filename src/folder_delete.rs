@@ -84,6 +84,11 @@ impl Service {
         )
     }
     pub(crate) fn folder_path_pinned(&self, path: &Path) -> Result<bool> {
+        if path.parent() == Some(self.root.join(crate::pages::VAULT_NAME).as_path())
+            && crate::pages::pin(&self.db, path)?.is_some()
+        {
+            return Ok(true);
+        }
         let mut statement=self.db.prepare("SELECT e.path FROM events e JOIN katran_properties k ON k.event_id=e.id WHERE k.pinned=1 AND e.blob_hash IS NULL")?;
         for candidate in statement.query_map([], |row| row.get::<_, String>(0))? {
             let candidate = PathBuf::from(candidate?);

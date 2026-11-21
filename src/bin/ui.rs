@@ -996,10 +996,8 @@ impl Shelf {
             && !ctx.memory(|m| m.has_focus(egui::Id::new("shelf-search")))
             && (self.sorting_input.is_open() || !ctx.egui_wants_keyboard_input())
             && !(self.api.is_none() && self.busy_text_editing);
-        self.sorting_input.set_tags_allowed(!matches!(
-            self.state["tab"].as_str(),
-            Some("folder" | "pages")
-        ));
+        self.sorting_input
+            .set_tags_allowed(!matches!(self.state["tab"].as_str(), Some("folder")));
         let notion_sort = self.notion_database_active();
         self.sorting_input.set_notion_context(notion_sort);
         if let Some(action) = self.sorting_input.take(&ctx, sort_allowed) {

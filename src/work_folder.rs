@@ -92,6 +92,17 @@ impl State {
         cursor: Option<&str>,
         sort: SortSpec,
     ) -> Result<Value> {
+        self.browse_with_pins(query, limit, cursor, sort, None)
+    }
+
+    pub(crate) fn browse_with_pins(
+        &self,
+        query: &str,
+        limit: u32,
+        cursor: Option<&str>,
+        sort: SortSpec,
+        pins: Option<&crate::pages::BrowsePins>,
+    ) -> Result<Value> {
         self.generation.set(self.generation.get().wrapping_add(1));
         if !(1..=1000).contains(&limit) {
             return Err(ApiError::new("invalid_argument", "Expected limit 1..1000"));
@@ -204,8 +215,15 @@ impl State {
         let sort = sort.normalized();
         let mut hasher = Sha256::new();
         hasher.update(format!("{:?}\0{}\0{:?}\0", root, query, sort));
+        if let Some(pins) = pins {
+            hasher.update(format!("{:?}\0", (pins.pinned_only, pins.slot)));
+        }
         for e in &all {
             hasher.update(format!("{:?}\0{}\0{}\0", e.path, e.revision, e.id));
+            if let Some(pins) = pins {
+                let metadata = pins.get(e).map(|pin| (pin.position, pin.slot));
+                hasher.update(format!("{metadata:?}\0"));
+            }
         }
         let fingerprint = format!("{:x}", hasher.finalize());
         let offset = if let Some(value) = cursor {
@@ -226,8 +244,30 @@ impl State {
         };
         let needle = query.to_lowercase();
         all.retain(|event| event.name.to_lowercase().contains(&needle));
+        let pin_for = |event: &Event| pins.and_then(|pins| pins.get(event));
+        if let Some(pins) = pins {
+            all.retain(|event| {
+                let pin = pin_for(event);
+                (!pins.pinned_only || pin.is_some())
+                    && pins
+                        .slot
+                        .is_none_or(|slot| pin.and_then(|pin| pin.slot) == Some(slot))
+            });
+        }
         all.sort_by(|a, b| {
             let order = match sort.mode {
+                SortMode::Pinned if pins.is_some() => {
+                    let rank = |event| pin_for(event).map_or(i64::MAX, |pin| pin.position);
+                    rank(a)
+                        .cmp(&rank(b))
+                        .then_with(|| b.modified_at_ms.cmp(&a.modified_at_ms))
+                }
+                SortMode::Tags if pins.is_some() => {
+                    let slot = |event| pin_for(event).and_then(|pin| pin.slot).unwrap_or(10);
+                    slot(a)
+                        .cmp(&slot(b))
+                        .then_with(|| b.modified_at_ms.cmp(&a.modified_at_ms))
+                }
                 // Tags are rejected at SetSort for Folder; this stable arrival
                 // fallback also keeps an old persisted value harmless.
                 SortMode::Arrival | SortMode::Pinned | SortMode::Modified | SortMode::Tags => {
@@ -248,7 +288,13 @@ impl State {
             }
             .then_with(|| sorting::name_key(&a.name).cmp(&sorting::name_key(&b.name)))
             .then_with(|| a.path.cmp(&b.path));
-            if sort.reverse { order.reverse() } else { order }
+            if sort.reverse
+                && !(pins.is_some() && matches!(sort.mode, SortMode::Pinned | SortMode::Tags))
+            {
+                order.reverse()
+            } else {
+                order
+            }
         });
         if offset > all.len() {
             return Err(ApiError::new(
@@ -269,8 +315,30 @@ impl State {
         } else {
             None
         };
-        Ok(json!({"events": &all[offset..end], "next_cursor": next, "sort": sort}))
+        let events = &all[offset..end];
+        let mut page = json!({"events": events, "next_cursor": next, "sort": sort});
+        if pins.is_some() {
+            for (row, event) in page["events"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .zip(events)
+            {
+                row["properties"] =
+                    json!({"pinned":pin_for(event).is_some(),"display_name":null,"opener":null});
+                row["tags"] = json!([]);
+            }
+        }
+        Ok(page)
     }
+    pub(crate) fn cached_name(&self, id: i64) -> Option<String> {
+        self.cache
+            .borrow()
+            .by_id
+            .get(&id)
+            .map(|event| event.name.clone())
+    }
+
     pub fn get(&self, id: i64) -> Result<Event> {
         let stale = || {
             ApiError::new(
